@@ -232,6 +232,14 @@ export function AddGameModal({
               {d.installDir}
             </p>
           )}
+          {/* Where a game with nothing to point at ends up, said before it is
+              added rather than discovered afterwards in the Library. */}
+          {!d.exePath.trim() && !d.installDir.trim() && (
+            <p className="text-[11px] text-muted">
+              With no program and no folder this stays on the Backlog, with the rest of what you have not installed
+              yet. It can be pointed at a program later from its own page.
+            </p>
+          )}
         </section>
 
         <div className="flex gap-2">
