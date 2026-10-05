@@ -1,7 +1,20 @@
-import { MoveRight, Play, Square, Star, Trash2, X } from 'lucide-react';
+import {
+  Clock,
+  ExternalLink,
+  History,
+  Info,
+  MoveRight,
+  NotebookPen,
+  Play,
+  RefreshCw,
+  Square,
+  Star,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ActiveSession, Game, GameStatus, LaunchTarget, Session, Settings } from '../../types';
-import { fetchIgdb } from '../../services/igdb';
+import { fetchMetadata, metaCredentials } from '../../services/metadata';
 import { fetchHltb } from '../../services/hltb';
 import { listGameLogs } from '../../services/native';
 import { fmtBytes, fmtDate } from '../../utils/format';
@@ -10,7 +23,7 @@ import { HltbCard } from './HltbCard';
 import { LaunchEditor } from './LaunchEditor';
 import { SessionHistory } from './SessionHistory';
 import { GameLogView } from './GameLogView';
-import { EditSession } from '../SessionsView';
+import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
 
 interface Props {
@@ -29,6 +42,13 @@ interface Props {
   onClose: () => void;
 }
 
+/** Where the details on screen came from, said out loud. */
+const SOURCE_LABEL: Record<string, string> = {
+  steam: 'Steam catalogue',
+  igdb: 'IGDB',
+  estimate: 'preview',
+};
+
 export function GameDetail({
   game,
   settings,
@@ -42,12 +62,15 @@ export function GameDetail({
   onRemove,
   onClose,
 }: Props) {
-  const [loadingIgdb, setLoadingIgdb] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
   const [loadingHltb, setLoadingHltb] = useState(false);
+  const [hltbError, setHltbError] = useState<string | null>(null);
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'log' | 'sessions'>('overview');
   const [logCount, setLogCount] = useState(0);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
+  const [loggingSession, setLoggingSession] = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
   const running = session?.gameId === game.id;
 
@@ -76,23 +99,34 @@ export function GameDetail({
     }
   };
 
-  const getIgdb = async () => {
-    setLoadingIgdb(true);
+  const getDetails = async () => {
+    setLoadingDetails(true);
+    setDetailsError(null);
     try {
-      onUpdate({ igdb: await fetchIgdb(game.title, settings.igdbClientId, settings.igdbToken) });
+      onUpdate({ igdb: await fetchMetadata(game.title, metaCredentials(settings)) });
+    } catch (e) {
+      setDetailsError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoadingIgdb(false);
+      setLoadingDetails(false);
     }
   };
 
   const getHltb = async () => {
     setLoadingHltb(true);
+    setHltbError(null);
     try {
       onUpdate({ hltb: await fetchHltb(game.title) });
+    } catch (e) {
+      // "No data" is the honest answer for a title HowLongToBeat simply does not
+      // have, and it is worth saying rather than leaving the button looking dead.
+      setHltbError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingHltb(false);
     }
   };
+
+  const steamAppId = game.igdb?.steamAppId ?? null;
+  const canRunThroughSteam = !!steamAppId && game.launch.kind === 'none';
 
   return (
     <>
@@ -123,20 +157,21 @@ export function GameDetail({
         <div className="sticky top-0 z-10 flex gap-1 border-b border-line bg-panel/95 px-5 py-2 backdrop-blur">
           {(
             [
-              ['overview', 'Overview'],
-              ['log', 'Log'],
-              ['sessions', 'Sessions'],
+              ['overview', 'Overview', Info],
+              ['log', 'Log', NotebookPen],
+              ['sessions', 'Sessions', History],
             ] as const
-          ).map(([id, label]) => (
+          ).map(([id, label, Icon]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
                 tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'
               }`}
             >
+              <Icon className="size-3.5" />
               {label}
-              {id === 'log' && logCount > 0 && <span className="ml-1.5 text-[10px] text-muted">{logCount}</span>}
+              {id === 'log' && logCount > 0 && <span className="text-[10px] text-muted">{logCount}</span>}
             </button>
           ))}
         </div>
@@ -200,16 +235,42 @@ export function GameDetail({
             error={playtimeError}
           />
           <LaunchEditor game={game} onSave={(t: LaunchTarget) => onUpdate({ launch: t })} />
-          <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} />
+          {canRunThroughSteam && (
+            <button
+              onClick={() => onUpdate({ launch: { kind: 'steam', appId: steamAppId } })}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel2 py-2 text-xs hover:border-accent"
+            >
+              <ExternalLink className="size-3.5" />
+              Found on Steam — let Orbit start it through Steam
+            </button>
+          )}
+          <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} error={hltbError} />
 
           <section className="rounded-xl border border-line bg-panel2 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">About · IGDB</h3>
-              <button onClick={getIgdb} disabled={loadingIgdb} className="text-xs text-accent hover:underline disabled:opacity-50">
-                {loadingIgdb ? 'Fetching…' : game.igdb ? 'Refresh' : 'Fetch'}
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <Info className="size-4 text-accent" />
+                About
+                {game.igdb?.source && (
+                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-normal text-muted">
+                    {SOURCE_LABEL[game.igdb.source] ?? game.igdb.source}
+                  </span>
+                )}
+              </h3>
+              <button
+                onClick={getDetails}
+                disabled={loadingDetails}
+                className="flex items-center gap-1.5 text-xs text-accent hover:underline disabled:opacity-50"
+                title="Look this title up again"
+              >
+                <RefreshCw className={`size-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
+                {game.igdb ? 'Refresh' : 'Fetch'}
               </button>
             </div>
-            <p className="text-sm leading-relaxed text-muted">{game.igdb?.summary ?? 'No metadata yet.'}</p>
+            <p className="text-sm leading-relaxed text-muted">
+              {game.igdb?.summary || 'No details yet. Fetching works with no setup — the Steam catalogue needs no key.'}
+            </p>
+            {detailsError && <p className="mt-2 text-xs text-rose-400">{detailsError}</p>}
             {!!game.igdb?.genres.length && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {game.igdb.genres.map((g) => (
@@ -244,7 +305,7 @@ export function GameDetail({
               </>
             ) : (
               <p className="text-xs text-muted">
-                No folder recorded. Orb can still time this game, but will not offer to move it.
+                No folder recorded. Orbit can still time this game, but will not offer to move it.
               </p>
             )}
             <div className="mt-3 flex gap-2">
@@ -272,6 +333,13 @@ export function GameDetail({
 
           {tab === 'sessions' && (
             <>
+              <button
+                onClick={() => setLoggingSession(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:border-accent hover:text-fg"
+              >
+                <Clock className="size-4" />
+                Log time by hand
+              </button>
               <SessionHistory
                 game={game}
                 reloadKey={sessionVersion}
@@ -279,9 +347,14 @@ export function GameDetail({
                   setEditingSession(s);
                   setPlaytimeError(null);
                 }}
+                onChanged={() => {
+                  setSessionVersion((n) => n + 1);
+                  onUpdate({});
+                }}
               />
               <p className="px-1 text-[11px] text-muted">
-                Every tracked session for this game. Hover a row to correct when it started or how long it ran.
+                Every tracked session for this game. Edit corrects when one started or how long it ran; the
+                game's total follows it.
               </p>
             </>
           )}
@@ -295,6 +368,17 @@ export function GameDetail({
               setSessionVersion((n) => n + 1);
               onUpdate({});
               setEditingSession(null);
+            }}
+          />
+        )}
+        {loggingSession && (
+          <LogSession
+            games={[game]}
+            initialGameId={game.id}
+            onClose={() => setLoggingSession(false)}
+            onSaved={() => {
+              setSessionVersion((n) => n + 1);
+              onUpdate({});
             }}
           />
         )}

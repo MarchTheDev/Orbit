@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import type { Game, Session } from '../../types';
-import { listSessions } from '../../services/native';
+import { deleteSession, listSessions } from '../../services/native';
 import { fmtClock, fmtDateTime } from '../../utils/format';
 
 /**
@@ -14,17 +15,20 @@ import { fmtClock, fmtDateTime } from '../../utils/format';
 export function SessionHistory({
   game,
   onEdit,
+  onChanged,
   reloadKey = 0,
 }: {
   game: Game;
   onEdit?: (s: Session) => void;
+  /** A session was removed, so the numbers around this list need reading again. */
+  onChanged?: () => void;
   /** Bumped when a session is corrected, since the count does not change then. */
   reloadKey?: number;
 }) {
   const [rows, setRows] = useState<Session[]>([]);
   const [limit, setLimit] = useState(5);
 
-  useEffect(() => {
+  const load = () => {
     let alive = true;
     void listSessions(limit, 0, game.id).then((r) => {
       if (alive) setRows(r);
@@ -32,7 +36,9 @@ export function SessionHistory({
     return () => {
       alive = false;
     };
-  }, [game.id, game.sessionCount, limit, reloadKey]);
+  };
+
+  useEffect(load, [game.id, game.sessionCount, limit, reloadKey]);
 
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -53,12 +59,27 @@ export function SessionHistory({
               {onEdit && (
                 <button
                   onClick={() => onEdit(s)}
-                  className="hidden shrink-0 text-xs text-accent group-hover:block"
+                  className="shrink-0 text-muted hover:text-accent"
                   title="Correct when it started and how long it ran"
+                  aria-label={`Edit the ${fmtClock(s.durationSecs)} session`}
                 >
-                  Edit
+                  <Pencil className="size-3.5" />
                 </button>
               )}
+              <button
+                onClick={() => {
+                  if (!confirm(`Remove this ${fmtClock(s.durationSecs)} session?`)) return;
+                  void deleteSession(s.id).then(() => {
+                    load();
+                    onChanged?.();
+                  });
+                }}
+                className="shrink-0 text-muted hover:text-rose-400"
+                title="Remove this session"
+                aria-label={`Remove the ${fmtClock(s.durationSecs)} session`}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
             </li>
           ))}
         </ul>

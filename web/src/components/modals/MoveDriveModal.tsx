@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Check, MoveRight, X } from 'lucide-react';
 import type { Game } from '../../types';
 import { diskSpace, moveGameToFolder } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
@@ -79,16 +80,23 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
       footer={
         done ? (
           <div className="flex justify-end">
-            <button className={btnPrimary} onClick={onClose}>
+            <button className={`${btnPrimary} flex items-center gap-2`} onClick={onClose}>
+              <Check className="size-4" />
               Done
             </button>
           </div>
         ) : (
           <div className="flex justify-end gap-2">
-            <button onClick={onClose} disabled={locked} className={btnGhost}>
+            <button onClick={onClose} disabled={locked} className={`${btnGhost} flex items-center gap-2`}>
+              <X className="size-4" />
               Cancel
             </button>
-            <button onClick={move} disabled={!target || locked || elsewhere} className={btnPrimary}>
+            <button
+              onClick={move}
+              disabled={!target || locked || elsewhere}
+              className={`${btnPrimary} flex items-center gap-2`}
+            >
+              <MoveRight className="size-4" />
               Move {game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : ''}
             </button>
           </div>

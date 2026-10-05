@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, X } from 'lucide-react';
 import type { Game } from '../types';
 import { diskSpace, folderSize, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
 import { pickFolder } from '../services/desktop';
@@ -117,10 +118,16 @@ export function StorageView({
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Library folders</h2>
           <div className="flex-1" />
-          <button className={btnGhost} onClick={() => void addFolder()}>
+          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void addFolder()}>
+            <FolderPlus className="size-4" />
             Add folder
           </button>
-          <button className={btnGhost} onClick={() => void measure()} disabled={busy}>
+          <button
+            className={`${btnGhost} flex items-center gap-2`}
+            onClick={() => void measure()}
+            disabled={busy}
+          >
+            <RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
             {busy ? 'Measuring…' : 'Refresh sizes'}
           </button>
         </div>
@@ -151,16 +158,26 @@ export function StorageView({
                       {list.length} {list.length === 1 ? 'game' : 'games'}
                     </span>
                     <span className="text-sm font-mono">{sizes[path] !== undefined ? fmtBytes(sizes[path]) : '…'}</span>
-                    <button className={btnGhost} onClick={() => void revealInExplorer(path)}>
+                    <button
+                      className={`${btnGhost} flex items-center gap-2`}
+                      onClick={() => void revealInExplorer(path)}
+                    >
+                      <FolderOpen className="size-4" />
                       Open
                     </button>
-                    <button className={btnGhost} onClick={() => onImport(path)} title="Add the games found in this folder">
+                    <button
+                      className={`${btnGhost} flex items-center gap-2`}
+                      onClick={() => onImport(path)}
+                      title="Add the games found in this folder"
+                    >
+                      <PackagePlus className="size-4" />
                       Add games
                     </button>
                     <button
-                      className="text-xs text-muted hover:text-rose-400"
+                      className="flex items-center gap-1.5 text-xs text-muted hover:text-rose-400"
                       onClick={() => setFolders(folders.filter((f) => f !== path))}
                     >
+                      <X className="size-3.5" />
                       Remove
                     </button>
                   </div>

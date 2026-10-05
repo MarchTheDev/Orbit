@@ -334,6 +334,50 @@ export async function httpJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** What Orbit needs to reach IGDB, all of it optional. */
+export interface MetaCredentials {
+  clientId: string;
+  clientSecret: string;
+  /** A token pasted by hand, from before Orbit minted its own. */
+  token: string;
+}
+
+/**
+ * Details and artwork for a title.
+ *
+ * Rust uses the Steam catalogue, which needs no key, and switches to IGDB when
+ * credentials are saved. A browser preview has neither, so it answers with
+ * something deterministic and says it is only an estimate.
+ */
+export function metadataLookup<T>(title: string, credentials: MetaCredentials): Promise<T> {
+  return call(
+    'metadata_lookup',
+    {
+      title,
+      igdbClientId: credentials.clientId,
+      igdbClientSecret: credentials.clientSecret,
+    },
+    async () => {
+      await sleep(400);
+      return {
+        summary: `Details for "${title}" appear here once Orbit runs as the desktop app.`,
+        genres: [],
+        developer: '',
+        releaseYear: null,
+        rating: null,
+        coverUrl: null,
+        steamAppId: null,
+        source: 'estimate',
+      } as T;
+    },
+  );
+}
+
+/** Titles a store suggests for a partial name. */
+export function metadataSuggest(title: string): Promise<string[]> {
+  return call('metadata_suggest', { title }, async () => []);
+}
+
 /** Completion-time estimates from HowLongToBeat. */
 export function hltbSearch<T>(title: string): Promise<T> {
   return call('hltb_search', { title }, async () => {

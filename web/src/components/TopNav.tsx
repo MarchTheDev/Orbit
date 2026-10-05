@@ -1,6 +1,7 @@
 import { HardDrive, Library, ListOrdered, NotebookPen, Settings as SettingsIcon } from 'lucide-react';
 import type { Page, Settings } from '../types';
 import { ThemeToggle } from './ThemeToggle';
+import { Logo } from './ui/Logo';
 
 const TABS: { id: Page; label: string; Icon: typeof Library }[] = [
   { id: 'library', label: 'Library', Icon: Library },
@@ -23,10 +24,15 @@ export function TopNav({
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1400px] items-center gap-5 px-6 py-3">
-        <div className="flex items-center gap-2.5">
-          <div className="h-7 w-7 rounded-full bg-gradient-to-br from-accent to-accent2 shadow-lg shadow-accent/30" />
+        <button
+          onClick={() => setPage('library')}
+          className="flex items-center gap-2.5"
+          title="Orbit"
+          aria-label="Orbit"
+        >
+          <Logo className="size-7 drop-shadow-[0_2px_8px_var(--c-accent)]" animated />
           <span className="text-lg font-bold tracking-tight">Orbit</span>
-        </div>
+        </button>
 
         <nav className="flex items-center gap-1">
           {TABS.map((t) => (

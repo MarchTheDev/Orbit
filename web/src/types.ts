@@ -14,13 +14,23 @@ export interface HltbData {
   source: 'hltb' | 'estimate';
 }
 
+/**
+ * What a store knows about a game.
+ *
+ * The name predates Orbit fetching anything other than IGDB: details now come
+ * from the Steam catalogue by default and from IGDB when a Twitch app has been
+ * saved, which is what `source` says.
+ */
 export interface IgdbData {
   summary: string;
   genres: string[];
   developer: string;
   releaseYear: number | null;
   rating: number | null;
-  coverUrl?: string;
+  coverUrl?: string | null;
+  /** The store's own id, so Play can hand the game to Steam. */
+  steamAppId?: number | null;
+  source?: 'steam' | 'igdb' | 'estimate';
 }
 
 /**
@@ -137,13 +147,23 @@ export interface Stats {
 
 export interface Settings {
   theme: string;
+  /**
+   * A Twitch application, which is entirely optional: details and artwork come
+   * from the Steam catalogue with no key at all, and IGDB is used instead once
+   * these two are filled in. Orbit mints and refreshes the token itself, so
+   * there is nothing here that expires or needs pasting again.
+   */
   igdbClientId: string;
+  igdbClientSecret: string;
+  /** A token pasted by hand in an older Orbit, still honoured if present. */
   igdbToken: string;
   /**
    * Folders games are installed in. Orbit will only ever move a game between
    * these, and never touches a game that sits outside them.
    */
   libraryFolders: string[];
-  /** Fetch cover art and details from IGDB when a game is added. */
+  /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
+  /** Also fill in details for games that are already in the library. */
+  autoFetchMetadata: boolean;
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { FolderOpen, LoaderCircle, Plus, TriangleAlert, X } from 'lucide-react';
 import type { Game, LaunchTarget } from '../../types';
 import { exeInfo, isNative, scanFolder } from '../../services/native';
 import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
@@ -140,17 +141,14 @@ export function AddGameModal({
     if (picked) set('coverPath', picked);
   };
 
-  /** Search IGDB and offer the good matches, so a typo does not stick. */
+  /** Offer the store's own titles, so a typo does not become a permanent entry. */
   const search = async () => {
     const title = d.title.trim();
     if (title.length < 2) return;
     setSearching(true);
     try {
-      const { searchIgdb } = await import('../../services/igdb');
-      const { loadSettings } = await import('../../services/storage');
-      const settings = await loadSettings();
-      const found = await searchIgdb(title, settings.igdbClientId, settings.igdbToken);
-      setSuggestions(found);
+      const { searchTitles } = await import('../../services/metadata');
+      setSuggestions(await searchTitles(title));
       setFetchMeta(true);
     } finally {
       setSearching(false);
@@ -201,10 +199,16 @@ export function AddGameModal({
             Fetch artwork and details
           </label>
           <div className="flex gap-2">
-            <button type="button" className={btnGhost} onClick={onClose}>
+            <button type="button" className={`${btnGhost} flex items-center gap-2`} onClick={onClose}>
+              <X className="size-4" />
               Cancel
             </button>
-            <button className={btnPrimary} onClick={submit} disabled={!d.title.trim() || busy}>
+            <button
+              className={`${btnPrimary} flex items-center gap-2`}
+              onClick={submit}
+              disabled={!d.title.trim() || busy}
+            >
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
               {busy ? 'Adding…' : 'Add game'}
             </button>
           </div>
@@ -213,13 +217,21 @@ export function AddGameModal({
     >
       <form onSubmit={submit} className="space-y-4">
         {dropped.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
-            <span className="text-muted">Ready to add:</span>
-            {dropped.map((p) => (
-              <span key={p} className="max-w-[18rem] truncate font-mono">
-                {p}
-              </span>
-            ))}
+          <div className="space-y-1 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-muted">Ready to add:</span>
+              {dropped.map((p) => (
+                <span key={p} className="max-w-[18rem] truncate font-mono">
+                  {p}
+                </span>
+              ))}
+            </div>
+            {dropped.some((p) => /\.lnk$/i.test(p)) && (
+              <p className="flex items-start gap-1.5 text-amber-300">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                A Windows shortcut does not say where the program lives. Browse for the game's .exe instead.
+              </p>
+            )}
           </div>
         )}
 
@@ -271,7 +283,7 @@ export function AddGameModal({
             </datalist>
           </label>
           {native && (
-            <button type="button" className={`${btnBrowse} mt-5`} onClick={() => void search()} disabled={searching}>
+            <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void search()} disabled={searching}>
               {searching ? 'Searching…' : 'Search IGDB'}
             </button>
           )}
@@ -290,7 +302,8 @@ export function AddGameModal({
                   spellCheck={false}
                 />
               </label>
-              <button type="button" className={`${btnBrowse} mt-5`} onClick={() => void browseExe()}>
+              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseExe()}>
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             </div>
@@ -305,7 +318,8 @@ export function AddGameModal({
                   spellCheck={false}
                 />
               </label>
-              <button type="button" className={`${btnBrowse} mt-5`} onClick={() => void browseFolder()}>
+              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseFolder()}>
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             </div>
@@ -344,7 +358,8 @@ export function AddGameModal({
                   spellCheck={false}
                 />
               </label>
-              <button type="button" className={`${btnBrowse} mt-5`} onClick={() => void browseEmulator()}>
+              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseEmulator()}>
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             </div>
@@ -353,7 +368,8 @@ export function AddGameModal({
                 <span className={labelCls}>ROM or ISO</span>
                 <input className={inputCls} value={d.romPath} onChange={(e) => set('romPath', e.target.value)} spellCheck={false} />
               </label>
-              <button type="button" className={`${btnBrowse} mt-5`} onClick={() => void browseRom()}>
+              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseRom()}>
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             </div>
@@ -389,7 +405,8 @@ export function AddGameModal({
                 placeholder="Leave empty and Orbit will look next to the game"
                 spellCheck={false}
               />
-              <button type="button" className={btnBrowse} onClick={() => void browseCover()}>
+              <button type="button" className={`${btnBrowse} flex items-center gap-2`} onClick={() => void browseCover()}>
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             </div>

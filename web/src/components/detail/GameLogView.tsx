@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Check, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { GameLog } from '../../types';
 import { addGameLog, deleteGameLog, listGameLogs, updateGameLog } from '../../services/native';
 import { fmtClock, fmtDate, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
@@ -19,12 +20,17 @@ const blank = (): Draft => ({
   note: '',
 });
 
+/** The things people actually write down, one tap away. */
+const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete', 'Replay'];
+
 /**
  * The player's own log for one game.
  *
  * Deliberately separate from sessions: nothing here is tracked or measured by
  * Orbit. The player writes what happened, picks the date it happened on, and
- * says how long it took, and every field can be corrected later.
+ * says how long it took, and every field can be corrected later. That is what
+ * makes "10h · 08-12-26 · finished main story" a thing they typed rather than a
+ * thing the tracker guessed at.
  */
 export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: string }) {
   const [rows, setRows] = useState<GameLog[]>([]);
@@ -43,7 +49,6 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
 
   useEffect(() => load(), [load]);
 
-  // Newest first, and the running total of what the notes claim.
   const total = rows.reduce((s, r) => s + r.secs, 0);
 
   const save = async () => {
@@ -73,12 +78,17 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
     <section className="rounded-xl border border-line bg-panel2 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">Log</h3>
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <NotebookPen className="size-4 text-accent" />
+            Log
+          </h3>
           <p className="text-xs text-muted">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
         </div>
         <div className="text-right">
           <p className="font-mono text-sm font-semibold">{fmtClock(total)}</p>
-          <p className="text-[11px] text-muted">across {rows.length} {rows.length === 1 ? 'note' : 'notes'}</p>
+          <p className="text-[11px] text-muted">
+            across {rows.length} {rows.length === 1 ? 'note' : 'notes'}
+          </p>
         </div>
       </div>
 
@@ -117,12 +127,31 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
               }}
             />
           </label>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_NOTES.map((q) => (
+              <button
+                key={q}
+                onClick={() => setDraft({ ...draft, note: q })}
+                className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted hover:border-accent hover:text-fg"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
           {error && <p className="text-[11px] text-rose-400">{error}</p>}
           <div className="flex gap-2">
-            <button onClick={() => void save()} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white">
+            <button
+              onClick={() => void save()}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              <Check className="size-3.5" />
               Save note
             </button>
-            <button onClick={() => setDraft(null)} className="rounded-lg px-3 py-1.5 text-xs text-muted hover:text-fg">
+            <button
+              onClick={() => setDraft(null)}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted hover:text-fg"
+            >
+              <X className="size-3.5" />
               Cancel
             </button>
           </div>
@@ -133,8 +162,9 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
             setError(null);
             setDraft(blank());
           }}
-          className="mb-4 w-full rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:border-accent hover:text-fg"
+          className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:border-accent hover:text-fg"
         >
+          <Plus className="size-4" />
           Add a note
         </button>
       )}
@@ -147,18 +177,22 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
         <ul className="space-y-1.5">
           {rows.map((r) => (
             <li key={r.id} className="group flex items-center gap-3 rounded-lg bg-bg/60 px-3 py-2 text-sm">
-              <span className="w-20 shrink-0 font-mono text-xs text-muted">{fmtDate(new Date(r.at * 1000).toISOString())}</span>
-              <span className="w-16 shrink-0 font-mono text-xs font-semibold text-accent">{fmtShort(r.secs)}</span>
+              <span className="w-14 shrink-0 font-mono text-xs font-semibold text-accent">{fmtShort(r.secs)}</span>
+              <span className="w-20 shrink-0 font-mono text-xs text-muted">
+                {fmtDate(new Date(r.at * 1000).toISOString())}
+              </span>
               <span className="min-w-0 flex-1 truncate">{r.note || <span className="text-muted">no note</span>}</span>
-              <span className="hidden gap-2 group-hover:flex">
+              <span className="flex shrink-0 gap-2 opacity-0 transition group-hover:opacity-100">
                 <button
                   onClick={() => {
                     setError(null);
                     setDraft({ id: r.id, at: toLocalInput(r.at), secs: fmtShort(r.secs), note: r.note });
                   }}
-                  className="text-xs text-muted hover:text-accent"
+                  className="text-muted hover:text-accent"
+                  title="Edit this note"
+                  aria-label="Edit this note"
                 >
-                  Edit
+                  <Pencil className="size-3.5" />
                 </button>
                 <button
                   onClick={() => {
@@ -166,9 +200,11 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
                       void deleteGameLog(r.id).then(load);
                     }
                   }}
-                  className="text-xs text-muted hover:text-rose-400"
+                  className="text-muted hover:text-rose-400"
+                  title="Remove this note"
+                  aria-label="Remove this note"
                 >
-                  Remove
+                  <Trash2 className="size-3.5" />
                 </button>
               </span>
             </li>

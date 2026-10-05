@@ -9,6 +9,7 @@ mod format;
 mod hltb;
 mod launch;
 mod launch_target;
+mod metadata;
 mod session;
 mod storage;
 mod store;
@@ -470,6 +471,34 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
     hltb::lookup(&title).await
 }
 
+/// Everything Orbit can find out about a game with no setup at all.
+///
+/// The Steam store needs no key, which is the path every game takes by default.
+/// IGDB is richer and used instead when the player has saved a Twitch app; the
+/// token behind it is minted and refreshed here, so nothing expires on them.
+#[tauri::command]
+async fn metadata_lookup(
+    title: String,
+    igdb_client_id: Option<String>,
+    igdb_client_secret: Option<String>,
+) -> Result<metadata::Meta, String> {
+    let igdb = match (igdb_client_id, igdb_client_secret) {
+        (Some(id), Some(secret))
+            if !id.trim().is_empty() && !secret.trim().is_empty() =>
+        {
+            Some((id, secret))
+        }
+        _ => None,
+    };
+    metadata::lookup(&title, igdb).await
+}
+
+/// Titles the store suggests for a partial name, for the Add dialog.
+#[tauri::command]
+async fn metadata_suggest(title: String) -> Result<Vec<String>, String> {
+    metadata::suggest(&title).await
+}
+
 // ------------------------------------------------------------------- settings
 
 /// The saved settings, or `None` the first time Orbit runs.
@@ -573,6 +602,8 @@ pub fn run() {
             drive_of,
             http_request,
             hltb_search,
+            metadata_lookup,
+            metadata_suggest,
             load_settings,
             save_settings,
             data_dir,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check, Pencil, X } from 'lucide-react';
 import type { Game } from '../../types';
 import { fmtClock, parseDuration } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
@@ -41,9 +42,10 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
         {!editing && (
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-accent hover:underline"
+            className="flex items-center gap-1.5 text-xs text-accent hover:underline"
             title="Type the total you want to see"
           >
+            <Pencil className="size-3.5" />
             Edit total
           </button>
         )}
@@ -86,10 +88,19 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
               className={inputCls}
               spellCheck={false}
             />
-            <button disabled={saving} className="rounded-lg bg-accent px-3 text-sm text-white disabled:opacity-60">
+            <button
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-white disabled:opacity-60"
+            >
+              <Check className="size-4" />
               {saving ? 'Saving' : 'Save'}
             </button>
-            <button type="button" className="rounded-lg px-2 text-sm text-muted hover:text-fg" onClick={() => setEditing(false)}>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-lg px-2 text-sm text-muted hover:text-fg"
+              onClick={() => setEditing(false)}
+            >
+              <X className="size-4" />
               Cancel
             </button>
           </div>

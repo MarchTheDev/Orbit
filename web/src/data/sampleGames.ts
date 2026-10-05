@@ -57,7 +57,9 @@ export const SAMPLE_GAMES: Game[] = [
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
   igdbClientId: '',
+  igdbClientSecret: '',
   igdbToken: '',
   libraryFolders: [],
   fetchMetadata: true,
+  autoFetchMetadata: true,
 };

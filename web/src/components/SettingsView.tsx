@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { AlertTriangle, Database, FolderOpen, HardDrive, Info, Palette, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
 import type { Settings } from '../types';
 import { THEMES } from '../data/themes';
 import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
@@ -48,7 +48,10 @@ export function SettingsView({
       <h1 className="text-2xl font-bold">Settings</h1>
 
       <section>
-        <h2 className="mb-3 font-semibold">Theme</h2>
+        <h2 className="mb-3 flex items-center gap-2 font-semibold">
+          <Palette className="size-4 text-accent" />
+          Theme
+        </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
             <button
@@ -70,7 +73,15 @@ export function SettingsView({
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-semibold">Artwork and details</h2>
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Sparkles className="size-4 text-accent" />
+          Artwork and details
+        </h2>
+        <p className="text-sm text-muted">
+          Orbit looks a game up by its title. The Steam catalogue answers with no key and nothing to set up, which is
+          where descriptions, genres, release years and cover art come from by default.
+        </p>
+
         <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/50 p-3 text-sm">
           <input
             type="checkbox"
@@ -79,35 +90,75 @@ export function SettingsView({
             onChange={(e) => setSettings({ fetchMetadata: e.target.checked })}
           />
           <span>
-            Look games up on IGDB when they are added
+            Look games up when they are added
             <span className="block text-xs text-muted">
-              Adds a summary, genres and cover art. Needs credentials below. Turn it off to keep adding games offline.
+              Fills in a summary, genres, cover art and HowLongToBeat times. Turn it off to add games offline.
             </span>
           </span>
         </label>
 
-        <h3 className="pt-1 text-sm font-semibold">IGDB integration</h3>
-        <p className="text-sm text-muted">
-          Create an app at dev.twitch.tv to get a Client ID and an App Access Token. Both are stored on this machine only.
-        </p>
-        <label className="block">
-          <span className={labelCls}>Client ID</span>
-          <input value={settings.igdbClientId} onChange={(e) => setSettings({ igdbClientId: e.target.value })} placeholder="Client ID" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Access token</span>
+        <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/50 p-3 text-sm">
           <input
-            type="password"
-            value={settings.igdbToken}
-            onChange={(e) => setSettings({ igdbToken: e.target.value })}
-            placeholder="Access token"
-            className={inputCls}
+            type="checkbox"
+            className="mt-0.5"
+            checked={settings.autoFetchMetadata}
+            onChange={(e) => setSettings({ autoFetchMetadata: e.target.checked })}
           />
+          <span>
+            Fill in the gaps in the background
+            <span className="block text-xs text-muted">
+              Games already in the library, or ones added while offline, are looked up quietly — a few at a time.
+            </span>
+          </span>
         </label>
+
+        <h3 className="flex items-center gap-2 pt-1 text-sm font-semibold">
+          <Info className="size-4 text-muted" />
+          IGDB <span className="font-normal text-muted">(optional)</span>
+        </h3>
+        <p className="text-sm text-muted">
+          IGDB has richer descriptions and ratings. Create an application at{' '}
+          <span className="font-mono text-xs">dev.twitch.tv/console/apps</span> and paste its Client ID and Client
+          Secret here — Orbit fetches and renews the access token itself, so nothing expires and there is no token to
+          copy. Leave both blank to keep using the store.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelCls}>Client ID</span>
+            <input
+              value={settings.igdbClientId}
+              onChange={(e) => setSettings({ igdbClientId: e.target.value })}
+              placeholder="Client ID"
+              className={inputCls}
+              spellCheck={false}
+            />
+          </label>
+          <label className="block">
+            <span className={labelCls}>Client Secret</span>
+            <input
+              type="password"
+              value={settings.igdbClientSecret}
+              onChange={(e) => setSettings({ igdbClientSecret: e.target.value })}
+              placeholder="Client Secret"
+              className={inputCls}
+              spellCheck={false}
+            />
+          </label>
+        </div>
+        {settings.igdbToken && (
+          <p className="flex items-center gap-2 text-xs text-muted">
+            <AlertTriangle className="size-3.5 text-amber-400" />
+            A hand-pasted access token from an older version is still being used. Those expire; a Client Secret does
+            not.
+          </p>
+        )}
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-semibold">Library folders</h2>
+        <h2 className="flex items-center gap-2 font-semibold">
+          <HardDrive className="size-4 text-accent" />
+          Library folders
+        </h2>
         <p className="text-sm text-muted">
           Games inside these folders are yours as far as Orbit is concerned: it can report what they take and move them
           between the folders you list. Anything added from elsewhere is listed but never touched.
@@ -130,7 +181,8 @@ export function SettingsView({
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addFolder(folder); }}>
           <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="D:\Games" className={`${inputCls} flex-1 font-mono`} />
           {isNative() && (
-            <button type="button" className={btnBrowse} onClick={() => void pickFolder('Choose a library folder', folder || undefined).then((p) => p && addFolder(p))}>
+            <button type="button" className={`${btnBrowse} flex items-center gap-2`} onClick={() => void pickFolder('Choose a library folder', folder || undefined).then((p) => p && addFolder(p))}>
+              <FolderOpen className="size-4" />
               Browse…
             </button>
           )}
@@ -152,7 +204,10 @@ export function SettingsView({
       </section>
 
       <section className="space-y-2">
-        <h2 className="font-semibold">About</h2>
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Database className="size-4 text-accent" />
+          About
+        </h2>
         <p className="text-sm text-muted">Orbit v0.1.0 · running in {isNative() ? 'desktop (Tauri)' : 'browser preview'} mode</p>
         {where && (
           <div className="flex items-center gap-2 text-sm text-muted">
@@ -160,8 +215,9 @@ export function SettingsView({
             <span className="shrink-0">{fmtBytes(where.size)}</span>
             <button
               onClick={() => void revealInExplorer(where.path)}
-              className="shrink-0 rounded-lg border border-line px-2 py-0.5 text-xs hover:border-accent"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-xs hover:border-accent"
             >
+              <FolderOpen className="size-3" />
               Open
             </button>
           </div>
@@ -171,16 +227,18 @@ export function SettingsView({
             onClick={() => {
               if (confirm('Delete every game, session and note, and put the settings back to how they were on first run?')) onReset();
             }}
-            className="rounded-lg border border-rose-400/50 px-4 py-2 text-sm text-rose-400"
+            className="flex items-center gap-2 rounded-lg border border-rose-400/50 px-4 py-2 text-sm text-rose-400"
           >
+            <RefreshCw className="size-4" />
             Reset everything
           </button>
           <button
             onClick={() => {
               if (confirm('Delete every game and session from Orbit? Your settings are kept.')) onClearLibrary();
             }}
-            className="rounded-lg border border-line px-4 py-2 text-sm text-muted hover:border-rose-400/50 hover:text-rose-400"
+            className="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm text-muted hover:border-rose-400/50 hover:text-rose-400"
           >
+            <Trash2 className="size-4" />
             Delete games only
           </button>
         </div>

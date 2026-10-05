@@ -52,3 +52,15 @@ body::before {
 
 .orbit-ring { animation: spin 14s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* The Orbit mark: the moon travels around the ring. */
+.orbit-moon { animation: orbit-turn 9s linear infinite; }
+@keyframes orbit-turn { to { transform: rotate(360deg); } }
+
+/* Nobody who has asked for less motion gets a spinning anything. */
+@media (prefers-reduced-motion: reduce) {
+  .orbit-ring,
+  .orbit-moon,
+  .drawer-in,
+  .fade-in { animation: none !important; }
+}

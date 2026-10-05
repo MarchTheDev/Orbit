@@ -1,14 +1,15 @@
 import { useState } from 'react';
+import { AppWindow, FolderOpen, Gamepad2, Joystick, Timer } from 'lucide-react';
 import type { Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
 import { pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 
-const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string }[] = [
-  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.' },
-  { kind: 'executable', label: 'Program', hint: 'The game is a .exe on this machine.' },
-  { kind: 'steam', label: 'Steam', hint: 'Ask Steam to run an app you own.' },
-  { kind: 'emulator', label: 'Emulator', hint: 'Run a ROM through an emulator.' },
+const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
+  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
+  { kind: 'executable', label: 'Program', hint: 'The game is a .exe on this machine.', icon: AppWindow },
+  { kind: 'steam', label: 'Steam', hint: 'Ask Steam to run an app you own.', icon: Gamepad2 },
+  { kind: 'emulator', label: 'Emulator', hint: 'Run a ROM through an emulator.', icon: Joystick },
 ];
 
 /** The one path each kind needs, so it can be summarised in one line. */
@@ -74,10 +75,11 @@ export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchT
           <button
             key={k.kind}
             onClick={() => switchKind(k.kind)}
-            className={`rounded-full border px-3 py-1 text-xs ${
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
               target.kind === k.kind ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60'
             }`}
           >
+            <k.icon className="size-3.5" />
             {k.label}
           </button>
         ))}
@@ -99,9 +101,10 @@ export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchT
             </label>
             {native && (
               <button
-                className={`${btnBrowse} mt-5`}
+                className={`${btnBrowse} mt-5 flex items-center gap-2`}
                 onClick={() => void pickFile('Choose the program', ['exe', 'bat', 'cmd'], target.path || undefined).then((p) => p && setTarget({ ...target, path: p }))}
               >
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             )}
@@ -117,9 +120,10 @@ export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchT
             </label>
             {native && (
               <button
-                className={`${btnBrowse} mt-5`}
+                className={`${btnBrowse} mt-5 flex items-center gap-2`}
                 onClick={() => void pickFolder('Choose the working folder', workingDir || undefined).then((p) => p && setWorkingDir(p))}
               >
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             )}
@@ -149,9 +153,10 @@ export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchT
             </label>
             {native && (
               <button
-                className={`${btnBrowse} mt-5`}
+                className={`${btnBrowse} mt-5 flex items-center gap-2`}
                 onClick={() => void pickFile('Choose the emulator', ['exe', 'bat', 'cmd']).then((p) => p && setTarget({ ...target, emulatorPath: p }))}
               >
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             )}
@@ -163,9 +168,10 @@ export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchT
             </label>
             {native && (
               <button
-                className={`${btnBrowse} mt-5`}
+                className={`${btnBrowse} mt-5 flex items-center gap-2`}
                 onClick={() => void pickAnyFile('Choose the ROM', target.emulatorPath || undefined).then((p) => p && setRomPath(p))}
               >
+                <FolderOpen className="size-4" />
                 Browse…
               </button>
             )}

@@ -16,4 +16,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    // Reachable from outside this machine, so a preview (or a phone on the
+    // same network) can open the interface. The desktop app never uses this;
+    // it loads the built file.
+    host: true,
+    allowedHosts: true,
+  },
 });

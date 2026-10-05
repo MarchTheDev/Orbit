@@ -80,6 +80,15 @@ export interface DropState {
  * with no location, so `paths` is always empty there and the UI can say so.
  */
 export async function onFileDrop(onChange: (state: DropState) => void): Promise<() => void> {
+  // A file dropped on a webview that does not intercept it makes the window
+  // navigate to that file, which looks exactly like the app falling over. These
+  // two listeners stop the default whatever else happens; the desktop shell
+  // reports the real paths separately, below, and a browser preview uses them
+  // to show the overlay.
+  const swallow = (e: DragEvent) => e.preventDefault();
+  window.addEventListener('dragover', swallow);
+  window.addEventListener('drop', swallow);
+
   if (!isNative()) {
     // A browser drag has no paths, but the overlay should still react so the
     // feature is visible while designing.
@@ -91,15 +100,24 @@ export async function onFileDrop(onChange: (state: DropState) => void): Promise<
     window.addEventListener('dragleave', on('leave'));
     window.addEventListener('drop', on('drop'));
     return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
       window.removeEventListener('dragover', on('over'));
       window.removeEventListener('dragleave', on('leave'));
       window.removeEventListener('drop', on('drop'));
     };
   }
 
+  // The shell reports the drag through the webview's own event, which is the
+  // only place the paths actually exist: a browser drag carries a `File` with
+  // no location on it.
   const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
     const payload = event.payload as { type: DropState['type']; paths?: string[] };
     onChange({ type: payload.type, paths: payload.paths ?? [] });
   });
-  return unlisten;
+  return () => {
+    window.removeEventListener('dragover', swallow);
+    window.removeEventListener('drop', swallow);
+    unlisten();
+  };
 }

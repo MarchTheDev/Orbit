@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, Clock, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, Session, Stats } from '../types';
 import { CATEGORIES, DEFAULT_CATEGORY } from '../data/categories';
 import {
@@ -9,7 +10,7 @@ import {
   logManualSession,
   updateSession,
 } from '../services/native';
-import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, toLocalInput } from '../utils/format';
+import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, parseDuration, toLocalInput } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 
 const PAGE = 25;
@@ -115,7 +116,12 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
             ))}
           </select>
           <div className="flex-1" />
-          <button className={btnGhost} onClick={() => setLogging(true)} disabled={games.length === 0}>
+          <button
+            className={`${btnGhost} flex items-center gap-2`}
+            onClick={() => setLogging(true)}
+            disabled={games.length === 0}
+          >
+            <Plus className="size-4" />
             Log time by hand
           </button>
         </div>
@@ -146,10 +152,20 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
                     <td className="py-2 pr-3 text-muted">{s.category}</td>
                     <td className="py-2 pr-3 text-xs text-muted">{fmtEndedBy(s.endedBy, s.manual)}</td>
                     <td className="py-2 text-right whitespace-nowrap">
-                      <button className="text-xs text-accent hover:underline" onClick={() => setEditing(s)}>
+                      <button
+                        className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                        onClick={() => setEditing(s)}
+                        title="Correct when it started and how long it ran"
+                      >
+                        <Pencil className="size-3" />
                         Edit
                       </button>
-                      <button className="ml-3 text-xs text-muted hover:text-rose-400" onClick={() => void remove(s)}>
+                      <button
+                        className="ml-3 inline-flex items-center gap-1 text-xs text-muted hover:text-rose-400"
+                        onClick={() => void remove(s)}
+                        title="Remove this session"
+                      >
+                        <Trash2 className="size-3" />
                         Remove
                       </button>
                     </td>
@@ -268,30 +284,60 @@ export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: 
         </label>
         {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className={btnGhost} onClick={onClose}>
+          <button type="button" className={`${btnGhost} flex items-center gap-2`} onClick={onClose}>
+            <X className="size-4" />
             Cancel
           </button>
-          <button className={btnPrimary}>Save</button>
+          <button className={`${btnPrimary} flex items-center gap-2`}>
+            <Check className="size-4" />
+            Save
+          </button>
         </div>
       </form>
     </Modal>
   );
 }
 
-function LogSession({ games, onClose, onSaved }: { games: Game[]; onClose: () => void; onSaved: () => void }) {
-  const [gameId, setGameId] = useState(games[0]?.id ?? '');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [hours, setHours] = useState(1);
-  const [minutes, setMinutes] = useState(0);
+/**
+ * Time played somewhere Orbit cannot see.
+ *
+ * Exported because the same form belongs inside a game's own drawer, where the
+ * game is already chosen: passing one in preselects it and hides the picker
+ * rather than making the player choose the same game twice.
+ */
+export function LogSession({
+  games,
+  initialGameId,
+  onClose,
+  onSaved,
+}: {
+  games: Game[];
+  initialGameId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [gameId, setGameId] = useState(initialGameId ?? games[0]?.id ?? '');
+  const [at, setAt] = useState(() => toLocalInput(Math.floor(Date.now() / 1000)));
+  const [duration, setDuration] = useState('1h');
   const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    const secs = hours * 3600 + minutes * 60;
-    if (!gameId || secs <= 0) return;
-    const started = new Date(`${date}T12:00:00`);
-    await logManualSession(gameId, Math.floor(started.getTime() / 1000), secs, category, note);
+    const secs = parseDuration(duration);
+    if (secs === null || secs <= 0) {
+      setError('That is not a length of time. Try 1h, 45m, or 90.');
+      return;
+    }
+    const startedAt = fromLocalInput(at);
+    if (startedAt === null) {
+      setError('That is not a date.');
+      return;
+    }
+    if (!gameId) return;
+    setError(null);
+    await logManualSession(gameId, startedAt, secs, category, note);
     onSaved();
     onClose();
   };
@@ -299,31 +345,41 @@ function LogSession({ games, onClose, onSaved }: { games: Game[]; onClose: () =>
   return (
     <Modal title="Log time by hand" onClose={onClose}>
       <form onSubmit={save} className="space-y-3">
-        <p className="text-xs text-muted">
+        <p className="flex items-center gap-2 text-xs text-muted">
+          <Clock className="size-3.5" />
           For playing somewhere Orbit cannot see, such as a console or a handheld.
         </p>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Game</span>
-          <select value={gameId} onChange={(e) => setGameId(e.target.value)} className={inputCls}>
-            {games.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Date</span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
-        </label>
+        {!initialGameId && (
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted">Game</span>
+            <select value={gameId} onChange={(e) => setGameId(e.target.value)} className={inputCls}>
+              {games.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="flex gap-3">
           <label className="block flex-1 text-sm">
-            <span className="mb-1 block text-muted">Hours</span>
-            <input type="number" min={0} value={hours} onChange={(e) => setHours(Number(e.target.value))} className={inputCls} />
+            <span className="mb-1 block text-muted">When</span>
+            <input
+              type="datetime-local"
+              value={at}
+              onChange={(e) => setAt(e.target.value)}
+              className={inputCls}
+            />
           </label>
           <label className="block flex-1 text-sm">
-            <span className="mb-1 block text-muted">Minutes</span>
-            <input type="number" min={0} max={59} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className={inputCls} />
+            <span className="mb-1 block text-muted">How long</span>
+            <input
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="1h 30m"
+              spellCheck={false}
+              className={inputCls}
+            />
           </label>
         </div>
         <label className="block text-sm">
@@ -336,21 +392,21 @@ function LogSession({ games, onClose, onSaved }: { games: Game[]; onClose: () =>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">Note</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Finished the DLC" className={inputCls} />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What did you get through?"
+            className={inputCls}
+          />
         </label>
+        {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className={btnGhost} onClick={onClose}>
             Cancel
           </button>
-          <button className={btnPrimary}>Log it</button>
+          <button className={btnPrimary}>Save session</button>
         </div>
       </form>
     </Modal>
   );
-}
-
-/** The figures the detail page shows for a single game. */
-export function gameStats(game: Game) {
-  const average = game.sessionCount > 0 ? Math.round(game.playMinutes / game.sessionCount) : 0;
-  return { average, longest: game.longestSecs, count: game.sessionCount };
 }

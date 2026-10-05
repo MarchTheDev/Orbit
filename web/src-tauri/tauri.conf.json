@@ -21,7 +21,8 @@
         "center": true,
         "resizable": true,
         "fullscreen": false,
-        "theme": null
+        "theme": null,
+        "dragDropEnabled": true
       }
     ],
     "security": {

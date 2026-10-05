@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { FolderOpen, PackagePlus, X } from 'lucide-react';
 import type { Game } from '../types';
 import { exeInfo, knownExePaths, scanFolder, type FoundGame } from '../services/native';
 import { pickFolder } from '../services/desktop';
-import { fetchIgdb } from '../services/igdb';
+import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
+import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 
@@ -28,7 +30,7 @@ interface Candidate {
 export function ImportModal({
   existing,
   initialFolder,
-  igdbCredentials,
+  credentials,
   fetchMetadata,
   onAdd,
   onUpdate,
@@ -37,7 +39,8 @@ export function ImportModal({
   existing: Game[];
   /** A folder chosen elsewhere, such as on the Storage page. */
   initialFolder: string | null;
-  igdbCredentials: { clientId: string; token: string };
+  /** IGDB credentials, if the player saved any. The store needs none. */
+  credentials: { clientId: string; clientSecret: string; token: string };
   fetchMetadata: boolean;
   onAdd: (games: Game[]) => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
@@ -121,12 +124,20 @@ export function ImportModal({
       }));
       onAdd(games);
 
-      // Artwork is a bonus, so it happens after the games are already saved.
-      if (fetchMetadata && igdbCredentials.clientId && igdbCredentials.token) {
+      // Artwork and completion times are a bonus, so they are fetched after the
+      // games are already saved. The two sources are independent, so whichever
+      // answers is kept and a failure in one never blocks the other.
+      if (fetchMetadata) {
         await Promise.all(
           games.map(async (g) => {
-            const igdb = await fetchIgdb(g.title, igdbCredentials.clientId, igdbCredentials.token);
-            onUpdate(g.id, { igdb });
+            const [meta, hltb] = await Promise.allSettled([
+              fetchGameMetadata(g.title, credentials),
+              fetchHltb(g.title),
+            ]);
+            onUpdate(g.id, {
+              ...(meta.status === 'fulfilled' ? { igdb: meta.value } : {}),
+              ...(hltb.status === 'fulfilled' ? { hltb: hltb.value } : {}),
+            });
           }),
         );
       }
@@ -154,10 +165,16 @@ export function ImportModal({
             {included.length > 0 && ` · ${fmtBytes(included.reduce((s, r) => s + r.sizeBytes, 0))}`}
           </span>
           <div className="flex gap-2">
-            <button className={btnGhost} onClick={onClose} disabled={saving}>
+            <button className={`${btnGhost} flex items-center gap-2`} onClick={onClose} disabled={saving}>
+              <X className="size-4" />
               Cancel
             </button>
-            <button className={btnPrimary} onClick={importAll} disabled={included.length === 0 || saving}>
+            <button
+              className={`${btnPrimary} flex items-center gap-2`}
+              onClick={importAll}
+              disabled={included.length === 0 || saving}
+            >
+              <PackagePlus className="size-4" />
               {saving ? 'Adding…' : `Add ${included.length || ''} ${included.length === 1 ? 'game' : 'games'}`}
             </button>
           </div>
@@ -167,7 +184,8 @@ export function ImportModal({
       <div className="space-y-3">
         <div className="flex gap-2">
           <input className={inputCls} value={folder ?? ''} onChange={(e) => setFolder(e.target.value)} placeholder="D:\Games" spellCheck={false} readOnly />
-          <button className={btnGhost} onClick={() => void browse()}>
+          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void browse()}>
+            <FolderOpen className="size-4" />
             Browse…
           </button>
           {folder && (
