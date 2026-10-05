@@ -27,7 +27,9 @@ function summarise(t: LaunchTarget, companions: Companion[]): string {
   const extra = companions.length ? ` + ${companions.length} alongside` : '';
   switch (t.kind) {
     case 'executable':
-      return `${t.path}${extra}`;
+      // Chosen but not yet pointed at anything: say so rather than show a
+      // blank line where the program should be.
+      return t.path.trim() ? `${t.path}${extra}` : `No program chosen yet${extra}`;
     case 'steam':
       return `Steam app ${t.appId}${extra}`;
     default:
