@@ -320,7 +320,10 @@ fn endpoints_in(js: &str) -> Vec<String> {
                 found.push(base.to_string());
             }
         }
-        rest = &tail[end..];
+        // `end` cannot be zero (a path starts with the `/` that scanning
+        // allows), but a loop that cannot advance would hang the lookup, so it
+        // is written as though it could.
+        rest = &tail[end.max(1)..];
         if rest.is_empty() {
             break;
         }
