@@ -1324,14 +1324,77 @@ mod tests {
     }
 
     #[test]
-    fn only_one_session_may_be_open_at_a_time() {
+    fn a_new_session_takes_over_from_one_left_open() {
         let db = Db::open_memory().unwrap();
         db.upsert_game(&game("g1", "Hades")).unwrap();
         db.upsert_game(&game("g2", "Hollow Knight")).unwrap();
-        let id = db.open_session("g1", 1_000, "Main story").unwrap();
-        assert!(db.open_session("g2", 1_100, "Main story").is_err());
-        db.close_session(id, 1_100, ENDED_MANUAL).unwrap();
-        assert!(db.open_session("g2", 1_200, "Main story").is_ok());
+        let first = db.open_session("g1", 1_000, "Main story").unwrap();
+        // Not an error: the row left open is closed with the time it was open,
+        // and the new session starts. Being told you cannot play because Orbit
+        // forgot to stop counting an earlier game is not a thing to build.
+        let second = db.open_session("g2", 1_900, "Main story").unwrap();
+        assert_ne!(first, second);
+
+        let rows = db.list_sessions(10, 0, None).unwrap();
+        let closed = rows.iter().find(|r| r.id == first).unwrap();
+        assert_eq!(closed.ended_by.as_deref(), Some(ENDED_RECOVERED));
+        assert_eq!(closed.duration_secs, 900);
+        assert_eq!(db.current_session().unwrap().unwrap().id, second);
+    }
+
+    #[test]
+    fn a_recent_open_session_survives_a_restart() {
+        let dir = std::env::temp_dir().join("orbit-tauri-resume");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("orbit.db");
+        {
+            let db = Db::open(&path).unwrap();
+            db.upsert_game(&game("g1", "Hades")).unwrap();
+            db.open_session("g1", now() - 600, "Main story").unwrap();
+            // No close: the app was killed, or a launcher handed the game off.
+        }
+        let db = Db::open(&path).unwrap();
+        // Ten minutes of play is still there to be stopped by hand, rather than
+        // tidied away into nothing.
+        let open = db.current_session().unwrap().unwrap();
+        assert_eq!(open.game_title, "Hades");
+        db.close_session(open.id, now(), ENDED_MANUAL).unwrap();
+        let rows = db.list_sessions(10, 0, None).unwrap();
+        assert!(rows[0].duration_secs >= 600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_planned_game_and_its_ticks_survive_a_round_trip() {
+        let db = Db::open_memory().unwrap();
+        let mut g1 = game("g1", "Hades");
+        g1.planned = true;
+        g1.achievements = vec![serde_json::json!({ "id": "WAKE_UP", "unlocked": true })];
+        db.upsert_game(&g1).unwrap();
+
+        let rows = db.list_games().unwrap();
+        assert!(rows[0].planned);
+        assert_eq!(rows[0].achievements[0]["id"], "WAKE_UP");
+        assert_eq!(rows[0].achievements[0]["unlocked"], true);
+    }
+
+    #[test]
+    fn logs_keep_the_order_they_were_arranged_into() {
+        let db = Db::open_memory().unwrap();
+        db.upsert_game(&game("g1", "Hades")).unwrap();
+        let a = db.add_game_log("g1", 1_000, 60, "started").unwrap().id;
+        let b = db.add_game_log("g1", 2_000, 60, "beat the boss").unwrap().id;
+        let c = db.add_game_log("g1", 3_000, 60, "finished").unwrap().id;
+
+        // The latest one written is read first.
+        let rows = db.list_game_logs("g1").unwrap();
+        assert_eq!(rows[0].note, "finished");
+
+        // An arrangement the player made is kept, entry by entry.
+        db.reorder_game_logs("g1", &[a, c, b]).unwrap();
+        let rows = db.list_game_logs("g1").unwrap();
+        let order: Vec<&str> = rows.iter().map(|r| r.note.as_str()).collect();
+        assert_eq!(order, vec!["started", "finished", "beat the boss"]);
     }
 
     #[test]
