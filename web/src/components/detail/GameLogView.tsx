@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, GameLog } from '../../types';
 import { addGameLog, deleteGameLog, listGameLogs, reorderGameLogs, updateGameLog } from '../../services/native';
 import { useDragReorder } from '../../hooks/useDragReorder';
-import { fmtClock, fmtDate, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
+import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
+import { Select } from '../ui/Select';
 import { cn } from '../../utils/cn';
 
 /** A row being written or corrected. */
@@ -54,6 +55,7 @@ export function GameLogView({
   game,
   onChanged,
   onNotes,
+  withClock = false,
 }: {
   game: Game;
   /** Told after a note is written, corrected or removed, so a page showing
@@ -62,6 +64,9 @@ export function GameLogView({
   /** Save the game's own notes, which live in here now rather than in a box of
    *  their own on the overview. */
   onNotes?: (notes: string) => void;
+  /** True in the Journal, where there is room to say the time of day as well:
+   *  entries written weeks apart are worth telling apart by more than a date. */
+  withClock?: boolean;
 }) {
   const gameId = game.id;
   const gameTitle = game.title;
@@ -123,10 +128,11 @@ export function GameLogView({
    * opened. Only the ids that were on screen are sent, so an entry written
    * elsewhere is not swallowed.
    */
-  const move = (fromId: number, toId: number) => {
+  const move = (fromId: number, toId: number, after: boolean) => {
     const ids = rows.map((r) => r.id).filter((id) => id !== fromId);
-    const at = ids.indexOf(toId);
-    ids.splice(at === -1 ? ids.length : at, 0, fromId);
+    const found = ids.indexOf(toId);
+    const at = found === -1 ? ids.length : found + (after ? 1 : 0);
+    ids.splice(at, 0, fromId);
     const byId = new Map(rows.map((r) => [r.id, r]));
     setRows(ids.map((id) => byId.get(id)!).filter(Boolean));
     void reorderGameLogs(gameId, ids).catch(() => load());
@@ -157,9 +163,7 @@ export function GameLogView({
     }
   };
 
-  const drag = useDragReorder(
-    (fromId, toId) => move(Number(fromId), Number(toId)),
-  );
+  const drag = useDragReorder((fromId, toId, after) => move(Number(fromId), Number(toId), after));
 
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -260,21 +264,14 @@ export function GameLogView({
       {rows.length > 1 && (
         <div className="mb-3 flex items-center gap-2">
           <ListFilter className="size-3.5 shrink-0 text-muted" />
-          <div className="relative">
-            <select
-              value={order}
-              onChange={(e) => setOrder(e.target.value as Order)}
-              className="appearance-none rounded-lg border border-line bg-panel py-1 pl-2.5 pr-7 text-[11px] outline-none focus:border-accent"
-              title="How the entries are ordered"
-            >
-              {ORDERS.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted" />
-          </div>
+          <Select
+            value={order}
+            onChange={setOrder}
+            className="w-56 !py-1 text-[11px]"
+            menuClassName="w-56"
+            ariaLabel="How the entries are ordered"
+            options={ORDERS.map((o) => ({ value: o.id, label: o.label }))}
+          />
           {order === 'mine' && rows.length > 1 && (
             <span className="text-[11px] text-muted">Drag an entry by its handle to move it.</span>
           )}
@@ -309,8 +306,8 @@ export function GameLogView({
               <span className="w-14 shrink-0 font-mono text-xs font-semibold text-accent">
                 {fmtShort(r.secs) || '-'}
               </span>
-              <span className="w-20 shrink-0 font-mono text-xs text-muted">
-                {fmtDate(new Date(r.at * 1000).toISOString())}
+              <span className={`shrink-0 font-mono text-xs text-muted ${withClock ? 'w-32' : 'w-20'}`}>
+                {withClock ? fmtDateTime(r.at) : fmtDate(new Date(r.at * 1000).toISOString())}
               </span>
               <span className="min-w-0 flex-1 truncate">{r.note || <span className="text-muted">no note</span>}</span>
               <span className={cn('flex shrink-0 gap-2 transition', order === 'mine' && '')}>

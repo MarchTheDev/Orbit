@@ -13,7 +13,7 @@ interface Props {
   /** Drawn at this percentage of the base tile, from the toolbar's slider. */
   scale: number;
   /** Set while the library is in the player's own order. */
-  onReorder?: (fromId: string, toId: string) => void;
+  onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
 export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {

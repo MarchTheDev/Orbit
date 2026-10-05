@@ -15,16 +15,16 @@ const THRESHOLD = 6;
  * A press that never moves is left alone, so clicking a card still selects it and
  * clicking a button inside one still presses it.
  */
-export function useDragReorder(onReorder?: (fromId: string, toId: string) => void) {
+export function useDragReorder(
+  onReorder?: (fromId: string, toId: string, after: boolean) => void,
+) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
   const press = useRef<{ id: string; x: number; y: number; live: boolean } | null>(null);
-  const overRef = useRef<string | null>(null);
+  const overRef = useRef<{ id: string; after: boolean } | null>(null);
   const reorderRef = useRef(onReorder);
   reorderRef.current = onReorder;
-
-  overRef.current = over;
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -37,9 +37,19 @@ export function useDragReorder(onReorder?: (fromId: string, toId: string) => voi
         document.body.style.userSelect = 'none';
       }
       const under = document.elementFromPoint(e.clientX, e.clientY);
-      const target = under?.closest('[data-orbit-drop]')?.getAttribute('data-orbit-drop') ?? null;
-      const next = target && target !== held.id ? target : null;
-      if (next !== overRef.current) setOver(next);
+      const element = under?.closest('[data-orbit-drop]') ?? null;
+      const id = element?.getAttribute('data-orbit-drop') ?? null;
+      // Which half of the row or card the pointer is in decides whether the
+      // dragged thing lands before it or after it. Without that, dragging a
+      // card downwards only ever moved it one place and refused to go further,
+      // because it was always placed before the card it was dropped on.
+      const rect = element?.getBoundingClientRect();
+      const after = rect ? e.clientY > rect.top + rect.height / 2 : false;
+      const next = id && id !== held.id ? { id, after } : null;
+      if (next?.id !== overRef.current?.id || next?.after !== overRef.current?.after) {
+        overRef.current = next;
+        setOver(next?.id ?? null);
+      }
     };
 
     const finish = () => {
@@ -48,7 +58,7 @@ export function useDragReorder(onReorder?: (fromId: string, toId: string) => voi
       document.body.style.userSelect = '';
       if (held?.live) {
         const to = overRef.current;
-        if (to) reorderRef.current?.(held.id, to);
+        if (to) reorderRef.current?.(held.id, to.id, to.after);
         // The release lands on the card the press started on, which the browser
         // reads as a click. It is the end of a drag, so it is swallowed.
         const swallow = (e: MouseEvent) => {
@@ -58,6 +68,7 @@ export function useDragReorder(onReorder?: (fromId: string, toId: string) => voi
         document.addEventListener('click', swallow, { capture: true, once: true });
         window.setTimeout(() => document.removeEventListener('click', swallow, { capture: true } as EventListenerOptions), 0);
       }
+      overRef.current = null;
       setDragging(null);
       setOver(null);
     };

@@ -2,6 +2,7 @@ import { ArrowDownUp, LayoutGrid, List, Plus, Rows3 } from 'lucide-react';
 import type { Game, SortKey, ViewMode } from '../types';
 import { cn } from '../utils/cn';
 import { SearchField } from './ui/SearchField';
+import { Select } from './ui/Select';
 
 /** The status chips above the library. */
 export type Filter = 'all' | 'favorites' | Game['status'] | 'unplayed';
@@ -58,19 +59,20 @@ export function Toolbar({
 
         <SearchField value={query} onChange={setQuery} />
 
-        <select
+        <Select
           value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
-          className="glass rounded-full px-4 py-2 text-sm outline-none"
-          title="How the library is ordered"
-        >
-          <option value="title">A-Z</option>
-          <option value="lastPlayed">Last played</option>
-          <option value="playtime">Playtime</option>
-          <option value="added">Recently added</option>
-          <option value="size">Size</option>
-          <option value="manual">My order (drag to arrange)</option>
-        </select>
+          onChange={setSort}
+          className="!rounded-full !px-4 !py-2 text-sm"
+          ariaLabel="How the library is ordered"
+          options={[
+            { value: 'title', label: 'A-Z' },
+            { value: 'lastPlayed', label: 'Last played' },
+            { value: 'playtime', label: 'Playtime' },
+            { value: 'added', label: 'Recently added' },
+            { value: 'size', label: 'Size' },
+            { value: 'manual', label: 'My order (drag to arrange)' },
+          ]}
+        />
 
         {/* How big the covers are drawn. Two views share it, so the library
             looks the same size whichever way it is read. */}

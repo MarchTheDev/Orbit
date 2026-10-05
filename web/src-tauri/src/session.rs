@@ -123,8 +123,13 @@ impl Runner {
         // only times, and a failure below has something to roll back.
         let session_id = self.db.open_session(&game.id, now(), category)?;
 
-        let (pid, manual) = match self.lock()?.sessions.launch_target(target) {
-            Ok(launched) => (launched.pid, launched.manual),
+        // The game's own folder is what says whether it is still running once
+        // the process Orbit started has handed off, and it is the only signal at
+        // all for a game Steam starts.
+        let install_dir = game.install_dir.as_deref().map(std::path::Path::new);
+
+        let launched = match self.lock()?.sessions.launch_target(target, install_dir) {
+            Ok(launched) => launched,
             Err(e) => {
                 // Never leave a session that will not be stopped by anything.
                 let _ = self.db.close_session(session_id, now(), ENDED_FAILED);
@@ -150,14 +155,14 @@ impl Runner {
             game_title: game.title.clone(),
             started_at: now(),
             started_at_ms: epoch_millis(),
-            manual,
+            manual: launched.manual,
         };
 
         {
             let mut inner = self.lock()?;
             inner.active = Some(Active {
                 view: view.clone(),
-                pid,
+                pid: launched.pid,
             });
         }
 
@@ -165,10 +170,11 @@ impl Runner {
         // player asked for.
         self.nudge_window(true);
 
-        // Only a process can end a session by itself. A Steam game, or one the
-        // player starts themselves, is stopped by hand.
-        if !manual {
-            self.watch(session_id, game.id.clone(), pid);
+        // Watching the folder is what lets a session end by itself, however the
+        // game was started. A game with no folder to watch, and no process of
+        // Orbit's, is stopped by hand.
+        if launched.watched {
+            self.watch(session_id, game.id.clone(), launched.pid);
         }
 
         Ok(view)
@@ -208,6 +214,10 @@ impl Runner {
             if let Err(e) = self.lock()?.sessions.kill(active.pid) {
                 log::warn!("could not close the game: {e}");
             }
+        } else {
+            // A game Orbit only watched the folder for: there is no process of
+            // ours to close, so the clock simply stops.
+            self.lock()?.sessions.forget(active.pid);
         }
         Ok(Some(active.view))
     }

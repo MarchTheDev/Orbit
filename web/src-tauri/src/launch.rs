@@ -17,15 +17,21 @@ use crate::launch_target::LaunchTarget;
 /// until the player stops it.
 const HANDOFF_WINDOW: std::time::Duration = std::time::Duration::from_secs(90);
 
-/// How often the process list is looked through once a launcher has handed off.
+/// How often the game is looked for once the process Orbit started has gone.
 ///
-/// The real game is a grandchild Orbit has no handle for, so the only thing left
-/// to go on is its name, and the list costs one small helper process to read.
-/// Every five seconds is often enough to notice a game being closed without
-/// spending the session doing nothing else.
+/// The real game is usually a grandchild Orbit has no handle for, so the only
+/// thing left to go on is what is running, and a process list costs one small
+/// helper to read. Every five seconds is often enough to notice a game being
+/// closed without spending the session doing anything else.
 const HANDOFF_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// What the watcher has learned about a process.
+/// The key a session watched only by folder is filed under.
+///
+/// There is only ever one session at a time, so a key that no real process can
+/// have is enough, and a game Orbit started keeps its own pid.
+pub const FOLDER_WATCH: u32 = 0;
+
+/// What the watcher has learned about a game.
 pub enum Verdict {
     /// Still going.
     Running,
@@ -35,9 +41,18 @@ pub enum Verdict {
     Unwatched,
 }
 
-/// A game Orbit started and is keeping time for.
+/// A game Orbit is keeping time for.
+///
+/// Watching one program is not enough. Games start through launchers, patchers
+/// and engine bootstrappers which exit as soon as they have handed the real game
+/// on, and games started by Steam or by the player have no process of Orbit's at
+/// all. So a session remembers the folder the game lives in and every program
+/// name inside it, and a game counts as running while any of those is running.
+/// That is what makes the clock stop when the player quits, whichever way the
+/// game was started.
 struct Tracked {
-    child: Child,
+    /// The process Orbit started, when it started one.
+    child: Option<Child>,
     started: Instant,
     /// When the process was noticed dead, if it has been.
     ///
@@ -46,10 +61,11 @@ struct Tracked {
     died_at: Option<Instant>,
     /// True once a quick death was judged to be a launcher handing off.
     handed_off: bool,
-    /// The program's file name, which is all there is to look for once the
-    /// process Orbit started has gone.
+    /// The program's file name, for the summary in the log.
     image: Option<String>,
-    /// Whether a program of that name has been seen since the hand-off.
+    /// Every program name in the game's folder, lowercased.
+    names: Vec<String>,
+    /// Whether the game itself has been seen running at least once.
     seen: bool,
     /// Polls in a row that found nothing, so one hiccup is not an ending.
     misses: u32,
@@ -60,7 +76,7 @@ struct Tracked {
 /// The games currently running, so time can stop by itself when they exit.
 #[derive(Default)]
 pub struct Sessions {
-    running: HashMap<u32, Tracked>,
+    running: std::collections::HashMap<u32, Tracked>,
 }
 
 /// What `launch_game` hands back to the UI.
@@ -68,106 +84,169 @@ pub struct Sessions {
 #[serde(rename_all = "camelCase")]
 pub struct Launched {
     pub pid: u32,
-    /// True when Orbit could not watch the process and the player must stop
-    /// the session themselves.
+    /// True when Orbit did not start the program, so the player stops the
+    /// session themselves if the folder cannot tell when the game has gone.
     pub manual: bool,
+    /// True when something is watching the game, so a session that ends by
+    /// itself is possible.
+    pub watched: bool,
 }
 
 impl Sessions {
-    /// Start a game the way its launch target says to.
-    pub fn launch_target(&mut self, target: &LaunchTarget) -> Result<Launched, String> {
+    /// Start a game the way its launch target says to, and work out how its end
+    /// will be noticed.
+    ///
+    /// `install_dir` is the game's own folder, when Orbit knows it. A game
+    /// started through Steam or left to the player has no process to hold on to,
+    /// and the folder is the only thing that says whether it is still running.
+    pub fn launch_target(
+        &mut self,
+        target: &LaunchTarget,
+        install_dir: Option<&Path>,
+    ) -> Result<Launched, String> {
+        // The program's own folder matters as much as the install folder: the
+        // real executable often sits a level or two below the game's root.
+        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(dir) = install_dir {
+            dirs.push(dir.to_path_buf());
+        }
+        if let Some(path) = target.primary_path() {
+            if let Some(parent) = path.parent() {
+                dirs.push(parent.to_path_buf());
+            }
+        }
+        let names = program_names(&dirs);
+
         match crate::launch_target::spawn(target)? {
             Some(child) => {
                 let pid = child.id();
-                log::info!("launched {} (pid {})", target.label(), pid);
+                log::info!("launched {} (pid {pid})", target.label());
                 self.running.insert(
                     pid,
                     Tracked {
-                        child,
+                        child: Some(child),
                         started: Instant::now(),
                         died_at: None,
                         handed_off: false,
-                        image: match target {
-                            LaunchTarget::Executable { path, .. } => path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .map(str::to_string),
-                            _ => None,
-                        },
+                        image: target
+                            .primary_path()
+                            .and_then(|p| p.file_name())
+                            .and_then(|n| n.to_str())
+                            .map(|n| n.to_lowercase()),
+                        names,
                         seen: false,
                         misses: 0,
                         last_scan: None,
                     },
                 );
-                Ok(Launched { pid, manual: false })
+                Ok(Launched {
+                    pid,
+                    manual: false,
+                    watched: true,
+                })
             }
-            // Nothing to watch: Steam was asked to do it, or the game is being
-            // timed only. Either way the player ends the session.
-            None => Ok(Launched {
-                pid: 0,
-                manual: true,
-            }),
+            // Steam was asked to do it, or the game is being timed only. The
+            // player starts it, but its folder still says when it is over.
+            None => {
+                if names.is_empty() {
+                    return Ok(Launched {
+                        pid: 0,
+                        manual: true,
+                        watched: false,
+                    });
+                }
+                self.running.insert(
+                    FOLDER_WATCH,
+                    Tracked {
+                        child: None,
+                        started: Instant::now(),
+                        died_at: None,
+                        handed_off: true,
+                        image: None,
+                        names,
+                        seen: false,
+                        misses: 0,
+                        last_scan: None,
+                    },
+                );
+                log::info!("watching the game's folder for something to start");
+                Ok(Launched {
+                    pid: FOLDER_WATCH,
+                    manual: true,
+                    watched: true,
+                })
+            }
         }
     }
 
-    /// What is happening with a game Orbit started.
+    /// What is happening with a game Orbit is keeping time for.
     ///
-    /// `None` for a process Orbit never started, so the caller can fall back to
-    /// a session the player stops by hand.
-    ///
-    /// A game that dies after having run for a while is over. A game that dies
-    /// within the hand-off window was a bootstrapper, and the real game is a
-    /// grandchild with no handle of Orbit's own: the name of the program is
-    /// then the only thing left to look for, which is what the process list is
-    /// for. Without that, a launcher handing off means the clock runs until the
-    /// player notices, which is exactly the thing that makes playtime wrong.
+    /// `None` for a session Orbit is not watching at all, so the caller can fall
+    /// back to a clock the player stops.
     pub fn check(&mut self, pid: u32) -> Option<Verdict> {
         let tracked = self.running.get_mut(&pid)?;
 
-        // `try_wait` is the only way to notice, and once a process has been
-        // reaped the answer stays "exited", so the first sighting is recorded.
-        if tracked.died_at.is_none() && tracked.child.try_wait().ok().flatten().is_some() {
-            tracked.died_at = Some(Instant::now());
+        // The process Orbit started, if it started one. Once it has been reaped
+        // the answer stays "exited", so the first sighting is recorded.
+        if let Some(child) = tracked.child.as_mut() {
+            if tracked.died_at.is_none() && child.try_wait().ok().flatten().is_some() {
+                tracked.died_at = Some(Instant::now());
+            }
+            if tracked.died_at.is_none() {
+                return Some(Verdict::Running);
+            }
+        } else {
+            tracked.died_at = Some(tracked.started);
         }
 
-        let Some(died) = tracked.died_at else {
-            return Some(Verdict::Running);
-        };
-
-        if died.duration_since(tracked.started) >= HANDOFF_WINDOW {
-            return Some(Verdict::Ended);
-        }
-
-        if !tracked.handed_off {
+        // A quick death is a launcher handing the game on rather than the game
+        // itself ending, so the session carries on and the folder takes over.
+        if tracked.child.is_some() && !tracked.handed_off {
             tracked.handed_off = true;
-            log::info!(
-                "pid {pid} exited early; looking for the game itself by name from here \
-                 so its session still ends when it does"
-            );
+            log::info!("pid {pid} exited; watching the game's folder from here");
         }
 
-        // Nothing to look for, or no way to look: the session is the player's.
-        let (Some(image), true) = (tracked.image.clone(), cfg!(windows)) else {
-            return Some(Verdict::Unwatched);
-        };
+        if !cfg!(windows) || tracked.names.is_empty() {
+            return Some(match tracked.child {
+                // A program that ran and died is over, whether or not anything
+                // can be said about the folder.
+                Some(_) => Verdict::Ended,
+                // Nothing was watched and nothing said: the player stops it.
+                None => Verdict::Unwatched,
+            });
+        }
 
+        // One read of the process list every few seconds, and no more.
         let now = Instant::now();
         if now.duration_since(tracked.last_scan.unwrap_or(tracked.started)) < HANDOFF_POLL {
             return Some(Verdict::Running);
         }
         tracked.last_scan = Some(now);
 
-        if image_running(&image) {
-            tracked.seen = true;
+        let names = std::mem::take(&mut tracked.names);
+        let running = any_running(&names);
+        tracked.names = names;
+
+        if running {
+            if !tracked.seen {
+                tracked.seen = true;
+                log::info!("the game is running from its own folder, so its session ends when it does");
+            }
             tracked.misses = 0;
             return Some(Verdict::Running);
         }
-        // The game has not appeared yet, or it runs under a name nothing like
-        // the program's. Either way there is nothing to conclude, and ending the
-        // session on a guess would lose the evening's playtime.
-        if !tracked.seen {
+
+        // Nothing from the game's folder is running.
+        //
+        // A session the player started has to be seen at least once: pressing
+        // Play and taking a minute to start the game is not an ending, and
+        // ending the clock here would throw the session away.
+        if tracked.child.is_none() && !tracked.seen {
             return Some(Verdict::Running);
         }
+
+        // Two empty reads in a row, so a game that restarts itself, or one read
+        // that catches a moment between processes, is not mistaken for the end.
         tracked.misses += 1;
         if tracked.misses >= 2 {
             Some(Verdict::Ended)
@@ -176,7 +255,7 @@ impl Sessions {
         }
     }
 
-    /// Forget a process the player has stopped tracking.
+    /// Forget a game the player has stopped tracking.
     pub fn forget(&mut self, pid: u32) {
         self.running.remove(&pid);
     }
@@ -199,33 +278,94 @@ impl Sessions {
         #[cfg(windows)]
         kill_tree(pid);
         // Belt and braces, and the only route on other platforms.
-        let _ = tracked.child.kill();
+        if let Some(child) = tracked.child.as_mut() {
+            let _ = child.kill();
+        }
 
         let deadline = Instant::now() + EXIT_WAIT;
         loop {
-            match tracked.child.try_wait() {
-                Ok(Some(_)) => return Ok(()),
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                Ok(None) => {
-                    log::warn!("pid {pid} was still running after {:?}", EXIT_WAIT);
-                    return Ok(());
-                }
-                Err(e) => return Err(format!("Could not check whether the game closed: {e}")),
+            match tracked.child.as_mut() {
+                None => return Ok(()),
+                Some(child) => match child.try_wait() {
+                    Ok(Some(_)) => return Ok(()),
+                    Ok(None) if Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Ok(None) => {
+                        log::warn!("pid {pid} was still running after {:?}", EXIT_WAIT);
+                        return Ok(());
+                    }
+                    Err(e) => return Err(format!("Could not check whether the game closed: {e}")),
+                },
             }
         }
     }
 }
 
-/// Is a program of this name running anywhere on the machine?
+/// Every program name inside a game's folder, so a running one can be recognised.
 ///
-/// `tasklist` lists every process as CSV, which is the same shape in every
-/// display language: the image name is the first field and nothing else needs
-/// reading. A process list costs a few milliseconds, and it is only read for a
-/// game whose launcher handed off.
+/// The folder is walked a short way down, because the executable that ends up
+/// running is often below the game's root: an engine puts it in `Binaries`, a
+/// launcher hands off to something in a subfolder. Names only, lowercased, and
+/// deduped, because the question being asked is just "is any of these running".
+fn program_names(dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for root in dirs {
+        if !root.is_dir() {
+            continue;
+        }
+        let mut queue = vec![(root.clone(), 0usize)];
+        while let Some((dir, depth)) = queue.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                let path = entry.path();
+                if kind.is_dir() {
+                    if depth + 1 < 3 && !is_junk_dir(&path) {
+                        queue.push((path, depth + 1));
+                    }
+                } else if kind.is_file() && is_executable(&path) {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        let name = name.to_lowercase();
+                        if !out.contains(&name) {
+                            out.push(name);
+                        }
+                    }
+                }
+            }
+        }
+        // A library folder is the wrong place to be walking: if a game's folder
+        // turns out to be one, the list would hold every game at once.
+        if out.len() > 500 {
+            break;
+        }
+    }
+    out
+}
+
+/// Is any program of these names running?
+fn any_running(names: &[String]) -> bool {
+    let running = running_programs();
+    if running.is_empty() {
+        return false;
+    }
+    names.iter().any(|name| {
+        running
+            .iter()
+            .any(|listed| same_program(listed, name))
+    })
+}
+
+/// The image name of every process on the machine, lowercased.
+///
+/// `tasklist` lists them as CSV, which is the same shape in every display
+/// language: the image name is the first field and nothing else needs reading.
 #[cfg(windows)]
-fn image_running(name: &str) -> bool {
+fn running_programs() -> Vec<String> {
     use std::os::windows::process::CommandExt;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -234,18 +374,19 @@ fn image_running(name: &str) -> bool {
         .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
-        return false;
+        return Vec::new();
     };
-    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
-        line.split(',')
-            .next()
-            .is_some_and(|first| same_program(first.trim().trim_matches('"'), name))
-    })
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split(',').next())
+        .map(|first| first.trim().trim_matches('"').to_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 #[cfg(not(windows))]
-fn image_running(_name: &str) -> bool {
-    false
+fn running_programs() -> Vec<String> {
+    Vec::new()
 }
 
 /// Whether a listed program is the one being looked for.
@@ -255,12 +396,10 @@ fn image_running(_name: &str) -> bool {
 /// same name. A suffix that starts with a separator is the same game; anything
 /// else is a different program that happens to begin with the same letters.
 fn same_program(listed: &str, wanted: &str) -> bool {
-    let listed = listed.to_lowercase();
-    let wanted = wanted.to_lowercase();
     if listed == wanted {
         return true;
     }
-    let stem = wanted.strip_suffix(".exe").unwrap_or(&wanted);
+    let stem = wanted.strip_suffix(".exe").unwrap_or(wanted);
     if stem.len() < 4 {
         return false;
     }

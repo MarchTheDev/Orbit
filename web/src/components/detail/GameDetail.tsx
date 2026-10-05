@@ -24,6 +24,7 @@ import { listGameLogs } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { Cover } from '../ui/Cover';
 import { HltbCard } from './HltbCard';
+import { Select } from '../ui/Select';
 import { LaunchEditor } from './LaunchEditor';
 import { SessionHistory } from './SessionHistory';
 import { GameLogView } from './GameLogView';
@@ -34,6 +35,14 @@ import { TimeTracker } from './TimeTracker';
 
 interface Props {
   game: Game;
+  /**
+   * What the drawer is being opened from.
+   *
+   * From the library it is about a game somebody is playing: how to start it,
+   * where it came from, what it looks like. From the Backlog it is about a game
+   * somebody is deciding to play, so nothing about launching belongs in it.
+   */
+  context?: 'library' | 'backlog';
   /** The running session, if it is for this game. */
   session: ActiveSession | null;
   now: number;
@@ -55,6 +64,7 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export function GameDetail({
   game,
+  context = 'library',
   session,
   now,
   onUpdate,
@@ -71,6 +81,11 @@ export function GameDetail({
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions' | 'edit'>('overview');
+  /** The backlog drawer is a smaller thing: four tabs, and no launch settings. */
+  const backlog = context === 'backlog';
+  const showing = backlog
+    ? (['overview', 'log', 'sessions', 'edit'] as const)
+    : (['overview', 'achievements', 'log', 'sessions', 'edit'] as const);
   const [logCount, setLogCount] = useState(0);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
   const [loggingSession, setLoggingSession] = useState(false);
@@ -217,7 +232,9 @@ export function GameDetail({
               ['sessions', 'Sessions', History],
               ['edit', 'Edit', Pencil],
             ] as const
-          ).map(([id, label, Icon]) => (
+          )
+            .filter(([id]) => (showing as readonly string[]).includes(id))
+            .map(([id, label, Icon]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
@@ -238,9 +255,33 @@ export function GameDetail({
         </div>
 
         <div className="space-y-4 p-5">
-          {/* A game that is only planned has nothing to start, so the button
-              would be a lie: what it needs is a way to say it is owned now. */}
-          {game.planned ? (
+          {/* The Backlog drawer has no Start button at all: it is a page about
+              deciding what to play, and a Stop for a session already running is
+              the one thing worth keeping. */}
+          {backlog ? (
+            game.planned || running ? (
+              <div className="flex gap-2">
+                {running && (
+                  <button
+                    onClick={onStop}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-500 py-2.5 font-semibold text-white hover:brightness-110"
+                  >
+                    <Square className="size-4" fill="currentColor" strokeWidth={0} />
+                    Stop session
+                  </button>
+                )}
+                {game.planned && (
+                  <button
+                    onClick={() => onUpdate({ planned: false, status: 'backlog' })}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 py-2.5 font-semibold text-white shadow-lg shadow-accent/30 hover:brightness-110"
+                  >
+                    <Check className="size-4" />
+                    I own this now
+                  </button>
+                )}
+              </div>
+            ) : null
+          ) : game.planned ? (
             <div className="flex gap-2">
               <button
                 onClick={() => onUpdate({ planned: false, status: 'backlog' })}
@@ -284,30 +325,66 @@ export function GameDetail({
 
           {tab === 'overview' && (
             <>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <label className="col-span-2 flex items-center justify-between rounded-lg bg-panel2 px-3 py-2">
+          {/* Where this game sits, which is the one thing both readings of the
+              drawer want first. The word is spelled out rather than drawn from
+              the database's own name for it. */}
+          <div className="flex items-stretch gap-2 text-xs">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg bg-panel2 px-3 py-2">
               <span className="text-muted">Status</span>
-              <select
+              <Select
                 value={game.status}
-                onChange={(e) => onUpdate({ status: e.target.value as GameStatus })}
-                className="bg-transparent font-medium capitalize outline-none"
-              >
-                {['backlog', 'playing', 'completed', 'dropped'].map((s) => (
-                  <option key={s} value={s} className="bg-panel">
-                    {s}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => onUpdate({ status: v as GameStatus })}
+                className="!border-0 !bg-transparent !px-0 !py-0 text-xs font-medium"
+                menuClassName="w-48"
+                ariaLabel="Where this game sits"
+                options={[
+                  { value: 'backlog', label: 'Waiting to play' },
+                  { value: 'playing', label: 'Playing now' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'dropped', label: 'Dropped' },
+                ]}
+              />
             </label>
-            <div className="rounded-lg bg-panel2 px-3 py-2">
-              <p className="text-muted">Owned</p>
-              <p className="font-medium">{game.planned ? 'Not here yet' : 'Yes'}</p>
-            </div>
-            <div className="rounded-lg bg-panel2 px-3 py-2">
+            <div className="w-24 shrink-0 rounded-lg bg-panel2 px-3 py-2">
               <p className="text-muted">Rating</p>
               <p className="font-medium">{game.meta?.rating ?? '-'}</p>
             </div>
           </div>
+
+          {/* Ownership used to be a stat of its own here, which said the same
+              thing twice: a game that is not here yet is exactly a game that is
+              still only planned. Said once, underneath where it matters. */}
+          {game.planned && (
+            <p className="text-[11px] text-muted">
+              Not in the library yet. Orbit will not look for a file until it is.
+            </p>
+          )}
+
+          {backlog && (
+            <div className="flex flex-wrap gap-1.5 rounded-xl border border-line bg-panel2/40 p-2">
+              {(
+                [
+                  ['playing', 'Move to playing now'],
+                  ['backlog', 'Move to waiting'],
+                  ['completed', 'Move to completed'],
+                  ['dropped', 'Move to dropped'],
+                ] as const
+              ).map(([status, label]) => (
+                <button
+                  key={status}
+                  onClick={() => onUpdate({ status })}
+                  disabled={game.status === status}
+                  className={`rounded-full border px-3 py-1 text-[11px] ${
+                    game.status === status
+                      ? 'border-accent bg-accent/15 text-fg'
+                      : 'border-line text-muted hover:border-accent hover:text-fg'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <TimeTracker
             game={game}
@@ -316,10 +393,15 @@ export function GameDetail({
             onSetTotal={setPlaytime}
             error={playtimeError}
           />
-          <LaunchEditor
-            game={game}
-            onSave={(t: LaunchTarget, companions: Companion[]) => onUpdate({ launch: t, companions })}
-          />
+          {/* Not in the Backlog drawer: a game that is only being planned has
+              nothing to launch, and after it is owned it stops being a plan. */}
+          {!backlog && (
+            <LaunchEditor
+              game={game}
+              onSave={(t: LaunchTarget, companions: Companion[]) => onUpdate({ launch: t, companions })}
+            />
+          )}
+          {!backlog && (
           <div className="space-y-1.5">
             {steamAppId !== null && (
               <button
@@ -340,6 +422,7 @@ export function GameDetail({
               Open in PCGamingWiki
             </button>
           </div>
+          )}
           <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} error={hltbError} />
 
           <section className="rounded-xl border border-line bg-panel2 p-4">

@@ -6,6 +6,7 @@ import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { hashHue, uid } from '../../utils/format';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
 import { CheckboxInline } from '../ui/Checkbox';
+import { Select } from '../ui/Select';
 
 /** What the player has told us so far. */
 interface Draft {
@@ -282,12 +283,17 @@ export function AddGameModal({
           </label>
           <label className="block">
             <span className={labelCls}>Status</span>
-            <select className={inputCls} value={d.status} onChange={(e) => set('status', e.target.value as Game['status'])}>
-              <option value="backlog">Backlog</option>
-              <option value="playing">Playing</option>
-              <option value="completed">Completed</option>
-              <option value="dropped">Dropped</option>
-            </select>
+            <Select
+              value={d.status}
+              onChange={(v) => set('status', v)}
+              ariaLabel="Where this game starts out"
+              options={[
+                { value: 'backlog', label: 'Waiting to play' },
+                { value: 'playing', label: 'Playing now' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'dropped', label: 'Dropped' },
+              ]}
+            />
           </label>
           <div className="flex items-end pb-1.5">
             <CheckboxInline checked={d.favorite} onChange={(v) => set('favorite', v)} label="Favorite" />

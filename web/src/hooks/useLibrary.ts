@@ -153,6 +153,17 @@ export function useLibrary() {
    * moment earlier is never overtaken by the reset, and the reload waits until
    * the database has actually been written.
    */
+  /**
+   * Wait for every change made so far to reach the database.
+   *
+   * Writes are queued so the last one for a game wins, which means the state on
+   * screen is briefly ahead of the state on disk. Starting a session reads the
+   * launch target from disk, so a launch right after changing that target has to
+   * wait for the change to land: otherwise "Timer only", pressed and followed by
+   * Play, still starts the game the old setting pointed at.
+   */
+  const flush = useCallback(() => queue.current, []);
+
   const resetEverything = useCallback(() => {
     queue.current = queue.current
       .then(() => clearLibrary())
@@ -164,7 +175,7 @@ export function useLibrary() {
       .catch(console.error);
   }, []);
 
-  return { games, settings, setSettings, updateGame, addGame, addGames, removeGame, reload, resetEverything, ready };
+  return { games, settings, setSettings, updateGame, addGame, addGames, removeGame, reload, flush, resetEverything, ready };
 }
 
 export type Library = ReturnType<typeof useLibrary>;

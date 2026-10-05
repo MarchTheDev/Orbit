@@ -704,7 +704,9 @@ fn steam_app_id(game: &GameRow) -> Option<u64> {
 struct Artwork {
     /// The store's id, so the game can remember which app it is from now on.
     app_id: Option<u64>,
-    urls: Vec<String>,
+    /// Every picture the store has, each one saying what sort of picture it is,
+    /// so the front end offers them in groups instead of guessing from the URL.
+    picks: Vec<metadata::ArtworkPick>,
 }
 
 /// The pictures the store has for a game, for a cover that crops badly.
@@ -733,10 +735,10 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
         ));
     };
 
-    let urls = metadata::artwork(app_id).await?;
+    let picks = metadata::artwork(app_id).await?;
     Ok(Artwork {
         app_id: known.or(Some(app_id)),
-        urls,
+        picks,
     })
 }
 

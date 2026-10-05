@@ -448,16 +448,33 @@ export function fetchAchievements(gameId: string): Promise<Achievement[]> {
  * Every picture the store has for a game, so a cover that crops badly can be
  * swapped for a better one.
  */
-export function findArtwork(gameId: string): Promise<{ appId: number | null; urls: string[] }> {
+export function findArtwork(gameId: string): Promise<ArtworkFound> {
   return call(
     'artwork_candidates',
     { gameId },
     async () => {
       await sleep(250);
       // Nothing to ask in a browser, and the sample library has no store pages.
-      return { appId: null, urls: [] };
+      return { appId: null, picks: [] } satisfies ArtworkFound;
     },
   );
+}
+
+/**
+ * One picture the store has, and what sort of picture it is.
+ *
+ * `kind` is what decides where a click sends it: a portrait or a capsule is a
+ * cover, a hero shot, a logo or a screenshot is a backdrop.
+ */
+export interface ArtworkPick {
+  url: string;
+  kind: 'portrait' | 'hero' | 'logo' | 'header' | 'capsule' | 'screenshot';
+  label: string;
+}
+
+export interface ArtworkFound {
+  appId: number | null;
+  picks: ArtworkPick[];
 }
 
 /** Put one game's notes in the order they were dragged into. */

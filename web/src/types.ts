@@ -247,6 +247,16 @@ export interface Settings {
   /** How big the covers and rows are drawn, as a percentage. */
   coverScale: number;
   /**
+   * The player's own order for the tabs along the top.
+   *
+   * The shape of the app is the same for everybody, but the order somebody
+   * works in is not: an imported Steam library wants Library first, somebody
+   * clearing a backlog wants Backlog first. Missing tabs are appended where
+   * they belong, so an order saved before a tab existed still shows that tab
+   * rather than hiding it.
+   */
+  tabOrder?: Page[];
+  /**
    * The player's own order for the backlog, as game ids.
    *
    * Kept apart from the library order because the two questions are different:

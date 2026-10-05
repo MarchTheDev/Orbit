@@ -3,7 +3,9 @@ import { AppWindow, FolderOpen, Plus, Timer, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
-import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
+import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
+import { SaveButton } from '../ui/SaveButton';
+import { say } from '../../utils/toast';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
 // a program with a ROM as an argument, and Steam is not something the player
@@ -53,21 +55,51 @@ export function LaunchEditor({
   const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
 
+  /**
+   * Pick a way to start the game, and save it straight away.
+   *
+   * Choosing a kind and then having to press Save was a trap: the chip looked
+   * applied, so "Timer only" followed by Play still started the game, because
+   * nothing had been written down. A choice from this row is a decision, and it
+   * is kept the moment it is made.
+   */
   const switchKind = (kind: LaunchTarget['kind']) => {
-    if (kind === 'none') setTarget({ kind: 'none' });
-    else if (kind === 'executable') {
-      setTarget({ kind: 'executable', path: game.exePath ?? '', args: '', workingDir: game.installDir });
+    if (kind === 'none') {
+      setTarget({ kind: 'none' });
+      onSave({ kind: 'none' }, companions);
+      say(`${game.title} is timed only: Orbit starts nothing`);
+      return;
+    }
+    if (kind === 'executable') {
+      const picked: LaunchTarget = {
+        kind: 'executable',
+        path: game.exePath ?? '',
+        args: '',
+        workingDir: game.installDir,
+      };
+      setTarget(picked);
+      // Without a program there is nothing to save yet: the Browse button and
+      // the Save button below are the way through.
+      if (picked.path.trim()) {
+        onSave(
+          { kind: 'executable', path: picked.path, args, workingDir: parentOf(picked.path) },
+          companions,
+        );
+        say(`${game.title} starts ${picked.path.split(/[\\/]/).pop()}`);
+      }
     }
   };
 
   const save = () => {
     if (target.kind === 'executable') {
+      if (!target.path.trim()) return;
       onSave({ kind: 'executable', path: target.path, args, workingDir: parentOf(target.path) }, companions);
     } else if (target.kind === 'steam') {
       onSave({ kind: 'steam', appId: Number(target.appId) || 0 }, companions);
     } else {
       onSave({ kind: 'none' }, companions);
     }
+    say('Launch settings saved');
   };
 
   const setCompanion = (i: number, patch: Partial<Companion>) => {
@@ -219,10 +251,14 @@ export function LaunchEditor({
         )}
       </div>
 
-      <div className="flex items-center gap-3 border-t border-line pt-4">
-        <button className={`${btnGhost} !py-1.5`} onClick={save} disabled={!dirty}>
-          Save launch settings
-        </button>
+      <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
+        <SaveButton
+          onSave={save}
+          label="Save launch settings"
+          savedLabel="Launch settings saved"
+          className="!px-3 !py-1.5 !text-xs"
+        />
+        {!dirty && <span className="text-[11px] text-muted">Nothing to change</span>}
         <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>
     </section>

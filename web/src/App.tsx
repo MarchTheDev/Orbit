@@ -25,7 +25,7 @@ import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { SettingsView } from './components/SettingsView';
 import { fmtClock } from './utils/format';
-import { onToast, say } from './utils/toast';
+import { onToast } from './utils/toast';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast {
@@ -35,7 +35,19 @@ interface Toast {
 }
 
 export default function App() {
-  const { games, settings, setSettings, updateGame, addGame, addGames, removeGame, reload, resetEverything, ready } = useLibrary();
+  const {
+    games,
+    settings,
+    setSettings,
+    updateGame,
+    addGame,
+    addGames,
+    removeGame,
+    reload,
+    flush,
+    resetEverything,
+    ready,
+  } = useLibrary();
   const [page, setPage] = useState<Page>('library');
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
@@ -67,7 +79,6 @@ export default function App() {
 
   // Toasts come from a one-line channel rather than a callback threaded through
   // every layer, so a button several components down can still say "saved".
-  useEffect(() => onToast(say), []);
 
   const toast = useCallback((text: string, tone: Toast['tone'] = 'ok') => {
     const id = Date.now() + Math.random();
@@ -75,6 +86,11 @@ export default function App() {
     // Long enough to read, short enough not to pile up.
     setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 6000);
   }, []);
+
+  // Anything anywhere can say something: `toast` is the one that draws, and
+  // `say` only passes the message along. Registering `say` here instead made it
+  // call itself, which is why nothing ever appeared.
+  useEffect(() => onToast(toast), [toast]);
 
   /**
    * Games whose details have already been asked for.
@@ -298,10 +314,13 @@ export default function App() {
    * a place in it.
    */
   const reorder = useCallback(
-    (fromId: string, toId: string) => {
+    (fromId: string, toId: string, after: boolean) => {
       const ids = visible.map((g) => g.id).filter((id) => id !== fromId);
-      const at = ids.indexOf(toId);
-      ids.splice(at === -1 ? ids.length : at, 0, fromId);
+      const found = ids.indexOf(toId);
+      // Dropped on the lower half of a card, it goes below it: dragging
+      // downwards has to be able to overtake, not just nudge.
+      const at = found === -1 ? ids.length : found + (after ? 1 : 0);
+      ids.splice(at, 0, fromId);
       // Anything outside the current filter keeps whatever position it had.
       setSettings({ sortOrder: [...ids, ...order.filter((id) => !ids.includes(id))] });
     },
@@ -317,6 +336,10 @@ export default function App() {
   const startGame = async (g: Game) => {
     if (session?.gameId === g.id) return;
     setSelectedId(g.id);
+    // Whatever was just changed about how this game starts has to be on disk
+    // before the session reads it back, or a launch setting changed a second ago
+    // is ignored and something the player turned off still starts.
+    await flush();
     const started = await play(g.id);
     if (!started) return;
     updateGame(g.id, {
@@ -375,7 +398,7 @@ export default function App() {
 
   return (
     <div className="relative h-full overflow-y-auto text-fg">
-      <TopNav page={page} setPage={setPage} />
+      <TopNav page={page} setPage={setPage} order={settings?.tabOrder} />
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
@@ -405,7 +428,6 @@ export default function App() {
             games={played}
             onSelect={setSelectedId}
             onStatus={(id, status) => updateGame(id, { status })}
-            onPlay={(g) => void startGame(g)}
             onAdd={(game) => addGames([game])}
             onUpdate={(id, patch) => updateGame(id, patch)}
             onRemove={(id) => removeGame(id)}
@@ -555,6 +577,9 @@ export default function App() {
         <GameDetail
           key={selected.id}
           game={selected}
+          // The same drawer, read two ways: from the Backlog it is a page about
+          // deciding what to play, with nothing in it that starts anything.
+          context={page === 'backlog' ? 'backlog' : 'library'}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}

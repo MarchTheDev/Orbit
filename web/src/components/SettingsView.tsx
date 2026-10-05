@@ -5,6 +5,7 @@ import {
   FolderOpen,
   Ghost,
   GitBranch,
+  GripVertical,
   HardDrive,
   Heart,
   Monitor,
@@ -12,9 +13,10 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Wand2,
   X,
 } from 'lucide-react';
-import type { Settings } from '../types';
+import type { Page, Settings } from '../types';
 import { THEMES } from '../data/themes';
 import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
 import { openExternal } from '../services/desktop';
@@ -23,6 +25,9 @@ import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
+import { Select } from './ui/Select';
+import { orderedTabs } from './TopNav';
+import { useDragReorder } from '../hooks/useDragReorder';
 
 /**
  * One setting, as a dropdown with the meaning of the choice underneath.
@@ -46,19 +51,60 @@ function Setting<T extends string>({
   return (
     <div className="space-y-1.5">
       <p className="text-sm font-medium">{label}</p>
-      <select
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value as T)}
-        className={`${inputCls} max-w-sm`}
-        aria-label={label}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        options={options}
+        className="max-w-sm"
+        menuClassName="max-w-sm"
+        ariaLabel={label}
+      />
       <p className="text-xs text-muted">{current.hint}</p>
+    </div>
+  );
+}
+
+/**
+ * The tabs, in their current order, dragged about.
+ *
+ * The same pointer-based reordering the library and the backlog use, because
+ * the webview reserves HTML5 drags for files dragged in from the desktop. Each
+ * row shows what the tab is called in the bar, so the effect of a move is
+ * visible here rather than only up top.
+ */
+function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[]) => void }) {
+  const { bind, dragging, over, active } = useDragReorder((fromId, toId, after) => {
+    const next = order.filter((id) => id !== fromId);
+    const at = next.indexOf(toId as Page) + (after ? 1 : 0);
+    next.splice(at, 0, fromId as Page);
+    onChange(next);
+  });
+  const byId = new Map(orderedTabs([]).map((t) => [t.id, t]));
+
+  return (
+    <div className={cn('space-y-1', active && 'cursor-grabbing')}>
+      {order.map((id) => {
+        const tab = byId.get(id);
+        if (!tab) return null;
+        return (
+          <div
+            key={id}
+            {...bind(id)}
+            className={cn(
+              'flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-sm transition',
+              // The gap opens where the row would land, so a move is not a
+              // surprise when the pointer is released.
+              dragging === id && 'opacity-40',
+              over === id && dragging !== id && 'border-accent bg-accent/10',
+            )}
+          >
+            <GripVertical className="size-4 shrink-0 cursor-grab text-muted" />
+            <tab.Icon className="size-4 shrink-0 text-accent" strokeWidth={1.8} />
+            <span className="font-medium">{tab.label}</span>
+            {id === 'library' && <span className="text-[11px] text-muted">the page Orbit opens on</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -128,6 +174,21 @@ export function SettingsView({
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <GripVertical className="size-4 text-accent" />
+          Tabs along the top
+        </h2>
+        <p className="text-sm text-muted">
+          Press a tab and move it to put the pages you use most first. Settings is always last, wherever it would have
+          been.
+        </p>
+        <TabOrder
+          order={orderedTabs(settings.tabOrder).map((t) => t.id)}
+          onChange={(next) => setSettings({ tabOrder: next })}
+        />
       </section>
 
       <section className="space-y-3">
@@ -283,7 +344,7 @@ export function SettingsView({
 
       <section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
-          <Ghost className="size-4 text-accent" />
+          <Wand2 className="size-4 text-accent" />
           Other tools
         </h2>
         <p className="text-sm text-muted">Programs made alongside Orbit.</p>

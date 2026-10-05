@@ -12,6 +12,7 @@ import {
 } from '../services/native';
 import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, parseDuration, toLocalInput } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
+import { Select } from './ui/Select';
 
 const PAGE = 25;
 
@@ -106,14 +107,17 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
       <div className="glass rounded-2xl p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Sessions</h2>
-          <select value={gameFilter} onChange={(e) => { setGameFilter(e.target.value); setPage(0); }} className={`${inputCls} w-auto`}>
-            <option value="">Every game</option>
-            {games.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.title}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={gameFilter}
+            onChange={(v) => {
+              setGameFilter(v);
+              setPage(0);
+            }}
+            className="w-56"
+            menuClassName="w-56"
+            ariaLabel="Which game's sessions to show"
+            options={[{ value: '', label: 'Every game' }, ...games.map((g) => ({ value: g.id, label: g.title }))]}
+          />
           <div className="flex-1" />
           <button
             className={`${btnGhost} flex items-center gap-2`}
@@ -345,13 +349,12 @@ export function LogSession({
         {!initialGameId && (
           <label className="block text-sm">
             <span className="mb-1 block text-muted">Game</span>
-            <select value={gameId} onChange={(e) => setGameId(e.target.value)} className={inputCls}>
-              {games.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={gameId}
+              onChange={setGameId}
+              ariaLabel="Which game this time is for"
+              options={games.map((g) => ({ value: g.id, label: g.title }))}
+            />
           </label>
         )}
         <div className="flex gap-3">

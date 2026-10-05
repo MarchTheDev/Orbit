@@ -67,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   steamOnLaunch: false,
   sortOrder: [],
   coverScale: 100,
+  tabOrder: [],
   backlogOrder: [],
   window: {
     // Nothing happens to the window unless the player asks for it, which is the

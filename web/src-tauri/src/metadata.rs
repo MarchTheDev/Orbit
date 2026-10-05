@@ -132,6 +132,12 @@ struct SteamApp {
     background_image: String,
     #[serde(default)]
     capsule_image: String,
+    /// The full-size background the store page uses, which the header is a crop
+    /// of. Some pages have it and some do not.
+    #[serde(default)]
+    background_raw: String,
+    #[serde(default)]
+    screenshots: Vec<Screenshot>,
     #[serde(default)]
     metacritic: Option<Metacritic>,
 }
@@ -148,6 +154,15 @@ struct Named {
 struct ReleaseDate {
     #[serde(default)]
     date: String,
+}
+
+/// A store-page screenshot, in two sizes: the full one is what a backdrop wants.
+#[derive(Debug, Default, Deserialize)]
+struct Screenshot {
+    #[serde(default)]
+    path_full: String,
+    #[serde(default)]
+    path_thumbnail: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -256,57 +271,117 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     }
 }
 
+/// One picture the store has, and what sort of picture it is.
+///
+/// The kind is what stops the front end guessing from the file name which
+/// picture goes where: a portrait belongs on a tile, a hero or a screenshot
+/// behind the page, a logo over a backdrop, and a capsule is what the store
+/// itself uses for a list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtworkPick {
+    pub url: String,
+    /// `portrait`, `hero`, `logo`, `header`, `capsule` or `screenshot`.
+    pub kind: String,
+    /// What to call it in the list, in words rather than a file name.
+    pub label: String,
+}
+
+/// The names Valve publishes for a game's artwork.
+///
+/// The same app has several crops and sizes, and which one suits depends on
+/// where it is going: the portrait fills a tile, the wide header suits a list
+/// row, the hero art and the screenshots suit a page backdrop, and the logo is
+/// the name on its own. Not every app has every one, so each is checked before
+/// it is offered rather than handed over as a broken picture.
+const ASSETS: &[(&str, &str, &str)] = &[
+    ("library_600x900.jpg", "portrait", "Portrait, tile shape"),
+    ("library_600x900_2x.jpg", "portrait", "Portrait, sharper"),
+    ("library_hero.jpg", "hero", "Hero art"),
+    ("library_hero_blur.jpg", "hero", "Hero art, blurred"),
+    ("logo.png", "logo", "Logo on its own"),
+    ("header.jpg", "header", "Store header"),
+    ("capsule_616x353.jpg", "capsule", "Capsule, large"),
+    ("capsule_231x87.jpg", "capsule", "Capsule, small"),
+];
+
+/// The hosts that serve those files.
+///
+/// The first is the one Steam uses now. The other two are where the same
+/// pictures lived before it, and they still answer for older games, which is
+/// exactly the case where the modern host comes back empty. Each asset is
+/// asked for on the first host and only falls through on a miss.
+const HOSTS: &[&str] = &[
+    PORTRAIT,
+    "https://cdn.cloudflare.steamstatic.com/steam/apps",
+    "https://steamcdn-a.akamaihd.net/steam/apps",
+];
+
 /// Every piece of artwork the store has for an app, best first.
 ///
-/// Valve publishes the same game at several crops and sizes, and which one suits
-/// depends on where it is going: the portrait `library_600x900` fills a tile, the
-/// wide header suits a banner, the background suits a page, the logo is just the
-/// name. Some of them are missing for a given app, so each candidate is checked
-/// before it is offered rather than being handed over as a broken picture.
-///
 /// This is the answer for a cover that crops badly: instead of guessing, the
-/// player picks the picture that is actually right for the game.
-pub async fn artwork(app_id: u64) -> Result<Vec<String>, String> {
+/// player is shown each picture with its shape named, and picks.
+///
+/// SteamKit was the pointer here, and it is the wrong tool for this: it is a
+/// .NET library that speaks Steam's client protocol from C#, and Orbit is a Rust
+/// backend, so it cannot be linked in. What it would have fetched is not secret
+/// either. Valve publishes the artwork over plain HTTPS at predictable names,
+/// with no key and no login, which is what is asked for below.
+pub async fn artwork(app_id: u64) -> Result<Vec<ArtworkPick>, String> {
     let client = client()?;
-    let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
-    let big = format!("{PORTRAIT}/{app_id}/library_600x900_2x.jpg");
-    let hero = format!("{PORTRAIT}/{app_id}/library_hero.jpg");
-    let header = format!("{PORTRAIT}/{app_id}/header.jpg");
-    let capsule = format!("{PORTRAIT}/{app_id}/capsule_231x87.jpg");
-    let logo = format!("{PORTRAIT}/{app_id}/logo.png");
 
-    // Six questions asked at once: one after another would be six round trips
-    // before the player sees anything.
-    let (portrait_ok, big_ok, hero_ok, header_ok, capsule_ok, logo_ok) = tokio::join!(
-        exists(&client, &portrait),
-        exists(&client, &big),
-        exists(&client, &hero),
-        exists(&client, &header),
-        exists(&client, &capsule),
-        exists(&client, &logo),
-    );
+    // Every candidate at once: one after another would be eight round trips
+    // before the player sees a picture.
+    let mut asking = Vec::new();
+    for (name, kind, label) in ASSETS {
+        let client = client.clone();
+        asking.push(tokio::spawn(async move {
+            for host in HOSTS {
+                let url = format!("{host}/{app_id}/{name}");
+                if exists(&client, &url).await {
+                    return Some(ArtworkPick {
+                        url,
+                        kind: (*kind).to_string(),
+                        label: (*label).to_string(),
+                    });
+                }
+            }
+            None
+        }));
+    }
 
-    let mut out: Vec<String> = Vec::new();
-    for (ok, url) in [
-        (portrait_ok, portrait),
-        (big_ok, big),
-        (hero_ok, hero),
-        (header_ok, header),
-        (capsule_ok, capsule),
-        (logo_ok, logo),
-    ] {
-        if ok {
-            out.push(url);
+    let mut out: Vec<ArtworkPick> = Vec::new();
+    for handle in asking {
+        if let Ok(Some(pick)) = handle.await {
+            out.push(pick);
         }
     }
 
-    // The store page's own picture is the one that cannot be guessed: its file
-    // name carries a hash, so it comes from the details call.
+    // The store page adds the pictures whose file names cannot be guessed,
+    // because they carry a hash: the wide background and the screenshots. A page
+    // with no details call answered still has the ones above.
     if let Ok(app) = app_details(&client, app_id).await {
-        for url in [app.background_image, app.header_image, app.capsule_image] {
-            if !url.trim().is_empty() && !out.contains(&url) {
-                out.push(url);
+        let mut add = |url: String, kind: &str, label: &str| {
+            let url = url.trim().to_string();
+            if !url.is_empty() && !out.iter().any(|p| p.url == url) {
+                out.push(ArtworkPick {
+                    url,
+                    kind: kind.to_string(),
+                    label: label.to_string(),
+                });
             }
+        };
+        add(app.background_raw, "hero", "Background, full size");
+        add(app.background_image, "hero", "Store background");
+        add(app.header_image, "header", "Header from the store page");
+        add(app.capsule_image, "capsule", "Capsule from the store page");
+        for (i, shot) in app.screenshots.iter().take(6).enumerate() {
+            let url = if shot.path_full.trim().is_empty() {
+                shot.path_thumbnail.clone()
+            } else {
+                shot.path_full.clone()
+            };
+            add(url, "screenshot", &format!("Screenshot {}", i + 1));
         }
     }
 

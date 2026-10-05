@@ -73,5 +73,14 @@ body::before {
   .orbit-spin-outer,
   .orbit-twinkle,
   .drawer-in,
+  .save-tick,
   .fade-in { animation: none !important; }
+}
+
+/* The tick on a button that has just saved, so the confirmation lands. */
+.save-tick { animation: pop 0.3s ease-out; }
+@keyframes pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
 }

@@ -1,10 +1,17 @@
 # Orbit
 
+<img src="web/src-tauri/icons/icon.png" alt="The Orbit mark" width="96" align="right" />
+
 A library for the games on your PC: it launches them, keeps track of how long
 you actually played, and shows where the disk space went.
 
 Orbit is a desktop app. React and Tailwind for the interface, in `web/`; Rust
 behind it for everything that touches the machine, in `web/src-tauri/`.
+
+The app icon is [`web/src-tauri/icons/icon.png`](web/src-tauri/icons/icon.png),
+drawn from [`icon.svg`](web/src-tauri/icons/icon.svg) beside it; the set the
+installer bundles (`.ico`, `.icns`, the Windows tile sizes) is regenerated from
+that SVG with `npx tauri icon src-tauri/icons/icon.svg`.
 
 ## Running it
 

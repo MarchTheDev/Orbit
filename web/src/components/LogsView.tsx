@@ -133,6 +133,8 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
               game={selected}
               onChanged={() => setVersion((n) => n + 1)}
               onNotes={(notes) => onUpdate(selected.id, { notes })}
+              // The wide reading has room for the time of day next to the date.
+              withClock
             />
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">

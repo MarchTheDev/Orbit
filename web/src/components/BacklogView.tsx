@@ -10,6 +10,7 @@ import {
   Play,
   Plus,
   SquareArrowRight,
+  Timer,
   Undo2,
   X,
 } from 'lucide-react';
@@ -62,7 +63,6 @@ export function BacklogView({
   games,
   onSelect,
   onStatus,
-  onPlay,
   onAdd,
   onUpdate,
   onRemove,
@@ -73,7 +73,6 @@ export function BacklogView({
   games: Game[];
   onSelect: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
-  onPlay: (g: Game) => void;
   /** Saves a game that is only planned, so it can be added without a program. */
   onAdd: (game: Game) => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
@@ -92,6 +91,8 @@ export function BacklogView({
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<GameSuggestion[]>([]);
   const [looking, setLooking] = useState(false);
+  /** True while the times each game takes are being compared. */
+  const [showTimes, setShowTimes] = useState(false);
 
   const match = (g: Game) => !query || g.title.toLowerCase().includes(query.toLowerCase());
 
@@ -219,10 +220,11 @@ export function BacklogView({
    * player sees. Anything that is not on the waiting list at all, a completed
    * game for instance, keeps its own order after them.
    */
-  const move = (fromId: string, toId: string) => {
+  const move = (fromId: string, toId: string, after: boolean) => {
     const ids = backlog.map((g) => g.id).filter((id) => id !== fromId);
-    const at = ids.indexOf(toId);
-    ids.splice(at === -1 ? ids.length : at, 0, fromId);
+    const found = ids.indexOf(toId);
+    const at = found === -1 ? ids.length : found + (after ? 1 : 0);
+    ids.splice(at, 0, fromId);
     setMyOrder([...ids, ...myOrder.filter((id) => !ids.includes(id))]);
   };
 
@@ -259,6 +261,20 @@ export function BacklogView({
             <Plus className="size-4" />
             Plan a game
           </button>
+          {/* Comparing how long things take is the one question this page
+              exists to answer, so it is one click away rather than hidden in
+              each game's own page. */}
+          <button
+            onClick={() => setShowTimes((v) => !v)}
+            title="Show how long each game takes, to compare them"
+            aria-pressed={showTimes}
+            className={`glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ${
+              showTimes ? 'text-accent' : 'text-muted hover:text-fg'
+            }`}
+          >
+            <Timer className="size-3.5" />
+            Times
+          </button>
           <div className="glass flex rounded-full p-1">
             {ORDERS.map((o) => (
               <button
@@ -277,6 +293,35 @@ export function BacklogView({
           <SearchField value={query} onChange={setQuery} />
         </div>
       </header>
+
+      {/* The waiting list at a glance, to answer "what can I finish this
+          weekend" without opening anything: the shortest, the longest, and how
+          much is left of all of it together. */}
+      {showTimes && backlog.length > 0 && (
+        <section className="glass flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl px-4 py-3 text-sm">
+          {(() => {
+            const measured = backlog.filter((g) => (g.hltb?.main ?? 0) > 0);
+            const hours = measured.map((g) => g.hltb!.main);
+            const left = measured.reduce((sum, g) => sum + Math.max(0, g.hltb!.main - g.playSecs / 3600), 0);
+            return (
+              <>
+                <span className="text-muted">
+                  {measured.length} of {backlog.length} have times
+                </span>
+                <span>
+                  shortest <b className="font-mono">{Math.min(...hours)}h</b>
+                </span>
+                <span>
+                  longest <b className="font-mono">{Math.max(...hours)}h</b>
+                </span>
+                <span>
+                  left in total <b className="font-mono">{Math.round(left)}h</b>
+                </span>
+              </>
+            );
+          })()}
+        </section>
+      )}
 
       {planning !== null && (
         <form
@@ -347,8 +392,8 @@ export function BacklogView({
         empty="Nothing part-way through."
         onSelect={onSelect}
         onStatus={onStatus}
-        onPlay={onPlay}
         movable={false}
+        showTimes={showTimes}
       />
 
       <Section
@@ -358,9 +403,9 @@ export function BacklogView({
         empty="Nothing waiting. Write one down above, or add a game from the Library."
         onSelect={onSelect}
         onStatus={onStatus}
-        onPlay={onPlay}
         movable={order === 'mine' && query.trim() === ''}
         onMove={move}
+        showTimes={showTimes}
       />
 
       {planned.length > 0 && (
@@ -371,7 +416,6 @@ export function BacklogView({
           empty="Nothing written down that you do not own."
           onSelect={onSelect}
           onStatus={onStatus}
-          onPlay={onPlay}
           movable={false}
           notOwned
           // Owning it moves it to the waiting list rather than straight to
@@ -392,8 +436,8 @@ export function BacklogView({
         empty="Nothing dropped."
         onSelect={onSelect}
         onStatus={onStatus}
-        onPlay={onPlay}
         movable={false}
+        showTimes={showTimes}
       />
 
       {completed.length > 0 && (
@@ -404,8 +448,8 @@ export function BacklogView({
           empty="Nothing finished yet."
           onSelect={onSelect}
           onStatus={onStatus}
-          onPlay={onPlay}
           movable={false}
+          showTimes={showTimes}
         />
       )}
     </div>
@@ -427,12 +471,12 @@ function Section({
   empty,
   onSelect,
   onStatus,
-  onPlay,
   movable,
   onMove,
   onRemove,
   onOwned,
   notOwned,
+  showTimes,
 }: {
   title: string;
   icon: typeof Play;
@@ -440,14 +484,15 @@ function Section({
   empty: string;
   onSelect: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
-  onPlay: (g: Game) => void;
   /** True when this lane is being read in the player's own order. */
   movable: boolean;
-  onMove?: (fromId: string, toId: string) => void;
+  onMove?: (fromId: string, toId: string, after: boolean) => void;
   onRemove?: (id: string) => void;
   /** The player now owns something that was only written down. */
   onOwned?: (id: string) => void;
   notOwned?: boolean;
+  /** Comparing times: each card says how long it takes, three ways. */
+  showTimes?: boolean;
 }) {
   // The same pointer-based reordering the library uses: a webview that keeps
   // file drags for itself never delivers a browser drag here either.
@@ -460,6 +505,9 @@ function Section({
         {title} · {games.length}
         {movable && games.length > 1 && (
           <span className="normal-case tracking-normal">press on a card and move it to place it</span>
+        )}
+        {!notOwned && games.length > 0 && !movable && (
+          <span className="normal-case tracking-normal opacity-60">open a card to move it or to write about it</span>
         )}
       </h2>
       {games.length === 0 ? (
@@ -513,6 +561,33 @@ function Section({
                       />
                     </div>
                   )}
+
+                  {/* All three HowLongToBeat times at once, so two games can be
+                      held against each other without opening either. */}
+                  {showTimes && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {(
+                        [
+                          ['Main', g.hltb?.main ?? 0, '#38bdf8'],
+                          ['+ Extras', g.hltb?.mainExtra ?? 0, '#a78bfa'],
+                          ['100%', g.hltb?.completionist ?? 0, '#f472b6'],
+                        ] as const
+                      ).map(([label, hours, colour]) => (
+                        <span
+                          key={label}
+                          title={`${label}: ${hours > 0 ? `${hours} hours` : 'no time known'}`}
+                          className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                          style={{
+                            color: hours > 0 ? colour : undefined,
+                            background: hours > 0 ? `color-mix(in srgb, ${colour} 15%, transparent)` : 'transparent',
+                            border: hours > 0 ? 'none' : '1px dashed var(--c-border)',
+                          }}
+                        >
+                          {label} {hours > 0 ? `${hours}h` : '?'}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   {notOwned ? (
@@ -535,29 +610,23 @@ function Section({
                       </button>
                     </div>
                   ) : (
-                    <>
-                      <button
-                        onClick={() => onPlay(g)}
-                        title={`Play ${g.title}`}
-                        className="flex items-center gap-1 rounded-lg bg-gradient-to-r from-accent to-accent2 px-2.5 py-1 text-[11px] font-semibold text-white"
-                      >
-                        <Play className="size-3" fill="currentColor" strokeWidth={0} />
-                        Play
-                      </button>
-                      <div className="flex gap-1 opacity-0 transition group-hover:opacity-100">
-                        {MOVES.filter((m) => m.status !== g.status).map((m) => (
-                          <button
-                            key={m.status}
-                            onClick={() => onStatus(g.id, m.status)}
-                            title={`Move to ${m.label}`}
-                            aria-label={`Move ${g.title} to ${m.label}`}
-                            className="rounded-md border border-line bg-panel p-1 text-muted hover:border-accent hover:text-accent"
-                          >
-                            <m.icon className="size-3" />
-                          </button>
-                        ))}
-                      </div>
-                    </>
+                    // No Play button here. This page is about what to play next,
+                    // not about starting something: nothing on it is played from
+                    // the card, and a button that started a game from a planning
+                    // list is a button that gets pressed by accident.
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {MOVES.filter((m) => m.status !== g.status).map((m) => (
+                        <button
+                          key={m.status}
+                          onClick={() => onStatus(g.id, m.status)}
+                          title={`Move to ${m.label}`}
+                          aria-label={`Move ${g.title} to ${m.label}`}
+                          className="rounded-md border border-line bg-panel p-1 text-muted hover:border-accent hover:text-accent"
+                        >
+                          <m.icon className="size-3" />
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               </li>
