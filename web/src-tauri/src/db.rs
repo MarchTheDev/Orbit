@@ -283,10 +283,15 @@ impl Db {
             let mut stmt = conn
                 .prepare("PRAGMA table_info(games)")
                 .map_err(|e| format!("Could not read the library layout: {e}"))?;
-            stmt.query_map([], |r| r.get::<_, String>(1))
+            // Collected into a binding here rather than returned as the block's
+            // own expression: the rows borrow the statement, and a tail
+            // expression outlives the locals it borrows from.
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(1))
                 .map_err(|e| format!("Could not read the library layout: {e}"))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Could not read the library layout: {e}"))?
+                .map_err(|e| format!("Could not read the library layout: {e}"))?;
+            rows
         };
 
         if names.iter().any(|c| c == "igdb") && !names.iter().any(|c| c == "meta") {

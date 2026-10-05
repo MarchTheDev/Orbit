@@ -208,8 +208,12 @@ fn meta_from_app(app_id: u64, app: SteamApp) -> Meta {
     // game has one, which is why the header travels with it.
     let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
 
+    // A page with no name at all reads better as no name than as an empty one,
+    // but the rest of the page is still filled in.
+    let name = (!app.name.trim().is_empty()).then(|| app.name.clone());
+
     Meta {
-        name: app.name.clone().filter(|n| !n.trim().is_empty()),
+        name,
         summary,
         genres: names(&app.genres),
         // A few store pages leave the developer empty and only credit the
