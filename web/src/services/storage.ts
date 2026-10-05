@@ -5,7 +5,7 @@ export { DEFAULT_SETTINGS };
 
 /**
  * Settings only. The library itself lives in SQLite on the Rust side, so this
- * is no longer where a game lives — only how the app is set up.
+ * is no longer where a game lives, only how the app is set up.
  */
 export async function loadSettings(): Promise<Settings> {
   const t = (window as Window & { __TAURI__?: { core: { invoke: <T>(c: string) => Promise<T> } } }).__TAURI__;

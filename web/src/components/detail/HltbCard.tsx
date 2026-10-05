@@ -1,6 +1,23 @@
 import { RefreshCw, Timer } from 'lucide-react';
 import type { Game } from '../../types';
 
+/**
+ * How far the player has got, as a colour.
+ *
+ * The bars used to be one gradient whatever the game: a game barely started and
+ * one finished twice looked identical. These bands colour the bar by how far
+ * the played time has got towards that estimate, and the word says the same
+ * thing out loud for anyone who cannot separate the colours.
+ */
+function grade(played: number, target: number): { pct: number; colour: string; word: string } {
+  const pct = target > 0 ? (played / target) * 100 : 0;
+  if (pct >= 115) return { pct: 100, colour: '#f472b6', word: 'Runaway' };
+  if (pct >= 90) return { pct, colour: '#34d399', word: 'Finished' };
+  if (pct >= 55) return { pct, colour: '#fbbf24', word: 'Nearly there' };
+  if (pct >= 20) return { pct, colour: '#a78bfa', word: 'Under way' };
+  return { pct, colour: '#38bdf8', word: 'Early' };
+}
+
 export function HltbCard({
   game,
   onFetch,
@@ -47,20 +64,32 @@ export function HltbCard({
       ) : (
         <div className="space-y-3">
           {rows.map((r) => {
-            const pct = r.hours > 0 ? Math.min(100, (played / r.hours) * 100) : 0;
+            const g = grade(played, r.hours);
             return (
               <div key={r.label}>
-                <div className="mb-1 flex justify-between text-xs">
+                <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
                   <span className="text-muted">{r.label}</span>
-                  <span className="font-semibold">{r.hours > 0 ? `${r.hours}h` : '—'}</span>
+                  <span className="flex items-baseline gap-2">
+                    <span className="font-semibold">{r.hours > 0 ? `${r.hours}h` : 'no data'}</span>
+                    {r.hours > 0 && (
+                      <span className="w-20 text-right text-[10px] font-medium" style={{ color: g.colour }}>
+                        {played > 0 ? `${g.word} · ${Math.round(g.pct)}%` : g.word}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-bg">
-                  <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2" style={{ width: `${pct}%` }} />
+                  <div
+                    className="h-full rounded-full transition-[width]"
+                    style={{ width: `${Math.max(g.pct, played > 0 ? 3 : 0)}%`, background: g.colour }}
+                  />
                 </div>
               </div>
             );
           })}
-          {h.source === 'estimate' && <p className="text-[10px] text-muted">Estimated — the real lookup needs the desktop app.</p>}
+          {h.source === 'estimate' && (
+            <p className="text-[10px] text-muted">Estimated: the real lookup needs the desktop app.</p>
+          )}
         </div>
       )}
 

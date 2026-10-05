@@ -55,6 +55,9 @@ export const SAMPLE_GAMES: Game[] = [
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
   libraryFolders: [],
+  steamOnLaunch: false,
+  sortOrder: [],
+  coverScale: 100,
   fetchMetadata: true,
   autoFetchMetadata: true,
 };

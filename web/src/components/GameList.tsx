@@ -5,12 +5,26 @@ import { Cover } from './ui/Cover';
 import { cn } from '../utils/cn';
 import { StatusBadge } from './StatusBadge';
 
-interface Props { games: Game[]; selectedId: string | null; onSelect: (id: string) => void; onPlay: (g: Game) => void }
+interface Props {
+  games: Game[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onPlay: (g: Game) => void;
+  /** Drawn at this percentage of the base row, from the toolbar's slider. */
+  scale: number;
+  /** Set while the library is in the player's own order. */
+  onReorder?: (fromId: string, toId: string) => void;
+}
 
-export function GameList({ games, selectedId, onSelect, onPlay }: Props) {
+export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {
+  // One slider drives both views, so a row grows with the covers: the thumbnail
+  // and the text step together rather than the picture alone getting bigger.
+  const art = Math.round(36 * (scale / 100));
+  const text = Math.max(12, Math.round(14 * (scale / 100)));
+
   return (
     <div className="p-6">
-      <div className="grid grid-cols-[1fr_110px_100px_120px_70px_80px] gap-3 px-3 pb-2 text-[11px] font-semibold uppercase tracking-widest text-muted">
+      <div className="grid grid-cols-[1fr_110px_100px_120px_70px_90px] gap-3 px-3 pb-2 text-[11px] font-semibold uppercase tracking-widest text-muted">
         <span>Name</span><span>Status</span><span>Playtime</span><span>Last played</span><span>Drive</span><span />
       </div>
       <div className="space-y-1">
@@ -19,25 +33,41 @@ export function GameList({ games, selectedId, onSelect, onPlay }: Props) {
             key={g.id}
             onClick={() => onSelect(g.id)}
             onDoubleClick={() => onPlay(g)}
+            draggable={!!onReorder}
+            onDragStart={(e) => e.dataTransfer.setData('text/orbit-game', g.id)}
+            onDragOver={(e) => {
+              if (onReorder) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const from = e.dataTransfer.getData('text/orbit-game');
+              if (onReorder && from && from !== g.id) {
+                e.preventDefault();
+                onReorder(from, g.id);
+              }
+            }}
             className={cn(
-              'grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_80px] items-center gap-3 rounded-2xl border px-3 py-3 text-sm transition',
+              'grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_90px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
               selectedId === g.id ? 'glass !border-accent' : 'border-transparent hover:bg-panel/60',
+              onReorder && 'cursor-grab active:cursor-grabbing',
             )}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <Cover game={g} className="size-9 shrink-0 rounded-md [&_span]:text-xs" />
-              <span className="truncate font-medium">
+              <Cover
+                game={g}
+                className="shrink-0 rounded-lg [&_span]:text-xs"
+                style={{ width: `${art}px`, height: `${Math.round(art * 1.33)}px` }}
+              />
+              <span className="truncate font-medium" style={{ fontSize: `${text}px` }}>
                 {g.favorite && (
                   <Star className="mr-1 inline size-3 text-yellow-300 align-middle" fill="currentColor" strokeWidth={0} />
                 )}
-                {g.running && <span className="mr-1 inline-block size-2 animate-pulse rounded-full bg-emerald-400 align-middle" title="Playing now" />}
                 {g.title}
               </span>
             </div>
             <StatusBadge status={g.status} />
             <span className="text-muted">{fmtMinutes(g.playMinutes)}</span>
             <span className="text-muted">{fmtDate(g.lastPlayed)}</span>
-            <span className="text-muted">{g.drive || '—'}</span>
+            <span className="text-muted">{g.drive || '-'}</span>
             <button
               onClick={(e) => {
                 e.stopPropagation();

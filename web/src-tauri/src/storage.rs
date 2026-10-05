@@ -6,7 +6,9 @@
 //! at. A game added from somewhere else is listed but never moved or deleted:
 //! Orbit did not put it there.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Total and free bytes on the drive holding `path`.
 ///
@@ -18,6 +20,77 @@ pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
         p = p.parent()?.to_path_buf();
     }
     disk_space_of(&p)
+}
+
+/// Folder sizes that have already been measured.
+///
+/// Walking a game folder means reading every file in it, which on a spinning
+/// drive is seconds, not milliseconds. Doing that when the app starts and again
+/// every time a page is opened made both feel broken, so a size is measured once
+/// and remembered until somebody asks for it to be measured again.
+///
+/// The lock is only held while reading or writing the map, never while walking
+/// the disk, so a slow folder cannot block a request for a size that is already
+/// known.
+#[derive(Clone, Default)]
+pub struct SizeCache {
+    sizes: Arc<Mutex<HashMap<String, u64>>>,
+}
+
+impl SizeCache {
+    /// What is known about one folder, if anything.
+    pub fn get(&self, path: &str) -> Option<u64> {
+        self.sizes.lock().ok()?.get(&key(path)).copied()
+    }
+
+    /// Everything measured so far, for a page that wants it all at once.
+    ///
+    /// A path may appear twice, once as it was given and once normalized. That
+    /// is deliberate: the map is a cache, not a list, and a caller looks up the
+    /// string it knows.
+    pub fn snapshot(&self) -> HashMap<String, u64> {
+        self.sizes.lock().map(|m| m.clone()).unwrap_or_default()
+    }
+
+    /// Measure whatever is not known yet, and return everything asked for.
+    ///
+    /// Folders already measured are not walked again: this is the call the
+    /// Storage page makes on open, and it should be instant when nothing has
+    /// changed.
+    pub fn measure(&self, paths: &[String]) -> HashMap<String, u64> {
+        let mut out = HashMap::new();
+        for path in paths {
+            if let Some(size) = self.get(path) {
+                out.insert(path.clone(), size);
+                continue;
+            }
+            let size = dir_size(Path::new(path));
+            if let Ok(mut map) = self.sizes.lock() {
+                // Kept under both spellings: the normalized one so a lookup
+                // never misses because of case or a trailing slash, and the one
+                // it arrived as so the front end can look up the exact string it
+                // stored in its settings.
+                map.insert(key(path), size);
+                map.insert(path.clone(), size);
+            }
+            out.insert(path.clone(), size);
+        }
+        out
+    }
+
+    /// Forget everything, so the next measurement is a fresh walk of the disk.
+    pub fn clear(&self) {
+        if let Ok(mut map) = self.sizes.lock() {
+            map.clear();
+        }
+    }
+}
+
+/// Paths are compared case-insensitively and without a trailing slash, because
+/// Windows treats `D:\Games` and `d:\games\` as the same folder and the front
+/// end may hand over either.
+fn key(path: &str) -> String {
+    path.trim_end_matches(['\\', '/']).to_lowercase()
 }
 
 #[cfg(windows)]
@@ -500,5 +573,38 @@ mod tests {
         );
         assert_eq!(moved.install_dir, other.to_string_lossy());
         assert!(moved.message.is_none());
+    }
+    #[test]
+    fn a_folder_is_only_walked_once() {
+        let dir = std::env::temp_dir().join("orbit-size-cache");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.bin"), vec![0u8; 2048]).unwrap();
+
+        let cache = SizeCache::default();
+        let path = dir.to_string_lossy().to_string();
+        let first = cache.measure(&[path.clone()]);
+        assert_eq!(first.get(&path), Some(&2048));
+        // Both the exact spelling and the normalized one are looked up fine.
+        assert_eq!(cache.get(&path), Some(&2048));
+        assert_eq!(cache.get(&path.to_uppercase()), Some(&2048));
+
+        // A second file appears, but the answer is remembered rather than
+        // re-walked, which is the whole point of the cache.
+        std::fs::write(dir.join("b.bin"), vec![0u8; 2048]).unwrap();
+        let second = cache.measure(&[path.clone()]);
+        assert_eq!(second.get(&path), Some(&2048));
+
+        // Clearing makes the next ask see both files.
+        cache.clear();
+        let third = cache.measure(&[path.clone()]);
+        assert_eq!(third.get(&path), Some(&4096));
+
+        // A trailing slash is the same folder as far as Windows cares, so it
+        // must be the same key here: two ways of writing one path should not
+        // each cost their own walk of the disk.
+        assert_eq!(cache.get(&format!("{path}\\")), Some(&4096));
+        assert_eq!(cache.get(&path.to_uppercase()), Some(&4096));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

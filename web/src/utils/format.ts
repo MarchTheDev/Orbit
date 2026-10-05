@@ -64,11 +64,11 @@ export function fmtBytes(bytes: number): string {
   return '0 B';
 }
 
-/** A date, or an em dash when there is not one. */
+/** A date, or `Never` when there is not one. */
 export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
+  if (!iso) return 'Never';
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return 'Never';
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 

@@ -47,7 +47,6 @@ export function AddGameModal({
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
-  const [mode, setMode] = useState<'auto' | 'exe' | 'folder'>('auto');
   const [fetchMeta, setFetchMeta] = useState(true);
   const [dropped, setDropped] = useState<string[]>([]);
   const [d, setD] = useState<Draft>(() => blank());
@@ -89,9 +88,7 @@ export function AddGameModal({
   useEffect(() => {
     if (!initialPaths || initialPaths.length === 0) return;
     setDropped(initialPaths);
-    void takePaths(initialPaths).then((ok) => {
-      if (ok) setMode('exe');
-    });
+    void takePaths(initialPaths);
   }, [initialPaths, takePaths]);
 
   // Guess from a folder: the biggest thing in it is the game.
@@ -146,17 +143,13 @@ export function AddGameModal({
     setBusy(true);
     try {
       onAdd(buildGame(d), fetchMeta);
+      // The dialog has done its job, so it closes rather than leaving the
+      // player looking at a form for the game they just added.
+      onClose();
     } finally {
       setBusy(false);
     }
   };
-
-  /**
-   * Whatever the chosen mode still needs, named so the form can say it out loud.
-   * Without this the game would save as a timer and the reason would only turn up
-   * when Play did nothing.
-   */
-  const missing = !d.exePath.trim() ? 'the program' : null;
 
   return (
     <Modal
@@ -204,35 +197,6 @@ export function AddGameModal({
           </div>
         )}
 
-        <div>
-          <span className={labelCls}>How is this game launched?</span>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ['auto', 'Just a program'],
-                ['exe', 'Browse for .exe'],
-                ['folder', 'Browse for folder'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setMode(id)}
-                className={`rounded-full border px-3.5 py-1.5 text-sm ${
-                  mode === id ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {missing && (
-            <p className="mt-2 text-xs text-muted">
-              Without {missing}, this game is only timed — Orbit will not start it. You can fill it in later.
-            </p>
-          )}
-        </div>
-
         <div className="flex gap-2">
           <label className="block flex-1">
             <span className={labelCls}>Title</span>
@@ -256,9 +220,16 @@ export function AddGameModal({
           )}
         </div>
 
-        {/* The program and the folder around it are one question — where the
-            game lives — so they are one section rather than two blocks with a
-            gap down the middle. */}
+        {!d.exePath.trim() && (
+          <p className="rounded-lg border border-line bg-panel2/40 px-3 py-2 text-xs text-muted">
+            With no program, this game is only timed: Orbit runs the clock and you start it yourself. You can point it
+            at a program later from the game's own page.
+          </p>
+        )}
+
+        {/* The program and the folder around it are one question, where the game
+            lives, so they are one section rather than two blocks with a gap down
+            the middle. */}
         <section className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
           <span className={labelCls}>Where the game lives</span>
           <div className="flex gap-2">
@@ -299,10 +270,21 @@ export function AddGameModal({
           <label className="block flex-1">
             <span className={labelCls}>Cover image (optional)</span>
             <div className="flex items-center gap-2">
+              {/* A preview of what the tile will look like. With no file
+                  chosen that is the initials placeholder the library falls back
+                  to, so it is never an empty box saying "none". */}
               {d.coverPath ? (
-                <img src={fileSrc(d.coverPath)} alt="" className="h-12 w-9 rounded object-cover" />
+                <img src={fileSrc(d.coverPath)} alt="" className="h-12 w-9 shrink-0 rounded object-cover" />
               ) : (
-                <div className="grid h-12 w-9 place-items-center rounded bg-panel2 text-[10px] text-muted">none</div>
+                <div
+                  className="grid h-12 w-9 shrink-0 place-items-center rounded text-xs font-black text-white/90"
+                  style={{
+                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(d.title || 'Orbit')} 80% 55%), hsl(${(hashHue(d.title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                  }}
+                  title="The placeholder used until artwork is found"
+                >
+                  {initials(d.title || 'Orbit')}
+                </div>
               )}
               <input
                 className={inputCls}
@@ -360,6 +342,16 @@ export function AddGameModal({
       </form>
     </Modal>
   );
+}
+
+/** The three letters the library shows for a game with no artwork. */
+function initials(title: string): string {
+  return title
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 3)
+    .toUpperCase();
 }
 
 function blank(): Draft {

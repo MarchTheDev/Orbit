@@ -115,7 +115,7 @@ impl Sessions {
     ///
     /// Pressing Stop has to close the game as well, or the player ends up with a
     /// clock that says they finished while the game keeps running. Games spawn
-    /// children of their own — a launcher hands off to the real executable — so
+    /// children of their own, a launcher hands off to the real executable, so
     /// the whole tree goes rather than only the process Orbit happened to start.
     ///
     /// Waits for the process to actually go, up to [`EXIT_WAIT`], so a caller
@@ -347,9 +347,147 @@ pub fn scan_folder(root: &Path, max_depth: usize) -> Vec<FoundGame> {
     found
 }
 
+/// A program found while looking through a folder, with where it was found.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderProgram {
+    /// The folder the program sits in, which is what a game is grouped by.
+    pub folder: String,
+    pub title: String,
+    pub exe_path: String,
+    pub size_bytes: u64,
+    /// Everything in that folder, so the biggest one can be ranked first.
+    pub folder_bytes: u64,
+    /// Depth below the folder that was scanned, so a shallow hit wins.
+    pub depth: usize,
+}
+
+/// Every program worth offering in a folder, not just the biggest one.
+///
+/// An import used to be handed one guess per folder, and a game whose real
+/// program sits in `bin/x64` next to a launcher, a crash reporter and two
+/// redistributables made that guess wrong as often as right. This returns the
+/// candidates and lets the player pick; the biggest is still first, so the
+/// likely one is already selected.
+pub fn folder_programs(root: &Path, max_depth: usize) -> Vec<FolderProgram> {
+    let mut found: Vec<FolderProgram> = Vec::new();
+    let mut queue = vec![(root.to_path_buf(), 0usize)];
+
+    while let Some((dir, depth)) = queue.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut subdirs: Vec<PathBuf> = Vec::new();
+        let mut executables: Vec<PathBuf> = Vec::new();
+
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                if !is_junk_dir(&path) {
+                    subdirs.push(path);
+                }
+            } else if kind.is_file() && is_executable(&path) && !is_boring(&path) {
+                executables.push(path);
+            }
+        }
+
+        if !executables.is_empty() {
+            let title = dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let folder_bytes = crate::storage::dir_size(&dir);
+            for exe in executables {
+                found.push(FolderProgram {
+                    folder: dir.to_string_lossy().to_string(),
+                    title: title.clone(),
+                    size_bytes: exe.metadata().map(|m| m.len()).unwrap_or(0),
+                    exe_path: exe.to_string_lossy().to_string(),
+                    folder_bytes,
+                    depth,
+                });
+            }
+        }
+
+        if depth < max_depth {
+            queue.extend(subdirs.into_iter().map(|d| (d, depth + 1)));
+        }
+    }
+
+    // Shallowest first, then biggest, so the obvious program for each folder
+    // leads and a game's own folder is never hidden behind one of its helpers.
+    found.sort_by(|a, b| {
+        a.folder
+            .to_lowercase()
+            .cmp(&b.folder.to_lowercase())
+            .then(a.depth.cmp(&b.depth))
+            .then(b.size_bytes.cmp(&a.size_bytes))
+    });
+    found
+}
+
+/// Folders that hold somebody else's installer rather than a game.
+///
+/// Walking into these used to offer `dxsetup.exe` and `vcredist_x64.exe` as
+/// games, which is worse than offering nothing.
+fn is_junk_dir(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    const JUNK: [&str; 12] = [
+        "redist",
+        "_commonredist",
+        "directx",
+        "vcredist",
+        "dotnet",
+        "support",
+        "easyanticheat",
+        "battleye",
+        "docs",
+        "documentation",
+        "manual",
+        "engines",
+    ];
+    JUNK.iter().any(|j| name == *j || name.starts_with(&format!("{j}_")) || name.starts_with(&format!("{j}-")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_redistributable_folder_is_not_walked_into() {
+        assert!(is_junk_dir(Path::new(r"C:\Games\Hades\_CommonRedist")));
+        assert!(is_junk_dir(Path::new(r"C:\Games\Hades\DirectX")));
+        assert!(!is_junk_dir(Path::new(r"C:\Games\Hades\bin")));
+    }
+
+    #[test]
+    fn every_program_in_a_game_folder_is_offered() {
+        let dir = std::env::temp_dir().join("orbit-tauri-programs");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("bin").join("x64")).unwrap();
+        std::fs::create_dir_all(dir.join("_CommonRedist")).unwrap();
+        std::fs::write(dir.join("launcher.exe"), b"xx").unwrap();
+        std::fs::write(dir.join("bin").join("x64").join("game.exe"), b"xxxxxxxx").unwrap();
+        std::fs::write(dir.join("_CommonRedist").join("dxsetup.exe"), b"xxxxxxxxxxxx").unwrap();
+
+        let found = folder_programs(&dir, 2);
+        let names: Vec<String> = found.iter().map(|f| f.title.clone()).collect();
+        assert!(names.contains(&"orbit-tauri-programs".to_string()));
+        assert!(names.contains(&"x64".to_string()));
+        assert!(!names.contains(&"_CommonRedist".to_string()));
+        // The folder's own programs come before the ones buried deeper.
+        let first = found.first().expect("at least one");
+        assert_eq!(first.exe_path, dir.join("launcher.exe").to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn quoted_arguments_stay_together() {

@@ -120,7 +120,7 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
       ) : (
         <>
           <p className="mb-1 text-sm text-muted">
-            Currently on <b className="text-fg">{game.drive || '—'}</b>
+            Currently on <b className="text-fg">{game.drive || '-'}</b>
             {game.sizeBytes > 0 && ` · ${fmtBytes(game.sizeBytes)}`}
           </p>
           <p className="mb-3 break-all font-mono text-xs text-muted">{game.installDir}</p>

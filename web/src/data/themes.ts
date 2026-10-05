@@ -11,7 +11,7 @@ export interface Theme {
   accent2: string;
 }
 
-// Orbit themes – named after celestial bodies
+// Orbit themes - named after celestial bodies
 export const THEMES: Theme[] = [
   { id: 'nebula', name: 'Nebula', bg: '#0b0a16', panel: '#14122a', panel2: '#1d1a3a', border: '#2c2852', text: '#ecebff', muted: '#9a96c4', accent: '#8b5cf6', accent2: '#ec4899' },
   { id: 'eclipse', name: 'Eclipse', bg: '#09090b', panel: '#131316', panel2: '#1c1c21', border: '#2a2a31', text: '#f4f4f5', muted: '#a1a1aa', accent: '#f59e0b', accent2: '#ef4444' },

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { Game } from '../../types';
 import { fileSrc } from '../../services/desktop';
 import { cn } from '../../utils/cn';
@@ -11,12 +12,21 @@ import { cn } from '../../utils/cn';
  * 3. initials on a gradient, which always works
  *
  * Shapes are not assumed. A grid tile is a tall rectangle, and a store banner is
- * a wide one, so pasting a banner into a tile crops most of it away — which is
+ * a wide one, so pasting a banner into a tile crops most of it away, which is
  * exactly what a wrong-looking thumbnail is. Instead the picture says how wide
  * it is when it loads: tall art fills the frame, wide art is fitted whole over a
  * blurred copy of itself, so nothing is ever cut off.
  */
-export function Cover({ game, className }: { game: Game; className?: string }) {
+export function Cover({
+  game,
+  className,
+  style,
+}: {
+  game: Game;
+  className?: string;
+  /** For a size that comes from a slider rather than a class. */
+  style?: CSSProperties;
+}) {
   const [localFailed, setLocalFailed] = useState(false);
   const [remoteFailed, setRemoteFailed] = useState(false);
   const [headerFailed, setHeaderFailed] = useState(false);
@@ -29,15 +39,15 @@ export function Cover({ game, className }: { game: Game; className?: string }) {
   }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl]);
 
   if (game.coverPath && !localFailed) {
-    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} onFail={() => setLocalFailed(true)} />;
+    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} onFail={() => setLocalFailed(true)} />;
   }
 
   if (game.meta?.coverUrl && !remoteFailed) {
-    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} onFail={() => setRemoteFailed(true)} />;
+    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} onFail={() => setRemoteFailed(true)} />;
   }
 
   if (game.meta?.headerUrl && !headerFailed) {
-    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} onFail={() => setHeaderFailed(true)} />;
+    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} onFail={() => setHeaderFailed(true)} />;
   }
 
   const initials = game.title
@@ -49,7 +59,10 @@ export function Cover({ game, className }: { game: Game; className?: string }) {
   return (
     <div
       className={cn('relative flex items-center justify-center overflow-hidden', className)}
-      style={{ background: `radial-gradient(circle at 30% 20%, hsl(${game.hue} 80% 55%), hsl(${(game.hue + 60) % 360} 70% 22%) 70%)` }}
+      style={{
+        background: `radial-gradient(circle at 30% 20%, hsl(${game.hue} 80% 55%), hsl(${(game.hue + 60) % 360} 70% 22%) 70%)`,
+        ...style,
+      }}
     >
       <div className="absolute size-[140%] rounded-full border border-white/15" />
       <div className="absolute size-[90%] rounded-full border border-white/10" />
@@ -69,17 +82,19 @@ function Artwork({
   src,
   alt,
   className,
+  style,
   onFail,
 }: {
   src: string;
   alt: string;
   className?: string;
+  style?: CSSProperties;
   onFail: () => void;
 }) {
   const [wide, setWide] = useState(false);
 
   return (
-    <div className={cn('relative overflow-hidden', className)}>
+    <div className={cn('relative overflow-hidden', className)} style={style}>
       {/* First in the document so it stays behind: the blur fills the bars on
           either side with the picture's own colours, so a wide banner reads as
           artwork rather than as a gap with a picture in it. */}

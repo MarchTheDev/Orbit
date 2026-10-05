@@ -8,7 +8,7 @@ const TABS: { id: Page; label: string; Icon: typeof Library }[] = [
   { id: 'library', label: 'Library', Icon: Library },
   { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
   { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
-  { id: 'logs', label: 'Logs', Icon: ScrollText },
+  { id: 'logs', label: 'Journal', Icon: ScrollText },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
 

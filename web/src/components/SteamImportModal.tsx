@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, Search, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Game, SteamGame } from '../types';
 import { isNative, steamLibrary } from '../services/native';
 import { fetchMetadata } from '../services/metadata';
@@ -7,6 +7,7 @@ import { fetchHltb } from '../services/hltb';
 import { fmtBytes, fmtDate, hashHue, uid } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
+import { SearchField } from './ui/SearchField';
 
 /**
  * Bring games over from the Steam library installed on this PC.
@@ -20,6 +21,7 @@ export function SteamImportModal({
   fetchMeta,
   onAdd,
   onUpdate,
+  onRemoveSteam,
   onClose,
 }: {
   existing: Game[];
@@ -27,6 +29,8 @@ export function SteamImportModal({
   fetchMeta: boolean;
   onAdd: (games: Game[]) => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
+  /** Removes every game that came in from Steam. Confirmed by the caller. */
+  onRemoveSteam: () => void;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<(SteamGame & { include: boolean })[] | null>(null);
@@ -39,6 +43,7 @@ export function SteamImportModal({
   /** Games already here, by Steam id and by name, so nothing arrives twice. */
   const byId = existing.filter((g) => g.meta?.steamAppId).map((g) => g.meta!.steamAppId!);
   const byTitle = existing.map((g) => g.title.trim().toLowerCase());
+  const fromSteam = existing.filter((g) => g.launch.kind === 'steam' || g.meta?.steamAppId);
 
   const scan = async () => {
     setBusy(true);
@@ -56,7 +61,7 @@ export function SteamImportModal({
       );
       if (found.length === 0) {
         setError(
-          'No Steam library found on this PC. If Steam lives somewhere unusual, add a game by its app id below instead.',
+          'Nothing was found to import. If Steam is installed somewhere unusual, add a game by its app id below.',
         );
       }
     } catch (e) {
@@ -104,7 +109,7 @@ export function SteamImportModal({
     if (chosen.length === 0) return;
     setSaving(true);
     try {
-      const games = chosen.map(steamGameToGame);
+      const games = chosen.map(gameFromSteam);
       onAdd(games);
       await enrich(games);
       onClose();
@@ -126,7 +131,7 @@ export function SteamImportModal({
       const meta = fetchMeta ? await fetchMetadata('', appId).catch(() => null) : null;
       const title = meta?.name || `Steam app ${appId}`;
       const game: Game = {
-        ...steamGameToGame({ appId, name: title, installDir: '', sizeBytes: 0, lastPlayed: null, library: '' }),
+        ...gameFromSteam({ appId, name: title, installDir: '', sizeBytes: 0, lastPlayed: null, library: '' }),
         title,
         meta: meta ?? undefined,
       };
@@ -179,15 +184,13 @@ export function SteamImportModal({
         )}
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[12rem] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              className={`${inputCls} pl-9`}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name"
-            />
-          </div>
+          <SearchField
+            value={filter}
+            onChange={setFilter}
+            placeholder="Filter by name"
+            className="min-w-[12rem] flex-1"
+            inputClassName="w-full"
+          />
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Reading Steam…' : 'Scan Steam library'}
@@ -256,6 +259,30 @@ export function SteamImportModal({
             </button>
           </div>
         </section>
+
+        {fromSteam.length > 0 && (
+          <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/30 bg-rose-500/5 p-3">
+            <div>
+              <h3 className="text-sm font-semibold">Steam games in your library</h3>
+              <p className="text-xs text-muted">
+                {fromSteam.length} {fromSteam.length === 1 ? 'game came' : 'games came'} in from Steam. Removing them
+                takes their sessions and notes with them, and never touches the games on disk.
+              </p>
+            </div>
+            <button
+              onClick={onRemoveSteam}
+              className="flex shrink-0 items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10"
+            >
+              <Trash2 className="size-3.5" />
+              Remove them all
+            </button>
+          </section>
+        )}
+
+        <p className="text-[11px] text-muted">
+          A game added this way starts through Steam, because that is the only way it will start. Use Settings to have
+          Orbit check this library for new games each time it launches.
+        </p>
       </div>
     </Modal>
   );
@@ -268,7 +295,7 @@ export function SteamImportModal({
  * brought in this way has to go through Steam to start, so Orbit hands it over
  * rather than guessing at an .exe inside the install folder.
  */
-function steamGameToGame(r: SteamGame): Game {
+export function gameFromSteam(r: SteamGame): Game {
   const sizeBytes = r.sizeBytes || 0;
   return {
     id: uid(),

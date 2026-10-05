@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
-import type { GameLog } from '../../types';
+import type { Game, GameLog } from '../../types';
 import { addGameLog, deleteGameLog, listGameLogs, updateGameLog } from '../../services/native';
 import { fmtClock, fmtDate, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
@@ -13,12 +13,14 @@ interface Draft {
   note: string;
 }
 
-const blank = (): Draft => ({
-  id: null,
-  at: toLocalInput(Math.floor(Date.now() / 1000)),
-  secs: '',
-  note: '',
-});
+/**
+ * A new entry starts with neither date nor length filled in.
+ *
+ * Both are optional and both have an obvious default: today, and no time at
+ * all. Somebody writing "beat the last boss" should not have to answer two
+ * questions about numbers they never counted.
+ */
+const blank = (): Draft => ({ id: null, at: '', secs: '', note: '' });
 
 /** The things people actually write down, one tap away. */
 const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete', 'Replay'];
@@ -33,16 +35,20 @@ const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete',
  * thing the tracker guessed at.
  */
 export function GameLogView({
-  gameId,
-  gameTitle,
+  game,
   onChanged,
+  onNotes,
 }: {
-  gameId: string;
-  gameTitle: string;
+  game: Game;
   /** Told after a note is written, corrected or removed, so a page showing
    *  counts for every game can catch up. */
   onChanged?: () => void;
+  /** Save the game's own notes, which live in here now rather than in a box of
+   *  their own on the overview. */
+  onNotes?: (notes: string) => void;
 }) {
+  const gameId = game.id;
+  const gameTitle = game.title;
   const [rows, setRows] = useState<GameLog[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,12 +75,14 @@ export function GameLogView({
 
   const save = async () => {
     if (!draft) return;
-    const secs = parseDuration(draft.secs);
+    // Left empty means "today" and "no time to add", which is what most short
+    // entries want; only a value that is there and unreadable is an error.
+    const secs = draft.secs.trim() === '' ? 0 : parseDuration(draft.secs);
     if (secs === null) {
-      setError('That is not a length of time. Try 10h, 45m, or 90.');
+      setError('That is not a length of time. Try 10h, 45m, or 90, or leave it empty.');
       return;
     }
-    const at = fromLocalInput(draft.at);
+    const at = draft.at.trim() === '' ? Math.floor(Date.now() / 1000) : fromLocalInput(draft.at);
     if (at === null) {
       setError('That is not a date.');
       return;
@@ -92,13 +100,29 @@ export function GameLogView({
 
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
+      {onNotes && (
+        <label className="mb-4 block">
+          <span className="text-[11px] uppercase tracking-widest text-muted">Notes</span>
+          <textarea
+            value={game.notes}
+            onChange={(e) => onNotes(e.target.value)}
+            rows={3}
+            placeholder="Builds, quest reminders, codes, what you were in the middle of…"
+            className="mt-1 w-full resize-y rounded-lg border border-line bg-bg/60 p-3 text-sm outline-none focus:border-accent"
+          />
+        </label>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <NotebookPen className="size-4 text-accent" />
-            Log
+            Journal
           </h3>
-          <p className="text-xs text-muted">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
+          <p className="text-xs text-muted">
+            Everything you write about {gameTitle}: the game's own notes, and what happened when. Nothing here is
+            tracked for you.
+          </p>
         </div>
         <div className="text-right">
           <p className="font-mono text-sm font-semibold">{fmtClock(total)}</p>
@@ -112,21 +136,22 @@ export function GameLogView({
         <div className="mb-4 space-y-2 rounded-xl border border-accent/40 bg-accent/5 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">When</span>
+              <span className="text-[11px] uppercase tracking-widest text-muted">When (optional)</span>
               <input
                 type="datetime-local"
                 className={inputCls}
                 value={draft.at}
                 onChange={(e) => setDraft({ ...draft, at: e.target.value })}
+                title="Leave empty for today"
               />
             </label>
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">How long</span>
+              <span className="text-[11px] uppercase tracking-widest text-muted">How long (optional)</span>
               <input
                 className={inputCls}
                 value={draft.secs}
                 onChange={(e) => setDraft({ ...draft, secs: e.target.value })}
-                placeholder="10h, 45m, or 90"
+                placeholder="10h, 45m, or leave empty"
                 spellCheck={false}
               />
             </label>
@@ -187,7 +212,7 @@ export function GameLogView({
 
       {rows.length === 0 ? (
         <p className="py-6 text-center text-xs text-muted">
-          Nothing written yet. Finished the story, beat the DLC, went back to an older save — those go here.
+          Nothing written yet. Finished the story, beat the DLC, went back to an older save: those go here.
         </p>
       ) : (
         <ul className="space-y-1.5">

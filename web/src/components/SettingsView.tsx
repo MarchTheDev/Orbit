@@ -1,8 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Database, Download, FolderOpen, HardDrive, Palette, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
+import {
+  Database,
+  Download,
+  FolderOpen,
+  GitBranch,
+  HardDrive,
+  Heart,
+  Palette,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Wand2,
+  X,
+} from 'lucide-react';
 import type { Settings } from '../types';
 import { THEMES } from '../data/themes';
 import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
+import { openExternal } from '../services/desktop';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
@@ -97,7 +111,7 @@ export function SettingsView({
           checked={settings.autoFetchMetadata}
           onChange={(v) => setSettings({ autoFetchMetadata: v })}
           label="Fill in the gaps in the background"
-          hint="Games already in the library, or ones added while offline, are looked up quietly — a few at a time."
+          hint="Games already in the library, or ones added while offline, are looked up quietly, a few at a time."
         />
 
       </section>
@@ -108,10 +122,16 @@ export function SettingsView({
           Steam library
         </h2>
         <p className="text-sm text-muted">
-          Orbit can read the Steam library installed on this PC and bring games over, one at a time or all at once. It
-          never runs on its own: nothing is imported until you open the dialog, and nothing already in Orbit is
-          changed.
+          Orbit can read the Steam library installed on this PC and bring games over. Nothing arrives without you
+          asking: open the dialog below, tick what you want, and that is what is added. It is also where games that
+          came in from Steam can be taken back out again.
         </p>
+        <Checkbox
+          checked={settings.steamOnLaunch}
+          onChange={(v) => setSettings({ steamOnLaunch: v })}
+          label="Check Steam for new games when Orbit starts"
+          hint="Adds anything installed on Steam that is not in the library yet. It never removes or changes a game, and a game you removed by hand comes back the next time you launch. Off by default."
+        />
         <button
           onClick={onImportSteam}
           className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent"
@@ -143,7 +163,7 @@ export function SettingsView({
               </button>
             </span>
           ))}
-          {settings.libraryFolders.length === 0 && <span className="text-sm text-muted">None yet — add one below.</span>}
+          {settings.libraryFolders.length === 0 && <span className="text-sm text-muted">None yet, add one below.</span>}
         </div>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addFolder(folder); }}>
           <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="D:\Games" className={`${inputCls} flex-1 font-mono`} />
@@ -168,6 +188,28 @@ export function SettingsView({
             ))}
           </div>
         )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Wand2 className="size-4 text-accent" />
+          Other tools
+        </h2>
+        <p className="text-sm text-muted">
+          Programs made alongside Orbit. They install separately and Orbit only opens the page for them.
+        </p>
+        <button
+          onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
+          className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
+        >
+          <Wand2 className="mt-0.5 size-5 shrink-0 text-accent" />
+          <span>
+            <span className="block text-sm font-semibold">Ghost Hunter Pro</span>
+            <span className="block text-xs text-muted">
+              Find and clean out game save files and leftover data. Opens on GitHub.
+            </span>
+          </span>
+        </button>
       </section>
 
       <section className="space-y-2">
@@ -210,6 +252,27 @@ export function SettingsView({
           </button>
         </div>
       </section>
+
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-muted">
+        <p className="flex items-center gap-1.5">
+          Made with <Heart className="size-3.5 text-rose-400" fill="currentColor" strokeWidth={0} /> by TheMarch88
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void openExternal('https://github.com/MarchTheDev/Orbit')}
+            className="flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 hover:border-accent hover:text-fg"
+          >
+            <GitBranch className="size-4" />
+            Orbit on GitHub
+          </button>
+          <button
+            onClick={() => void openExternal('https://github.com/MarchTheDev')}
+            className="text-xs hover:text-fg hover:underline"
+          >
+            Everything else TheMarch88 has made
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 //! Game details without asking the player for anything.
 //!
-//! The Steam store answers questions about a title with no credentials at all —
-//! description, genres, developer, release year and artwork — which is what
+//! The Steam store answers questions about a title with no credentials at all,
+//! description, genres, developer, release year and artwork, which is what
 //! makes Orbit work out of the box. There is no second provider to configure:
 //! IGDB was dropped, so nothing here can expire, need a key, or fail because
 //! somebody's token ran out.
@@ -24,7 +24,7 @@ const SUMMARY_LIMIT: usize = 1500;
 #[serde(rename_all = "camelCase")]
 pub struct Meta {
     /// What the store calls the game. Only filled in when the lookup started
-    /// from an app id — a title search already knows the name it asked about.
+    /// from an app id, a title search already knows the name it asked about.
     pub name: Option<String>,
     pub summary: String,
     pub genres: Vec<String>,
@@ -65,11 +65,11 @@ pub async fn lookup(title: &str) -> Result<Meta, String> {
 pub async fn lookup_app(app_id: u64) -> Result<Meta, String> {
     let client = client()?;
     let app = app_details(&client, app_id).await?;
-    Ok(meta_from_app(app_id, app))
+    Ok(meta_from_app(&client, app_id, app).await)
 }
 
 /// The same, but the app id is only used when the store has no page for the
-/// title — which is the case for a game that is not sold any more.
+/// title, which is the case for a game that is not sold any more.
 pub async fn lookup_or_app(title: &str, app_id: Option<u64>) -> Result<Meta, String> {
     if let Some(id) = app_id {
         if let Ok(meta) = lookup_app(id).await {
@@ -158,7 +158,7 @@ async fn steam_lookup(client: &reqwest::Client, title: &str) -> Result<Meta, Str
         .await
         .map_err(|_| format!("the store has no page for \"{title}\""))?;
 
-    Ok(meta_from_app(app_id, app))
+    Ok(meta_from_app(client, app_id, app).await)
 }
 
 /// The store page for one app id.
@@ -186,7 +186,11 @@ async fn app_details(client: &reqwest::Client, app_id: u64) -> Result<SteamApp, 
 }
 
 /// Shape a store page into what the front end stores.
-fn meta_from_app(app_id: u64, app: SteamApp) -> Meta {
+///
+/// Async because the portrait artwork is asked for rather than assumed: not
+/// every store page has a library capsule, and offering a URL that 404s is what
+/// left some games showing initials while their neighbours had covers.
+async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> Meta {
     // A bundle or a soundtrack is not what a player means by a game title, but
     // it is still better than nothing when it is all the store has.
     if !app.kind.is_empty() && app.kind != "game" {
@@ -204,9 +208,11 @@ fn meta_from_app(app_id: u64, app: SteamApp) -> Meta {
     } else {
         app.header_image
     };
-    // The portrait picture is what a grid of covers actually wants; not every
-    // game has one, which is why the header travels with it.
+    // The portrait picture is what a grid of covers actually wants, and the
+    // wide header is the fallback, so the front end never has to fall through
+    // to initials when the store has any artwork at all.
     let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
+    let cover_url = if exists(client, &portrait).await { Some(portrait) } else { None };
 
     // A page with no name at all reads better as no name than as an empty one,
     // but the rest of the page is still filled in.
@@ -227,10 +233,24 @@ fn meta_from_app(app_id: u64, app: SteamApp) -> Meta {
         steam_app_id: Some(app_id),
         release_year: year_in(&app.release_date.date),
         rating: app.metacritic.and_then(|m| m.score).filter(|s| *s > 0),
-        cover_url: Some(portrait),
+        cover_url,
         header_url: Some(header).filter(|url| !url.is_empty()),
         source: "steam",
     }
+}
+
+/// Whether an image URL really is there.
+///
+/// A HEAD request, with a short clock on it: a wrong guess about artwork is
+/// never worth making a lookup slow.
+async fn exists(client: &reqwest::Client, url: &str) -> bool {
+    client
+        .head(url)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 /// Ask the store what it has for a name.

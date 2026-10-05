@@ -14,6 +14,7 @@ import type {
   Session,
   Stats,
   SteamGame,
+  FolderProgram,
 } from '../types';
 import { SAMPLE_GAMES } from '../data/sampleGames';
 
@@ -280,6 +281,28 @@ export function folderSize(path: string): Promise<number> {
   return call('folder_size', { path }, async () => 0);
 }
 
+/**
+ * Every folder size Orbit has already measured.
+ *
+ * Sizes are walked in the background when the app starts, because measuring a
+ * game folder means reading every file in it. This returns what is known right
+ * now: a folder missing from the map has not been measured yet, which is worth
+ * showing as such rather than as zero.
+ */
+export function cachedSizes(): Promise<Record<string, number>> {
+  return call('cached_sizes', {}, async () => ({}));
+}
+
+/**
+ * Measure these folders again, walking the disk for each one.
+ *
+ * The Refresh button. Everything else reads the cache, so this is the only
+ * call that can take a while on a drive full of games.
+ */
+export function refreshSizes(paths: string[]): Promise<Record<string, number>> {
+  return call('refresh_sizes', { paths }, async () => ({}));
+}
+
 /** Look through a folder for things that look like games. */
 export function scanFolder(path: string, maxDepth = 2): Promise<FoundGame[]> {
   return call('scan_folder', { path, maxDepth }, async () => []);
@@ -378,6 +401,16 @@ export function metadataLookup<T>(title: string, appId?: number): Promise<T> {
 /** Titles a store suggests for a partial name. */
 export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
+}
+
+/**
+ * Every program in a folder, so an import can ask which one is the game.
+ *
+ * A different question from `scanFolder`, which guesses one per folder: this
+ * returns all of them, with the folder each sits in.
+ */
+export function folderPrograms(path: string, maxDepth = 3): Promise<FolderProgram[]> {
+  return call('folder_programs', { path, maxDepth }, async () => []);
 }
 
 /** The player's installed Steam games, for the import dialog. */

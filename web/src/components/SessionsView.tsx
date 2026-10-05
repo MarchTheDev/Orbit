@@ -94,13 +94,13 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
           <Stat label="Sessions" value={String(stats.sessionCount)} />
           <Stat
             label="Longest session"
-            value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '—'}
+            value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '-'}
           />
           <Stat
             label="Average session"
-            value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.totalSecs / stats.sessionCount)) : '—'}
+            value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.totalSecs / stats.sessionCount)) : '-'}
           />
-          <Stat label="First played" value={stats.firstPlay ? fmtDate(new Date(stats.firstPlay * 1000).toISOString()) : '—'} />
+          <Stat label="First played" value={stats.firstPlay ? fmtDate(new Date(stats.firstPlay * 1000).toISOString()) : '-'} />
         </div>
       )}
 

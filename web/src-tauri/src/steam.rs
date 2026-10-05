@@ -28,65 +28,100 @@ pub struct SteamGame {
 }
 
 /// Every installed game across every Steam library on the machine.
+///
+/// An empty list is a normal answer, not an error: Steam may not be installed,
+/// or nothing may be installed through it. The caller says so in its own words,
+/// which it can do better than an error string from here.
 pub fn installed_games() -> Result<Vec<SteamGame>, String> {
-    let Some(root) = steam_root() else {
-        return Err("Steam does not look like it is installed on this machine.".into());
-    };
-
     let mut games = Vec::new();
-    for library in library_folders(&root) {
-        let apps = library.join("steamapps");
-        let Ok(entries) = std::fs::read_dir(&apps) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(file) = path.file_name().and_then(|n| n.to_str()) else {
+    let roots = steam_roots();
+
+    if roots.is_empty() {
+        log::info!("no Steam installation found");
+        return Ok(games);
+    }
+
+    for root in roots {
+        if root.is_dir() {
+            log::info!("reading Steam library at {}", root.display());
+        }
+        for library in library_folders(&root) {
+            let apps = library.join("steamapps");
+            let Ok(entries) = std::fs::read_dir(&apps) else {
                 continue;
             };
-            // One manifest per installed game; anything else in there (the
-            // common folder, the workshop) is not a game entry.
-            if !file.starts_with("appmanifest_") || !file.ends_with(".acf") {
-                continue;
-            }
-            if let Some(game) = parse_manifest(&path, &apps, &library) {
-                games.push(game);
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(file) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                // One manifest per installed game; anything else in there (the
+                // common folder, the workshop) is not a game entry.
+                if !file.starts_with("appmanifest_") || !file.ends_with(".acf") {
+                    continue;
+                }
+                if let Some(game) = parse_manifest(&path, &apps, &library) {
+                    if !games.iter().any(|g: &SteamGame| g.app_id == game.app_id) {
+                        games.push(game);
+                    }
+                }
             }
         }
     }
 
     games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    games.dedup_by(|a, b| a.app_id == b.app_id);
-    if games.is_empty() {
-        return Err("No installed Steam games were found.".into());
-    }
     log::info!("found {} installed Steam games", games.len());
     Ok(games)
 }
 
-/// Where Steam lives, asked of the registry first because that is where Steam
-/// itself records it, then guessed at the two places it normally installs.
-fn steam_root() -> Option<PathBuf> {
-    if let Some(path) = from_registry() {
-        return Some(path);
-    }
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    for key in ["ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"] {
-        if let Ok(dir) = std::env::var(key) {
-            candidates.push(PathBuf::from(dir).join("Steam"));
+/// Where Steam lives.
+///
+/// The registry is asked first because that is where Steam records it, in both
+/// the 64-bit and the 32-bit view of the hive. Failing that, the usual install
+/// folders are tried, and finally the path is read out of the Steam client's
+/// own config file, which is the last thing to move if a player relocated it.
+fn steam_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    for (hive, key) in [
+        ("HKCU", r"Software\Valve\Steam"),
+        ("HKLM", r"SOFTWARE\WOW6432Node\Valve\Steam"),
+        ("HKLM", r"SOFTWARE\Valve\Steam"),
+    ] {
+        for name in ["SteamPath", "InstallPath"] {
+            if let Some(path) = registry_path(hive, key, name) {
+                roots.push(path);
+            }
         }
     }
-    candidates.push(PathBuf::from(r"C:\Steam"));
-    candidates.into_iter().find(|p| p.is_dir())
+
+    for var in ["ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"] {
+        if let Ok(dir) = std::env::var(var) {
+            roots.push(PathBuf::from(dir).join("Steam"));
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        roots.push(PathBuf::from(local).join("Steam"));
+    }
+    roots.push(PathBuf::from(r"C:\Steam"));
+    roots.push(PathBuf::from(r"C:\Program Files (x86)\Steam"));
+
+    let mut found: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        if root.is_dir() && !found.contains(&root) {
+            found.push(root);
+        }
+    }
+    found
 }
 
-/// `HKCU\Software\Valve\Steam\SteamPath`, read with the `reg` command.
+/// One value out of the registry, read with the `reg` command.
 ///
 /// Not the Windows API: that needs features this crate does not pull in, and a
 /// single read of one value does not justify them.
-fn from_registry() -> Option<PathBuf> {
+fn registry_path(hive: &str, key: &str, name: &str) -> Option<PathBuf> {
     let output = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
+        .args(["query", &format!("{hive}\\{key}"), "/v", name])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -94,33 +129,39 @@ fn from_registry() -> Option<PathBuf> {
     }
     let text = String::from_utf8_lossy(&output.stdout);
     // `    SteamPath    REG_SZ    c:/program files (x86)/steam`
-    let value = text
+    let line = text
         .lines()
-        .find(|line| line.contains("SteamPath"))?
-        .split("REG_SZ")
-        .nth(1)?
-        .trim();
+        .find(|line| line.contains(name) && line.contains("REG_SZ"))?;
+    let value = line.split("REG_SZ").nth(1)?.trim().trim_matches('"');
     if value.is_empty() {
         return None;
     }
     // The registry keeps forward slashes; Windows is happy either way, but this
     // keeps every path in the app spelled the same way.
-    let path = PathBuf::from(value.replace('/', "\\"));
-    path.is_dir().then_some(path)
+    Some(PathBuf::from(value.replace('/', "\\")))
 }
 
-/// Every place Steam keeps games, the main installation included.
+/// Every place Steam keeps games, starting with the installation itself.
+///
+/// The list lives in `steamapps/libraryfolders.vdf`, and older or relocated
+/// installs keep a copy in `config/libraryfolders.vdf`; both are read.
 fn library_folders(root: &Path) -> Vec<PathBuf> {
     let mut folders = vec![root.to_path_buf()];
 
-    let vdf = root.join("steamapps").join("libraryfolders.vdf");
-    if let Ok(text) = std::fs::read_to_string(&vdf) {
-        for (key, value) in pairs(&text) {
-            if key.eq_ignore_ascii_case("path") && !value.trim().is_empty() {
-                let path = PathBuf::from(value.replace('/', "\\"));
-                if path.is_dir() && !folders.contains(&path) {
-                    folders.push(path);
-                }
+    for candidate in [
+        root.join("steamapps").join("libraryfolders.vdf"),
+        root.join("config").join("libraryfolders.vdf"),
+    ] {
+        let Ok(text) = std::fs::read_to_string(&candidate) else {
+            continue;
+        };
+        for value in values_in(&quoted(&text), "path") {
+            if value.trim().is_empty() {
+                continue;
+            }
+            let path = PathBuf::from(value.replace('/', "\\"));
+            if path.is_dir() && !folders.contains(&path) {
+                folders.push(path);
             }
         }
     }
@@ -130,53 +171,52 @@ fn library_folders(root: &Path) -> Vec<PathBuf> {
 /// Read one `appmanifest_*.acf` into a game, if it says enough to be one.
 fn parse_manifest(path: &Path, apps: &Path, library: &Path) -> Option<SteamGame> {
     let text = std::fs::read_to_string(path).ok()?;
-    let mut game = SteamGame {
-        app_id: 0,
-        name: String::new(),
-        install_dir: String::new(),
-        size_bytes: 0,
-        last_played: None,
-        library: library.to_string_lossy().to_string(),
-    };
+    let tokens = quoted(&text);
+    let value = |key: &str| values_in(&tokens, key).into_iter().next();
 
-    for (key, value) in pairs(&text) {
-        match key.as_str() {
-            "appid" => game.app_id = value.parse().unwrap_or(0),
-            "name" => game.name = value,
-            "installdir" => game.install_dir = value,
-            "SizeOnDisk" => game.size_bytes = value.parse().unwrap_or(0),
-            "LastPlayed" => {
-                game.last_played = value.parse().ok().filter(|at| *at > 0);
-            }
-            _ => {}
-        }
-    }
-
-    if game.app_id == 0 || game.name.trim().is_empty() {
+    let app_id: u32 = value("appid").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let name = value("name").unwrap_or_default();
+    if app_id == 0 || name.trim().is_empty() {
         return None;
     }
+
+    let install_dir = value("installdir").unwrap_or_default();
     // The manifest names the folder, so the path is worked out rather than
     // stored: it stays right even when a library is moved between drives.
-    let dir = apps.join("common").join(&game.install_dir);
-    game.install_dir = dir.to_string_lossy().to_string();
-    Some(game)
+    let dir = apps.join("common").join(&install_dir);
+
+    Some(SteamGame {
+        app_id,
+        name,
+        install_dir: dir.to_string_lossy().to_string(),
+        size_bytes: value("SizeOnDisk").and_then(|v| v.parse().ok()).unwrap_or(0),
+        last_played: value("LastPlayed")
+            .and_then(|v| v.parse().ok())
+            .filter(|at| *at > 0),
+        library: library.to_string_lossy().to_string(),
+    })
 }
 
-/// Every `"key" "value"` pair in a Valve data file, in the order they appear.
+/// Every value written under `key`, in the order the keys appear.
 ///
-/// The format is nested, but nothing read here needs the nesting: the library
-/// list has one `path` per entry, and a manifest has one of each key. Strings
-/// are unescaped only as far as a Windows path needs (`\\` for `\`).
-fn pairs(text: &str) -> Vec<(String, String)> {
-    let tokens = quoted(text);
+/// Matching is done on the key token itself rather than on adjacent pairs: a
+/// Valve data file nests, so pairing every two tokens from the top drifts out of
+/// step the moment a brace intervenes, which is always. Reading a manifest that
+/// way found no keys at all and quietly reported an empty library.
+fn values_in(tokens: &[String], key: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut index = 0;
-    while index + 1 < tokens.len() {
-        out.push((tokens[index].clone(), tokens[index + 1].clone()));
-        // A pair is two tokens, but a backslash-escaped quote inside a value
-        // can leave an odd token behind; stepping by two keeps the pairing
-        // right for the files Steam actually writes.
-        index += 2;
+    while index < tokens.len() {
+        if tokens[index] == key {
+            if let Some(value) = tokens.get(index + 1) {
+                out.push(value.clone());
+            }
+            // Past the value as well, so a value that happens to spell the key
+            // is not read as one.
+            index += 2;
+        } else {
+            index += 1;
+        }
     }
     out
 }
@@ -229,16 +269,14 @@ mod tests {
     }
 }
 "#;
-        let paths: Vec<String> = pairs(vdf)
-            .into_iter()
-            .filter(|(k, _)| k == "path")
-            .map(|(_, v)| v)
-            .collect();
+        let paths = values_in(&quoted(vdf), "path");
         assert_eq!(paths, vec![r"C:\Program Files (x86)\Steam", r"D:\SteamLibrary"]);
     }
 
     #[test]
     fn a_manifest_gives_the_name_folder_and_size() {
+        // Braces and nesting included, because that is what made the first
+        // parser read every key one step out and find nothing.
         let acf = r#"
 "AppState"
 {
@@ -253,32 +291,64 @@ mod tests {
     }
 }
 "#;
-        let found: Vec<(String, String)> = pairs(acf);
-        let value = |key: &str| {
-            found
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
-        };
+        let tokens = quoted(acf);
+        let value = |key: &str| values_in(&tokens, key).into_iter().next().unwrap_or_default();
         assert_eq!(value("appid"), "620");
         assert_eq!(value("name"), "Portal 2");
         assert_eq!(value("installdir"), "Portal 2");
         assert_eq!(value("SizeOnDisk"), "12345678901");
         assert_eq!(value("LastPlayed"), "1700000000");
+        assert_eq!(value("language"), "english");
+    }
+
+    #[test]
+    fn a_manifest_on_disk_becomes_a_game() {
+        let dir = std::env::temp_dir().join("orbit-tauri-steam");
+        let _ = std::fs::remove_dir_all(&dir);
+        let apps = dir.join("steamapps");
+        std::fs::create_dir_all(&apps).unwrap();
+        let file = apps.join("appmanifest_620.acf");
+        std::fs::write(
+            &file,
+            r#"
+"AppState"
+{
+    "appid"     "620"
+    "name"      "Portal 2"
+    "installdir"    "Portal 2"
+    "SizeOnDisk"    "12345678901"
+    "LastPlayed"    "1700000000"
+}
+"#,
+        )
+        .unwrap();
+
+        let game = parse_manifest(&file, &apps, &dir).expect("a game");
+        assert_eq!(game.app_id, 620);
+        assert_eq!(game.name, "Portal 2");
+        assert_eq!(game.size_bytes, 12_345_678_901);
+        assert_eq!(game.last_played, Some(1_700_000_000));
+        assert!(game.install_dir.ends_with(r"steamapps\common\Portal 2"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_manifest_with_no_name_is_not_a_game() {
+        let tokens = quoted(r#""AppState" { "appid" "620" "name" "" }"#);
+        assert!(values_in(&tokens, "name").into_iter().all(|n| n.trim().is_empty()));
     }
 
     #[test]
     fn a_path_with_a_space_and_a_quote_survives() {
         let text = r#""path" "D:\\Games\\It's Here""#;
-        let found = pairs(text);
-        assert_eq!(found[0].1, r"D:\Games\It's Here");
+        let paths = values_in(&quoted(text), "path");
+        assert_eq!(paths[0], r"D:\Games\It's Here");
     }
 
     #[test]
     fn a_file_with_no_pairs_is_empty_rather_than_a_panic() {
-        assert!(pairs("").is_empty());
-        assert!(pairs("nonsense without quotes").is_empty());
-        assert!(pairs(r#""dangling"#).is_empty());
+        assert!(values_in(&quoted(""), "path").is_empty());
+        assert!(values_in(&quoted("nonsense without quotes"), "path").is_empty());
+        assert!(values_in(&quoted(r#""dangling""#), "path").is_empty());
     }
 }

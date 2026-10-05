@@ -15,7 +15,6 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
         <Cover game={game} className="hidden h-56 w-40 shrink-0 rounded-2xl shadow-2xl sm:flex [&_span]:text-4xl" />
         <div className="max-w-xl">
           <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-accent">
-            {running && <span className="size-2 animate-pulse rounded-full bg-emerald-400" />}
             {running ? 'Now playing' : 'Jump back in'}
           </p>
           <h1 className="text-4xl font-black leading-tight md:text-5xl">{game.title}</h1>

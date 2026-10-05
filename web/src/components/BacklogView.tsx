@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react';
-import { CircleCheck, CircleDashed, Clock, Hourglass, Play, Search, SquareArrowRight, Undo2 } from 'lucide-react';
+import { CircleCheck, CircleDashed, Clock, Hourglass, Play, Plus, Sparkles, SquareArrowRight, Undo2 } from 'lucide-react';
 import type { Game, GameStatus } from '../types';
-import { fmtDate, fmtMinutes } from '../utils/format';
+import { fetchMetadata } from '../services/metadata';
+import { fetchHltb } from '../services/hltb';
+import { fmtDate, fmtMinutes, hashHue, uid } from '../utils/format';
 import { Cover } from './ui/Cover';
+import { SearchField } from './ui/SearchField';
+import { btnGhost, inputCls } from './ui/Modal';
 
 /** The order the waiting list is read in. */
 type Order = 'shortest' | 'longest' | 'added';
@@ -26,16 +30,86 @@ export function BacklogView({
   onSelect,
   onStatus,
   onPlay,
+  onAdd,
+  onUpdate,
+  onRemove,
+  fetchMetadata: fetchMeta,
 }: {
   games: Game[];
   onSelect: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
   onPlay: (g: Game) => void;
+  /** Saves a game that is only planned, so it can be added without a program. */
+  onAdd: (game: Game) => void;
+  onUpdate: (id: string, patch: Partial<Game>) => void;
+  /** Takes a planned game off the list for good. */
+  onRemove: (id: string) => void;
+  /** Whether titles should be looked up as they are planned. */
+  fetchMetadata: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [order, setOrder] = useState<Order>('shortest');
+  /** The title being put on the list, while it is being typed. */
+  const [planning, setPlanning] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const match = (g: Game) => !query || g.title.toLowerCase().includes(query.toLowerCase());
+
+  /**
+   * Games that are only planned.
+   *
+   * Somebody who intends to play a game should be able to write it down before
+   * owning it: no program, no folder, nothing to measure. Those are exactly the
+   * games with nothing on disk, which is also why they are listed apart from the
+   * backlog rather than mixed into it.
+   */
+  const planned = games.filter((g) => !g.exePath && !g.installDir);
+
+  /** Write down a game that is not installed anywhere yet. */
+  const plan = async () => {
+    const title = (planning ?? '').trim();
+    if (!title) return;
+    setBusy(true);
+    try {
+      const game: Game = {
+        id: uid(),
+        title,
+        launch: { kind: 'none' },
+        exePath: null,
+        installDir: null,
+        drive: '',
+        sizeBytes: 0,
+        sizeGb: 0,
+        status: 'backlog',
+        favorite: false,
+        manualPlaySecs: 0,
+        playMinutes: 0,
+        lastPlayed: null,
+        addedAt: new Date().toISOString(),
+        notes: '',
+        hue: hashHue(title),
+        coverPath: null,
+        sessionCount: 0,
+        longestSecs: 0,
+        running: false,
+        companions: [],
+      };
+      onAdd(game);
+      setPlanning(null);
+
+      // Details are a bonus, so they arrive after the game is on the list and a
+      // failure in either source leaves it exactly as it was written.
+      if (fetchMeta) {
+        const [meta, hltb] = await Promise.allSettled([fetchMetadata(title), fetchHltb(title)]);
+        onUpdate(game.id, {
+          ...(meta.status === 'fulfilled' ? { meta: meta.value, title: meta.value.name || title } : {}),
+          ...(hltb.status === 'fulfilled' ? { hltb: hltb.value } : {}),
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const backlog = useMemo(() => {
     const list = games.filter((g) => g.status === 'backlog' && match(g));
@@ -71,7 +145,15 @@ export function BacklogView({
             {unknown > 0 && <span title="HowLongToBeat has no time for these yet">· {unknown} unknown</span>}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setPlanning(planning === null ? '' : null)}
+            className={`${btnGhost} flex items-center gap-2`}
+            title="Add something you plan to play, even if you do not own it yet"
+          >
+            <Plus className="size-4" />
+            Plan a game
+          </button>
           <div className="glass flex rounded-full p-1">
             {ORDERS.map((o) => (
               <button
@@ -87,17 +169,73 @@ export function BacklogView({
               </button>
             ))}
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search"
-              className="glass w-56 rounded-full py-2 pl-10 pr-4 text-sm outline-none focus:border-accent"
-            />
-          </div>
+          <SearchField value={query} onChange={setQuery} />
         </div>
       </header>
+
+      {planning !== null && (
+        <form
+          className="glass flex flex-wrap items-center gap-2 rounded-2xl p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void plan();
+          }}
+        >
+          <Sparkles className="size-4 shrink-0 text-accent" />
+          <input
+            autoFocus
+            className={`${inputCls} min-w-[14rem] flex-1`}
+            value={planning}
+            onChange={(e) => setPlanning(e.target.value)}
+            placeholder="A game you plan to play, owned or not"
+            spellCheck={false}
+          />
+          <button className={`${btnGhost} flex items-center gap-2`} disabled={busy || !planning.trim()}>
+            {busy ? 'Adding…' : 'Add to backlog'}
+          </button>
+          <button
+            type="button"
+            className="px-2 text-xs text-muted hover:text-fg"
+            onClick={() => setPlanning(null)}
+          >
+            Cancel
+          </button>
+        </form>
+      )}
+
+      {planned.length > 0 && (
+        <section className="glass rounded-2xl p-4">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <Sparkles className="size-4 text-accent" />
+            Planned, not owned yet
+          </h2>
+          <p className="mb-3 text-xs text-muted">
+            {planned.length} {planned.length === 1 ? 'game' : 'games'} on the list that are not installed anywhere. Pick
+            one up and it can be played from the same place as everything else.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {planned.map((g) => (
+              <li key={g.id}>
+                <div className="flex items-center gap-2 rounded-xl border border-line bg-panel2/40 py-1.5 pl-1.5 pr-2">
+                  <Cover game={g} className="size-9 rounded-lg [&_span]:text-[10px]" />
+                  <button className="max-w-[12rem] truncate text-sm hover:text-accent hover:underline" onClick={() => onSelect(g.id)}>
+                    {g.title}
+                  </button>
+                  <button
+                    className="text-muted hover:text-rose-400"
+                    title="Take this off the list"
+                    onClick={() => {
+                      if (confirm(`Take ${g.title} off the list?`)) onRemove(g.id);
+                    }}
+                  >
+                    <Undo2 className="size-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Section
         title="Playing now"

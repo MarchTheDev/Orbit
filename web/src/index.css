@@ -52,7 +52,7 @@ body::before {
 
 /* The Orbit mark: the two orbits turn against each other, carrying the bodies
    that sit on them. Each orbit group is already centred on the drawing by a
-   `translate` in the markup, so the origin here is that group's own 0 0 — which
+   `translate` in the markup, so the origin here is that group's own 0 0, which
    is the middle of the mark in every engine, with no `transform-box` to rely
    on. */
 .orbit-spin-inner,

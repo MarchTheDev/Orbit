@@ -3,16 +3,16 @@ import { useId } from 'react';
 /**
  * The Orbit mark.
  *
- * A planet with one lit side, an orbit broken in two places — once for the moon
- * that rides it, once for the twinkle that answers it — and a second, lighter
+ * A planet with one lit side, an orbit broken in two places: once for the moon
+ * that rides it, once for the twinkle that answers it. A second, lighter
  * orbit inside turning the other way. Drawn here rather than imported so the
  * pieces can move: `orbit-spin-outer`, `orbit-spin-inner` and `orbit-twinkle`
  * are the CSS hooks in index.css, and the same drawing is what
  * `src/assets/orbit-mark.svg` and the application icon are made from.
  *
  * Colour is `currentColor`, so the mark follows the theme and whatever surface
- * it sits on. It is always animated — the turning is most of what makes it the
- * Orbit mark — and stops for anyone who has asked for less motion.
+ * it sits on. It is always animated, since the turning is most of what makes it
+ * the Orbit mark, and it stops for anyone who has asked for less motion.
  */
 export function Logo({
   className,

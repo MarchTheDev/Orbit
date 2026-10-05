@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, FolderPlus, HardDrive, MoveRight, PackagePlus, RefreshCw, X } from 'lucide-react';
 import type { Game } from '../types';
-import { diskSpace, folderSize, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
+import { cachedSizes, diskSpace, listDrives, refreshSizes, revealInExplorer, type DriveInfo } from '../services/native';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { folderOf } from '../utils/paths';
@@ -44,29 +44,40 @@ export function StorageView({
   /** Hands a folder to the importer, for games not added yet. */
   onImport: (folder: string) => void;
 }) {
+  /** Folder sizes, as measured at startup and remembered by Rust. */
   const [sizes, setSizes] = useState<Record<string, number>>({});
   const [drives, setDrives] = useState<DriveInfo[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
 
   /** The folder a game sits in, or null when it is outside all of them. */
   const ownerOf = useCallback((game: Game): string | null => (game.installDir ? folderOf(folders, game.installDir) : null), [folders]);
 
-  const measure = useCallback(async () => {
-    setBusy(true);
-    try {
-      const list = await listDrives();
-      setDrives(list);
-      const next: Record<string, number> = {};
-      for (const path of folders) next[path] = await folderSize(path);
-      setSizes(next);
-    } finally {
-      setBusy(false);
-    }
-  }, [folders]);
+  /**
+   * Read the sizes Orbit already measured.
+   *
+   * Nothing here walks the disk: the measurement happens in the background when
+   * the app starts, and this only asks what is known. A folder with no answer
+   * yet shows as pending rather than as empty, and the Refresh button is there
+   * for anyone who has added a game since.
+   */
+  const read = useCallback(async () => {
+    setDrives(await listDrives());
+    setSizes(await cachedSizes());
+  }, []);
 
   useEffect(() => {
-    void measure();
-  }, [measure]);
+    void read();
+  }, [read]);
+
+  /** Measure again, which is the one thing on this page that reads the disk. */
+  const measure = useCallback(async () => {
+    setMeasuring(true);
+    try {
+      setSizes(await refreshSizes(folders));
+    } finally {
+      setMeasuring(false);
+    }
+  }, [folders]);
 
   // Room left on the drive each folder is on, which does not need a disk walk.
   const [spaceBy, setSpaceBy] = useState<Record<string, [number, number] | null>>({});
@@ -158,9 +169,9 @@ export function StorageView({
             Your games
           </h2>
           <div className="flex-1" />
-          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void measure()} disabled={busy}>
-            <RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
-            {busy ? 'Measuring…' : 'Refresh'}
+          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void measure()} disabled={measuring}>
+            <RefreshCw className={`size-4 ${measuring ? 'animate-spin' : ''}`} />
+            {measuring ? 'Measuring…' : 'Measure again'}
           </button>
         </div>
 
@@ -189,11 +200,11 @@ export function StorageView({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{g.title}</p>
                           <p className="truncate font-mono text-[11px] text-muted">
-                            {g.installDir ?? 'no folder recorded — Orbit cannot move this one'}
+                            {g.installDir ?? 'no folder recorded, so Orbit cannot move this one'}
                           </p>
                         </div>
                         <span className="shrink-0 font-mono text-xs text-muted">
-                          {g.sizeBytes > 0 ? fmtBytes(g.sizeBytes) : '—'}
+                          {g.sizeBytes > 0 ? fmtBytes(g.sizeBytes) : '-'}
                         </span>
                         {g.installDir ? (
                           <button
@@ -233,8 +244,8 @@ export function StorageView({
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-muted">
-              {fmtBytes(grand)} across {folders.length} {folders.length === 1 ? 'folder' : 'folders'}. Games are only ever
-              moved between these.
+              {fmtBytes(grand)} across {folders.length} {folders.length === 1 ? 'folder' : 'folders'}, measured once when
+              Orbit starts. Games are only ever moved between these.
             </p>
             {folders.map((path) => {
               const list = games.filter((g) => ownerOf(g) === path);
@@ -252,7 +263,9 @@ export function StorageView({
                     <span className="rounded-full bg-panel px-2 py-0.5 text-xs">
                       {list.length} {list.length === 1 ? 'game' : 'games'}
                     </span>
-                    <span className="font-mono text-sm">{sizes[path] !== undefined ? fmtBytes(sizes[path]) : '…'}</span>
+                    <span className="font-mono text-sm" title={sizes[path] === undefined ? 'Still being measured in the background' : undefined}>
+                      {sizes[path] !== undefined ? fmtBytes(sizes[path]) : 'measuring…'}
+                    </span>
                     <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void revealInExplorer(path)}>
                       <FolderOpen className="size-4" />
                       Open

@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ActiveSession, Companion, Game, GameStatus, LaunchTarget, Session } from '../../types';
 import { fetchMetadata } from '../../services/metadata';
 import { openExternal } from '../../services/desktop';
@@ -72,7 +72,11 @@ export function GameDetail({
   const [sessionVersion, setSessionVersion] = useState(0);
   const running = session?.gameId === game.id;
 
-  // The tab bar shows how much has been written, so the count is worth keeping.
+  // The tab bar shows how much has been written, so the count is worth keeping,
+  // and the journal says when it has moved.
+  const [logVersion, setLogVersion] = useState(0);
+  const refreshLogCount = useCallback(() => setLogVersion((n) => n + 1), []);
+
   useEffect(() => {
     let alive = true;
     void listGameLogs(game.id).then((r) => {
@@ -81,7 +85,7 @@ export function GameDetail({
     return () => {
       alive = false;
     };
-  }, [game.id, tab]);
+  }, [game.id, logVersion]);
 
   // A refused total has to say why, or the number simply refuses to move.
   const setPlaytime = async (totalSecs: number) => {
@@ -123,9 +127,30 @@ export function GameDetail({
     }
   };
 
-  // A game Orbit only times, but which Steam knows about: the extra button hands
-  // it straight to the Steam client.
-  const steamAppId = game.meta?.steamAppId ?? null;
+  /**
+   * Renaming, which is also what fixes a title that came from a file name.
+   *
+   * A changed title means the old completion times belong to a different name,
+   * so HowLongToBeat is asked again; if it has nothing, the times that were
+   * already there are kept rather than thrown away.
+   */
+  const [titleDraft, setTitleDraft] = useState(game.title);
+  useEffect(() => setTitleDraft(game.title), [game.id, game.title]);
+
+  const commitTitle = async () => {
+    const next = titleDraft.trim();
+    if (!next || next === game.title) {
+      setTitleDraft(game.title);
+      return;
+    }
+    onUpdate({ title: next });
+    const fresh = await fetchHltb(next).catch(() => null);
+    if (fresh) onUpdate({ title: next, hltb: fresh });
+  };
+
+  // The store number for this game, whether it was imported from Steam or found
+  // by a lookup. Both buttons below are web pages, so they open in the browser.
+  const steamAppId = game.meta?.steamAppId ?? (game.launch.kind === 'steam' ? game.launch.appId : null);
 
   return (
     <>
@@ -144,7 +169,19 @@ export function GameDetail({
           <div className="absolute bottom-0 left-0 flex items-end gap-4 p-5">
             <Cover game={game} className="h-28 w-20 rounded-lg shadow-xl [&_span]:text-lg" />
             <div className="pb-1">
-              <h2 className="text-xl font-bold leading-tight">{game.title}</h2>
+              <input
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={() => void commitTitle()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur();
+                  if (e.key === 'Escape') setTitleDraft(game.title);
+                }}
+                spellCheck={false}
+                aria-label="Game title"
+                title="Rename this game"
+                className="w-full max-w-[15rem] rounded-lg border border-transparent bg-transparent text-xl font-bold leading-tight outline-none hover:border-line focus:border-accent focus:bg-black/20"
+              />
               <p className="text-xs text-muted">
                 {game.meta?.developer ?? 'Unknown developer'}
                 {game.meta?.releaseYear ? ` · ${game.meta.releaseYear}` : ''}
@@ -157,7 +194,7 @@ export function GameDetail({
           {(
             [
               ['overview', 'Overview', Info],
-              ['log', 'Log', NotebookPen],
+              ['log', 'Journal', NotebookPen],
               ['sessions', 'Sessions', History],
             ] as const
           ).map(([id, label, Icon]) => (
@@ -222,7 +259,7 @@ export function GameDetail({
             </div>
             <div className="rounded-lg bg-panel2 px-3 py-2">
               <p className="text-muted">Rating</p>
-              <p className="font-medium">{game.meta?.rating ?? '—'}</p>
+              <p className="font-medium">{game.meta?.rating ?? '-'}</p>
             </div>
           </div>
 
@@ -237,16 +274,26 @@ export function GameDetail({
             game={game}
             onSave={(t: LaunchTarget, companions: Companion[]) => onUpdate({ launch: t, companions })}
           />
-          {steamAppId && game.launch.kind !== 'steam' && (
+          <div className="space-y-1.5">
+            {steamAppId !== null && (
+              <button
+                onClick={() => void openExternal(`https://steamdb.info/app/${steamAppId}/`)}
+                title="Open this game on SteamDB, which tracks prices, updates and stats"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel2 py-2 text-xs hover:border-accent"
+              >
+                <ExternalLink className="size-3.5" />
+                Open in SteamDB
+              </button>
+            )}
             <button
-              onClick={() => void openExternal(`steam://rungameid/${steamAppId}`)}
-              title="Hand this game to the Steam client"
+              onClick={() => void openExternal(`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.title)}`)}
+              title="Fixes, save file locations and configuration on PCGamingWiki"
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel2 py-2 text-xs hover:border-accent"
             >
               <ExternalLink className="size-3.5" />
-              Open in Steam
+              Open in PCGamingWiki
             </button>
-          )}
+          </div>
           <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} error={hltbError} />
 
           <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -271,7 +318,7 @@ export function GameDetail({
               </button>
             </div>
             <p className="text-sm leading-relaxed text-muted">
-              {game.meta?.summary || 'No details yet. Fetching works with no setup — the Steam catalogue needs no key.'}
+              {game.meta?.summary || 'No details yet. Fetching works with no setup: the Steam catalogue needs no key.'}
             </p>
             {detailsError && <p className="mt-2 text-xs text-rose-400">{detailsError}</p>}
             {!!game.meta?.genres.length && (
@@ -286,24 +333,13 @@ export function GameDetail({
           </section>
 
           <section className="rounded-xl border border-line bg-panel2 p-4">
-            <h3 className="mb-2 text-sm font-semibold">Notes</h3>
-            <textarea
-              value={game.notes}
-              onChange={(e) => onUpdate({ notes: e.target.value })}
-              rows={4}
-              placeholder="Builds, quest reminders, codes…"
-              className="w-full resize-y rounded-lg border border-line bg-bg/60 p-3 text-sm outline-none focus:border-accent"
-            />
-          </section>
-
-          <section className="rounded-xl border border-line bg-panel2 p-4">
             <h3 className="mb-2 text-sm font-semibold">Installation</h3>
             {game.installDir ? (
               <>
                 <p className="break-all font-mono text-xs text-muted">{game.installDir}</p>
                 {game.exePath && <p className="mt-1 break-all font-mono text-[11px] text-muted">{game.exePath}</p>}
                 <p className="mt-1 text-xs text-muted">
-                  {game.sizeBytes > 0 ? `${fmtBytes(game.sizeBytes)}` : 'Size unknown'} on drive <b className="text-fg">{game.drive || '—'}</b>
+                  {game.sizeBytes > 0 ? `${fmtBytes(game.sizeBytes)}` : 'Size unknown'} on drive <b className="text-fg">{game.drive || '-'}</b>
                 </p>
               </>
             ) : (
@@ -332,7 +368,9 @@ export function GameDetail({
             </>
           )}
 
-          {tab === 'log' && <GameLogView gameId={game.id} gameTitle={game.title} />}
+          {tab === 'log' && (
+            <GameLogView game={game} onChanged={refreshLogCount} onNotes={(notes) => onUpdate({ notes })} />
+          )}
 
           {tab === 'sessions' && (
             <>

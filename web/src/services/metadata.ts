@@ -13,7 +13,7 @@ import { metadataLookup, metadataSuggest } from './native';
  * Details for one title.
  *
  * With an app id the store page is read directly, which also brings the game's
- * proper name — that is what makes importing by id work when the id is all the
+ * proper name, that is what makes importing by id work when the id is all the
  * player has.
  */
 export function fetchMetadata(title: string, appId?: number): Promise<MetaData> {

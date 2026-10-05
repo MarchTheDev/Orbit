@@ -13,7 +13,7 @@ use serde_json::Value;
 
 /// Bumped whenever the schema below changes, and never guessed at.
 ///
-/// 2 — the metadata column is called `meta` rather than `igdb`, since Orbit no
+/// 2, the metadata column is called `meta` rather than `igdb`, since Orbit no
 ///     longer talks to IGDB at all, and a game can list the programs it wants
 ///     started alongside it.
 const SCHEMA_VERSION: i64 = 2;

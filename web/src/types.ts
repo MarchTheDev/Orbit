@@ -35,7 +35,7 @@ export interface MetaData {
  * How a game gets started.
  *
  * `none` means Orbit only runs the clock, and the player starts the game
- * themselves — Play still works, it just does not launch anything. `steam` is
+ * themselves, Play still works, it just does not launch anything. `steam` is
  * not something the launch editor offers: it is set on games brought in from a
  * Steam library, which have to go through Steam to start at all.
  */
@@ -92,10 +92,21 @@ export interface Game {
 }
 
 export type ViewMode = 'grid' | 'list';
-export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size';
+export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | 'manual';
 
 /** The three top-level screens; Settings is reached from the gear. */
 export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'settings';
+
+/** A game imported from a Steam library. */
+/** A program found while looking through a folder, for the import dialog. */
+export interface FolderProgram {
+  folder: string;
+  title: string;
+  exePath: string;
+  sizeBytes: number;
+  folderBytes: number;
+  depth: number;
+}
 
 /** A game imported from a Steam library. */
 export interface SteamGame {
@@ -171,8 +182,24 @@ export interface Settings {
    * these, and never touches a game that sits outside them.
    */
   libraryFolders: string[];
+  /**
+   * Whether Orbit reads the Steam library at launch and adds anything that is
+   * installed but missing here. Off by default: nothing arrives without the
+   * player asking for it.
+   */
+  steamOnLaunch: boolean;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */
   autoFetchMetadata: boolean;
+  /**
+   * The player's own order for the library, as game ids.
+   *
+   * Kept here rather than in the browser's storage, so an order someone
+   * arranged survives clearing the WebView profile. Ids that no longer exist
+   * are simply ignored, and a game that is not in the list sits at the end.
+   */
+  sortOrder: string[];
+  /** How big the covers and rows are drawn, as a percentage. */
+  coverScale: number;
 }

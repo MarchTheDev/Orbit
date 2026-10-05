@@ -25,7 +25,7 @@ use db::{GameLogRow, GameRow, GameWrite, SessionRow, Stats};
 use launch::FoundGame;
 use launch_target::LaunchTarget;
 use session::{ActiveView, Runner};
-use storage::{DriveInfo, Moved};
+use storage::{DriveInfo, Moved, SizeCache};
 use store::{Settings, Store};
 
 /// Everything the commands need, kept in one place by Tauri.
@@ -33,6 +33,8 @@ pub struct Orbit {
     db: Arc<db::Db>,
     runner: Runner,
     store: Store,
+    /// Folder sizes measured once and remembered. See `storage::SizeCache`.
+    sizes: SizeCache,
 }
 
 /// The running session has ended; the UI should refresh that game.
@@ -377,11 +379,41 @@ fn list_drives() -> Vec<DriveInfo> {
 }
 
 /// How much room a folder takes on disk.
+///
+/// Answered from the cache when it is already known, which is the usual case:
+/// sizes are measured in the background when Orbit starts, so opening a page
+/// that shows them does not start a walk of the disk.
 #[tauri::command]
-async fn folder_size(path: String) -> Result<u64, String> {
-    tokio::task::spawn_blocking(move || storage::dir_size(Path::new(&path)))
+async fn folder_size(orbit: State<'_, Orbit>, path: String) -> Result<u64, String> {
+    if let Some(size) = orbit.sizes.get(&path) {
+        return Ok(size);
+    }
+    let cache = orbit.sizes.clone();
+    tokio::task::spawn_blocking(move || cache.measure(&[path]).into_values().next().unwrap_or(0))
         .await
         .map_err(|e| format!("Could not measure that folder: {e}"))
+}
+
+/// Every size already measured, so a page can show them without asking twice.
+#[tauri::command]
+fn cached_sizes(orbit: State<'_, Orbit>) -> std::collections::HashMap<String, u64> {
+    orbit.sizes.snapshot()
+}
+
+/// Measure a list of folders again, walking the disk for each one.
+///
+/// This is the Refresh button: it forgets what it knew and measures again, so a
+/// game that grew by twenty gigabytes is reported as it is now.
+#[tauri::command]
+async fn refresh_sizes(
+    orbit: State<'_, Orbit>,
+    paths: Vec<String>,
+) -> Result<std::collections::HashMap<String, u64>, String> {
+    let cache = orbit.sizes.clone();
+    cache.clear();
+    tokio::task::spawn_blocking(move || cache.measure(&paths))
+        .await
+        .map_err(|e| format!("Could not measure those folders: {e}"))
 }
 
 /// Look through a folder for things that look like games.
@@ -488,12 +520,18 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
 /// The Steam store needs no key and nothing to configure: there is no second
 /// provider, and so nothing that can expire or need a login.
 ///
-/// An app id is passed when the caller has one — an import by Steam id, say —
+/// An app id is passed when the caller has one, an import by Steam id, say,
 /// in which case the store page is read directly and the title can be blank,
 /// because the page carries its own name.
 #[tauri::command]
 async fn metadata_lookup(title: String, app_id: Option<u64>) -> Result<metadata::Meta, String> {
     metadata::lookup_or_app(&title, app_id).await
+}
+
+/// Every program in a folder, so an import can ask which one is the game.
+#[tauri::command]
+fn folder_programs(path: String, max_depth: Option<usize>) -> Vec<launch::FolderProgram> {
+    launch::folder_programs(Path::new(&path), max_depth.unwrap_or(3))
 }
 
 /// The player's installed Steam games, for the import dialog.
@@ -575,8 +613,37 @@ pub fn run() {
                 db::Db::open(&store.root().join("orbit.db")).map_err(std::io::Error::other)?,
             );
             let runner = Runner::new(Arc::clone(&db));
+            let sizes = SizeCache::default();
             let _ = APP.set(app.handle().clone());
-            app.manage(Orbit { db, runner, store });
+
+            // Sizes are measured once, in the background, right after launch:
+            // waiting for them here would hold the window back, and walking the
+            // disk every time the Storage page opens would make that page crawl
+            // on the drives where it matters most. Nothing is measured twice.
+            {
+                let db = Arc::clone(&db);
+                let store = store.clone();
+                let cache = sizes.clone();
+                std::thread::spawn(move || {
+                    let mut paths: Vec<String> = store
+                        .load_settings()
+                        .and_then(|s| s.get("libraryFolders").cloned())
+                        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+                        .unwrap_or_default();
+                    if let Ok(games) = db.list_games() {
+                        for game in games {
+                            if let Some(dir) = game.install_dir {
+                                paths.push(dir);
+                            }
+                        }
+                    }
+                    paths.sort();
+                    paths.dedup();
+                    cache.measure(&paths);
+                });
+            }
+
+            app.manage(Orbit { db, runner, store, sizes });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -608,6 +675,8 @@ pub fn run() {
             library_stats,
             list_drives,
             folder_size,
+            cached_sizes,
+            refresh_sizes,
             scan_folder,
             move_game,
             disk_space,
@@ -617,6 +686,7 @@ pub fn run() {
             metadata_lookup,
             metadata_suggest,
             steam_library,
+            folder_programs,
             load_settings,
             save_settings,
             data_dir,

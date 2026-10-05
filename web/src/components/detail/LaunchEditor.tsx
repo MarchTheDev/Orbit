@@ -2,17 +2,23 @@ import { useState } from 'react';
 import { AppWindow, FolderOpen, Plus, Timer, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
-import { pickFile, pickFolder } from '../../services/desktop';
+import { pickFile } from '../../services/desktop';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
 // a program with a ROM as an argument, and Steam is not something the player
-// should have to type an app id for — games imported from a Steam library carry
+// should have to type an app id for, games imported from a Steam library carry
 // that with them.
 const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
-  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
   { kind: 'executable', label: 'Program', hint: 'The game is a .exe on this machine.', icon: AppWindow },
+  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
 ];
+
+/** The folder a program lives in, which is where it expects to be started. */
+function parentOf(path: string): string | null {
+  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+  return cut > 0 ? path.slice(0, cut) : null;
+}
 
 /** The one path each kind needs, so it can be summarised in one line. */
 function summarise(t: LaunchTarget, companions: Companion[]): string {
@@ -44,7 +50,6 @@ export function LaunchEditor({
 }) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
   const [args, setArgs] = useState(target.kind === 'executable' ? (target.args ?? '') : '');
-  const [workingDir, setWorkingDir] = useState(target.kind === 'executable' ? (target.workingDir ?? '') : '');
   const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
 
@@ -57,7 +62,7 @@ export function LaunchEditor({
 
   const save = () => {
     if (target.kind === 'executable') {
-      onSave({ kind: 'executable', path: target.path, args, workingDir: workingDir || null }, companions);
+      onSave({ kind: 'executable', path: target.path, args, workingDir: parentOf(target.path) }, companions);
     } else if (target.kind === 'steam') {
       onSave({ kind: 'steam', appId: Number(target.appId) || 0 }, companions);
     } else {
@@ -72,9 +77,7 @@ export function LaunchEditor({
   const dirty =
     JSON.stringify(target) !== JSON.stringify(game.launch ?? { kind: 'none' }) ||
     JSON.stringify(companions) !== JSON.stringify(game.companions ?? []) ||
-    (target.kind === 'executable' &&
-      (args !== (game.launch?.kind === 'executable' ? game.launch.args ?? '' : '') ||
-        workingDir !== (game.launch?.kind === 'executable' ? game.launch.workingDir ?? '' : '')));
+    (target.kind === 'executable' && args !== (game.launch?.kind === 'executable' ? game.launch.args ?? '' : ''));
 
   return (
     <section className="space-y-4 rounded-xl border border-line bg-panel2 p-4">
@@ -128,27 +131,6 @@ export function LaunchEditor({
               <span className={labelCls}>Arguments</span>
               <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="-windowed" spellCheck={false} />
             </label>
-            <div className="flex gap-2">
-              <label className="block flex-1">
-                <span className={labelCls}>Start in</span>
-                <input
-                  className={inputCls}
-                  value={workingDir}
-                  onChange={(e) => setWorkingDir(e.target.value)}
-                  placeholder="Leave empty for the program's own folder"
-                  spellCheck={false}
-                />
-              </label>
-              {native && (
-                <button
-                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                  onClick={() => void pickFolder('Choose the working folder', workingDir || undefined).then((p) => p && setWorkingDir(p))}
-                >
-                  <FolderOpen className="size-4" />
-                  Browse…
-                </button>
-              )}
-            </div>
           </div>
         )}
 
@@ -176,13 +158,13 @@ export function LaunchEditor({
           </button>
         </div>
         <p className="mb-3 text-xs text-muted">
-          For anything that has to be running with the game — a frame-rate tool, a controller mapper, a mod loader.
+          For anything that has to be running with the game: a frame-rate tool, a controller mapper, a mod loader.
           Orbit starts these at the same moment and then forgets about them.
         </p>
 
         {companions.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
-            Nothing yet. Add one above, such as Lossless Scaling next to Assetto Corsa.
+            Nothing yet, add here something to start together with {game.title}.
           </p>
         ) : (
           <div className="space-y-2">

@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NotebookPen, ScrollText, Search } from 'lucide-react';
+import { NotebookPen } from 'lucide-react';
 import type { Game, GameLog } from '../types';
 import { countLogs, listAllLogs } from '../services/native';
 import { fmtClock } from '../utils/format';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
+import { SearchField } from './ui/SearchField';
 
 /**
- * Every game's log, in one place.
+ * The journal: every game's notes, in one place.
  *
- * The game's own drawer is fine for a glance, but a log you write in a 460px
- * column is cramped the moment a note is more than a line long. This is the
+ * The game's own drawer is fine for a glance, but a journal you write in a 460px
+ * column is cramped the moment an entry is more than a line long. This is the
  * same thing with the whole window to use: pick a game on the left, read and
- * write its notes on the right.
+ * write on the right.
  *
- * The counts come from one read of every note rather than a request per game,
+ * The counts come from one read of every entry rather than a request per game,
  * which is why `list_all_logs` exists at all.
  */
-export function LogsView({ games }: { games: Game[] }) {
+export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: string, patch: Partial<Game>) => void }) {
   const [logs, setLogs] = useState<GameLog[]>([]);
   /** How many there are in total, which can be more than were read. */
   const [total, setTotal] = useState(0);
@@ -76,12 +77,12 @@ export function LogsView({ games }: { games: Game[] }) {
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <ScrollText className="size-6 text-accent" />
-            Logs
+            <NotebookPen className="size-6 text-accent" />
+            Journal
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Everything you have written down, game by game. Orbit also writes the first one itself: the moment a game is
-            played for the first time, a note saying so appears here.
+            Everything you have written down, game by game, next to the notes for each one. Orbit also writes the first
+            entry itself: the moment a game is played for the first time, a line saying so appears here.
           </p>
         </div>
         <div className="text-right">
@@ -96,15 +97,7 @@ export function LogsView({ games }: { games: Game[] }) {
 
       <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
         <aside className="space-y-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find a game"
-              className="glass w-full rounded-full py-2 pl-9 pr-4 text-sm outline-none focus:border-accent"
-            />
-          </div>
+          <SearchField value={query} onChange={setQuery} placeholder="Find a game" className="w-full" inputClassName="w-full" />
 
           <ul className="space-y-1 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
             {ordered.map((g) => {
@@ -137,9 +130,9 @@ export function LogsView({ games }: { games: Game[] }) {
           {selected ? (
             <GameLogView
               key={`${selected.id}-${version}`}
-              gameId={selected.id}
-              gameTitle={selected.title}
+              game={selected}
               onChanged={() => setVersion((n) => n + 1)}
+              onNotes={(notes) => onUpdate(selected.id, { notes })}
             />
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">

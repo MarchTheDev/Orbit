@@ -5,8 +5,8 @@ import { cn } from '../../utils/cn';
 /**
  * A checkbox that looks like part of the app.
  *
- * The native control is kept — it is what the keyboard, the screen reader and
- * `:focus-visible` all understand — but it is drawn over rather than shown: an
+ * The native control is kept, since it is what the keyboard, the screen reader
+ * and `:focus-visible` all understand, but it is drawn over rather than shown: an
  * OS tick inside an Orbit panel looks like a browser control that lost its way.
  * The box itself lives in `CheckboxBox`, which every row shares.
  */

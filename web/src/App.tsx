@@ -3,7 +3,7 @@ import { CircleAlert, CircleCheck, LoaderCircle, Square, X } from 'lucide-react'
 import type { Game, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
-import { clearLibrary, isNative, setPlaytime } from './services/native';
+import { clearLibrary, isNative, setPlaytime, steamLibrary } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
@@ -19,7 +19,7 @@ import { SessionsView } from './components/SessionsView';
 import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
 import { LogsView } from './components/LogsView';
-import { SteamImportModal } from './components/SteamImportModal';
+import { SteamImportModal, gameFromSteam } from './components/SteamImportModal';
 import { AddGameModal, gameFromDropped } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
@@ -52,6 +52,14 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   /** Games still being looked up, so the wait is visible rather than silent. */
   const [enriching, setEnriching] = useState(0);
+  /**
+   * The player's own order for the library, and how big the covers are drawn.
+   *
+   * Both live in the settings, which are written to disk, so an arrangement
+   * someone made is still there tomorrow and survives a cleared browser profile.
+   */
+  const order = settings?.sortOrder ?? [];
+  const scale = settings?.coverScale ?? 100;
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
@@ -148,7 +156,7 @@ export default function App() {
             if (!g) {
               setDroppedPaths(state.paths);
               setShowAdd(true);
-              toast('No program to run in that drop — pick one below.', 'error');
+              toast('No program to run in that drop. Pick one below.', 'error');
               return;
             }
             void handleAddRef.current?.(g, true);
@@ -172,6 +180,35 @@ export default function App() {
       dispose?.();
     };
   }, [toast]);
+
+  /**
+   * Bring in Steam games that are installed but missing, at launch.
+   *
+   * Off unless the player turns it on, and even then it only ever adds: nothing
+   * already in the library is touched, and a game the player removed from Orbit
+   * while it is still installed on Steam comes back, which is the whole point of
+   * the switch. Runs once per launch, after the library has been read.
+   */
+  const steamChecked = useRef(false);
+  useEffect(() => {
+    if (!ready || !settings?.steamOnLaunch || steamChecked.current) return;
+    steamChecked.current = true;
+    void (async () => {
+      const found = await steamLibrary().catch(() => []);
+      if (found.length === 0) return;
+      const byId = new Set(games.filter((g) => g.meta?.steamAppId).map((g) => g.meta!.steamAppId));
+      const byTitle = new Set(games.map((g) => g.title.trim().toLowerCase()));
+      const fresh = found.filter((s) => !byId.has(s.appId) && !byTitle.has(s.name.trim().toLowerCase()));
+      if (fresh.length === 0) return;
+      const added: Game[] = fresh.map(gameFromSteam);
+      addGames(added);
+      toast(`${added.length} Steam ${added.length === 1 ? 'game' : 'games'} added`);
+      for (const g of added) {
+        const meta = await fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null);
+        if (meta) updateGame(g.id, { meta, title: meta.name || g.title });
+      }
+    })();
+  }, [ready, settings?.steamOnLaunch, games, addGames, updateGame, toast]);
 
   /** A finished session changes one game's numbers, so re-read that game. */
   const onSessionEnded = useCallback(() => {
@@ -204,9 +241,37 @@ export default function App() {
       playtime: (a, b) => b.playMinutes - a.playMinutes,
       added: (a, b) => b.addedAt.localeCompare(a.addedAt),
       size: (a, b) => b.sizeBytes - a.sizeBytes,
+      // Ids the player has arranged come first, in that arrangement; anything
+      // new waits at the end rather than landing in the middle of the pile.
+      manual: (a, b) => {
+        const ai = order.indexOf(a.id);
+        const bi = order.indexOf(b.id);
+        if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      },
     };
     return [...list].sort(by[sort]);
-  }, [games, filter, query, sort]);
+  }, [games, filter, query, sort, order]);
+
+  /**
+   * Move a game to where another one is, dragging one card onto another.
+   *
+   * The whole order is written out rather than a swap, so the list the player
+   * sees is exactly what is stored and a game that was never dragged still has
+   * a place in it.
+   */
+  const reorder = useCallback(
+    (fromId: string, toId: string) => {
+      const ids = visible.map((g) => g.id).filter((id) => id !== fromId);
+      const at = ids.indexOf(toId);
+      ids.splice(at === -1 ? ids.length : at, 0, fromId);
+      // Anything outside the current filter keeps whatever position it had.
+      setSettings({ sortOrder: [...ids, ...order.filter((id) => !ids.includes(id))] });
+    },
+    [visible, order, setSettings],
+  );
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const moving = games.find((g) => g.id === moveId) ?? null;
@@ -257,7 +322,7 @@ export default function App() {
   const byRecent = [...games].filter((g) => g.lastPlayed).sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''));
   const heroGame = runningGame ?? byRecent[0] ?? games[0];
   const continueGames = byRecent.filter((g) => g.id !== heroGame?.id && g.status !== 'completed').slice(0, 6);
-  // The hero stays on screen while the category chips are used — that is the
+  // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
   // one particular game.
@@ -300,11 +365,15 @@ export default function App() {
             onSelect={setSelectedId}
             onStatus={(id, status) => updateGame(id, { status })}
             onPlay={(g) => void startGame(g)}
+            onAdd={(game) => addGames([game])}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onRemove={(id) => removeGame(id)}
+            fetchMetadata={settings.fetchMetadata}
           />
         ) : page === 'sessions' ? (
           <SessionsView games={games} onChanged={() => void reload()} />
         ) : page === 'logs' ? (
-          <LogsView games={games} />
+          <LogsView games={games} onUpdate={(id, patch) => updateGame(id, patch)} />
         ) : page === 'storage' ? (
           <StorageView
             games={games}
@@ -339,7 +408,8 @@ export default function App() {
               sort={sort}
               setSort={setSort}
               onAdd={() => setShowAdd(true)}
-              onSteam={() => setShowSteam(true)}
+              scale={scale}
+              setScale={(n) => setSettings({ coverScale: n })}
             />
             <div>
               {!ready ? null : visible.length === 0 ? (
@@ -351,9 +421,23 @@ export default function App() {
                   )}
                 </div>
               ) : view === 'grid' ? (
-                <GameGrid games={visible} selectedId={selectedId} onSelect={setSelectedId} onPlay={(g) => void startGame(g)} />
+                <GameGrid
+                  games={visible}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onPlay={(g) => void startGame(g)}
+                  scale={scale}
+                  onReorder={sort === 'manual' ? reorder : undefined}
+                />
               ) : (
-                <GameList games={visible} selectedId={selectedId} onSelect={setSelectedId} onPlay={(g) => void startGame(g)} />
+                <GameList
+                  games={visible}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onPlay={(g) => void startGame(g)}
+                  scale={scale}
+                  onReorder={sort === 'manual' ? reorder : undefined}
+                />
               )}
             </div>
           </>
@@ -472,6 +556,22 @@ export default function App() {
           fetchMeta={settings.fetchMetadata}
           onAdd={addGames}
           onUpdate={(id, patch) => updateGame(id, patch)}
+          onRemoveSteam={() => {
+            const ids = games
+              .filter((g) => g.launch.kind === 'steam' || g.meta?.steamAppId)
+              .map((g) => g.id);
+            if (ids.length === 0) return;
+            if (
+              !confirm(
+                `Remove ${ids.length} Steam ${ids.length === 1 ? 'game' : 'games'} from Orbit? Their sessions and notes go too. Nothing on disk is touched.`,
+              )
+            ) {
+              return;
+            }
+            for (const id of ids) removeGame(id);
+            if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+            toast(`Removed ${ids.length} ${ids.length === 1 ? 'game' : 'games'} that came from Steam`);
+          }}
           onClose={() => setShowSteam(false)}
         />
       )}
