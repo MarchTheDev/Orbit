@@ -15,6 +15,17 @@ export interface HltbData {
  * saved, which is what `source` says.
  */
 export interface MetaData {
+  /**
+   * True once the player has corrected something about this game by hand.
+   *
+   * Background lookups leave it alone from then on: a title typed in on purpose
+   * must not be quietly replaced by whatever the store thinks the file name
+   * means. Buttons that ask for a fresh lookup still work, because those are
+   * asked for rather than assumed.
+   */
+  edited?: boolean;
+  /** How the cover fills its frame: `cover` crops, `contain` fits it whole. */
+  coverFit?: 'cover' | 'contain';
   /** What the store calls the game, when the lookup started from an app id. */
   name?: string | null;
   summary: string;
@@ -81,7 +92,13 @@ export interface Game {
    * sessions, so playtime added before Orbit was tracking still counts.
    */
   manualPlaySecs: number;
-  playMinutes: number;
+  /**
+   * Everything played, in seconds: the sessions plus any time typed in by hand.
+   *
+   * Seconds rather than minutes because rounding down hid short sessions: a
+   * session under a minute used to add nothing at all to the total.
+   */
+  playSecs: number;
   lastPlayed: string | null;
   addedAt: string;
   notes: string;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Clock, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, Session, Stats } from '../types';
-import { CATEGORIES, DEFAULT_CATEGORY } from '../data/categories';
+import { DEFAULT_CATEGORY } from '../data/categories';
 import {
   countSessions,
   deleteSession,
@@ -80,7 +80,7 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
     () =>
       [...games]
         .filter((g) => g.sessionCount > 0)
-        .sort((a, b) => b.playMinutes - a.playMinutes)
+        .sort((a, b) => b.playSecs - a.playSecs)
         .slice(0, 8),
     [games],
   );
@@ -88,8 +88,7 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
   return (
     <div className="mx-6 mt-5 space-y-4">
       {stats && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <Stat label="Time in orbit" value={fmtClock(stats.totalSecs)} />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           <Stat label="Games tracked" value={String(stats.trackedGames)} hint={`of ${stats.totalGames} in the library`} />
           <Stat label="Sessions" value={String(stats.sessionCount)} />
           <Stat
@@ -138,7 +137,6 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
                   <th className="py-2 pr-3 font-medium">Game</th>
                   <th className="py-2 pr-3 font-medium">Started</th>
                   <th className="py-2 pr-3 font-medium">Played</th>
-                  <th className="py-2 pr-3 font-medium">Category</th>
                   <th className="py-2 pr-3 font-medium">Ended</th>
                   <th className="py-2 font-medium" />
                 </tr>
@@ -149,11 +147,13 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
                     <td className="py-2 pr-3 font-medium">{s.gameTitle}</td>
                     <td className="py-2 pr-3 text-muted">{fmtDateTime(s.startedAt)}</td>
                     <td className="py-2 pr-3 font-mono">{fmtClock(s.durationSecs)}</td>
-                    <td className="py-2 pr-3 text-muted">{s.category}</td>
                     <td className="py-2 pr-3 text-xs text-muted">{fmtEndedBy(s.endedBy, s.manual)}</td>
-                    <td className="py-2 text-right whitespace-nowrap">
+                    {/* The buttons sit a comfortable distance from the edge of
+                        the table rather than up against it: a Remove button half
+                        a step from the border is one misclick from being wrong. */}
+                    <td className="py-2 pl-6 pr-4 text-right whitespace-nowrap">
                       <button
-                        className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-accent hover:border-accent"
                         onClick={() => setEditing(s)}
                         title="Correct when it started and how long it ran"
                       >
@@ -161,7 +161,7 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
                         Edit
                       </button>
                       <button
-                        className="ml-3 inline-flex items-center gap-1 text-xs text-muted hover:text-rose-400"
+                        className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-rose-400 hover:text-rose-400"
                         onClick={() => void remove(s)}
                         title="Remove this session"
                       >
@@ -196,17 +196,17 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-muted">Most played</h2>
           <div className="space-y-2">
             {played.map((g) => {
-              const top = played[0].playMinutes || 1;
+              const top = played[0].playSecs || 1;
               return (
                 <div key={g.id} className="flex items-center gap-3">
                   <span className="w-40 truncate text-sm">{g.title}</span>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-panel2">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-accent to-accent2"
-                      style={{ width: `${Math.max(2, (g.playMinutes / top) * 100)}%` }}
+                      style={{ width: `${Math.max(2, (g.playSecs / top) * 100)}%` }}
                     />
                   </div>
-                  <span className="w-20 text-right font-mono text-xs text-muted">{fmtClock(g.playMinutes * 60)}</span>
+                  <span className="w-20 text-right font-mono text-xs text-muted">{fmtClock(g.playSecs)}</span>
                 </div>
               );
             })}
@@ -230,7 +230,6 @@ export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: 
   const [hours, setHours] = useState(Math.floor(row.durationSecs / 3600));
   const [minutes, setMinutes] = useState(Math.floor((row.durationSecs % 3600) / 60));
   const [at, setAt] = useState(toLocalInput(row.startedAt));
-  const [category, setCategory] = useState(row.category || DEFAULT_CATEGORY);
   const [note, setNote] = useState(row.note);
   const [error, setError] = useState<string | null>(null);
 
@@ -247,7 +246,10 @@ export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: 
       return;
     }
     setError(null);
-    await updateSession(row.id, startedAt, secs, category, note);
+    // The category is left exactly as it was: it is not something the player
+    // picks any more, and rewriting it here would change a stored row for no
+    // reason.
+    await updateSession(row.id, startedAt, secs, row.category || DEFAULT_CATEGORY, note);
     onSaved();
     onClose();
   };
@@ -270,14 +272,6 @@ export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: 
             <input type="number" min={0} max={59} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className={inputCls} />
           </label>
         </div>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Category</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
-            {CATEGORIES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </label>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">Note</span>
           <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} />
@@ -319,7 +313,6 @@ export function LogSession({
   const [gameId, setGameId] = useState(initialGameId ?? games[0]?.id ?? '');
   const [at, setAt] = useState(() => toLocalInput(Math.floor(Date.now() / 1000)));
   const [duration, setDuration] = useState('1h');
-  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -337,7 +330,7 @@ export function LogSession({
     }
     if (!gameId) return;
     setError(null);
-    await logManualSession(gameId, startedAt, secs, category, note);
+    await logManualSession(gameId, startedAt, secs, DEFAULT_CATEGORY, note);
     onSaved();
     onClose();
   };
@@ -382,14 +375,6 @@ export function LogSession({
             />
           </label>
         </div>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Category</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
-            {CATEGORIES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </label>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">Note</span>
           <input

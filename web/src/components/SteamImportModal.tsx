@@ -309,7 +309,7 @@ export function gameFromSteam(r: SteamGame): Game {
     status: 'backlog',
     favorite: false,
     manualPlaySecs: 0,
-    playMinutes: 0,
+    playSecs: 0,
     lastPlayed: null,
     addedAt: new Date().toISOString(),
     notes: '',

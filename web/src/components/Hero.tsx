@@ -6,7 +6,7 @@ import { Cover } from './ui/Cover';
 interface Props { game: Game; running: boolean; onPlay: () => void; onDetails: () => void }
 
 export function Hero({ game, running, onPlay, onDetails }: Props) {
-  const pct = game.hltb ? Math.min(100, Math.round((game.playMinutes / 60 / game.hltb.main) * 100)) : null;
+  const pct = game.hltb ? Math.min(100, Math.round((game.playSecs / 3600 / game.hltb.main) * 100)) : null;
   return (
     <section className="relative mx-6 mt-5 overflow-hidden rounded-3xl border border-line">
       <Cover game={game} className="absolute inset-0 size-full scale-110 blur-2xl opacity-70 [&_span]:hidden" />
@@ -20,7 +20,7 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
           <h1 className="text-4xl font-black leading-tight md:text-5xl">{game.title}</h1>
           <p className="mt-3 line-clamp-2 text-sm text-muted">{game.meta?.summary}</p>
           <div className="mt-4 flex flex-wrap gap-5 text-sm">
-            <div><p className="text-[10px] uppercase tracking-widest text-muted">Played</p><p className="font-bold">{fmtMinutes(game.playMinutes)}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-muted">Played</p><p className="font-bold">{fmtMinutes(game.playSecs / 60)}</p></div>
             <div><p className="text-[10px] uppercase tracking-widest text-muted">Last session</p><p className="font-bold">{fmtDate(game.lastPlayed)}</p></div>
             {pct !== null && <div><p className="text-[10px] uppercase tracking-widest text-muted">Main story</p><p className="font-bold">{pct}%</p></div>}
           </div>

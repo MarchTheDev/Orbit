@@ -16,6 +16,11 @@ import { cn } from '../../utils/cn';
  * exactly what a wrong-looking thumbnail is. Instead the picture says how wide
  * it is when it loads: tall art fills the frame, wide art is fitted whole over a
  * blurred copy of itself, so nothing is ever cut off.
+ *
+ * That guess is right most of the time and wrong often enough to matter, so a
+ * game can carry its own answer: `meta.coverFit` pins the picture to `cover`
+ * (fill the frame, crop what does not fit) or `contain` (fit it whole), chosen
+ * on the Edit tab next to the artwork it applies to.
  */
 export function Cover({
   game,
@@ -40,23 +45,25 @@ export function Cover({
     setBackdropFailed(false);
   }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl, game.meta?.backgroundUrl]);
 
+  const fit = game.meta?.coverFit;
+
   if (game.coverPath && !localFailed) {
-    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} onFail={() => setLocalFailed(true)} />;
+    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} fit={fit} onFail={() => setLocalFailed(true)} />;
   }
 
   if (game.meta?.coverUrl && !remoteFailed) {
-    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} onFail={() => setRemoteFailed(true)} />;
+    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setRemoteFailed(true)} />;
   }
 
   if (game.meta?.headerUrl && !headerFailed) {
-    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} onFail={() => setHeaderFailed(true)} />;
+    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setHeaderFailed(true)} />;
   }
 
   // The wide backdrop is the last picture worth trying before initials: it is
   // always there on a store page, and a letterboxed backdrop still reads as the
   // game rather than as a coloured square.
   if (game.meta?.backgroundUrl && !backdropFailed) {
-    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} onFail={() => setBackdropFailed(true)} />;
+    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setBackdropFailed(true)} />;
   }
 
   const initials = game.title
@@ -92,22 +99,28 @@ function Artwork({
   alt,
   className,
   style,
+  fit,
   onFail,
 }: {
   src: string;
   alt: string;
   className?: string;
   style?: CSSProperties;
+  /** The player's own answer, which beats the guess made from the shape. */
+  fit?: 'cover' | 'contain';
   onFail: () => void;
 }) {
   const [wide, setWide] = useState(false);
+  // A pinned choice wins; otherwise a picture squarer than a poster is fitted
+  // whole rather than cropped to a strip.
+  const fitted = fit === 'contain' || (fit === undefined && wide);
 
   return (
     <div className={cn('relative overflow-hidden', className)} style={style}>
       {/* First in the document so it stays behind: the blur fills the bars on
           either side with the picture's own colours, so a wide banner reads as
           artwork rather than as a gap with a picture in it. */}
-      {wide && (
+      {fitted && (
         <img
           src={src}
           alt=""
@@ -126,7 +139,7 @@ function Artwork({
           setWide(w > 0 && h > 0 && w / h > 0.72);
         }}
         onError={onFail}
-        className={cn('relative size-full', wide ? 'object-contain' : 'object-cover')}
+        className={cn('relative size-full', fitted ? 'object-contain' : 'object-cover')}
       />
     </div>
   );

@@ -17,6 +17,24 @@ use crate::launch_target::LaunchTarget;
 /// until the player stops it.
 const HANDOFF_WINDOW: std::time::Duration = std::time::Duration::from_secs(90);
 
+/// How often the process list is looked through once a launcher has handed off.
+///
+/// The real game is a grandchild Orbit has no handle for, so the only thing left
+/// to go on is its name, and the list costs one small helper process to read.
+/// Every five seconds is often enough to notice a game being closed without
+/// spending the session doing nothing else.
+const HANDOFF_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// What the watcher has learned about a process.
+pub enum Verdict {
+    /// Still going.
+    Running,
+    /// Gone, so the session ends.
+    Ended,
+    /// Nothing more can be learned about it: the session belongs to the player.
+    Unwatched,
+}
+
 /// A game Orbit started and is keeping time for.
 struct Tracked {
     child: Child,
@@ -28,6 +46,15 @@ struct Tracked {
     died_at: Option<Instant>,
     /// True once a quick death was judged to be a launcher handing off.
     handed_off: bool,
+    /// The program's file name, which is all there is to look for once the
+    /// process Orbit started has gone.
+    image: Option<String>,
+    /// Whether a program of that name has been seen since the hand-off.
+    seen: bool,
+    /// Polls in a row that found nothing, so one hiccup is not an ending.
+    misses: u32,
+    /// When the process list was last read.
+    last_scan: Option<Instant>,
 }
 
 /// The games currently running, so time can stop by itself when they exit.
@@ -60,6 +87,16 @@ impl Sessions {
                         started: Instant::now(),
                         died_at: None,
                         handed_off: false,
+                        image: match target {
+                            LaunchTarget::Executable { path, .. } => path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .map(str::to_string),
+                            _ => None,
+                        },
+                        seen: false,
+                        misses: 0,
+                        last_scan: None,
                     },
                 );
                 Ok(Launched { pid, manual: false })
@@ -73,11 +110,18 @@ impl Sessions {
         }
     }
 
-    /// Is this game still going?
+    /// What is happening with a game Orbit started.
     ///
-    /// Answers `None` for a process Orbit never started, so the UI can fall
-    /// back to a manual stop instead of guessing.
-    pub fn status(&mut self, pid: u32) -> Option<bool> {
+    /// `None` for a process Orbit never started, so the caller can fall back to
+    /// a session the player stops by hand.
+    ///
+    /// A game that dies after having run for a while is over. A game that dies
+    /// within the hand-off window was a bootstrapper, and the real game is a
+    /// grandchild with no handle of Orbit's own: the name of the program is
+    /// then the only thing left to look for, which is what the process list is
+    /// for. Without that, a launcher handing off means the clock runs until the
+    /// player notices, which is exactly the thing that makes playtime wrong.
+    pub fn check(&mut self, pid: u32) -> Option<Verdict> {
         let tracked = self.running.get_mut(&pid)?;
 
         // `try_wait` is the only way to notice, and once a process has been
@@ -86,39 +130,50 @@ impl Sessions {
             tracked.died_at = Some(Instant::now());
         }
 
-        match tracked.died_at {
-            None => Some(true),
-            Some(died) => {
-                // A process that dies inside the window was a bootstrapper, not
-                // the game. The real game is a grandchild Orbit has no handle
-                // for, so the session cannot end by itself: it stays open, and
-                // the player stops it when they are done. Reporting it as ended
-                // here would log two minutes for a four hour evening, and the
-                // time after that would never be counted at all.
-                if died.duration_since(tracked.started) < HANDOFF_WINDOW {
-                    if !tracked.handed_off {
-                        tracked.handed_off = true;
-                        log::info!(
-                            "pid {pid} exited early; the game is running without Orbit watching it, \
-                             so this session ends when the player stops it"
-                        );
-                    }
-                    Some(true)
-                } else {
-                    Some(false)
-                }
-            }
-        }
-    }
+        let Some(died) = tracked.died_at else {
+            return Some(Verdict::Running);
+        };
 
-    /// Whether this process was a bootstrapper that has already handed off.
-    ///
-    /// Nothing is left to watch in that case, so the poll loop can end; the
-    /// session stays open, which is what lets the evening's playtime be counted.
-    pub fn handed_off(&self, pid: u32) -> bool {
-        self.running
-            .get(&pid)
-            .is_some_and(|tracked| tracked.handed_off)
+        if died.duration_since(tracked.started) >= HANDOFF_WINDOW {
+            return Some(Verdict::Ended);
+        }
+
+        if !tracked.handed_off {
+            tracked.handed_off = true;
+            log::info!(
+                "pid {pid} exited early; looking for the game itself by name from here \
+                 so its session still ends when it does"
+            );
+        }
+
+        // Nothing to look for, or no way to look: the session is the player's.
+        let (Some(image), true) = (tracked.image.clone(), cfg!(windows)) else {
+            return Some(Verdict::Unwatched);
+        };
+
+        let now = Instant::now();
+        if now.duration_since(tracked.last_scan.unwrap_or(tracked.started)) < HANDOFF_POLL {
+            return Some(Verdict::Running);
+        }
+        tracked.last_scan = Some(now);
+
+        if image_running(&image) {
+            tracked.seen = true;
+            tracked.misses = 0;
+            return Some(Verdict::Running);
+        }
+        // The game has not appeared yet, or it runs under a name nothing like
+        // the program's. Either way there is nothing to conclude, and ending the
+        // session on a guess would lose the evening's playtime.
+        if !tracked.seen {
+            return Some(Verdict::Running);
+        }
+        tracked.misses += 1;
+        if tracked.misses >= 2 {
+            Some(Verdict::Ended)
+        } else {
+            Some(Verdict::Running)
+        }
     }
 
     /// Forget a process the player has stopped tracking.
@@ -161,6 +216,57 @@ impl Sessions {
             }
         }
     }
+}
+
+/// Is a program of this name running anywhere on the machine?
+///
+/// `tasklist` lists every process as CSV, which is the same shape in every
+/// display language: the image name is the first field and nothing else needs
+/// reading. A process list costs a few milliseconds, and it is only read for a
+/// game whose launcher handed off.
+#[cfg(windows)]
+fn image_running(name: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        line.split(',')
+            .next()
+            .is_some_and(|first| same_program(first.trim().trim_matches('"'), name))
+    })
+}
+
+#[cfg(not(windows))]
+fn image_running(_name: &str) -> bool {
+    false
+}
+
+/// Whether a listed program is the one being looked for.
+///
+/// Engines append things to their own name: `Game.exe` starts
+/// `Game-Win64-Shipping.exe`, and a launcher often restarts itself under the
+/// same name. A suffix that starts with a separator is the same game; anything
+/// else is a different program that happens to begin with the same letters.
+fn same_program(listed: &str, wanted: &str) -> bool {
+    let listed = listed.to_lowercase();
+    let wanted = wanted.to_lowercase();
+    if listed == wanted {
+        return true;
+    }
+    let stem = wanted.strip_suffix(".exe").unwrap_or(&wanted);
+    if stem.len() < 4 {
+        return false;
+    }
+    listed
+        .strip_prefix(stem)
+        .is_some_and(|rest| rest.starts_with('-') || rest.starts_with('_') || rest.starts_with('.'))
 }
 
 /// How long [`Sessions::kill`] waits for a process to actually exit.

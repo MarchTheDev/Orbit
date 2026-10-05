@@ -682,6 +682,64 @@ async fn metadata_cards(title: String) -> Result<Vec<metadata::Card>, String> {
 
 /// Every achievement the game's Steam Community page lists.
 ///
+/// The Steam app a library game belongs to.
+///
+/// Kept in the details when the game was looked up, and in the launch target
+/// when it came in from Steam. A game that has neither is one Orbit only knows
+/// by name, which is not enough for an achievement list or for artwork.
+fn steam_app_id(game: &GameRow) -> Option<u64> {
+    game.meta
+        .as_ref()
+        .and_then(|m| m.get("steamAppId"))
+        .and_then(|v| v.as_u64())
+        .or_else(|| match &game.launch {
+            serde_json::Value::Object(map) => map.get("appId").and_then(|v| v.as_u64()),
+            _ => None,
+        })
+}
+
+/// What an artwork lookup found.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Artwork {
+    /// The store's id, so the game can remember which app it is from now on.
+    app_id: Option<u64>,
+    urls: Vec<String>,
+}
+
+/// The pictures the store has for a game, for a cover that crops badly.
+///
+/// Playnite's answer to a cut-off cover is to offer the alternatives, and that
+/// is the honest one here too: Orbit cannot know which crop suits a tile it did
+/// not draw, so the player picks.
+#[tauri::command]
+async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<Artwork, String> {
+    let game = orbit
+        .db
+        .game(&game_id)?
+        .ok_or_else(|| "That game is not in the library any more.".to_string())?;
+
+    // A game added from a folder has no store id of its own, so the title is
+    // asked about. That is also the moment the id becomes worth keeping.
+    let known = steam_app_id(&game);
+    let app_id = match known {
+        Some(id) => Some(id),
+        None => metadata::app_id_for(&game.title).await,
+    };
+    let Some(app_id) = app_id else {
+        return Err(format!(
+            "Orbit could not find \"{}\" in the store. A cover can still be chosen by hand.",
+            game.title
+        ));
+    };
+
+    let urls = metadata::artwork(app_id).await?;
+    Ok(Artwork {
+        app_id: known.or(Some(app_id)),
+        urls,
+    })
+}
+
 /// Read fresh each time, because the share of players who have each one moves.
 /// Whether an achievement is ticked is the player's own mark and is kept in the
 /// library, so this never overwrites that.
@@ -691,18 +749,15 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         .db
         .game(&game_id)?
         .ok_or_else(|| "That game is not in the library any more.".to_string())?;
-    let app_id = game
-        .meta
-        .as_ref()
-        .and_then(|m| m.get("steamAppId"))
-        .and_then(|v| v.as_u64())
-        .or_else(|| match &game.launch {
-            serde_json::Value::Object(map) => map.get("appId").and_then(|v| v.as_u64()),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            "Orbit does not know which Steam app this is, so there is no achievement list to read. Look the game up first, or paste its store link.".to_string()
-        })?;
+    let app_id = match steam_app_id(&game) {
+        Some(id) => id,
+        // A game added from a folder is remembered by title only, so the store
+        // is asked which app it is before the list can be read.
+        None => metadata::app_id_for(&game.title).await.ok_or_else(|| {
+            "Orbit could not find this game in the store, so there is no achievement list to read."
+                .to_string()
+        })?,
+    };
 
     let mut fetched = achievements::fetch(app_id).await?;
 
@@ -891,6 +946,7 @@ pub fn run() {
             metadata_suggest,
             metadata_cards,
             achievements_fetch,
+            artwork_candidates,
             reorder_game_logs,
             steam_library,
             folder_programs,

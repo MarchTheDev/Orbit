@@ -259,8 +259,8 @@ export function logManualSession(
 
 export function libraryStats(): Promise<Stats> {
   return call('library_stats', {}, async () => ({
-    totalSecs: SAMPLE_GAMES.reduce((s, g) => s + g.playMinutes * 60, 0),
-    trackedGames: SAMPLE_GAMES.filter((g) => g.playMinutes > 0).length,
+    totalSecs: SAMPLE_GAMES.reduce((s, g) => s + g.playSecs, 0),
+    trackedGames: SAMPLE_GAMES.filter((g) => g.playSecs > 0).length,
     totalGames: SAMPLE_GAMES.length,
     sessionCount: 0,
     longestSecs: 0,
@@ -442,6 +442,22 @@ export function fetchAchievements(gameId: string): Promise<Achievement[]> {
       { id: 'SPEEDRUN', name: 'Two Hours Flat', description: 'Beat the game in under two hours', icon: '', percent: 0.9, unlocked: false },
     ];
   });
+}
+
+/**
+ * Every picture the store has for a game, so a cover that crops badly can be
+ * swapped for a better one.
+ */
+export function findArtwork(gameId: string): Promise<{ appId: number | null; urls: string[] }> {
+  return call(
+    'artwork_candidates',
+    { gameId },
+    async () => {
+      await sleep(250);
+      // Nothing to ask in a browser, and the sample library has no store pages.
+      return { appId: null, urls: [] };
+    },
+  );
 }
 
 /** Put one game's notes in the order they were dragged into. */

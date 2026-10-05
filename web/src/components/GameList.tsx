@@ -59,7 +59,7 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
               </span>
             </div>
             <StatusBadge status={g.status} />
-            <span className="text-muted">{fmtMinutes(g.playMinutes)}</span>
+            <span className="text-muted">{fmtMinutes(g.playSecs / 60)}</span>
             <span className="text-muted">{fmtDate(g.lastPlayed)}</span>
             <span className="text-muted">{g.drive || '-'}</span>
             <button

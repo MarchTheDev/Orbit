@@ -52,14 +52,17 @@ export function SessionHistory({
       ) : (
         <ul className="space-y-1.5">
           {rows.map((s) => (
-            <li key={s.id} className="group flex items-center gap-3 rounded-lg bg-bg/60 px-3 py-2 text-sm">
+            // The buttons sit a step back from the edge, with a little room of
+            // their own: Remove flush against the border is one misclick from
+            // ending the wrong session.
+            <li key={s.id} className="group flex items-center gap-2 rounded-lg bg-bg/60 py-2 pl-3 pr-2 text-sm">
               <span className="font-mono font-semibold text-accent">{fmtClock(s.durationSecs)}</span>
-              <span className="flex-1 truncate text-xs text-muted">{s.category || s.note || 'Playing'}</span>
+              <span className="flex-1 truncate text-xs text-muted">{s.note || 'Played'}</span>
               <span className="text-[10px] text-muted">{fmtDateTime(s.startedAt)}</span>
               {onEdit && (
                 <button
                   onClick={() => onEdit(s)}
-                  className="shrink-0 text-muted hover:text-accent"
+                  className="shrink-0 rounded-md p-1 text-muted hover:bg-panel2 hover:text-accent"
                   title="Correct when it started and how long it ran"
                   aria-label={`Edit the ${fmtClock(s.durationSecs)} session`}
                 >
@@ -74,7 +77,7 @@ export function SessionHistory({
                     onChanged?.();
                   });
                 }}
-                className="shrink-0 text-muted hover:text-rose-400"
+                className="shrink-0 rounded-md p-1 text-muted hover:bg-panel2 hover:text-rose-400"
                 title="Remove this session"
                 aria-label={`Remove the ${fmtClock(s.durationSecs)} session`}
               >

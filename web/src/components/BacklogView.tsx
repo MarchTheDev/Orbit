@@ -22,6 +22,18 @@ import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { btnGhost, inputCls } from './ui/Modal';
 
+/**
+ * How long the main story takes, for the two orders that read by length.
+ *
+ * `Infinity` for a game nobody has times for, so an unmeasured game sorts to the
+ * end of both the shortest and the longest list rather than being called the
+ * shortest thing on it, which is what a zero would do.
+ */
+function byLength(game: Game): number {
+  const main = game.hltb?.main ?? 0;
+  return main > 0 ? main : Number.POSITIVE_INFINITY;
+}
+
 /** The order the waiting list is read in, including the player's own. */
 type Order = 'mine' | 'shortest' | 'longest' | 'added';
 
@@ -139,7 +151,7 @@ export function BacklogView({
         status: 'backlog',
         favorite: false,
         manualPlaySecs: 0,
-        playMinutes: 0,
+        playSecs: 0,
         lastPlayed: null,
         addedAt: new Date().toISOString(),
         notes: '',
@@ -185,7 +197,6 @@ export function BacklogView({
   /** The waiting list, in whichever order is being read. */
   const backlog = useMemo(() => {
     const list = owned.filter((g) => g.status === 'backlog' && match(g));
-    const byLength = (g: Game) => g.hltb?.main ?? Number.POSITIVE_INFINITY;
     return [...list].sort((a, b) => {
       if (order === 'mine') {
         const ai = myOrder.indexOf(a.id);
@@ -457,7 +468,7 @@ function Section({
         <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {games.map((g) => {
             const main = g.hltb?.main ?? 0;
-            const left = Math.max(0, main - g.playMinutes / 60);
+            const left = Math.max(0, main - g.playSecs / 3600);
             return (
               <li
                 key={g.id}
@@ -481,7 +492,7 @@ function Section({
                     <p className="mt-0.5 text-xs text-muted">not installed here</p>
                   ) : (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
-                      <span>{fmtMinutes(g.playMinutes)} played</span>
+                      <span>{fmtMinutes(g.playSecs / 60)} played</span>
                       {g.lastPlayed && <span>· {fmtDate(g.lastPlayed)}</span>}
                       {main > 0 && (
                         <span className="flex items-center gap-1" title={`HowLongToBeat: ${main}h for the main story`}>
@@ -494,11 +505,11 @@ function Section({
                   {main > 0 && !notOwned && (
                     <div
                       className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
-                      title={`${Math.round((g.playMinutes / 60 / main) * 100)}% of the main story`}
+                      title={`${Math.round((g.playSecs / 3600 / main) * 100)}% of the main story`}
                     >
                       <div
                         className="h-full bg-accent"
-                        style={{ width: `${Math.min(100, (g.playMinutes / 60 / main) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (g.playSecs / 3600 / main) * 100)}%` }}
                       />
                     </div>
                   )}

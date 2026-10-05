@@ -84,10 +84,12 @@ export function AchievementsTab({
             <Trophy className="size-4 text-accent" />
             Achievements
           </h3>
+          {/* Just the count and the share: how the ticks got there is not the
+              page's business. */}
           <p className="text-xs text-muted">
             {rows.length === 0
               ? 'Nothing read yet. Orbit reads the list from the game\'s Steam page.'
-              : `${unlocked} of ${rows.length} ticked by you, ${pct}%. Every one starts locked: Orbit does not know what your Steam account has done, so the marks are yours to make.`}
+              : `${unlocked} of ${rows.length} unlocked · ${pct}%`}
           </p>
           {rows.length > 0 && (
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-bg">
@@ -104,7 +106,7 @@ export function AchievementsTab({
           className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-50"
         >
           <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-          {loading ? 'Reading…' : rows.length > 0 ? 'Read again' : 'Read from Steam'}
+          {loading ? 'Reading…' : 'Refresh'}
         </button>
       </div>
 
@@ -194,7 +196,7 @@ export function AchievementsTab({
       {rows.length === 0 && !loading && (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line py-10 text-muted">
           <Sparkles className="size-6 opacity-60" />
-          <p className="text-xs">Game without achievements, or without artwork? Both are worth checking on the page.</p>
+          <p className="text-xs">No achievements here yet. Refresh, or look the game up first.</p>
         </div>
       )}
     </section>

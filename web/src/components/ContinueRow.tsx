@@ -13,10 +13,10 @@ export function ContinueRow({ games, onSelect }: { games: Game[]; onSelect: (id:
             <Cover game={g} className="size-14 shrink-0 rounded-xl [&_span]:text-sm" />
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{g.title}</p>
-              <p className="text-xs text-muted">{fmtMinutes(g.playMinutes)}</p>
+              <p className="text-xs text-muted">{fmtMinutes(g.playSecs / 60)}</p>
               {g.hltb && (
                 <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-line">
-                  <div className="h-full bg-accent" style={{ width: `${Math.min(100, (g.playMinutes / 60 / g.hltb.main) * 100)}%` }} />
+                  <div className="h-full bg-accent" style={{ width: `${Math.min(100, (g.playSecs / 3600 / g.hltb.main) * 100)}%` }} />
                 </div>
               )}
             </div>

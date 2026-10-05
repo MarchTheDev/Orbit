@@ -15,7 +15,7 @@ use crate::db::{
     epoch_millis, now, Db, SessionRow, ENDED_APP_CLOSED, ENDED_FAILED, ENDED_MANUAL, ENDED_PROCESS,
 };
 use crate::WindowPolicy;
-use crate::launch::Sessions;
+use crate::launch::{Sessions, Verdict};
 use crate::launch_target::LaunchTarget;
 
 /// How often the watched process is checked.
@@ -265,7 +265,7 @@ impl Runner {
                 // The other is the player pressing Stop: that clears `active`,
                 // closes the row and kills the process, so this task has nothing
                 // left to do and must not sit here polling forever.
-                let ended = match inner.lock() {
+                let verdict = match inner.lock() {
                     Ok(mut guard) => {
                         if !guard
                             .active
@@ -274,19 +274,22 @@ impl Runner {
                         {
                             return;
                         }
-                        let ended = matches!(guard.sessions.status(pid), Some(false));
-                        // A bootstrapper has handed off, so there is nothing left
-                        // to watch: the session stays open for the player to
-                        // stop, and this loop gets out of the way.
-                        if !ended && guard.sessions.handed_off(pid) {
-                            guard.sessions.forget(pid);
-                            return;
-                        }
-                        ended
+                        guard.sessions.check(pid)
                     }
                     Err(_) => return,
                 };
-                if !ended {
+
+                // Nothing left to watch, either because Orbit never started this
+                // process or because the game is running where it cannot see it.
+                // The session stays open for the player to stop; this loop has
+                // nothing to do and gets out of the way.
+                if matches!(verdict, None | Some(Verdict::Unwatched)) {
+                    if let Ok(mut guard) = inner.lock() {
+                        guard.sessions.forget(pid);
+                    }
+                    return;
+                }
+                if matches!(verdict, Some(Verdict::Running)) {
                     continue;
                 }
 

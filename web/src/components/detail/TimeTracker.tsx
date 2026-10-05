@@ -32,8 +32,8 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
 
   // Open the editor showing the number in the same shape it is typed back in.
   useEffect(() => {
-    if (editing) setVal(fmtDuration(Math.round(game.playMinutes) * 60));
-  }, [editing, game.playMinutes]);
+    if (editing) setVal(fmtDuration(game.playSecs));
+  }, [editing, game.playSecs]);
 
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -111,7 +111,7 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
         </form>
       ) : (
         <>
-          <p className="text-3xl font-bold">{fmtClock(game.playMinutes * 60 + live)}</p>
+          <p className="text-3xl font-bold">{fmtClock(game.playSecs + live)}</p>
           {game.sessionCount > 0 && (
             <p className="mt-1 text-xs text-muted">
               {game.sessionCount} {game.sessionCount === 1 ? 'session' : 'sessions'}

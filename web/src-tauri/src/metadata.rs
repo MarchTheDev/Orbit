@@ -256,6 +256,77 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     }
 }
 
+/// Every piece of artwork the store has for an app, best first.
+///
+/// Valve publishes the same game at several crops and sizes, and which one suits
+/// depends on where it is going: the portrait `library_600x900` fills a tile, the
+/// wide header suits a banner, the background suits a page, the logo is just the
+/// name. Some of them are missing for a given app, so each candidate is checked
+/// before it is offered rather than being handed over as a broken picture.
+///
+/// This is the answer for a cover that crops badly: instead of guessing, the
+/// player picks the picture that is actually right for the game.
+pub async fn artwork(app_id: u64) -> Result<Vec<String>, String> {
+    let client = client()?;
+    let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
+    let big = format!("{PORTRAIT}/{app_id}/library_600x900_2x.jpg");
+    let hero = format!("{PORTRAIT}/{app_id}/library_hero.jpg");
+    let header = format!("{PORTRAIT}/{app_id}/header.jpg");
+    let capsule = format!("{PORTRAIT}/{app_id}/capsule_231x87.jpg");
+    let logo = format!("{PORTRAIT}/{app_id}/logo.png");
+
+    // Six questions asked at once: one after another would be six round trips
+    // before the player sees anything.
+    let (portrait_ok, big_ok, hero_ok, header_ok, capsule_ok, logo_ok) = tokio::join!(
+        exists(&client, &portrait),
+        exists(&client, &big),
+        exists(&client, &hero),
+        exists(&client, &header),
+        exists(&client, &capsule),
+        exists(&client, &logo),
+    );
+
+    let mut out: Vec<String> = Vec::new();
+    for (ok, url) in [
+        (portrait_ok, portrait),
+        (big_ok, big),
+        (hero_ok, hero),
+        (header_ok, header),
+        (capsule_ok, capsule),
+        (logo_ok, logo),
+    ] {
+        if ok {
+            out.push(url);
+        }
+    }
+
+    // The store page's own picture is the one that cannot be guessed: its file
+    // name carries a hash, so it comes from the details call.
+    if let Ok(app) = app_details(&client, app_id).await {
+        for url in [app.background_image, app.header_image, app.capsule_image] {
+            if !url.trim().is_empty() && !out.contains(&url) {
+                out.push(url);
+            }
+        }
+    }
+
+    if out.is_empty() {
+        return Err("The store has no artwork for this game.".into());
+    }
+    Ok(out)
+}
+
+/// The store's id for a title, when the library does not know it.
+pub async fn app_id_for(title: &str) -> Option<u64> {
+    let title = title.trim();
+    if title.chars().count() < 2 {
+        return None;
+    }
+    let client = client().ok()?;
+    let items = store_search(&client, title).await.ok()?;
+    best_match(&items, title).map(|item| item.id)
+}
+
 /// Whether an image URL really is there.
 ///
 /// A HEAD request, with a short clock on it: a wrong guess about artwork is

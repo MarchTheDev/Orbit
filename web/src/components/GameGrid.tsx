@@ -66,7 +66,7 @@ export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder
             {g.title}
           </p>
           <p className="text-xs text-muted">
-            {fmtMinutes(g.playMinutes)}
+            {fmtMinutes(g.playSecs / 60)}
             {g.drive && ` · ${g.drive}`}
           </p>
         </div>

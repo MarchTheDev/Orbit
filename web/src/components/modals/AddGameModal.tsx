@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { FolderOpen, LoaderCircle, Plus, TriangleAlert, X } from 'lucide-react';
 import type { Game, LaunchTarget } from '../../types';
 import { exeInfo, isNative, scanFolder } from '../../services/native';
-import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
+import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { hashHue, uid } from '../../utils/format';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
 import { CheckboxInline } from '../ui/Checkbox';
@@ -91,31 +91,9 @@ export function AddGameModal({
     void takePaths(initialPaths);
   }, [initialPaths, takePaths]);
 
-  // Guess from a folder: the biggest thing in it is the game.
-  const takeFolder = useCallback(
-    async (folder: string) => {
-      const found = await scanFolder(folder, 1);
-      const best = found.sort((a, b) => b.sizeBytes - a.sizeBytes)[0];
-      setD((current) => ({
-        ...current,
-        installDir: best?.installDir ?? folder,
-        drive: folder.slice(0, 2).toUpperCase(),
-        exePath: best?.exePath ?? current.exePath,
-        title: current.title || best?.title || folder.replace(/\\+$/, '').split('\\').pop() || current.title,
-      }));
-      if (best?.exePath) await takePaths([best.exePath]);
-    },
-    [takePaths],
-  );
-
   const browseExe = async () => {
     const picked = await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
     if (picked) await takePaths([picked]);
-  };
-
-  const browseFolder = async () => {
-    const picked = await pickFolder('Choose the game folder', d.installDir || undefined);
-    if (picked) await takeFolder(picked);
   };
 
   const browseCover = async () => {
@@ -227,10 +205,10 @@ export function AddGameModal({
           </p>
         )}
 
-        {/* The program and the folder around it are one question, where the game
-            lives, so they are one section rather than two blocks with a gap down
-            the middle. */}
-        <section className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
+        {/* Only the program is asked for. The folder around it, the drive it
+            sits on and its size all come from that one path, so asking for them
+            as well was three questions with only one right answer each. */}
+        <section className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
           <span className={labelCls}>Where the game lives</span>
           <div className="flex gap-2">
             <label className="block flex-1">
@@ -248,22 +226,11 @@ export function AddGameModal({
               Browse…
             </button>
           </div>
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>Install folder</span>
-              <input
-                className={inputCls}
-                value={d.installDir}
-                onChange={(e) => set('installDir', e.target.value)}
-                placeholder="Leave empty and Orbit will look for it"
-                spellCheck={false}
-              />
-            </label>
-            <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseFolder()}>
-              <FolderOpen className="size-4" />
-              Browse…
-            </button>
-          </div>
+          {d.installDir && (
+            <p className="truncate font-mono text-[11px] text-muted" title={d.installDir}>
+              {d.installDir}
+            </p>
+          )}
         </section>
 
         <div className="flex gap-2">
@@ -450,7 +417,7 @@ export function buildGame(d: Draft): Game {
     status: d.status,
     favorite: d.favorite,
     manualPlaySecs: 0,
-    playMinutes: 0,
+    playSecs: 0,
     lastPlayed: null,
     addedAt: new Date().toISOString(),
     notes: d.notes,

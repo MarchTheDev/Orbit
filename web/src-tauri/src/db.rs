@@ -85,8 +85,12 @@ pub struct GameRow {
     #[serde(rename = "addedAt")]
     pub created_at: String,
     pub last_played: Option<String>,
-    /// Effective playtime in minutes: the manual total if there is one.
-    pub play_minutes: i64,
+    /// Everything played, in seconds: the sessions plus the time typed in.
+    ///
+    /// Seconds rather than minutes, because rounding down hid short sessions
+    /// entirely: ninety seconds of play reported as one whole minute, and a run
+    /// of sessions under a minute added up to nothing at all.
+    pub play_secs: i64,
     pub session_count: i64,
     pub longest_secs: i64,
     /// True while a session for this game is open right now.
@@ -471,7 +475,7 @@ impl Db {
                     hue: r.get(14)?,
                     created_at: iso8601(created_at),
                     last_played: last_end.map(iso8601),
-                    play_minutes: effective / 60,
+                    play_secs: effective,
                     session_count,
                     longest_secs,
                     running: open_count > 0,
@@ -1033,8 +1037,8 @@ impl Db {
             .map_err(|e| format!("Could not total up the sessions: {e}"))?;
 
         Ok(Stats {
-            total_secs: games.iter().map(|g| g.play_minutes * 60).sum(),
-            tracked_games: games.iter().filter(|g| g.play_minutes > 0).count() as i64,
+            total_secs: games.iter().map(|g| g.play_secs).sum(),
+            tracked_games: games.iter().filter(|g| g.play_secs > 0).count() as i64,
             total_games: games.len() as i64,
             session_count,
             longest_secs: longest,
@@ -1161,7 +1165,7 @@ mod tests {
         let games = db.list_games().unwrap();
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].title, "Hades");
-        assert_eq!(games[0].play_minutes, 0);
+        assert_eq!(games[0].play_secs, 0);
     }
 
     #[test]
@@ -1192,7 +1196,7 @@ mod tests {
             .unwrap();
 
         let g = &db.list_games().unwrap()[0];
-        assert_eq!(g.play_minutes, 90);
+        assert_eq!(g.play_secs, 5_400);
         assert_eq!(g.session_count, 2);
         assert_eq!(g.longest_secs, 3_600);
         assert!(!g.running);
@@ -1211,7 +1215,7 @@ mod tests {
 
         // One minute of sessions plus two hours typed in. This used to report
         // the two hours on their own, quietly dropping the session.
-        assert_eq!(db.list_games().unwrap()[0].play_minutes, 121);
+        assert_eq!(db.list_games().unwrap()[0].play_secs, 7_260);
         // The library total agrees with the rows, which is what the old app
         // managed to get wrong.
         assert_eq!(db.stats().unwrap().total_secs, 7_260);
@@ -1227,19 +1231,19 @@ mod tests {
         // Ten minutes of sessions, then a total of two hours.
         db.set_playtime("g1", 7_200).unwrap();
         let g = &db.list_games().unwrap()[0];
-        assert_eq!(g.play_minutes, 120);
+        assert_eq!(g.play_secs, 7_200);
         assert_eq!(g.manual_play_secs, 6_600);
 
         // Asking for exactly what the sessions hold clears the correction rather
         // than leaving 22 hours behind.
         db.set_playtime("g1", 600).unwrap();
         let g = &db.list_games().unwrap()[0];
-        assert_eq!(g.play_minutes, 10);
+        assert_eq!(g.play_secs, 600);
         assert_eq!(g.manual_play_secs, 0);
 
         // Below the real sessions is refused, because they are the record.
         assert!(db.set_playtime("g1", 60).is_err());
-        assert_eq!(db.list_games().unwrap()[0].play_minutes, 10);
+        assert_eq!(db.list_games().unwrap()[0].play_secs, 600);
     }
 
     #[test]

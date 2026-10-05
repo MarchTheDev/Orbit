@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, GameLog } from '../../types';
 import { addGameLog, deleteGameLog, listGameLogs, reorderGameLogs, updateGameLog } from '../../services/native';
+import { useDragReorder } from '../../hooks/useDragReorder';
 import { fmtClock, fmtDate, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
 import { cn } from '../../utils/cn';
@@ -113,11 +114,14 @@ export function GameLogView({
   }, [rows, order]);
 
   /**
-   * Move one entry to where another one is, dragging the grip.
+   * Move one entry to where another one is.
    *
-   * The new order is written straight away rather than kept in the browser, so
-   * it is the same list the next time the game is opened. Only the ids that were
-   * on screen are sent, so an entry written elsewhere is not swallowed.
+   * Pressing and moving, not the browser's drag and drop: a desktop webview
+   * keeps drag events for files coming off the desktop, which is why the handle
+   * used to do nothing at all. The new order is written straight away rather
+   * than kept in the browser, so it is the same list the next time the game is
+   * opened. Only the ids that were on screen are sent, so an entry written
+   * elsewhere is not swallowed.
    */
   const move = (fromId: number, toId: number) => {
     const ids = rows.map((r) => r.id).filter((id) => id !== fromId);
@@ -152,6 +156,10 @@ export function GameLogView({
       setError(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const drag = useDragReorder(
+    (fromId, toId) => move(Number(fromId), Number(toId)),
+  );
 
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -282,23 +290,18 @@ export function GameLogView({
           {shown.map((r) => (
             <li
               key={r.id}
-              onDragOver={(e) => {
-                if (order === 'mine') e.preventDefault();
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const from = Number(e.dataTransfer.getData('text/orbit-log'));
-                if (order === 'mine' && from && from !== r.id) move(from, r.id);
-              }}
-              className="group flex items-center gap-2 rounded-lg bg-bg/60 px-2 py-2 text-sm"
+              {...bindLogRow(r.id, order === 'mine', drag.bind)}
+              className={`group flex items-center gap-2 rounded-lg bg-bg/60 px-2 py-2 text-sm ${
+                order === 'mine' ? 'cursor-grab active:cursor-grabbing' : ''
+              } ${order === 'mine' && drag.over === String(r.id) ? 'ring-2 ring-accent' : ''} ${
+                order === 'mine' && drag.dragging === String(r.id) ? 'opacity-60' : ''
+              }`}
             >
               {order === 'mine' && (
                 <span
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData('text/orbit-log', String(r.id))}
-                  title="Drag to move this entry"
-                  aria-label="Drag to move this entry"
-                  className="cursor-grab shrink-0 text-muted active:cursor-grabbing"
+                  title="Press here and move to place this entry"
+                  aria-label="Press here and move to place this entry"
+                  className="shrink-0 text-muted"
                 >
                   <GripVertical className="size-4" />
                 </span>
@@ -356,6 +359,21 @@ export function GameLogView({
       )}
     </section>
   );
+}
+
+/**
+ * The press-to-move wiring for one entry.
+ *
+ * `useDragReorder` only hands out its bindings when reordering is allowed, so
+ * the row is left alone in the sorted views, where the order is not the
+ * player's to change.
+ */
+function bindLogRow(
+  id: number,
+  movable: boolean,
+  bind: (id: string) => Record<string, unknown>,
+): Record<string, unknown> {
+  return movable ? bind(String(id)) : {};
 }
 
 /**

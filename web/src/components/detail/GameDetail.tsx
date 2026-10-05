@@ -1,4 +1,5 @@
 import {
+  Check,
   Clock,
   ExternalLink,
   History,
@@ -20,7 +21,7 @@ import { fetchMetadata } from '../../services/metadata';
 import { openExternal } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { listGameLogs } from '../../services/native';
-import { fmtBytes, fmtDate } from '../../utils/format';
+import { fmtBytes } from '../../utils/format';
 import { Cover } from '../ui/Cover';
 import { HltbCard } from './HltbCard';
 import { LaunchEditor } from './LaunchEditor';
@@ -207,7 +208,7 @@ export function GameDetail({
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 flex gap-1 border-b border-line bg-panel/95 px-5 py-2 backdrop-blur">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel/95 px-5 py-2 pr-4 backdrop-blur">
           {(
             [
               ['overview', 'Overview', Info],
@@ -220,7 +221,7 @@ export function GameDetail({
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
                 tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'
               }`}
             >
@@ -237,6 +238,26 @@ export function GameDetail({
         </div>
 
         <div className="space-y-4 p-5">
+          {/* A game that is only planned has nothing to start, so the button
+              would be a lie: what it needs is a way to say it is owned now. */}
+          {game.planned ? (
+            <div className="flex gap-2">
+              <button
+                onClick={() => onUpdate({ planned: false, status: 'backlog' })}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 py-2.5 font-semibold text-white shadow-lg shadow-accent/30 hover:brightness-110"
+              >
+                <Check className="size-4" />
+                I own this now
+              </button>
+              <button
+                onClick={onPlay}
+                title="Start the clock anyway, for a game played somewhere else"
+                className="rounded-lg border border-line bg-panel2 px-3 text-xs text-muted hover:border-accent hover:text-fg"
+              >
+                Time it
+              </button>
+            </div>
+          ) : (
           <div className="flex gap-2">
             {running ? (
               <button onClick={onStop} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-500 py-2.5 font-semibold text-white hover:brightness-110">
@@ -259,6 +280,7 @@ export function GameDetail({
               <Star className={`size-5 ${game.favorite ? 'text-yellow-300' : 'text-muted'}`} fill={game.favorite ? 'currentColor' : 'none'} />
             </button>
           </div>
+          )}
 
           {tab === 'overview' && (
             <>
@@ -278,8 +300,8 @@ export function GameDetail({
               </select>
             </label>
             <div className="rounded-lg bg-panel2 px-3 py-2">
-              <p className="text-muted">Last played</p>
-              <p className="font-medium">{fmtDate(game.lastPlayed)}</p>
+              <p className="text-muted">Owned</p>
+              <p className="font-medium">{game.planned ? 'Not here yet' : 'Yes'}</p>
             </div>
             <div className="rounded-lg bg-panel2 px-3 py-2">
               <p className="text-muted">Rating</p>

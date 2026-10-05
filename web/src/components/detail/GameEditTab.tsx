@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Check, FolderOpen, Image, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { Check, FolderOpen, Image, LoaderCircle, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import type { Game, HltbData, MetaData } from '../../types';
-import { isNative } from '../../services/native';
+import { findArtwork, isNative } from '../../services/native';
+import { say } from '../../utils/toast';
 import { pickAnyFile } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
@@ -35,7 +36,12 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
   const [completionist, setCompletionist] = useState(hltb ? String(hltb.completionist) : '');
   const [sizeGb, setSizeGb] = useState(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
   const [notes, setNotes] = useState(game.notes);
-  const [saved, setSaved] = useState(false);
+  const [fit, setFit] = useState<'auto' | 'cover' | 'contain'>(meta?.coverFit ?? 'auto');
+  const [planned, setPlanned] = useState(!!game.planned);
+  /** Pictures the store offers, once the player asks for them. */
+  const [options, setOptions] = useState<string[]>([]);
+  const [finding, setFinding] = useState(false);
+  const [artError, setArtError] = useState<string | null>(null);
 
   // A different game means a different form; the fields are reseeded rather than
   // carrying the last game's title into this one's.
@@ -54,7 +60,34 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
     setCompletionist(game.hltb ? String(game.hltb.completionist) : '');
     setSizeGb(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
     setNotes(game.notes);
+    setFit(game.meta?.coverFit ?? 'auto');
+    setPlanned(!!game.planned);
+    setOptions([]);
+    setArtError(null);
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Ask the store for every picture it has of this game.
+   *
+   * A cover that crops badly is usually the wrong crop rather than the wrong
+   * picture, and the store publishes several. The list is offered as pictures to
+   * look at, because a URL tells nobody anything.
+   */
+  const findArt = async () => {
+    setFinding(true);
+    setArtError(null);
+    try {
+      const found = await findArtwork(game.id);
+      setOptions(found.urls);
+      if (found.urls.length === 0) {
+        setArtError('The store has no pictures for this game. A file can still be chosen by hand.');
+      }
+    } catch (e) {
+      setArtError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFinding(false);
+    }
+  };
 
   /** A number field, where empty means "no value" rather than zero. */
   const hours = (value: string): number | null => {
@@ -78,6 +111,7 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
         .filter(Boolean),
       coverUrl: coverUrl.trim() || null,
       backgroundUrl: backdropUrl.trim() || null,
+      coverFit: fit === 'auto' ? undefined : fit,
       headerUrl: meta?.headerUrl ?? null,
       steamAppId: meta?.steamAppId ?? null,
       source: meta?.source ?? 'steam',
@@ -100,14 +134,16 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
     onUpdate({
       title: title.trim() || game.title,
       notes,
+      planned,
       coverPath: coverPath.trim() || null,
       sizeBytes: Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1e9) : 0,
       sizeGb: Number.isFinite(gb) && gb > 0 ? gb : 0,
       meta: nextMeta,
       hltb: nextHltb ?? undefined,
     });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    // Said out loud in the corner rather than next to the button: a line of text
+    // appearing beside it moved the row and made the whole footer jump.
+    say(planned ? `${nextMeta.name ?? game.title} saved, still not owned` : `${nextMeta.name ?? game.title} saved`);
   };
 
   return (
@@ -240,7 +276,97 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
             spellCheck={false}
           />
         </label>
+
+        {/* How the picture sits in a tall tile. The guess based on shape is
+            right most of the time; this is for the times it is not. */}
+        <div>
+          <span className={labelCls}>How the cover sits in its frame</span>
+          <div className="glass flex w-fit rounded-full p-1">
+            {(
+              [
+                ['auto', 'Automatic'],
+                ['cover', 'Fill the frame'],
+                ['contain', 'Fit it whole'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setFit(id)}
+                className={`rounded-full px-3 py-1 text-[11px] ${
+                  fit === id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-muted">
+            Fill fills the tile and crops what does not fit; fit shows the whole picture. Save to keep it.
+          </p>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void findArt()}
+              disabled={finding}
+              className={`${btnGhost} flex items-center gap-2 text-xs disabled:opacity-50`}
+            >
+              {finding ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+              {finding ? 'Looking…' : 'Find other artwork'}
+            </button>
+            <span className="text-[11px] text-muted">
+              Every picture the store has, so a badly cropped cover can be swapped.
+            </span>
+          </div>
+
+          {artError && <p className="mt-2 text-[11px] text-rose-400">{artError}</p>}
+
+          {options.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {options.map((url) => (
+                <li key={url}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // The portrait ones are covers; a wide picture goes to the
+                      // backdrop, where a wide picture belongs.
+                      if (url.includes('library_600x900')) setCoverUrl(url);
+                      else if (url.includes('capsule') || url.includes('header')) setCoverUrl(url);
+                      else setBackdropUrl(url);
+                      say('Picture chosen. Save to keep it.');
+                    }}
+                    title={url}
+                    className={`block overflow-hidden rounded-lg border-2 transition ${
+                      url === coverUrl || url === backdropUrl ? 'border-accent' : 'border-line hover:border-muted'
+                    }`}
+                  >
+                    <img src={url} alt="" className="h-24 w-16 object-cover" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
+
+      <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/40 p-3">
+        <input
+          type="checkbox"
+          checked={planned}
+          onChange={(e) => setPlanned(e.target.checked)}
+          className="mt-0.5 size-4 accent-[var(--c-accent)]"
+        />
+        <span>
+          <span className="block text-sm font-medium">Not owned yet</span>
+          <span className="block text-xs text-muted">
+            Tick this for a game you mean to play but do not have here. It stays on the Backlog page instead of the
+            library, with no Play button, until a program is pointed at it.
+          </span>
+        </span>
+      </label>
 
       <div className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
         <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">
@@ -304,7 +430,6 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
           <Check className="size-4" />
           Save changes
         </button>
-        {saved && <span className="text-xs text-emerald-400">Saved.</span>}
         <button
           type="button"
           onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}

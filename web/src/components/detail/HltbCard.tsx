@@ -5,9 +5,9 @@ import type { Game } from '../../types';
  * How far the player has got, as a colour.
  *
  * The bars used to be one gradient whatever the game: a game barely started and
- * one finished twice looked identical. These bands colour the bar by how far
- * the played time has got towards that estimate, and the word says the same
- * thing out loud for anyone who cannot separate the colours.
+ * one finished twice looked identical. These bands colour the bar by how far the
+ * played time has got towards that estimate. The band is also the tooltip, so
+ * the meaning of the colour is there for anyone who cannot separate them.
  */
 function grade(played: number, target: number): { pct: number; colour: string; word: string } {
   const pct = target > 0 ? (played / target) * 100 : 0;
@@ -15,7 +15,7 @@ function grade(played: number, target: number): { pct: number; colour: string; w
   if (pct >= 90) return { pct, colour: '#34d399', word: 'Finished' };
   if (pct >= 55) return { pct, colour: '#fbbf24', word: 'Nearly there' };
   if (pct >= 20) return { pct, colour: '#a78bfa', word: 'Under way' };
-  return { pct, colour: '#38bdf8', word: 'Early' };
+  return { pct, colour: '#38bdf8', word: pct > 0 ? 'Early' : 'Not started' };
 }
 
 export function HltbCard({
@@ -31,7 +31,7 @@ export function HltbCard({
   error?: string | null;
 }) {
   const h = game.hltb;
-  const played = game.playMinutes / 60;
+  const played = game.playSecs / 3600;
   const rows = h
     ? [
         { label: 'Main Story', hours: h.main },
@@ -72,13 +72,23 @@ export function HltbCard({
                   <span className="flex items-baseline gap-2">
                     <span className="font-semibold">{r.hours > 0 ? `${r.hours}h` : 'no data'}</span>
                     {r.hours > 0 && (
-                      <span className="w-20 text-right text-[10px] font-medium" style={{ color: g.colour }}>
-                        {played > 0 ? `${g.word} · ${Math.round(g.pct)}%` : g.word}
+                      <span
+                        className="w-14 text-right text-[10px] font-medium"
+                        style={{ color: g.colour }}
+                        title={g.word}
+                      >
+                        {Math.round(g.pct)}%
                       </span>
                     )}
                   </span>
                 </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-bg">
+                {/* The track carries the colour at a quarter strength, so a row
+                    reads as coloured even before anything has been played, and
+                    the fill shows how far along the player is. */}
+                <div
+                  className="h-1.5 overflow-hidden rounded-full"
+                  style={{ background: `color-mix(in srgb, ${g.colour} 25%, transparent)` }}
+                >
                   <div
                     className="h-full rounded-full transition-[width]"
                     style={{ width: `${Math.max(g.pct, played > 0 ? 3 : 0)}%`, background: g.colour }}

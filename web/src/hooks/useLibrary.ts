@@ -1,9 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Game, Settings } from '../types';
+import type { Game, MetaData, Settings } from '../types';
+
 import { deleteGame as removeFromDb, listGames, saveGame, clearLibrary } from '../services/native';
 import { loadSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyTheme } from '../data/themes';
+
+/**
+ * Fields a person fills in, as opposed to anything Orbit works out.
+ *
+ * A patch touching one of these marks the game as corrected by hand, which is
+ * what stops the background lookups from overwriting it later.
+ */
+const PLAYER_FIELDS: (keyof Game)[] = ['meta', 'title', 'coverPath', 'hltb', 'notes'];
+
+/** The shape `MetaData` always has, for a game that has no details yet. */
+function baseMeta(meta: MetaData | undefined): MetaData {
+  return {
+    summary: '',
+    genres: [],
+    developer: '',
+    releaseYear: null,
+    rating: null,
+    ...meta,
+  };
+}
 
 /**
  * The library, kept in step with the database.
@@ -53,11 +74,20 @@ export function useLibrary() {
     queue.current = queue.current.then(() => saveGame(game)).catch(console.error);
   }, []);
 
+  /**
+   * Change a game.
+   *
+   * `origin` says who is asking: a person, or one of the background lookups.
+   * A lookup never overrules a correction somebody made by hand, which is what
+   * keeps an edited title, cover or set of times from being quietly replaced
+   * minutes later by a search that used the old file name.
+   */
   const updateGame = useCallback(
-    (id: string, patch: Partial<Game> | ((g: Game) => Partial<Game>)) => {
+    (id: string, patch: Partial<Game> | ((g: Game) => Partial<Game>), origin: 'player' | 'auto' = 'player') => {
       const current = gamesRef.current;
       const target = current.find((g) => g.id === id);
       if (!target) return;
+      if (origin === 'auto' && target.meta?.edited) return;
       const next = typeof patch === 'function' ? patch(target) : patch;
       const updated = { ...target, ...next };
       // Pointing Orbit at a program is what turns a plan into a game: it stops
@@ -69,6 +99,11 @@ export function useLibrary() {
         launchTarget?.kind === 'executable' ||
         launchTarget?.kind === 'steam';
       if (pointsAtAProgram) updated.planned = false;
+      // Anything typed in by hand is remembered with the game, so the record
+      // survives a restart and the lookups know to keep their hands off it.
+      if (origin === 'player' && PLAYER_FIELDS.some((key) => key in next)) {
+        updated.meta = { ...baseMeta(updated.meta), ...updated.meta, edited: true };
+      }
       gamesRef.current = current.map((g) => (g.id === id ? updated : g));
       setGames(gamesRef.current);
       save(updated);

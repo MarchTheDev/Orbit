@@ -25,6 +25,7 @@ import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { SettingsView } from './components/SettingsView';
 import { fmtClock } from './utils/format';
+import { onToast, say } from './utils/toast';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast {
@@ -64,6 +65,10 @@ export default function App() {
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
 
+  // Toasts come from a one-line channel rather than a callback threaded through
+  // every layer, so a button several components down can still say "saved".
+  useEffect(() => onToast(say), []);
+
   const toast = useCallback((text: string, tone: Toast['tone'] = 'ok') => {
     const id = Date.now() + Math.random();
     setToasts((current) => [...current, { id, text, tone }]);
@@ -94,7 +99,15 @@ export default function App() {
   useEffect(() => {
     if (!ready || !settings || !settings.fetchMetadata || !settings.autoFetchMetadata) return;
     const missing = games
-      .filter((g) => !asked.current.has(g.id) && (!g.meta || !g.hltb || artIsWide(g)))
+      .filter(
+        (g) =>
+          !asked.current.has(g.id) &&
+          // A game whose details were corrected by hand is left exactly as it
+          // was: the lookup would use the store's idea of the title and put
+          // back what the player just took out.
+          !g.meta?.edited &&
+          (!g.meta || !g.hltb || artIsWide(g)),
+      )
       .slice(0, 6);
     if (missing.length === 0) return;
 
@@ -115,7 +128,7 @@ export default function App() {
         const patch: Partial<Game> = {};
         if (meta) patch.meta = meta;
         if (hltb) patch.hltb = hltb;
-        if (Object.keys(patch).length > 0) updateGame(game.id, patch);
+        if (Object.keys(patch).length > 0) updateGame(game.id, patch, 'auto');
         setEnriching((n) => Math.max(0, n - 1));
         await new Promise((r) => setTimeout(r, 350));
       }
@@ -205,7 +218,7 @@ export default function App() {
       toast(`${added.length} Steam ${added.length === 1 ? 'game' : 'games'} added`);
       for (const g of added) {
         const meta = await fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null);
-        if (meta) updateGame(g.id, { meta, title: meta.name || g.title });
+        if (meta) updateGame(g.id, { meta, title: meta.name || g.title }, 'auto');
       }
     })();
   }, [ready, settings?.steamOnLaunch, games, addGames, updateGame, toast]);
@@ -225,10 +238,28 @@ export default function App() {
     return () => clearInterval(t);
   }, [session]);
 
+  /**
+   * The library as it should be read, with the running session added on.
+   *
+   * The database only has the total of the sessions that have finished, so a
+   * game being played right now would sit at yesterday's number until it was
+   * stopped. Every total on the page is drawn from this instead, which is what
+   * makes the playtime climb while the game is running rather than jumping when
+   * it ends.
+   */
+  const liveSecs = session ? Math.max(0, Math.floor((now - session.startedAtMs) / 1000)) : 0;
+  const played = useMemo(
+    () =>
+      session && liveSecs > 0
+        ? games.map((g) => (g.id === session.gameId ? { ...g, playSecs: g.playSecs + liveSecs } : g))
+        : games,
+    [games, session, liveSecs],
+  );
+
   // The game that is playing is marked, so the grid can show it at a glance.
   const visible = useMemo(() => {
     const q = query.toLowerCase();
-    const list = games.filter((g) => {
+    const list = played.filter((g) => {
       // A game that is only written down lives on the Backlog page: it is a plan,
       // not something in the library, and seeing it here as well would make it
       // look installed.
@@ -242,7 +273,7 @@ export default function App() {
     const by: Record<SortKey, (a: Game, b: Game) => number> = {
       title: (a, b) => a.title.localeCompare(b.title),
       lastPlayed: (a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''),
-      playtime: (a, b) => b.playMinutes - a.playMinutes,
+      playtime: (a, b) => b.playSecs - a.playSecs,
       added: (a, b) => b.addedAt.localeCompare(a.addedAt),
       size: (a, b) => b.sizeBytes - a.sizeBytes,
       // Ids the player has arranged come first, in that arrangement; anything
@@ -257,7 +288,7 @@ export default function App() {
       },
     };
     return [...list].sort(by[sort]);
-  }, [games, filter, query, sort, order]);
+  }, [played, filter, query, sort, order]);
 
   /**
    * Move a game to where another one is, dragging one card onto another.
@@ -279,7 +310,9 @@ export default function App() {
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const moving = games.find((g) => g.id === moveId) ?? null;
-  const runningGame = games.find((g) => g.id === session?.gameId) ?? null;
+  // The drawer draws its own live clock, so it gets the stored numbers rather
+  // than these, and nothing is counted twice.
+  const runningGame = played.find((g) => g.id === session?.gameId) ?? null;
 
   const startGame = async (g: Game) => {
     if (session?.gameId === g.id) return;
@@ -311,7 +344,7 @@ export default function App() {
     const patch: Partial<Game> = {};
     if (meta) patch.meta = meta;
     if (hltb) patch.hltb = hltb;
-    if (Object.keys(patch).length > 0) updateGame(g.id, patch);
+    if (Object.keys(patch).length > 0) updateGame(g.id, patch, 'auto');
   };
 
   // The drop listener is set up once and must not close over a stale `handleAdd`,
@@ -323,8 +356,12 @@ export default function App() {
   const showAddRef = useRef(showAdd);
   showAddRef.current = showAdd;
 
-  const byRecent = [...games].filter((g) => g.lastPlayed).sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''));
-  const heroGame = runningGame ?? byRecent[0] ?? games[0];
+  const byRecent = [...played]
+    .filter((g) => g.lastPlayed)
+    .sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''));
+  // A game that is only written down is not the thing to jump back into: there
+  // is nothing to jump into.
+  const heroGame = runningGame ?? byRecent[0] ?? played.find((g) => !g.planned) ?? null;
   const continueGames = byRecent.filter((g) => g.id !== heroGame?.id && g.status !== 'completed').slice(0, 6);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
@@ -365,7 +402,7 @@ export default function App() {
           </div>
         ) : page === 'backlog' ? (
           <BacklogView
-            games={games}
+            games={played}
             onSelect={setSelectedId}
             onStatus={(id, status) => updateGame(id, { status })}
             onPlay={(g) => void startGame(g)}
@@ -479,13 +516,15 @@ export default function App() {
       )}
 
       {enriching > 0 && (
-        <p className="fixed bottom-5 left-5 z-30 flex items-center gap-2 rounded-full bg-panel/90 px-3 py-1.5 text-[11px] text-muted">
+        <p className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-panel/90 px-3 py-1.5 text-[11px] text-muted">
           <LoaderCircle className="size-3.5 animate-spin" />
           Looking up details for {enriching} {enriching === 1 ? 'game' : 'games'}…
         </p>
       )}
 
-      <div className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-72 flex-col gap-2">
+      {/* Bottom left, the way the app talks to the player: out of the way of the
+          player bar in the middle and the Stop button at the top right. */}
+      <div className="pointer-events-none fixed bottom-5 left-5 z-50 flex w-80 flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -512,7 +551,7 @@ export default function App() {
         ))}
       </div>
 
-      {page === 'library' && selected && (
+      {selected && (
         <GameDetail
           key={selected.id}
           game={selected}

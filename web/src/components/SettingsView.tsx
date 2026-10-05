@@ -3,6 +3,7 @@ import {
   Database,
   Download,
   FolderOpen,
+  Ghost,
   GitBranch,
   HardDrive,
   Heart,
@@ -11,7 +12,6 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
-  Wand2,
   X,
 } from 'lucide-react';
 import type { Settings } from '../types';
@@ -24,41 +24,41 @@ import { cn } from '../utils/cn';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
 
-/** One option in a small set, drawn as a row that can be clicked anywhere. */
-function Choice<T extends string>({
+/**
+ * One setting, as a dropdown with the meaning of the choice underneath.
+ *
+ * Four rows of radios per setting took up most of the page to say what one line
+ * and a dropdown say, and the hint under it changes with the choice rather than
+ * listing every possibility at once.
+ */
+function Setting<T extends string>({
+  label,
   value,
   onChange,
   options,
-  name,
 }: {
+  label: string;
   value: T;
   onChange: (value: T) => void;
   options: { value: T; label: string; hint: string }[];
-  name: string;
 }) {
+  const current = options.find((o) => o.value === value) ?? options[0];
   return (
     <div className="space-y-1.5">
-      {options.map((o) => (
-        <label
-          key={o.value}
-          className={cn(
-            'flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 transition',
-            value === o.value ? 'border-accent bg-accent/10' : 'border-line hover:border-muted',
-          )}
-        >
-          <input
-            type="radio"
-            name={name}
-            checked={value === o.value}
-            onChange={() => onChange(o.value)}
-            className="mt-0.5 size-3.5 accent-[var(--c-accent)]"
-          />
-          <span className="min-w-0">
-            <span className="block text-sm">{o.label}</span>
-            <span className="block text-xs text-muted">{o.hint}</span>
-          </span>
-        </label>
-      ))}
+      <p className="text-sm font-medium">{label}</p>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        className={`${inputCls} max-w-sm`}
+        aria-label={label}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-muted">{current.hint}</p>
     </div>
   );
 }
@@ -139,40 +139,46 @@ export function SettingsView({
           Both of these do nothing unless you pick something: Orbit never moves itself uninvited.
         </p>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium">When a game starts</p>
-          <Choice
-            value={settings.window.onLaunch}
-            onChange={(v) => setSettings({ window: { ...settings.window, onLaunch: v } })}
-            name="on-launch"
-            options={[
-              { value: 'nothing', label: 'Do nothing', hint: 'Orbit stays where it is.' },
-              { value: 'minimize', label: 'Minimize', hint: 'Out of the way, still on the taskbar.' },
-              { value: 'tray', label: 'Minimize to tray', hint: 'Off the screen and off the taskbar. Left click the tray icon to bring it back.' },
-              { value: 'close', label: 'Close Orbit completely', hint: 'Orbit quits. Playtime is NOT tracked while it is closed, and the game becomes something you started yourself.' },
-            ]}
-          />
-          {settings.window.onLaunch === 'close' && (
-            <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
-              With this on, Orbit writes down nothing about how long you play: it is not running to see the game end.
-              You can still say how long you played, by hand, afterwards.
-            </p>
-          )}
-        </div>
+        <Setting
+          label="When a game starts"
+          value={settings.window.onLaunch}
+          onChange={(v) => setSettings({ window: { ...settings.window, onLaunch: v } })}
+          options={[
+            { value: 'nothing', label: 'Do nothing', hint: 'Orbit stays where it is.' },
+            { value: 'minimize', label: 'Minimize', hint: 'Out of the way, still on the taskbar.' },
+            {
+              value: 'tray',
+              label: 'Minimize to tray',
+              hint: 'Off the screen and off the taskbar. Left click the tray icon to bring it back.',
+            },
+            {
+              value: 'close',
+              label: 'Close Orbit completely',
+              hint: 'Orbit quits, and playtime is NOT tracked while it is closed. It is written down up to the moment it quits.',
+            },
+          ]}
+        />
+        {settings.window.onLaunch === 'close' && (
+          <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+            With this on, Orbit writes down nothing about how long you play: it is not running to see the game end. You
+            can still say how long you played, by hand, afterwards.
+          </p>
+        )}
 
-        <div className="space-y-2 pt-2">
-          <p className="text-sm font-medium">When the game closes</p>
-          <Choice
-            value={settings.window.onClose}
-            onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
-            name="on-close"
-            options={[
-              { value: 'nothing', label: 'Do nothing', hint: 'Whatever Orbit was doing, it carries on doing.' },
-              { value: 'show', label: 'Bring Orbit back', hint: 'Minimized, hidden or behind the game, it comes to the front when the session ends.' },
-              { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
-            ]}
-          />
-        </div>
+        <Setting
+          label="When the game closes"
+          value={settings.window.onClose}
+          onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
+          options={[
+            { value: 'nothing', label: 'Do nothing', hint: 'Whatever Orbit was doing, it carries on doing.' },
+            {
+              value: 'show',
+              label: 'Bring Orbit back',
+              hint: 'Minimized, hidden or behind the game, it comes to the front when the session ends.',
+            },
+            { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
+          ]}
+        />
       </section>
 
       <section className="space-y-3">
@@ -277,22 +283,18 @@ export function SettingsView({
 
       <section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
-          <Wand2 className="size-4 text-accent" />
+          <Ghost className="size-4 text-accent" />
           Other tools
         </h2>
-        <p className="text-sm text-muted">
-          Programs made alongside Orbit. They install separately and Orbit only opens the page for them.
-        </p>
+        <p className="text-sm text-muted">Programs made alongside Orbit.</p>
         <button
           onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
           className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
         >
-          <Wand2 className="mt-0.5 size-5 shrink-0 text-accent" />
+          <Ghost className="mt-0.5 size-5 shrink-0 text-accent" />
           <span>
             <span className="block text-sm font-semibold">Ghost Hunter Pro</span>
-            <span className="block text-xs text-muted">
-              Find and clean out game save files and leftover data. Opens on GitHub.
-            </span>
+            <span className="block text-xs text-muted">Find and clean out game save files and leftover data.</span>
           </span>
         </button>
       </section>
@@ -349,12 +351,6 @@ export function SettingsView({
           >
             <GitBranch className="size-4" />
             Orbit on GitHub
-          </button>
-          <button
-            onClick={() => void openExternal('https://github.com/MarchTheDev')}
-            className="text-xs hover:text-fg hover:underline"
-          >
-            Everything else TheMarch88 has made
           </button>
         </div>
       </footer>
