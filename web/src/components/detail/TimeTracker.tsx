@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 import type { Game } from '../../types';
 import { fmtClock, parseDuration } from '../../utils/format';
+import { cn } from '../../utils/cn';
 import { inputCls } from '../ui/Modal';
+import { btnGradient } from '../ui/buttons';
 
 interface Props {
   game: Game;
@@ -90,7 +92,7 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
             />
             <button
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-white disabled:opacity-60"
+              className={cn('flex items-center gap-1.5 rounded-lg px-3 text-sm', btnGradient)}
             >
               <Check className="size-4" />
               {saving ? 'Saving' : 'Save'}

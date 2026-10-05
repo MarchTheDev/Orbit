@@ -260,6 +260,7 @@ export function logManualSession(
 export function libraryStats(): Promise<Stats> {
   return call('library_stats', {}, async () => ({
     totalSecs: SAMPLE_GAMES.reduce((s, g) => s + g.playSecs, 0),
+    sessionSecs: SAMPLE_GAMES.reduce((s, g) => s + g.playSecs, 0),
     trackedGames: SAMPLE_GAMES.filter((g) => g.playSecs > 0).length,
     totalGames: SAMPLE_GAMES.length,
     sessionCount: 0,

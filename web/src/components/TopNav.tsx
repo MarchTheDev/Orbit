@@ -55,7 +55,10 @@ export function TopNav({
   const tabs = orderedTabs(order);
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1400px] items-center gap-5 px-6 py-3">
+      {/* The bar is the one thing that spans the whole window rather than sitting
+          in a column: on a wide screen the logo belongs at the left edge and the
+          settings button at the right, not both of them a hand's width in. */}
+      <div className="flex w-full items-center gap-5 px-6 py-3">
         <button
           onClick={() => setPage('library')}
           className="flex items-center gap-2.5"

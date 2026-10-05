@@ -96,10 +96,7 @@ export function HltbCard({
             return (
               <div key={r.label} className={isGoal ? 'rounded-lg bg-bg/40 p-2 -mx-2' : ''}>
                 <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
-                  <span className={isGoal ? 'font-medium text-fg' : 'text-muted'}>
-                    {r.label}
-                    {isGoal && <span className="ml-1.5 text-[10px] text-accent">next</span>}
-                  </span>
+                  <span className={isGoal ? 'font-medium text-fg' : 'text-muted'}>{r.label}</span>
                   <span className="flex items-baseline gap-2">
                     <span className="font-mono font-semibold">{r.hours}h</span>
                     <span className="w-10 text-right font-mono text-[10px]" style={{ color: g.colour }} title={g.word}>

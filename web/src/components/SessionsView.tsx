@@ -90,15 +90,22 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
     <div className="mx-6 mt-5 space-y-4">
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <Stat label="Games tracked" value={String(stats.trackedGames)} hint={`of ${stats.totalGames} in the library`} />
+          <Stat
+            label="Games tracked"
+            value={String(stats.trackedGames)}
+            hint={`of ${stats.totalGames} in the library`}
+          />
           <Stat label="Sessions" value={String(stats.sessionCount)} />
           <Stat
             label="Longest session"
             value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '-'}
           />
+          {/* From the sessions alone. The library's own total includes time
+              typed in by hand, which is not a session and was dragging this
+              number away from anything anybody had actually played. */}
           <Stat
             label="Average session"
-            value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.totalSecs / stats.sessionCount)) : '-'}
+            value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.sessionSecs / stats.sessionCount)) : '-'}
           />
           <Stat label="First played" value={stats.firstPlay ? fmtDate(new Date(stats.firstPlay * 1000).toISOString()) : '-'} />
         </div>

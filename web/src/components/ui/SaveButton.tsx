@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { cn } from '../../utils/cn';
+import { btnGradient } from './buttons';
 
 /**
  * The button that keeps a page of edits.
@@ -43,13 +44,14 @@ export function SaveButton({
       onClick={() => void run()}
       disabled={state === 'busy'}
       className={cn(
-        'group relative flex items-center gap-2 overflow-hidden rounded-xl px-4 py-2 text-sm font-semibold text-white',
-        'bg-gradient-to-r from-accent to-accent2 shadow-[0_6px_18px_-6px_var(--c-accent)]',
-        'transition-all duration-150 ease-out',
-        // Pressed: the button sinks into the panel and the glow goes with it.
-        'hover:brightness-110 active:translate-y-[1px] active:scale-[0.98] active:shadow-[0_2px_8px_-4px_var(--c-accent)]',
+        'group relative flex items-center gap-2 overflow-hidden rounded-xl px-4 py-2 text-sm',
+        // The same gradient as every other button that does something, plus the
+        // extra press this one has earned: it sinks into the panel on the way
+        // down and the glow goes with it.
+        btnGradient,
+        'active:scale-[0.98] active:shadow-[0_2px_8px_-4px_var(--c-accent)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
-        state === 'done' && 'from-emerald-500 to-emerald-400 shadow-[0_6px_18px_-6px_rgb(16_185_129)]',
+        state === 'done' && 'from-emerald-500 to-emerald-400 shadow-[0_6px_18px_-6px_rgb(16_185_129)] hover:brightness-100',
         state === 'busy' && 'cursor-wait opacity-90',
         className,
       )}

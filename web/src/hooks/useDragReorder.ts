@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
+import { slotAt } from '../utils/reorder';
 
 /** How far the pointer travels before a press counts as a drag. */
 const THRESHOLD = 6;
@@ -17,7 +19,33 @@ const THRESHOLD = 6;
  */
 export function useDragReorder(
   onReorder?: (fromId: string, toId: string, after: boolean) => void,
+  /**
+   * Set for a plain vertical list, and the list reorders itself by where the
+   * pointer is rather than by what happens to be under it.
+   *
+   * `elementFromPoint` is exact, which is the wrong thing for a list of one-line
+   * rows: releasing in the few pixels of a gap, or just past the last row, finds
+   * nothing at all and the drag is thrown away. Give the list's own element and
+   * the nearest slot is worked out from the pointer's height, so a drag that
+   * reaches a row always means something.
+   */
+  options?: {
+    container?: RefObject<HTMLElement | null>;
+    /**
+     * Allow a drag to start on a button.
+     *
+     * Off by default, because a card with a Play button in it has to keep that
+     * button pressable. On for a row that is *itself* a button, which is how the
+     * Journal's game list is built: there, refusing the press would mean the row
+     * could never be picked up at all. A press that does not move is still a
+     * plain click, because the click is only swallowed once something was
+     * actually dragged.
+     */
+    fromButtons?: boolean;
+  },
 ) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
@@ -36,16 +64,7 @@ export function useDragReorder(
         setDragging(held.id);
         document.body.style.userSelect = 'none';
       }
-      const under = document.elementFromPoint(e.clientX, e.clientY);
-      const element = under?.closest('[data-orbit-drop]') ?? null;
-      const id = element?.getAttribute('data-orbit-drop') ?? null;
-      // Which half of the row or card the pointer is in decides whether the
-      // dragged thing lands before it or after it. Without that, dragging a
-      // card downwards only ever moved it one place and refused to go further,
-      // because it was always placed before the card it was dropped on.
-      const rect = element?.getBoundingClientRect();
-      const after = rect ? e.clientY > rect.top + rect.height / 2 : false;
-      const next = id && id !== held.id ? { id, after } : null;
+      const next = slotUnder(e.clientX, e.clientY, held.id);
       if (next?.id !== overRef.current?.id || next?.after !== overRef.current?.after) {
         overRef.current = next;
         setOver(next?.id ?? null);
@@ -71,6 +90,43 @@ export function useDragReorder(
       overRef.current = null;
       setDragging(null);
       setOver(null);
+    };
+
+    /**
+     * Which row the pointer is next to, in a vertical list.
+     *
+     * The rows are walked in the order they are drawn and the pointer's height
+     * is compared with the middle of each: everything above the pointer is
+     * passed, and the slot is the one after the last of those. Above the first
+     * row is the top of the list, below the last row is the bottom of it, and
+     * the gap between two rows belongs to whichever one the pointer is nearer,
+     * so no pixel in the list is a dead zone.
+     */
+    const slotUnder = (x: number, y: number, heldId: string): { id: string; after: boolean } | null => {
+      const container = optionsRef.current?.container?.current ?? null;
+      if (!container) {
+        // Not a list: what is under the pointer is the answer, and which half of
+        // it the pointer is in decides before or after. Without that, dragging a
+        // card downwards only ever moved it one place, because it was always
+        // placed before the card it was dropped on.
+        const under = document.elementFromPoint(x, y);
+        const element = under?.closest('[data-orbit-drop]') ?? null;
+        const id = element?.getAttribute('data-orbit-drop') ?? null;
+        if (!id || id === heldId) return null;
+        const rect = element?.getBoundingClientRect();
+        return { id, after: rect ? y > rect.top + rect.height / 2 : false };
+      }
+      const rows = [...container.querySelectorAll<HTMLElement>('[data-orbit-drop]')].filter(
+        (el) => el.getAttribute('data-orbit-drop') !== heldId,
+      );
+      if (rows.length === 0) return null;
+      return slotAt(
+        rows.map((row) => {
+          const rect = row.getBoundingClientRect();
+          return { id: row.getAttribute('data-orbit-drop')!, top: rect.top, height: rect.height };
+        }),
+        y,
+      );
     };
 
     const cancel = (e: KeyboardEvent) => {
@@ -101,10 +157,11 @@ export function useDragReorder(
       onReorder
         ? {
             'data-orbit-drop': id,
-            onPointerDown: (e: React.PointerEvent) => {
+            onPointerDown: (e: ReactPointerEvent) => {
               if (e.button !== 0) return;
               // A button inside the card is being pressed, not the card.
-              if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+              const interactive = (e.target as HTMLElement).closest('button, a, input, select, textarea');
+              if (interactive && !optionsRef.current?.fromButtons) return;
               press.current = { id, x: e.clientX, y: e.clientY, live: false };
             },
           }

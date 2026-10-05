@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, Eye, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, GameLog } from '../../types';
 import { addGameLog, deleteGameLog, listGameLogs, reorderGameLogs, updateGameLog } from '../../services/native';
 import { useDragReorder } from '../../hooks/useDragReorder';
 import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
 import { Select } from '../ui/Select';
+import { Markdown } from '../ui/Markdown';
+import { btnGradient } from '../ui/buttons';
+import { moveInOrder } from '../../utils/reorder';
 import { cn } from '../../utils/cn';
 
 /** A row being written or corrected. */
@@ -72,6 +75,20 @@ export function GameLogView({
   const gameTitle = game.title;
   const [rows, setRows] = useState<GameLog[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
+  /**
+   * Whether the notes are being written or read.
+   *
+   * Read first when there is something to read, because that is what the page is
+   * for; write first when there is not, because otherwise there is nothing to
+   * look at.
+   */
+  const [editingNotes, setEditingNotes] = useState(false);
+
+  // Writing is what you want when there is nothing written; reading is what you
+  // want when there is. Switching games in the Journal reuses this component, so
+  // the choice is made again for each game.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setEditingNotes(game.notes.trim() === ''), [game.id]);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order>('mine');
 
@@ -129,10 +146,12 @@ export function GameLogView({
    * elsewhere is not swallowed.
    */
   const move = (fromId: number, toId: number, after: boolean) => {
-    const ids = rows.map((r) => r.id).filter((id) => id !== fromId);
-    const found = ids.indexOf(toId);
-    const at = found === -1 ? ids.length : found + (after ? 1 : 0);
-    ids.splice(at, 0, fromId);
+    const ids = moveInOrder(
+      rows.map((r) => String(r.id)),
+      String(fromId),
+      String(toId),
+      after,
+    ).map(Number);
     const byId = new Map(rows.map((r) => [r.id, r]));
     setRows(ids.map((id) => byId.get(id)!).filter(Boolean));
     void reorderGameLogs(gameId, ids).catch(() => load());
@@ -234,7 +253,7 @@ export function GameLogView({
           <div className="flex gap-2">
             <button
               onClick={() => void save()}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+              className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs', btnGradient)}
             >
               <Check className="size-3.5" />
               Save entry
@@ -341,18 +360,53 @@ export function GameLogView({
       )}
 
       {/* The game's own notes, underneath the entries: what the player wants to
-          remember about playing it, as opposed to what happened when. */}
+          remember about playing it, as opposed to what happened when. They are
+          shown as written, which means markdown: a list is a list and a heading
+          is a heading, without anybody having to learn a syntax to type one. */}
       {onNotes && (
-        <label className="mt-5 block border-t border-line pt-4">
-          <span className="text-[11px] uppercase tracking-widest text-muted">Notes on {gameTitle}</span>
-          <textarea
-            value={game.notes}
-            onChange={(e) => onNotes(e.target.value)}
-            rows={4}
-            placeholder="Builds, quest reminders, codes, what you were in the middle of…"
-            className="mt-1 w-full resize-y rounded-lg border border-line bg-bg/60 p-3 text-sm outline-none focus:border-accent"
-          />
-        </label>
+        <div className="mt-5 border-t border-line pt-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-widest text-muted">Notes on {gameTitle}</span>
+            <span className="text-[11px] text-muted/70">markdown: **bold**, - lists, # headings</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => setEditingNotes((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent"
+            >
+              {editingNotes ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+              {editingNotes ? 'Read' : 'Write'}
+            </button>
+          </div>
+
+          {editingNotes ? (
+            <div className="mt-1.5 grid gap-2 lg:grid-cols-2">
+              <textarea
+                value={game.notes}
+                onChange={(e) => onNotes(e.target.value)}
+                rows={8}
+                placeholder="Builds, quest reminders, codes, what you were in the middle of…"
+                className="w-full resize-y rounded-lg border border-line bg-bg/60 p-3 text-sm outline-none focus:border-accent"
+              />
+              {/* Written on the left, read on the right: the point of markdown
+                  is what it looks like, and a syntax nobody can see is a
+                  syntax nobody uses. */}
+              <div className="min-h-[6rem] overflow-y-auto rounded-lg border border-dashed border-line bg-bg/40 p-3">
+                {game.notes.trim() === '' ? (
+                  <p className="text-xs text-muted">What you type appears here as it will be read.</p>
+                ) : (
+                  <Markdown text={game.notes} />
+                )}
+              </div>
+            </div>
+          ) : game.notes.trim() === '' ? (
+            <p className="mt-1.5 text-xs text-muted">Nothing written yet. Press Write to start.</p>
+          ) : (
+            <div className="mt-1.5 rounded-lg bg-bg/40 p-3">
+              <Markdown text={game.notes} />
+            </div>
+          )}
+        </div>
       )}
     </section>
   );

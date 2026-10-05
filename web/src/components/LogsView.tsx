@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NotebookPen } from 'lucide-react';
 import type { Game, GameLog } from '../types';
 import { countLogs, listAllLogs } from '../services/native';
@@ -6,6 +6,8 @@ import { fmtClock } from '../utils/format';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
+import { useDragReorder } from '../hooks/useDragReorder';
+import { moveInOrder } from '../utils/reorder';
 
 /**
  * The logs: every game's entries, in one place.
@@ -18,7 +20,19 @@ import { SearchField } from './ui/SearchField';
  * The counts come from one read of every entry rather than a request per game,
  * which is why `list_all_logs` exists at all.
  */
-export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: string, patch: Partial<Game>) => void }) {
+export function LogsView({
+  games,
+  onUpdate,
+  order = [],
+  onOrder,
+}: {
+  games: Game[];
+  onUpdate: (id: string, patch: Partial<Game>) => void;
+  /** The player's own order for the game list, as ids. */
+  order?: string[];
+  /** Called with the whole list once one has been dragged somewhere. */
+  onOrder?: (ids: string[]) => void;
+}) {
   const [logs, setLogs] = useState<GameLog[]>([]);
   /** How many there are in total, which can be more than were read. */
   const [total, setTotal] = useState(0);
@@ -57,17 +71,46 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
     return map;
   }, [logs]);
 
+  /**
+   * The games down the left, in the player's own order when there is one.
+   *
+   * Without one, the games with the most written about them come first, which is
+   * the right guess: whatever is being worked on is usually what has the most
+   * entries. Which game is being *read* is a different question though, and only
+   * the person doing the reading knows the answer, so the list can be dragged
+   * into shape and that order is kept.
+   */
   const ordered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return games
-      .filter((g) => !q || g.title.toLowerCase().includes(q))
-      .sort((a, b) => {
+    const found = games.filter((g) => !q || g.title.toLowerCase().includes(q));
+    if (order.length === 0) {
+      return [...found].sort((a, b) => {
         const ac = perGame.get(a.id)?.count ?? 0;
         const bc = perGame.get(b.id)?.count ?? 0;
         if (ac !== bc) return bc - ac;
         return a.title.localeCompare(b.title);
       });
-  }, [games, perGame, query]);
+    }
+    return [...found].sort((a, b) => {
+      const ai = order.indexOf(a.id);
+      const bi = order.indexOf(b.id);
+      // A game that was never dragged waits at the end rather than landing in
+      // the middle of an arrangement somebody made.
+      if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [games, perGame, query, order]);
+
+  const list = useRef<HTMLUListElement>(null);
+  const { bind, dragging, over } = useDragReorder(
+    onOrder
+      ? (fromId, toId, after) => onOrder(moveInOrder(ordered.map((g) => g.id), fromId, toId, after))
+      : undefined,
+    // The whole row is a button, so the press has to be allowed to start here.
+    { container: list, fromButtons: true },
+  );
 
   const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => perGame.has(g.id)) ?? ordered[0] ?? null;
   const totalSecs = logs.reduce((s, l) => s + l.secs, 0);
@@ -98,8 +141,14 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
       <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
         <aside className="space-y-3">
           <SearchField value={query} onChange={setQuery} placeholder="Find a game" className="w-full" inputClassName="w-full" />
+          {onOrder && query.trim() === '' && (
+            <p className="px-1 text-[11px] text-muted">Press a game and move it to put the ones you write about most first.</p>
+          )}
 
-          <ul className="space-y-1 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
+          <ul
+            ref={list}
+            className="space-y-1 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1"
+          >
             {ordered.map((g) => {
               const counts = perGame.get(g.id);
               const active = selected?.id === g.id;
@@ -107,8 +156,11 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
                 <li key={g.id}>
                   <button
                     onClick={() => setSelectedId(g.id)}
+                    {...bind(g.id)}
                     className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
                       active ? 'border-accent bg-accent/10' : 'border-line hover:border-accent/60'
+                    } ${dragging === g.id ? 'opacity-50' : ''} ${
+                      over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
                     }`}
                   >
                     <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />

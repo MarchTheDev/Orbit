@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { btnGradient } from './buttons';
 
 const SIZES = {
   sm: 'max-w-sm',
@@ -55,7 +56,7 @@ export function Modal({
 
 export const inputCls = 'w-full rounded-lg border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent';
 export const labelCls = 'mb-1 block text-xs uppercase tracking-widest text-muted';
-export const btnPrimary = 'rounded-lg bg-gradient-to-r from-accent to-accent2 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/20 hover:brightness-110 disabled:opacity-50';
+export const btnPrimary = `${btnGradient} rounded-lg px-4 py-2 text-sm`;
 export const btnGhost = 'rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-40';
 /** A Browse button: looks like part of the field it fills. */
 export const btnBrowse = 'shrink-0 rounded-lg border border-line bg-panel px-3 py-2 text-sm text-muted hover:border-accent hover:text-accent';

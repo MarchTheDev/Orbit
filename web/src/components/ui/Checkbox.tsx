@@ -22,18 +22,18 @@ export function CheckboxBox({
   title?: string;
 }) {
   return (
-    <span className="relative flex size-4 shrink-0 items-center justify-center">
+    <span className="relative flex size-3.5 shrink-0 items-center justify-center">
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         title={title}
-        className="peer size-4 cursor-pointer appearance-none rounded-[5px] border border-line bg-panel transition checked:border-accent checked:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+        className="peer size-3.5 cursor-pointer appearance-none rounded-[4px] border border-line bg-panel transition checked:border-accent checked:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
       />
       <Check
-        className="pointer-events-none absolute size-3 text-white opacity-0 transition peer-checked:opacity-100"
-        strokeWidth={3.5}
+        className="pointer-events-none absolute size-2.5 text-white opacity-0 transition peer-checked:opacity-100"
+        strokeWidth={3}
         aria-hidden
       />
     </span>
@@ -58,7 +58,7 @@ export function Checkbox({
   return (
     <label
       className={cn(
-        'group flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-panel2/50 p-3 text-sm transition hover:border-accent/50',
+        'group flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-panel2/50 p-2.5 text-[13px] transition hover:border-accent/50',
         className,
       )}
     >
@@ -67,7 +67,7 @@ export function Checkbox({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block">{label}</span>
-        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+        {hint && <span className="mt-0.5 block text-[11px] leading-snug text-muted">{hint}</span>}
       </span>
     </label>
   );

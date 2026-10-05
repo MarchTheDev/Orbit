@@ -18,10 +18,13 @@ import type { Game, GameStatus, GameSuggestion } from '../types';
 import { fetchMetadata, searchGames } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtDate, fmtMinutes, hashHue, uid } from '../utils/format';
+import { moveInOrder } from '../utils/reorder';
+import { onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { btnGhost, inputCls } from './ui/Modal';
+import { btnGradient } from './ui/buttons';
 
 /**
  * How long the main story takes, for the two orders that read by length.
@@ -221,10 +224,12 @@ export function BacklogView({
    * game for instance, keeps its own order after them.
    */
   const move = (fromId: string, toId: string, after: boolean) => {
-    const ids = backlog.map((g) => g.id).filter((id) => id !== fromId);
-    const found = ids.indexOf(toId);
-    const at = found === -1 ? ids.length : found + (after ? 1 : 0);
-    ids.splice(at, 0, fromId);
+    const ids = moveInOrder(
+      backlog.map((g) => g.id),
+      fromId,
+      toId,
+      after,
+    );
     setMyOrder([...ids, ...myOrder.filter((id) => !ids.includes(id))]);
   };
 
@@ -341,7 +346,7 @@ export function BacklogView({
               placeholder="A game you plan to play, owned or not"
               spellCheck={false}
             />
-            <button className={`${btnGhost} flex items-center gap-2`} disabled={busy || !planning.trim()}>
+            <button className={`${btnGradient} flex items-center gap-2 rounded-lg px-4 py-2 text-sm`} disabled={busy || !planning.trim()}>
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}
               {busy ? 'Adding…' : 'Add to backlog'}
             </button>
@@ -541,6 +546,13 @@ function Section({
                   ) : (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
                       <span>{fmtMinutes(g.playSecs / 60)} played</span>
+                      {/* Owned, but nowhere on the machine: it belongs to this
+                          page until it has a folder, not to the library. */}
+                      {!onDisk(g) && (
+                        <span className="rounded-full border border-dashed border-line px-1.5 text-[10px]">
+                          no folder yet
+                        </span>
+                      )}
                       {g.lastPlayed && <span>· {fmtDate(g.lastPlayed)}</span>}
                       {main > 0 && (
                         <span className="flex items-center gap-1" title={`HowLongToBeat: ${main}h for the main story`}>

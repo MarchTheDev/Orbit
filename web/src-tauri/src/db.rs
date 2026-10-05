@@ -151,6 +151,13 @@ pub struct GameLogRow {
 pub struct Stats {
     /// Sum of every game's *effective* playtime, so a manual total counts.
     pub total_secs: i64,
+    /// The sessions on their own, without any time typed in by hand.
+    pub session_secs: i64,
+    /// Games with at least one session, counted from the sessions themselves.
+    ///
+    /// Reading this off the library's playtime instead meant deleting every
+    /// session of a game left it counted as tracked, because a manual total, or
+    /// a row that had not been recomputed, still added up to something.
     pub tracked_games: i64,
     pub total_games: i64,
     pub session_count: i64,
@@ -448,10 +455,13 @@ impl Db {
                 let effective = total_secs.saturating_add(manual_play_secs);
 
                 Ok(GameRow {
+                    // No folder means no drive. Guessing C: listed every game
+                    // that had not been installed anywhere under the system
+                    // drive, which is a lie about where the player's files are.
                     drive: install_dir
                         .as_deref()
                         .map(|p| crate::storage::drive_of(Path::new(p)))
-                        .unwrap_or_else(|| "C:".to_string()),
+                        .unwrap_or_default(),
                     id: r.get(0)?,
                     title: r.get(1)?,
                     launch: parse(launch.as_deref(), r#"{"kind":"none"}"#),
@@ -1021,11 +1031,19 @@ impl Db {
     pub fn stats(&self) -> Result<Stats, String> {
         let games = self.list_games()?;
         let conn = self.lock()?;
-        let (session_count, longest, first_play): (i64, i64, Option<i64>) = conn
+        let (session_count, longest, first_play, session_secs, tracked): (
+            i64,
+            i64,
+            Option<i64>,
+            i64,
+            i64,
+        ) = conn
             .query_row(
-                "SELECT COUNT(*), COALESCE(MAX(duration_secs), 0), MIN(started_at) FROM sessions",
+                "SELECT COUNT(*), COALESCE(MAX(duration_secs), 0), MIN(started_at), \
+                        COALESCE(SUM(duration_secs), 0), COUNT(DISTINCT game_id) \
+                   FROM sessions",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .map_err(|e| format!("Could not total up the sessions: {e}"))?;
         let last_play: Option<i64> = conn
@@ -1038,7 +1056,11 @@ impl Db {
 
         Ok(Stats {
             total_secs: games.iter().map(|g| g.play_secs).sum(),
-            tracked_games: games.iter().filter(|g| g.play_secs > 0).count() as i64,
+            session_secs,
+            // A game with sessions but no time left in them (a session that was
+            // deleted, a stray zero) is still counted: the count answers "which
+            // games have been played", not "which add up to more than zero".
+            tracked_games: tracked,
             total_games: games.len() as i64,
             session_count,
             longest_secs: longest,

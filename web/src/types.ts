@@ -210,7 +210,23 @@ export interface ActiveSession {
 }
 
 export interface Stats {
+  /** Every second in the library: sessions plus any time typed in by hand. */
   totalSecs: number;
+  /**
+   * The seconds the sessions recorded, on their own.
+   *
+   * Kept apart from `totalSecs` because the Sessions page is about sessions: a
+   * game whose time was typed in by hand is tracked, but it is not a session,
+   * and averaging hand-written time into "average session" was wrong.
+   */
+  sessionSecs: number;
+  /**
+   * How many games have been played, counted from the sessions themselves.
+   *
+   * Deleting the last session of a game has to stop it counting, which is what
+   * made this read off the session table rather than off the library's cached
+   * playtime.
+   */
   trackedGames: number;
   totalGames: number;
   sessionCount: number;
@@ -247,6 +263,14 @@ export interface Settings {
   /** How big the covers and rows are drawn, as a percentage. */
   coverScale: number;
   /**
+   * Where the tint behind a hovered cover comes from.
+   *
+   * On by default: the picture's own colours, so the tile reads as one thing.
+   * Turned off, the tile is tinted with Orbit's theme colours instead, so the
+   * whole library reads as one thing.
+   */
+  coverTint: boolean;
+  /**
    * The player's own order for the tabs along the top.
    *
    * The shape of the app is the same for everybody, but the order somebody
@@ -256,6 +280,14 @@ export interface Settings {
    * rather than hiding it.
    */
   tabOrder?: Page[];
+  /**
+   * The player's own order for the games in the Journal, as game ids.
+   *
+   * The Journal has its own question from the library's: which game am I in the
+   * middle of writing about. Games that are not in the list sit at the end, in
+   * the order the counts would have put them.
+   */
+  logOrder?: string[];
   /**
    * The player's own order for the backlog, as game ids.
    *

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Database,
   Download,
@@ -26,8 +26,10 @@ import { cn } from '../utils/cn';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
 import { Select } from './ui/Select';
+import { btnGradient } from './ui/buttons';
 import { orderedTabs } from './TopNav';
 import { useDragReorder } from '../hooks/useDragReorder';
+import { moveInOrder } from '../utils/reorder';
 
 /**
  * One setting, as a dropdown with the meaning of the choice underneath.
@@ -73,16 +75,17 @@ function Setting<T extends string>({
  * visible here rather than only up top.
  */
 function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[]) => void }) {
-  const { bind, dragging, over, active } = useDragReorder((fromId, toId, after) => {
-    const next = order.filter((id) => id !== fromId);
-    const at = next.indexOf(toId as Page) + (after ? 1 : 0);
-    next.splice(at, 0, fromId as Page);
-    onChange(next);
-  });
+  const list = useRef<HTMLDivElement>(null);
+  const { bind, dragging, over, active } = useDragReorder(
+    (fromId, toId, after) => onChange(moveInOrder(order, fromId, toId, after) as Page[]),
+    // A list, so the drop is decided by where the pointer is rather than by
+    // which few pixels of a one-line row it happened to be over.
+    { container: list },
+  );
   const byId = new Map(orderedTabs([]).map((t) => [t.id, t]));
 
   return (
-    <div className={cn('space-y-1', active && 'cursor-grabbing')}>
+    <div ref={list} className={cn('space-y-1', active && 'cursor-grabbing')}>
       {order.map((id) => {
         const tab = byId.get(id);
         if (!tab) return null;
@@ -173,6 +176,17 @@ export function SettingsView({
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
             </button>
           ))}
+        </div>
+
+        {/* Part of the theme rather than a setting of its own: it decides what
+            colour a cover is tinted with when the pointer is over it. */}
+        <div className="mt-3">
+          <Checkbox
+            checked={settings.coverTint !== false}
+            onChange={(v) => setSettings({ coverTint: v })}
+            label="Tint a cover's hover with its own colours"
+            hint="On: the glow behind the Play button is taken from the artwork, so each tile matches the game. Off: it uses Orbit's theme colours instead, so every tile matches the app."
+          />
         </div>
       </section>
 
@@ -325,7 +339,7 @@ export function SettingsView({
               Browse…
             </button>
           )}
-          <button className="rounded-lg bg-accent px-4 text-sm text-white">Add folder</button>
+          <button className={cn(btnGradient, 'rounded-lg px-4 py-2 text-sm')}>Add folder</button>
         </form>
         {drives.length > 0 && (
           <div className="flex flex-wrap gap-2">

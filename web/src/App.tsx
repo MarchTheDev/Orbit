@@ -25,6 +25,8 @@ import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { SettingsView } from './components/SettingsView';
 import { fmtClock } from './utils/format';
+import { moveInOrder } from './utils/reorder';
+import { onDisk } from './utils/library';
 import { onToast } from './utils/toast';
 
 /** A short message in the corner: what just happened, and whether it worked. */
@@ -278,8 +280,10 @@ export default function App() {
     const list = played.filter((g) => {
       // A game that is only written down lives on the Backlog page: it is a plan,
       // not something in the library, and seeing it here as well would make it
-      // look installed.
-      if (g.planned) return false;
+      // look installed. The same goes for a game that is owned but not installed
+      // anywhere yet: marking one as owned in the Backlog keeps it a plan until
+      // it has a folder.
+      if (g.planned || !onDisk(g)) return false;
       if (q && !g.title.toLowerCase().includes(q)) return false;
       if (filter === 'favorites') return g.favorite;
       if (filter === 'unplayed') return g.sessionCount === 0;
@@ -315,12 +319,14 @@ export default function App() {
    */
   const reorder = useCallback(
     (fromId: string, toId: string, after: boolean) => {
-      const ids = visible.map((g) => g.id).filter((id) => id !== fromId);
-      const found = ids.indexOf(toId);
-      // Dropped on the lower half of a card, it goes below it: dragging
-      // downwards has to be able to overtake, not just nudge.
-      const at = found === -1 ? ids.length : found + (after ? 1 : 0);
-      ids.splice(at, 0, fromId);
+      // Dropped on the lower half of a card it goes below it, on the upper half
+      // above: dragging downwards has to be able to overtake, not just nudge.
+      const ids = moveInOrder(
+        visible.map((g) => g.id),
+        fromId,
+        toId,
+        after,
+      );
       // Anything outside the current filter keeps whatever position it had.
       setSettings({ sortOrder: [...ids, ...order.filter((id) => !ids.includes(id))] });
     },
@@ -438,10 +444,18 @@ export default function App() {
         ) : page === 'sessions' ? (
           <SessionsView games={games} onChanged={() => void reload()} />
         ) : page === 'logs' ? (
-          <LogsView games={games} onUpdate={(id, patch) => updateGame(id, patch)} />
+          <LogsView
+            games={games}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            // The Journal is read for the game being written about, so it can be
+            // arranged in whatever order that reading wants.
+            order={settings.logOrder ?? []}
+            onOrder={(ids) => setSettings({ logOrder: ids })}
+          />
         ) : page === 'storage' ? (
           <StorageView
-            games={games}
+            // Storage is about files, so it counts only the games that have some.
+            games={games.filter(onDisk)}
             folders={settings.libraryFolders}
             setFolders={(libraryFolders) => setSettings({ libraryFolders })}
             onMove={setMoveId}
@@ -493,6 +507,7 @@ export default function App() {
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
+                  coverTint={settings.coverTint !== false}
                 />
               ) : (
                 <GameList
@@ -589,7 +604,6 @@ export default function App() {
           }}
           onPlay={() => void startGame(selected)}
           onStop={() => void stop()}
-          onMove={() => setMoveId(selected.id)}
           onRemove={() => {
             if (confirm(`Remove ${selected.title} from library? Its sessions go too.`)) {
               removeGame(selected.id);

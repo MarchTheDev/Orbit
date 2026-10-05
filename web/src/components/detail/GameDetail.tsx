@@ -2,9 +2,9 @@ import {
   Check,
   Clock,
   ExternalLink,
+  HardDrive,
   History,
   Info,
-  MoveRight,
   NotebookPen,
   Pencil,
   Play,
@@ -51,7 +51,6 @@ interface Props {
   onSetPlaytime: (totalSecs: number) => Promise<void>;
   onPlay: () => void;
   onStop: () => void;
-  onMove: () => void;
   onRemove: () => void;
   onClose: () => void;
 }
@@ -71,7 +70,6 @@ export function GameDetail({
   onSetPlaytime,
   onPlay,
   onStop,
-  onMove,
   onRemove,
   onClose,
 }: Props) {
@@ -462,29 +460,32 @@ export function GameDetail({
           </section>
 
           <section className="rounded-xl border border-line bg-panel2 p-4">
-            <h3 className="mb-2 text-sm font-semibold">Installation</h3>
-            {game.installDir ? (
-              <>
-                <p className="break-all font-mono text-xs text-muted">{game.installDir}</p>
-                {game.exePath && <p className="mt-1 break-all font-mono text-[11px] text-muted">{game.exePath}</p>}
-                <p className="mt-1 text-xs text-muted">
-                  {game.sizeBytes > 0 ? `${fmtBytes(game.sizeBytes)}` : 'Size unknown'} on drive <b className="text-fg">{game.drive || '-'}</b>
-                </p>
-              </>
-            ) : (
-              <p className="text-xs text-muted">
-                No folder recorded. Orbit can still time this game, but will not offer to move it.
-              </p>
-            )}
+            {/* Where the files are is a Storage question, and the paths that used
+                to be printed here were two lines of C:\\Program Files nobody
+                read. What the drawer is asked is how much room the game takes. */}
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <HardDrive className="size-4 text-accent" />
+              Size on drive
+            </h3>
+            <p className="text-sm">
+              {game.sizeBytes > 0 ? (
+                <b className="font-mono">{fmtBytes(game.sizeBytes)}</b>
+              ) : (
+                <span className="text-muted">Not measured yet</span>
+              )}
+              {game.drive && (
+                <>
+                  <span className="text-muted"> on </span>
+                  <b className="font-mono text-fg">{game.drive}</b>
+                </>
+              )}
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              {game.installDir
+                ? 'Storage can move this game to another drive, and measure it again.'
+                : 'Orbit has no folder for this game, so it can only time it.'}
+            </p>
             <div className="mt-3 flex gap-2">
-              <button
-                onClick={onMove}
-                disabled={!game.installDir}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-panel py-2 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <MoveRight className="size-4" />
-                Move to another folder
-              </button>
               <button
                 onClick={onRemove}
                 className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm text-rose-400 hover:border-rose-400"

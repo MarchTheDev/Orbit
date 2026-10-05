@@ -115,7 +115,7 @@ export function Toolbar({
 
         <button
           onClick={onAdd}
-          className="grid size-10 place-items-center rounded-full bg-gradient-to-br from-accent to-accent2 text-white shadow-[0_0_20px_var(--c-accent)] transition hover:scale-110"
+          className="grid size-10 place-items-center rounded-full bg-gradient-to-r from-accent to-accent2 text-white shadow-[0_0_20px_var(--c-accent)] transition hover:scale-110 active:scale-95"
           title="Add game"
           aria-label="Add game"
         >
