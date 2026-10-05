@@ -5,11 +5,13 @@ import {
   Info,
   MoveRight,
   NotebookPen,
+  Pencil,
   Play,
   RefreshCw,
   Square,
   Star,
   Trash2,
+  Trophy,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -24,6 +26,8 @@ import { HltbCard } from './HltbCard';
 import { LaunchEditor } from './LaunchEditor';
 import { SessionHistory } from './SessionHistory';
 import { GameLogView } from './GameLogView';
+import { AchievementsTab } from './AchievementsTab';
+import { GameEditTab } from './GameEditTab';
 import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
 
@@ -65,7 +69,7 @@ export function GameDetail({
   const [loadingHltb, setLoadingHltb] = useState(false);
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'log' | 'sessions'>('overview');
+  const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions' | 'edit'>('overview');
   const [logCount, setLogCount] = useState(0);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
   const [loggingSession, setLoggingSession] = useState(false);
@@ -158,6 +162,19 @@ export function GameDetail({
       <aside className="glass drawer-in fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl">
         <div className="relative h-44 shrink-0">
           <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
+          {/* The store's own backdrop sits over the cover art when there is one:
+              it is the picture the game's page is meant to be read against. */}
+          {game.meta?.backgroundUrl && (
+            <img
+              src={game.meta.backgroundUrl}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 size-full object-cover opacity-70"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-panel to-transparent" />
           <button
             onClick={onClose}
@@ -194,19 +211,26 @@ export function GameDetail({
           {(
             [
               ['overview', 'Overview', Info],
-              ['log', 'Journal', NotebookPen],
+              ['achievements', 'Achievements', Trophy],
+              ['log', 'Log', NotebookPen],
               ['sessions', 'Sessions', History],
+              ['edit', 'Edit', Pencil],
             ] as const
           ).map(([id, label, Icon]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
                 tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'
               }`}
             >
               <Icon className="size-3.5" />
               {label}
+              {id === 'achievements' && !!game.achievements?.length && (
+                <span className="text-[10px] text-muted">
+                  {game.achievements.filter((a) => a.unlocked).length}/{game.achievements.length}
+                </span>
+              )}
               {id === 'log' && logCount > 0 && <span className="text-[10px] text-muted">{logCount}</span>}
             </button>
           ))}
@@ -368,9 +392,13 @@ export function GameDetail({
             </>
           )}
 
+          {tab === 'achievements' && <AchievementsTab game={game} onUpdate={onUpdate} />}
+
           {tab === 'log' && (
             <GameLogView game={game} onChanged={refreshLogCount} onNotes={(notes) => onUpdate({ notes })} />
           )}
+
+          {tab === 'edit' && <GameEditTab game={game} onUpdate={onUpdate} />}
 
           {tab === 'sessions' && (
             <>

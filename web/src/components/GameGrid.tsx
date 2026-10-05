@@ -2,6 +2,7 @@ import { Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtMinutes } from '../utils/format';
 import { Cover } from './ui/Cover';
+import { useDragReorder } from '../hooks/useDragReorder';
 import { cn } from '../utils/cn';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
 }
 
 export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {
+  const { bind, dragging, over } = useDragReorder(onReorder);
+
   return (
     <div
       className="grid gap-6 p-6"
@@ -26,19 +29,14 @@ export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder
           key={g.id}
           onClick={() => onSelect(g.id)}
           onDoubleClick={() => onPlay(g)}
-          draggable={!!onReorder}
-          onDragStart={(e) => e.dataTransfer.setData('text/orbit-game', g.id)}
-          onDragOver={(e) => {
-            if (onReorder) e.preventDefault();
-          }}
-          onDrop={(e) => {
-            const from = e.dataTransfer.getData('text/orbit-game');
-            if (onReorder && from && from !== g.id) {
-              e.preventDefault();
-              onReorder(from, g.id);
-            }
-          }}
-          className={cn('group', onReorder ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer')}
+          {...bind(g.id)}
+          className={cn(
+            'group',
+            onReorder ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+            // The card the pointer is over while something is being moved.
+            over === g.id && 'ring-2 ring-accent ring-offset-2 ring-offset-bg',
+            dragging === g.id && 'opacity-60',
+          )}
         >
           <div
             className={cn(

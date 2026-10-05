@@ -30,13 +30,15 @@ export function Cover({
   const [localFailed, setLocalFailed] = useState(false);
   const [remoteFailed, setRemoteFailed] = useState(false);
   const [headerFailed, setHeaderFailed] = useState(false);
+  const [backdropFailed, setBackdropFailed] = useState(false);
 
   // A new game means a new cover to try, and a failed one must not stick.
   useEffect(() => {
     setLocalFailed(false);
     setRemoteFailed(false);
     setHeaderFailed(false);
-  }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl]);
+    setBackdropFailed(false);
+  }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl, game.meta?.backgroundUrl]);
 
   if (game.coverPath && !localFailed) {
     return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} onFail={() => setLocalFailed(true)} />;
@@ -48,6 +50,13 @@ export function Cover({
 
   if (game.meta?.headerUrl && !headerFailed) {
     return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} onFail={() => setHeaderFailed(true)} />;
+  }
+
+  // The wide backdrop is the last picture worth trying before initials: it is
+  // always there on a store page, and a letterboxed backdrop still reads as the
+  // game rather than as a coloured square.
+  if (game.meta?.backgroundUrl && !backdropFailed) {
+    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} onFail={() => setBackdropFailed(true)} />;
   }
 
   const initials = game.title
@@ -109,7 +118,13 @@ function Artwork({
       <img
         src={src}
         alt={alt}
-        onLoad={(e) => setWide(e.currentTarget.naturalWidth > e.currentTarget.naturalHeight)}
+        onLoad={(e) => {
+          const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+          // Filling a tall frame with a picture that is barely taller than it is
+          // wide cuts the sides off whatever the artwork actually shows, so
+          // anything squarer than a poster is fitted whole instead.
+          setWide(w > 0 && h > 0 && w / h > 0.72);
+        }}
         onError={onFail}
         className={cn('relative size-full', wide ? 'object-contain' : 'object-cover')}
       />

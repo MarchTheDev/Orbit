@@ -58,6 +58,14 @@ export const DEFAULT_SETTINGS: Settings = {
   steamOnLaunch: false,
   sortOrder: [],
   coverScale: 100,
+  backlogOrder: [],
+  window: {
+    // Nothing happens to the window unless the player asks for it, which is the
+    // only safe default: minimising or closing somebody's window on their behalf
+    // is not something to do uninvited.
+    onLaunch: 'nothing',
+    onClose: 'nothing',
+  },
   fetchMetadata: true,
   autoFetchMetadata: true,
 };

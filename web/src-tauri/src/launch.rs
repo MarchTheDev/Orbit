@@ -89,14 +89,19 @@ impl Sessions {
         match tracked.died_at {
             None => Some(true),
             Some(died) => {
-                // Inside the window, the process that died was a launcher
-                // handing off rather than the game itself, so the session keeps
-                // counting. Only once the window has passed does the session
-                // end.
+                // A process that dies inside the window was a bootstrapper, not
+                // the game. The real game is a grandchild Orbit has no handle
+                // for, so the session cannot end by itself: it stays open, and
+                // the player stops it when they are done. Reporting it as ended
+                // here would log two minutes for a four hour evening, and the
+                // time after that would never be counted at all.
                 if died.duration_since(tracked.started) < HANDOFF_WINDOW {
                     if !tracked.handed_off {
                         tracked.handed_off = true;
-                        log::info!("pid {pid} exited early; treating it as a launcher handing off");
+                        log::info!(
+                            "pid {pid} exited early; the game is running without Orbit watching it, \
+                             so this session ends when the player stops it"
+                        );
                     }
                     Some(true)
                 } else {
@@ -104,6 +109,16 @@ impl Sessions {
                 }
             }
         }
+    }
+
+    /// Whether this process was a bootstrapper that has already handed off.
+    ///
+    /// Nothing is left to watch in that case, so the poll loop can end; the
+    /// session stays open, which is what lets the evening's playtime be counted.
+    pub fn handed_off(&self, pid: u32) -> bool {
+        self.running
+            .get(&pid)
+            .is_some_and(|tracked| tracked.handed_off)
     }
 
     /// Forget a process the player has stopped tracking.

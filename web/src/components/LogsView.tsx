@@ -8,7 +8,7 @@ import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
 
 /**
- * The journal: every game's notes, in one place.
+ * The logs: every game's entries, in one place.
  *
  * The game's own drawer is fine for a glance, but a journal you write in a 460px
  * column is cramped the moment an entry is more than a line long. This is the
@@ -45,7 +45,7 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
 
   useEffect(() => load(), [load]);
 
-  /** Notes and time per game, worked out once per read. */
+  /** Entries and time per game, worked out once per read. */
   const perGame = useMemo(() => {
     const map = new Map<string, { count: number; secs: number }>();
     for (const log of logs) {
@@ -78,17 +78,17 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
             <NotebookPen className="size-6 text-accent" />
-            Journal
+            Logs
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Everything you have written down, game by game, next to the notes for each one. Orbit also writes the first
-            entry itself: the moment a game is played for the first time, a line saying so appears here.
+            Everything you have written down, game by game. Orbit also writes the first entry itself: the moment a game
+            is played for the first time, a line saying so appears here.
           </p>
         </div>
         <div className="text-right">
           <p className="font-mono text-lg font-semibold">{fmtClock(totalSecs)}</p>
           <p className="text-[11px] text-muted">
-            across {logs.length} {logs.length === 1 ? 'note' : 'notes'} in {perGame.size}{' '}
+            across {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {perGame.size}{' '}
             {perGame.size === 1 ? 'game' : 'games'}
             {total > logs.length && ` · the latest ${logs.length} of ${total}`}
           </p>
@@ -115,7 +115,7 @@ export function LogsView({ games, onUpdate }: { games: Game[]; onUpdate: (id: st
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{g.title}</span>
                       <span className="block text-[11px] text-muted">
-                        {counts ? `${counts.count} ${counts.count === 1 ? 'note' : 'notes'} · ${fmtClock(counts.secs)}` : 'no notes yet'}
+                        {counts ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'} · ${fmtClock(counts.secs)}` : 'nothing logged yet'}
                       </span>
                     </span>
                   </button>

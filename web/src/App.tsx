@@ -229,6 +229,10 @@ export default function App() {
   const visible = useMemo(() => {
     const q = query.toLowerCase();
     const list = games.filter((g) => {
+      // A game that is only written down lives on the Backlog page: it is a plan,
+      // not something in the library, and seeing it here as well would make it
+      // look installed.
+      if (g.planned) return false;
       if (q && !g.title.toLowerCase().includes(q)) return false;
       if (filter === 'favorites') return g.favorite;
       if (filter === 'unplayed') return g.sessionCount === 0;
@@ -369,6 +373,8 @@ export default function App() {
             onUpdate={(id, patch) => updateGame(id, patch)}
             onRemove={(id) => removeGame(id)}
             fetchMetadata={settings.fetchMetadata}
+            myOrder={settings.backlogOrder}
+            setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
         ) : page === 'sessions' ? (
           <SessionsView games={games} onChanged={() => void reload()} />

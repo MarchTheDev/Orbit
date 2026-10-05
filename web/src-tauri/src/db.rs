@@ -16,13 +16,16 @@ use serde_json::Value;
 /// 2, the metadata column is called `meta` rather than `igdb`, since Orbit no
 ///     longer talks to IGDB at all, and a game can list the programs it wants
 ///     started alongside it.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
 pub const ENDED_PROCESS: &str = "process exit";
 pub const ENDED_FAILED: &str = "failed";
 pub const ENDED_RECOVERED: &str = "recovered";
+/// The app was closed while a session was running, so the clock stopped with
+/// it. The time up to that moment is the player's and is kept.
+pub const ENDED_APP_CLOSED: &str = "app closed";
 
 /// Seconds since the Unix epoch, which is what every timestamp in here is.
 pub fn now() -> i64 {
@@ -73,6 +76,10 @@ pub struct GameRow {
     pub hltb: Option<Value>,
     /// Programs Orbit starts at the same time as the game.
     pub companions: Vec<Companion>,
+    /// Something the player means to play, which is not on this machine yet.
+    pub planned: bool,
+    /// Achievements, as last read, with the ones the player has ticked.
+    pub achievements: Vec<serde_json::Value>,
     pub notes: String,
     pub hue: i64,
     #[serde(rename = "addedAt")]
@@ -186,16 +193,29 @@ impl Db {
     /// Done on every open rather than only when migrating: an app that is
     /// killed mid-session comes back to a schema that is already current, and
     /// that session still needs closing.
+    /// Deal with sessions left open by a crash or a kill.
+    ///
+    /// A recent one is left alone on purpose: the game may well still be
+    /// running, and closing it here would throw away everything that has been
+    /// played since it started. It is shown as a session the player can stop,
+    /// which is where the time gets counted. Anything older than a day is
+    /// closed at its own start with no time at all, because crediting a whole
+    /// day of playtime for a game nobody was watching would be a lie.
     fn close_orphans(conn: &Connection) -> Result<(), String> {
-        conn.execute(
-            "UPDATE sessions
-                SET ended_at = started_at,
-                    duration_secs = 0,
-                    ended_by = ?1
-              WHERE ended_at IS NULL",
-            params![ENDED_RECOVERED],
-        )
-        .map_err(|e| format!("Could not tidy up open sessions: {e}"))?;
+        let cut_off = now() - 24 * 60 * 60;
+        let closed = conn
+            .execute(
+                "UPDATE sessions
+                    SET ended_at = started_at,
+                        duration_secs = 0,
+                        ended_by = ?1
+                  WHERE ended_at IS NULL AND started_at < ?2",
+                params![ENDED_RECOVERED, cut_off],
+            )
+            .map_err(|e| format!("Could not tidy up open sessions: {e}"))?;
+        if closed > 0 {
+            log::info!("closed {closed} stale session(s) with no time to add");
+        }
         Ok(())
     }
 
@@ -228,6 +248,8 @@ impl Db {
                 meta             TEXT,
                 hltb             TEXT,
                 companions       TEXT    NOT NULL DEFAULT '[]',
+                planned          INTEGER NOT NULL DEFAULT 0,
+                achievements     TEXT    NOT NULL DEFAULT '[]',
                 notes            TEXT    NOT NULL DEFAULT '',
                 logs             TEXT    NOT NULL DEFAULT '[]',
                 hue              INTEGER NOT NULL DEFAULT 0,
@@ -258,7 +280,10 @@ impl Db {
                 at         INTEGER NOT NULL,
                 secs       INTEGER NOT NULL DEFAULT 0,
                 note       TEXT    NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                -- Where the player put it in their own order. Everything starts
+                -- at zero, which falls back to newest first.
+                position   INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_game_logs_game ON game_logs(game_id, at DESC);
@@ -268,6 +293,9 @@ impl Db {
 
         // Anything a version 1 library has that version 2 spells differently.
         Self::upgrade_to_2(conn)?;
+        // Version 3 adds what a game planned rather than installed needs, plus
+        // the player's own order for each game's log.
+        Self::upgrade_to_3(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -313,6 +341,53 @@ impl Db {
         Ok(())
     }
 
+    /// Bring a version 1 or 2 library up to date.
+    ///
+    /// Every step is conditional, because a fresh library is built by the batch
+    /// above and already has these.
+    fn upgrade_to_3(conn: &Connection) -> Result<(), String> {
+        let columns = |table: &str, conn: &Connection| -> Result<Vec<String>, String> {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .map_err(|e| format!("Could not read the library layout: {e}"))?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(1))
+                .map_err(|e| format!("Could not read the library layout: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Could not read the library layout: {e}"))?;
+            Ok(rows)
+        };
+
+        let games = columns("games", conn)?;
+        if !games.iter().any(|c| c == "planned") {
+            conn.execute(
+                "ALTER TABLE games ADD COLUMN planned INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Could not add the planned column: {e}"))?;
+            log::info!("added games.planned");
+        }
+        if !games.iter().any(|c| c == "achievements") {
+            conn.execute(
+                "ALTER TABLE games ADD COLUMN achievements TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )
+            .map_err(|e| format!("Could not add the achievements column: {e}"))?;
+            log::info!("added games.achievements");
+        }
+
+        let logs = columns("game_logs", conn)?;
+        if !logs.iter().any(|c| c == "position") {
+            conn.execute(
+                "ALTER TABLE game_logs ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Could not add the log order column: {e}"))?;
+            log::info!("added game_logs.position");
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
         self.conn
             .lock()
@@ -335,7 +410,8 @@ impl Db {
                        COALESCE(MAX(s.duration_secs), 0)              AS longest_secs,
                        MIN(s.started_at)                              AS first_play,
                        MAX(COALESCE(s.ended_at, s.started_at))        AS last_end,
-                       COALESCE(SUM(CASE WHEN s.ended_at IS NULL THEN 1 ELSE 0 END), 0) AS open_count
+                       COALESCE(SUM(CASE WHEN s.ended_at IS NULL THEN 1 ELSE 0 END), 0) AS open_count,
+                       g.planned, g.achievements
                   FROM games g
                   LEFT JOIN sessions s ON s.game_id = g.id
                  GROUP BY g.id
@@ -359,6 +435,7 @@ impl Db {
                 let manual_play_secs: i64 = r.get(8)?;
                 let size_bytes: i64 = r.get(5)?;
                 let install_dir: Option<String> = r.get(4)?;
+                let achievements: Option<String> = r.get(23)?;
 
                 // The typed-in time is time played away from Orbit, so it adds to
                 // what the sessions recorded rather than standing in for it.
@@ -386,6 +463,11 @@ impl Db {
                     hltb: hltb.as_deref().and_then(|v| serde_json::from_str(v).ok()),
                     notes: r.get(12)?,
                     companions: parse_vec(companions.as_deref()),
+                    planned: r.get::<_, i64>(22)? != 0,
+                    achievements: achievements
+                        .as_deref()
+                        .and_then(|v| serde_json::from_str::<Vec<Value>>(v).ok())
+                        .unwrap_or_default(),
                     hue: r.get(14)?,
                     created_at: iso8601(created_at),
                     last_played: last_end.map(iso8601),
@@ -423,8 +505,9 @@ impl Db {
             r#"
             INSERT INTO games (id, title, launch, exe_path, install_dir, size_bytes,
                                status, favorite, manual_play_secs, cover_path, meta,
-                               hltb, notes, companions, hue, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
+                               hltb, notes, companions, hue, planned, achievements,
+                               created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?17, ?18, ?16, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 title            = excluded.title,
                 launch           = excluded.launch,
@@ -440,6 +523,8 @@ impl Db {
                 notes            = excluded.notes,
                 companions       = excluded.companions,
                 hue              = excluded.hue,
+                planned          = excluded.planned,
+                achievements     = excluded.achievements,
                 updated_at       = excluded.updated_at
             "#,
             params![
@@ -464,6 +549,8 @@ impl Db {
                 serde_json::to_string(&game.companions).unwrap_or_else(|_| "[]".into()),
                 game.hue,
                 now(),
+                i64::from(game.planned),
+                serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".into()),
             ],
         )
         .map_err(|e| format!("Could not save {}: {e}", game.title))?;
@@ -562,15 +649,29 @@ impl Db {
         category: &str,
     ) -> Result<i64, String> {
         let conn = self.lock()?;
-        let open: i64 = conn
+
+        // A row can still be open from a run of the app that ended badly, or from
+        // a game whose launcher handed off and which the player never stopped.
+        // That time belongs to the game it was played on, so it is written down
+        // before this new session starts rather than blocking the launch. Nobody
+        // wants to be told they cannot play something because Orbit forgot to
+        // stop counting yesterday's game.
+        let leftover: Option<(i64, i64)> = conn
             .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL",
+                "SELECT id, started_at FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
+            .optional()
             .map_err(|e| format!("Could not check for a running session: {e}"))?;
-        if open > 0 {
-            return Err("There is already a session running.".into());
+        if let Some((id, began)) = leftover {
+            let secs = (started_at - began).max(0);
+            conn.execute(
+                "UPDATE sessions SET ended_at = ?2, duration_secs = ?3, ended_by = ?4 WHERE id = ?1",
+                params![id, started_at, secs, ENDED_RECOVERED],
+            )
+            .map_err(|e| format!("Could not close the previous session: {e}"))?;
+            log::info!("closed a session left open elsewhere, {secs}s counted");
         }
         let category = if category.trim().is_empty() {
             "Main story"
@@ -717,7 +818,7 @@ impl Db {
                    FROM game_logs l
                    LEFT JOIN games g ON g.id = l.game_id
                   WHERE l.game_id = ?1
-                  ORDER BY l.at DESC, l.id DESC",
+                  ORDER BY l.position ASC, l.at DESC, l.id DESC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -751,7 +852,9 @@ impl Db {
         }
         let conn = self.lock()?;
         conn.execute(
-            "INSERT INTO game_logs (game_id, at, secs, note, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO game_logs (game_id, at, secs, note, created_at, position) \
+             VALUES (?1, ?2, ?3, ?4, ?5, \
+                     (SELECT COALESCE(MIN(position), 0) - 1 FROM game_logs WHERE game_id = ?1))",
             params![game_id, at, secs.max(0), note.trim(), now()],
         )
         .map_err(|e| format!("Could not save that note: {e}"))?;
@@ -817,8 +920,8 @@ impl Db {
         let conn = self.lock()?;
         let written = conn
             .execute(
-                "INSERT INTO game_logs (game_id, at, secs, note, created_at)
-                 SELECT ?1, ?2, 0, 'Started playing', ?2
+                "INSERT INTO game_logs (game_id, at, secs, note, created_at, position)
+                 SELECT ?1, ?2, 0, 'Started playing', ?2, 0
                   WHERE NOT EXISTS (SELECT 1 FROM game_logs WHERE game_id = ?1)
                     AND NOT EXISTS (SELECT 1 FROM sessions WHERE game_id = ?1)",
                 params![game_id, at],
@@ -839,6 +942,28 @@ impl Db {
         if changed == 0 {
             return Err("That note is not in any log.".into());
         }
+        Ok(())
+    }
+
+    /// Put one game's notes in the order they were dragged into.
+    ///
+    /// Only the ids that were sent are placed, in the order given, at 0, 1, 2
+    /// and so on. Anything else is left alone, so a note written in another
+    /// window is not swallowed by a drag that started before it existed.
+    pub fn reorder_game_logs(&self, game_id: &str, ids: &[i64]) -> Result<(), String> {
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Could not reorder the notes: {e}"))?;
+        for (index, id) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE game_logs SET position = ?1 WHERE id = ?2 AND game_id = ?3",
+                params![index as i64, id, game_id],
+            )
+            .map_err(|e| format!("Could not reorder the notes: {e}"))?;
+        }
+        tx.commit()
+            .map_err(|e| format!("Could not reorder the notes: {e}"))?;
         Ok(())
     }
 
@@ -942,6 +1067,12 @@ pub struct GameWrite {
     pub companions: Vec<Companion>,
     pub notes: String,
     pub hue: i64,
+    /// Meant to be played rather than installed here.
+    #[serde(default)]
+    pub planned: bool,
+    /// Read from Steam, with the ones the player has ticked kept as they are.
+    #[serde(default)]
+    pub achievements: Vec<Value>,
 }
 
 fn session_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {

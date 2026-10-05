@@ -15,6 +15,8 @@ import type {
   Stats,
   SteamGame,
   FolderProgram,
+  Achievement,
+  GameSuggestion,
 } from '../types';
 import { SAMPLE_GAMES } from '../data/sampleGames';
 
@@ -401,6 +403,32 @@ export function metadataLookup<T>(title: string, appId?: number): Promise<T> {
 /** Titles a store suggests for a partial name. */
 export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
+}
+
+/**
+ * The games a partial title suggests, with the store's own little capsule.
+ *
+ * Used while a name is being typed, because picking the right game out of a list
+ * of similar titles is much easier with the picture in front of you.
+ */
+export function gameSuggestions(title: string): Promise<GameSuggestion[]> {
+  return call('metadata_cards', { title }, async () => []);
+}
+
+/**
+ * Every achievement the game's Steam Community page lists.
+ *
+ * The list is read fresh, because the share of players who have each one moves.
+ * Whether an achievement is ticked is the player's own mark and is kept when
+ * this comes back.
+ */
+export function fetchAchievements(gameId: string): Promise<Achievement[]> {
+  return call('achievements_fetch', { gameId }, async () => []);
+}
+
+/** Put one game's notes in the order they were dragged into. */
+export function reorderGameLogs(gameId: string, ids: number[]): Promise<void> {
+  return call('reorder_game_logs', { gameId, ids }, () => undefined);
 }
 
 /**

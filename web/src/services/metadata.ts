@@ -6,8 +6,8 @@
  * artwork and asks for no key at all. That is what makes a dropped-in game fill
  * itself out.
  */
-import type { MetaData } from '../types';
-import { metadataLookup, metadataSuggest } from './native';
+import type { GameSuggestion, MetaData } from '../types';
+import { gameSuggestions, metadataLookup, metadataSuggest } from './native';
 
 /**
  * Details for one title.
@@ -23,4 +23,9 @@ export function fetchMetadata(title: string, appId?: number): Promise<MetaData> 
 /** Titles a store suggests while a name is being typed. */
 export function searchTitles(title: string): Promise<string[]> {
   return metadataSuggest(title);
+}
+
+/** The same suggestions, as games with pictures rather than names. */
+export function searchGames(title: string): Promise<GameSuggestion[]> {
+  return gameSuggestions(title);
 }

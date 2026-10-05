@@ -4,6 +4,7 @@
 //! starting games, noticing when they stop, moving a game between drives,
 //! reading folders, and fetching metadata the browser is not allowed to reach.
 
+mod achievements;
 mod db;
 mod format;
 mod hltb;
@@ -28,6 +29,22 @@ use session::{ActiveView, Runner};
 use storage::{DriveInfo, Moved, SizeCache};
 use store::{Settings, Store};
 
+/// What Orbit should do with its own window around a game.
+///
+/// The two choices are separate on purpose: some players want Orbit out of the
+/// way while they play but want it back when the game closes, and some want it
+/// gone in both directions.
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowPolicy {
+    /// `nothing`, `minimize`, `tray` or `close`.
+    #[serde(default)]
+    pub on_launch: String,
+    /// `nothing`, `show` or `quit`.
+    #[serde(default)]
+    pub on_close: String,
+}
+
 /// Everything the commands need, kept in one place by Tauri.
 pub struct Orbit {
     db: Arc<db::Db>,
@@ -35,6 +52,129 @@ pub struct Orbit {
     store: Store,
     /// Folder sizes measured once and remembered. See `storage::SizeCache`.
     sizes: SizeCache,
+    /// What to do with the window when a game starts and when it closes. Kept
+    /// here rather than read from disk at the moment it is needed, so the
+    /// settings file is not read while a game is starting.
+    policy: Arc<std::sync::Mutex<WindowPolicy>>,
+}
+
+/// Read the window behaviour out of the settings JSON.
+fn policy_from_settings(settings: Option<&Settings>) -> WindowPolicy {
+    settings
+        .and_then(|s| s.get("window"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// Do the thing the player asked for, to whatever state the window is in now.
+pub(crate) fn apply_policy(app: &tauri::AppHandle, on_launch: bool, policy: WindowPolicy) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if on_launch {
+        match policy.on_launch.as_str() {
+            // A game is starting, so getting out of the way is the whole point.
+            "minimize" => {
+                let _ = window.minimize();
+            }
+            // Out of the way and off the taskbar. Only when the tray icon is
+            // there to come back to; otherwise this is just a minimize.
+            "tray" => {
+                if TRAY_READY.load(std::sync::atomic::Ordering::SeqCst) {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.minimize();
+                }
+            }
+            // Quitting is what the player asked for, warning and all: the time
+            // up to this moment is written down first, by the session runner,
+            // and nothing after it is tracked.
+            "close" => app.exit(0),
+            // Anything unrecognised, including a settings file written by an
+            // older build, leaves the window alone.
+            _ => {}
+        }
+    } else {
+        match policy.on_close.as_str() {
+            "show" => reveal_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        }
+    }
+}
+
+/// Whether the tray icon is really there.
+///
+/// Hiding the window is only safe when there is something left to click, so this
+/// is set by `build_tray` once the icon exists and never before. A hidden window
+/// with no tray is an app the player cannot get back, which is not a preference
+/// anybody asked for.
+static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Put an icon in the notification area, with a way back to the window.
+///
+/// This is what makes "step aside while I play" possible: Orbit leaves the
+/// screen, the game gets it, and the app is still one click away rather than
+/// something that has to be found again in the taskbar.
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItem::with_id(app, "show", "Show Orbit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("Orbit")
+        .menu(&menu)
+        // Left click belongs to the window; the menu is on the right button, as
+        // it is for everything else in the notification area.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => reveal_window(app),
+            "quit" => {
+                // Same as closing the window by hand: the clock stops and what
+                // it counted is written down before the app goes.
+                if let Some(orbit) = app.try_state::<Orbit>() {
+                    orbit.runner.close_for_app_exit();
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                reveal_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+    tray.build(app)?;
+    TRAY_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+/// Bring Orbit back to the front, wherever it went.
+pub(crate) fn reveal_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// The app handle, for the code that has to move the window.
+pub(crate) fn app_handle() -> Option<tauri::AppHandle> {
+    APP.get().cloned()
 }
 
 /// The running session has ended; the UI should refresh that game.
@@ -534,6 +674,58 @@ fn folder_programs(path: String, max_depth: Option<usize>) -> Vec<launch::Folder
     launch::folder_programs(Path::new(&path), max_depth.unwrap_or(3))
 }
 
+/// A partial title, as the games the store suggests for it, with pictures.
+#[tauri::command]
+async fn metadata_cards(title: String) -> Result<Vec<metadata::Card>, String> {
+    metadata::suggest_cards(&title).await
+}
+
+/// Every achievement the game's Steam Community page lists.
+///
+/// Read fresh each time, because the share of players who have each one moves.
+/// Whether an achievement is ticked is the player's own mark and is kept in the
+/// library, so this never overwrites that.
+#[tauri::command]
+async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<achievements::Achievement>, String> {
+    let game = orbit
+        .db
+        .game(&game_id)?
+        .ok_or_else(|| "That game is not in the library any more.".to_string())?;
+    let app_id = game
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("steamAppId"))
+        .and_then(|v| v.as_u64())
+        .or_else(|| match &game.launch {
+            serde_json::Value::Object(map) => map.get("appId").and_then(|v| v.as_u64()),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            "Orbit does not know which Steam app this is, so there is no achievement list to read. Look the game up first, or paste its store link.".to_string()
+        })?;
+
+    let mut fetched = achievements::fetch(app_id).await?;
+
+    // What the player ticked comes back with the fresh list; a new achievement
+    // arrives locked, which is the honest default.
+    let ticked: std::collections::HashSet<String> = game
+        .achievements
+        .iter()
+        .filter(|a| a.get("unlocked").and_then(|v| v.as_bool()).unwrap_or(false))
+        .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    for row in &mut fetched {
+        row.unlocked = ticked.contains(&row.id);
+    }
+    Ok(fetched)
+}
+
+/// Put one game's notes in the order they were dragged into.
+#[tauri::command]
+fn reorder_game_logs(orbit: State<'_, Orbit>, game_id: String, ids: Vec<i64>) -> Result<(), String> {
+    orbit.db.reorder_game_logs(&game_id, &ids)
+}
+
 /// The player's installed Steam games, for the import dialog.
 #[tauri::command]
 async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
@@ -559,6 +751,9 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
 /// Save the settings to disk.
 #[tauri::command]
 fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), String> {
+    if let Ok(mut policy) = orbit.policy.lock() {
+        *policy = policy_from_settings(Some(&settings));
+    }
     orbit.store.save_settings(&settings)
 }
 
@@ -612,7 +807,10 @@ pub fn run() {
             let db = Arc::new(
                 db::Db::open(&store.root().join("orbit.db")).map_err(std::io::Error::other)?,
             );
-            let runner = Runner::new(Arc::clone(&db));
+            let policy = Arc::new(std::sync::Mutex::new(policy_from_settings(
+                store.load_settings().as_ref(),
+            )));
+            let runner = Runner::new(Arc::clone(&db), Arc::clone(&policy));
             let sizes = SizeCache::default();
             let _ = APP.set(app.handle().clone());
 
@@ -643,7 +841,13 @@ pub fn run() {
                 });
             }
 
-            app.manage(Orbit { db, runner, store, sizes });
+            // The tray is allowed to fail: the window behaviour that needs it
+            // falls back to a plain minimize, and the app is otherwise fine.
+            if let Err(e) = build_tray(app.handle()) {
+                log::warn!("no tray icon this run: {e}");
+            }
+
+            app.manage(Orbit { db, runner, store, sizes, policy });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -685,6 +889,9 @@ pub fn run() {
             hltb_search,
             metadata_lookup,
             metadata_suggest,
+            metadata_cards,
+            achievements_fetch,
+            reorder_game_logs,
             steam_library,
             folder_programs,
             load_settings,

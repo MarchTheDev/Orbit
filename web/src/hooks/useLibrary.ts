@@ -58,7 +58,17 @@ export function useLibrary() {
       const current = gamesRef.current;
       const target = current.find((g) => g.id === id);
       if (!target) return;
-      const updated = { ...target, ...(typeof patch === 'function' ? patch(target) : patch) };
+      const next = typeof patch === 'function' ? patch(target) : patch;
+      const updated = { ...target, ...next };
+      // Pointing Orbit at a program is what turns a plan into a game: it stops
+      // being something written down and becomes something it can start.
+      const launchTarget = next.launch as { kind?: string } | undefined;
+      const pointsAtAProgram =
+        Boolean(next.exePath) ||
+        Boolean(next.installDir) ||
+        launchTarget?.kind === 'executable' ||
+        launchTarget?.kind === 'steam';
+      if (pointsAtAProgram) updated.planned = false;
       gamesRef.current = current.map((g) => (g.id === id ? updated : g));
       setGames(gamesRef.current);
       save(updated);

@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::db::{epoch_millis, now, Db, SessionRow, ENDED_FAILED, ENDED_MANUAL, ENDED_PROCESS};
+use crate::db::{
+    epoch_millis, now, Db, SessionRow, ENDED_APP_CLOSED, ENDED_FAILED, ENDED_MANUAL, ENDED_PROCESS,
+};
+use crate::WindowPolicy;
 use crate::launch::Sessions;
 use crate::launch_target::LaunchTarget;
 
@@ -49,17 +52,46 @@ pub struct Runner {
     db: Arc<Db>,
     /// Shared with the watcher task, which needs to reach the same tracker.
     inner: Arc<Mutex<Inner>>,
+    /// What to do with Orbit's own window while a game runs, and after it.
+    policy: Arc<Mutex<WindowPolicy>>,
 }
 
 impl Runner {
-    pub fn new(db: Arc<Db>) -> Self {
+    pub fn new(db: Arc<Db>, policy: Arc<Mutex<WindowPolicy>>) -> Self {
         Self {
             db,
             inner: Arc::new(Mutex::new(Inner {
                 sessions: Sessions::default(),
                 active: None,
             })),
+            policy,
         }
+    }
+
+    /// What the player asked Orbit's window to do, read under the lock.
+    fn window_policy(&self) -> WindowPolicy {
+        self.policy
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_default()
+    }
+
+    /// Do the window half of a game starting, and of one closing.
+    ///
+    /// Kept on the Rust side because the game can close while the interface is
+    /// not looking, and because the "quit" choice has to happen even if nothing
+    /// in the UI is listening any more.
+    fn nudge_window(&self, on_launch: bool) {
+        let Some(app) = crate::app_handle() else { return };
+        let policy = self.window_policy();
+        // Quitting on launch means the time up to now is all there will ever be,
+        // so the row is closed before the app goes.
+        if on_launch && policy.on_launch == "close" {
+            if let Ok(Some(open)) = self.db.current_session() {
+                let _ = self.db.close_session(open.id, now(), ENDED_MANUAL);
+            }
+        }
+        crate::apply_policy(&app, on_launch, policy);
     }
 
     /// Start a session for a game, and start the game if it has a target.
@@ -129,6 +161,10 @@ impl Runner {
             });
         }
 
+        // The game is up, so Orbit can get out of the way if that is what the
+        // player asked for.
+        self.nudge_window(true);
+
         // Only a process can end a session by itself. A Steam game, or one the
         // player starts themselves, is stopped by hand.
         if !manual {
@@ -162,6 +198,9 @@ impl Runner {
         }
 
         self.db.close_session(session_id, now(), ENDED_MANUAL)?;
+        // Stopping by hand counts as the game ending, so a player who asked for
+        // Orbit back when a game closes gets it back here too.
+        self.nudge_window(false);
         // Stopping a session has to close the game with it. A game Orbit only
         // timed, or asked Steam to start, has no process of ours to close, so
         // that case is a no-op rather than an error.
@@ -174,13 +213,36 @@ impl Runner {
     }
 
     /// The session in progress, if there is one, so a UI reload can pick it up.
+    ///
+    /// A session row can outlive the tracker: the app may have been restarted
+    /// while a game was running, or the game may be one Steam started. Either
+    /// way it is real time played, so it comes back as a session the player can
+    /// stop rather than being forgotten. That is where the evening's playtime
+    /// gets counted instead of being tidied away.
     pub fn active(&self) -> Result<Option<ActiveView>, String> {
         if let Some(active) = &self.lock()?.active {
             return Ok(Some(active.view.clone()));
         }
-        // The row outlives the process tracker only if the app was restarted
-        // mid-session, which `Db::open` already closed.
-        Ok(None)
+        Ok(self.db.current_session()?.map(|row| view_of(&row, true)))
+    }
+
+    /// Close whatever is running because Orbit itself is closing.
+    ///
+    /// The time up to this moment is real, so it is written down: a session left
+    /// open would look like a crash, and the catch-up on the next launch would
+    /// either credit a whole night of playtime or none of it.
+    pub fn close_for_app_exit(&self) {
+        let active = match self.inner.lock() {
+            Ok(mut inner) => inner.active.take(),
+            Err(_) => None,
+        };
+        if let Some(active) = active {
+            let _ = self.db.close_session(active.view.session_id, now(), ENDED_APP_CLOSED);
+            return;
+        }
+        if let Ok(Some(open)) = self.db.current_session() {
+            let _ = self.db.close_session(open.id, now(), ENDED_APP_CLOSED);
+        }
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>, String> {
@@ -193,6 +255,7 @@ impl Runner {
     fn watch(&self, session_id: i64, game_id: String, pid: u32) {
         let db = Arc::clone(&self.db);
         let inner = Arc::clone(&self.inner);
+        let policy = self.window_policy();
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(POLL);
             loop {
@@ -211,7 +274,15 @@ impl Runner {
                         {
                             return;
                         }
-                        matches!(guard.sessions.status(pid), Some(false))
+                        let ended = matches!(guard.sessions.status(pid), Some(false));
+                        // A bootstrapper has handed off, so there is nothing left
+                        // to watch: the session stays open for the player to
+                        // stop, and this loop gets out of the way.
+                        if !ended && guard.sessions.handed_off(pid) {
+                            guard.sessions.forget(pid);
+                            return;
+                        }
+                        ended
                     }
                     Err(_) => return,
                 };
@@ -228,9 +299,14 @@ impl Runner {
                     Err(_) => None,
                 };
 
-                // Tell the UI, so it can refresh the game and the totals.
+                // Tell the UI, so it can refresh the game and the totals, and
+                // give the window whatever the player asked for now the game is
+                // over: many players want Orbit back the moment they stop.
                 if let Some(view) = finished {
                     crate::emit_session_ended(&view, &game_id);
+                }
+                if let Some(app) = crate::app_handle() {
+                    crate::apply_policy(&app, false, policy);
                 }
                 return;
             }

@@ -39,6 +39,9 @@ pub struct Meta {
     pub cover_url: Option<String>,
     /// The wide header picture, which every store page has.
     pub header_url: Option<String>,
+    /// The wide background art, when the store has a separate one. Bigger and
+    /// softer than the header, which is what a page backdrop wants.
+    pub background_url: Option<String>,
     /// Where these details came from. Only `steam` for now, but a field so the
     /// front end does not have to guess if that ever changes.
     pub source: &'static str,
@@ -91,6 +94,10 @@ struct SteamSearch {
 struct SteamItem {
     id: u64,
     name: String,
+    /// The little capsule the store's own search shows, which is enough to
+    /// recognise a game by while a title is being typed.
+    #[serde(default)]
+    tiny_image: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +128,8 @@ struct SteamApp {
     release_date: ReleaseDate,
     #[serde(default)]
     header_image: String,
+    #[serde(default)]
+    background_image: String,
     #[serde(default)]
     capsule_image: String,
     #[serde(default)]
@@ -204,9 +213,16 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     };
 
     let header = if app.header_image.is_empty() {
-        app.capsule_image
+        app.capsule_image.clone()
     } else {
-        app.header_image
+        app.header_image.clone()
+    };
+    // The background is a different, larger picture than the header on most
+    // pages; where it is missing or the same, the header does the job.
+    let background = if app.background_image.is_empty() || app.background_image == header {
+        None
+    } else {
+        Some(app.background_image.clone())
     };
     // The portrait picture is what a grid of covers actually wants, and the
     // wide header is the fallback, so the front end never has to fall through
@@ -235,6 +251,7 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
         rating: app.metacritic.and_then(|m| m.score).filter(|s| *s > 0),
         cover_url,
         header_url: Some(header).filter(|url| !url.is_empty()),
+        background_url: background,
         source: "steam",
     }
 }
@@ -286,6 +303,43 @@ pub async fn suggest(title: &str) -> Result<Vec<String>, String> {
         !(got == want || got.starts_with(&want) || want.starts_with(&got))
     });
     Ok(items.into_iter().map(|item| item.name).take(8).collect())
+}
+
+/// One suggested game, with the little picture the store shows for it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Card {
+    pub app_id: u64,
+    pub name: String,
+    pub cover_url: Option<String>,
+}
+
+/// The games a partial name suggests, best match first, with their covers.
+///
+/// This is the same search the Add dialog uses, with the store's own capsule
+/// travelling with each name. Seeing the picture is most of how anyone knows
+/// they have picked the right game out of a list of similar titles.
+pub async fn suggest_cards(title: &str) -> Result<Vec<Card>, String> {
+    let title = title.trim();
+    if title.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    let client = client()?;
+    let mut items = store_search(&client, title).await?;
+    items.sort_by_key(|item| {
+        let got = normalize(&item.name);
+        let want = normalize(title);
+        !(got == want || got.starts_with(&want) || want.starts_with(&got))
+    });
+    Ok(items
+        .into_iter()
+        .take(8)
+        .map(|item| Card {
+            app_id: item.id,
+            name: item.name,
+            cover_url: (!item.tiny_image.is_empty()).then_some(item.tiny_image),
+        })
+        .collect())
 }
 
 /// The result whose name is closest to what was asked for.
@@ -388,7 +442,8 @@ fn normalize(s: &str) -> String {
         .collect()
 }
 
-fn client() -> Result<reqwest::Client, String> {
+/// The shared HTTP client, also used for the Steam Community achievements page.
+pub fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(concat!(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Orbit/0.1",
@@ -407,6 +462,7 @@ mod tests {
         SteamItem {
             id,
             name: name.to_string(),
+            tiny_image: format!("https://cdn.example/{id}.jpg"),
         }
     }
 

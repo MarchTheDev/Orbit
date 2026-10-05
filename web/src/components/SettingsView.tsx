@@ -6,6 +6,7 @@ import {
   GitBranch,
   HardDrive,
   Heart,
+  Monitor,
   Palette,
   RefreshCw,
   Sparkles,
@@ -22,6 +23,45 @@ import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
+
+/** One option in a small set, drawn as a row that can be clicked anywhere. */
+function Choice<T extends string>({
+  value,
+  onChange,
+  options,
+  name,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string; hint: string }[];
+  name: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {options.map((o) => (
+        <label
+          key={o.value}
+          className={cn(
+            'flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 transition',
+            value === o.value ? 'border-accent bg-accent/10' : 'border-line hover:border-muted',
+          )}
+        >
+          <input
+            type="radio"
+            name={name}
+            checked={value === o.value}
+            onChange={() => onChange(o.value)}
+            className="mt-0.5 size-3.5 accent-[var(--c-accent)]"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm">{o.label}</span>
+            <span className="block text-xs text-muted">{o.hint}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 export function SettingsView({
   settings,
@@ -87,6 +127,51 @@ export function SettingsView({
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Monitor className="size-4 text-accent" />
+          Orbit's window around a game
+        </h2>
+        <p className="text-sm text-muted">
+          Both of these do nothing unless you pick something: Orbit never moves itself uninvited.
+        </p>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium">When a game starts</p>
+          <Choice
+            value={settings.window.onLaunch}
+            onChange={(v) => setSettings({ window: { ...settings.window, onLaunch: v } })}
+            name="on-launch"
+            options={[
+              { value: 'nothing', label: 'Do nothing', hint: 'Orbit stays where it is.' },
+              { value: 'minimize', label: 'Minimize', hint: 'Out of the way, still on the taskbar.' },
+              { value: 'tray', label: 'Minimize to tray', hint: 'Off the screen and off the taskbar. Left click the tray icon to bring it back.' },
+              { value: 'close', label: 'Close Orbit completely', hint: 'Orbit quits. Playtime is NOT tracked while it is closed, and the game becomes something you started yourself.' },
+            ]}
+          />
+          {settings.window.onLaunch === 'close' && (
+            <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+              With this on, Orbit writes down nothing about how long you play: it is not running to see the game end.
+              You can still say how long you played, by hand, afterwards.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2 pt-2">
+          <p className="text-sm font-medium">When the game closes</p>
+          <Choice
+            value={settings.window.onClose}
+            onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
+            name="on-close"
+            options={[
+              { value: 'nothing', label: 'Do nothing', hint: 'Whatever Orbit was doing, it carries on doing.' },
+              { value: 'show', label: 'Bring Orbit back', hint: 'Minimized, hidden or behind the game, it comes to the front when the session ends.' },
+              { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
+            ]}
+          />
         </div>
       </section>
 

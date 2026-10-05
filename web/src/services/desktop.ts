@@ -7,7 +7,7 @@
  * and the UI falls back to typing paths, so the app is still usable for design
  * work.
  */
-import { open } from '@tauri-apps/plugin-dialog';
+import { message, open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -16,13 +16,22 @@ import { isNative } from './native';
 /**
  * Hand a link to the system: a web page, or a `steam://` address that opens the
  * Steam client on the right game.
+ *
+ * A refusal is said out loud rather than swallowed. The plugin only opens the
+ * URLs the app is allowed to open, and a button that does nothing at all leaves
+ * the player clicking it again and wondering what is broken.
  */
 export async function openExternal(url: string): Promise<void> {
   if (!isNative()) {
     window.open(url, '_blank', 'noopener');
     return;
   }
-  await openUrl(url);
+  try {
+    await openUrl(url);
+  } catch (e) {
+    console.warn('Could not hand a link to the system', url, e);
+    await message(`Orbit could not open that link.\n\n${url}`, { title: 'Orbit', kind: 'error' }).catch(() => {});
+  }
 }
 
 /** Ask for a folder. `null` means the player cancelled. */

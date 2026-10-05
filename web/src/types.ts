@@ -26,6 +26,9 @@ export interface MetaData {
   coverUrl?: string | null;
   /** The wide header picture, which every store page has. */
   headerUrl?: string | null;
+  /** Bigger, softer art for the backdrop of a game's own page, when there is a
+   *  separate one. Falls back to the header. */
+  backgroundUrl?: string | null;
   /** The store's own id, so Play can hand the game to Steam. */
   steamAppId?: number | null;
   source?: 'steam' | 'estimate';
@@ -60,6 +63,10 @@ export interface LaunchInfo {
 export interface Game {
   id: string;
   title: string;
+  /** True for a game the player means to play but does not have here. */
+  planned?: boolean;
+  /** Achievements as last read, with the player's own ticks. */
+  achievements?: Achievement[];
   /** What Orbit starts. Always present, defaulting to time-only. */
   launch: LaunchTarget;
   exePath: string | null;
@@ -98,6 +105,26 @@ export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | '
 export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'settings';
 
 /** A game imported from a Steam library. */
+/** One achievement, as the game's Steam Community page lists it. */
+export interface Achievement {
+  /** Steam's own API name, which does not change when a title does. */
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  /** The share of players who have it, as a percentage. */
+  percent: number;
+  /** The player's own mark, kept in the library. Locked until they say so. */
+  unlocked: boolean;
+}
+
+/** A suggested game while a title is being typed. */
+export interface GameSuggestion {
+  appId: number;
+  name: string;
+  coverUrl: string | null;
+}
+
 /** A program found while looking through a folder, for the import dialog. */
 export interface FolderProgram {
   folder: string;
@@ -202,4 +229,23 @@ export interface Settings {
   sortOrder: string[];
   /** How big the covers and rows are drawn, as a percentage. */
   coverScale: number;
+  /**
+   * The player's own order for the backlog, as game ids.
+   *
+   * Kept apart from the library order because the two questions are different:
+   * the library is a shelf, the backlog is a plan.
+   */
+  backlogOrder: string[];
+  /**
+   * What Orbit's own window does while a game is starting and when it closes.
+   *
+   * Both are deliberate choices rather than conveniences: closing on launch
+   * means no time is tracked after that moment, which the setting says out loud.
+   */
+  window: {
+    /** `nothing`, `minimize` or `close`. */
+    onLaunch: 'nothing' | 'minimize' | 'tray' | 'close';
+    /** `nothing`, `show` or `quit`. */
+    onClose: 'nothing' | 'show' | 'quit';
+  };
 }
