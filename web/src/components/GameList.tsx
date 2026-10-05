@@ -5,6 +5,7 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { cn } from '../utils/cn';
 import { StatusBadge } from './StatusBadge';
+import type { ContextHandler } from './ui/ContextMenu';
 
 interface Props {
   games: Game[];
@@ -15,9 +16,11 @@ interface Props {
   scale: number;
   /** Set while the library is in the player's own order. */
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
+  /** A right click on a row, for the menu of things to do with the game. */
+  onContextMenu?: ContextHandler;
 }
 
-export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {
+export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder, onContextMenu }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
@@ -36,6 +39,7 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
             key={g.id}
             onClick={() => onSelect(g.id)}
             onDoubleClick={() => onPlay(g)}
+            onContextMenu={(e) => onContextMenu?.(g, e)}
             {...bind(g.id)}
             className={cn(
               'grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',

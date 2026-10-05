@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NotebookPen } from 'lucide-react';
 import type { Game, GameLog } from '../types';
 import { countLogs, listAllLogs } from '../services/native';
-import { fmtClock } from '../utils/format';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
@@ -113,7 +112,6 @@ export function LogsView({
   );
 
   const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => perGame.has(g.id)) ?? ordered[0] ?? null;
-  const totalSecs = logs.reduce((s, l) => s + l.secs, 0);
 
   return (
     <div className="mx-auto max-w-[1400px] p-6">
@@ -128,10 +126,12 @@ export function LogsView({
             is played for the first time, a line saying so appears here.
           </p>
         </div>
+        {/* Counts, not clocks: the Journal is read for what was written, and the
+            hours and minutes beside every date were a second set of numbers to
+            skip past. */}
         <div className="text-right">
-          <p className="font-mono text-lg font-semibold">{fmtClock(totalSecs)}</p>
           <p className="text-[11px] text-muted">
-            across {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {perGame.size}{' '}
+            {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {perGame.size}{' '}
             {perGame.size === 1 ? 'game' : 'games'}
             {total > logs.length && ` · the latest ${logs.length} of ${total}`}
           </p>
@@ -167,7 +167,7 @@ export function LogsView({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{g.title}</span>
                       <span className="block text-[11px] text-muted">
-                        {counts ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'} · ${fmtClock(counts.secs)}` : 'nothing logged yet'}
+                        {counts ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'}` : 'nothing logged yet'}
                       </span>
                     </span>
                   </button>

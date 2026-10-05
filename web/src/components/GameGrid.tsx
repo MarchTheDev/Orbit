@@ -6,6 +6,7 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { useHoverTint } from '../utils/palette';
 import { cn } from '../utils/cn';
+import type { ContextHandler } from './ui/ContextMenu';
 
 /** What `useDragReorder`'s `bind` hands a tile. */
 type DragBinding = {
@@ -22,6 +23,8 @@ interface Props {
   scale: number;
   /** Set while the library is in the player's own order. */
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
+  /** A right click on a tile, for the menu of things to do with the game. */
+  onContextMenu?: ContextHandler;
   /**
    * Whether the tint behind a hovered cover comes from the picture itself or
    * from Orbit's theme. A preference rather than a taste Orbit decides for
@@ -30,7 +33,16 @@ interface Props {
   coverTint?: boolean;
 }
 
-export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder, coverTint = true }: Props) {
+export function GameGrid({
+  games,
+  selectedId,
+  onSelect,
+  onPlay,
+  scale,
+  onReorder,
+  coverTint = true,
+  onContextMenu,
+}: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
   return (
@@ -47,6 +59,7 @@ export function GameGrid({ games, selectedId, onSelect, onPlay, scale, onReorder
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
+          onContextMenu={onContextMenu}
           bound={bind(g.id)}
           dragging={dragging === g.id}
           over={over === g.id && dragging !== null && dragging !== g.id}
@@ -72,6 +85,7 @@ function Tile({
   onPlay,
   scale,
   coverTint,
+  onContextMenu,
   bound,
   dragging,
   over,
@@ -82,6 +96,7 @@ function Tile({
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
+  onContextMenu?: ContextHandler;
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
@@ -94,6 +109,7 @@ function Tile({
     <div
       onClick={() => onSelect(game.id)}
       onDoubleClick={() => onPlay(game)}
+      onContextMenu={(e) => onContextMenu?.(game, e)}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       {...bound}

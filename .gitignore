@@ -3,3 +3,7 @@ web/node_modules
 web/dist
 /.vs
 /node_modules
+# Nix writes these next to flake.nix when something is built.
+/result
+/result-*
+

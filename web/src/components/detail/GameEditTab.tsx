@@ -8,7 +8,7 @@ import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
 import { Cover } from '../ui/Cover';
 import { SaveButton } from '../ui/SaveButton';
-import { Markdown } from '../ui/Markdown';
+import { MarkdownEditor } from '../ui/Markdown';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 
 /**
@@ -451,22 +451,15 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
-            markdown: **bold**, - lists, # headings
+            markdown, applied as you type: **bold**, - list, # heading, `code`
           </span>
         </span>
-        <textarea
-          className={`${inputCls} h-24 resize-y`}
+        <MarkdownEditor
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Anything you want to remember. Written as markdown, shown as markdown in the log."
+          onChange={setNotes}
+          rows={6}
+          placeholder="Anything you want to remember."
         />
-        {/* The same reading the log tab shows, so what a note will look like is
-            visible before it is saved. */}
-        {notes.trim() !== '' && (
-          <div className="mt-2 rounded-lg border border-dashed border-line bg-bg/40 p-3">
-            <Markdown text={notes} />
-          </div>
-        )}
       </div>
 
       {game.installDir && (

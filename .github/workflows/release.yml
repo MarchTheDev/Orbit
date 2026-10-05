@@ -1,0 +1,364 @@
+name: Release
+
+# Builds everything Orbit ships as, and attaches all of it to a GitHub release.
+#
+# How to run it: Actions -> Release -> Run workflow. On a manual run the files
+# come out as workflow artifacts to download. Push a tag like v0.1.0 and the
+# same files are also attached to a release, which is what a download link
+# needs.
+#
+# What comes out:
+#   Windows  Orbit-<version>-windows-setup.exe      the installer
+#            Orbit-<version>-windows-standalone.exe the program on its own
+#            Orbit-<version>-windows-portable.zip   the program in a folder
+#   Linux    Orbit-<version>-linux-x86_64.AppImage  one file, any distribution
+#            orbit_<version>_amd64.deb              Debian, Ubuntu, Mint
+#            orbit-<version>-1.x86_64.rpm           Fedora, RHEL, openSUSE
+#            Orbit-<version>-linux-portable.tar.gz  the binary and a .desktop
+#   Arch     orbit-<version>-1-x86_64.pkg.tar.zst   pacman -U
+#   NixOS    Orbit-<version>-nix-x86_64.tar.gz      nix build, or unpack and run
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to call the files (only used for naming)'
+        required: false
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+env:
+  # Every job reads this: the tag if there is one, otherwise what was typed in.
+  ORBIT_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+
+jobs:
+  # ---------------------------------------------------------------- Windows
+  windows:
+    name: Windows (setup, standalone, portable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      # nsis makes the setup exe, msi makes an installer for anyone who prefers
+      # that. Both are built from the same binary, which is also left behind:
+      # that is the standalone exe.
+      - name: Build
+        working-directory: web
+        run: npx tauri build --bundles nsis,msi
+
+      - name: Collect the installers
+        shell: pwsh
+        run: |
+          $version = "$env:ORBIT_VERSION" -replace '^v', ''
+          $out = "artifacts"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $release = "web/src-tauri/target/release"
+          Get-ChildItem "$release/bundle/nsis/*.exe" | ForEach-Object {
+            Copy-Item $_.FullName "$out/Orbit-$version-windows-setup.exe"
+          }
+          Get-ChildItem "$release/bundle/msi/*.msi" | ForEach-Object {
+            Copy-Item $_.FullName "$out/Orbit-$version-windows.msi"
+          }
+
+          # The standalone program: one exe, the interface already inside it.
+          $exe = Get-ChildItem "$release/*.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "$out/Orbit-$version-windows-standalone.exe"
+
+          # The portable folder: the same program, with a line saying so.
+          $portable = "artifacts/portable"
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item $exe.FullName "$portable/Orbit.exe"
+          $readme = @(
+            "Orbit $version, portable",
+            "",
+            "Run Orbit.exe. Nothing is installed and nothing is written next to",
+            "it: your library and settings live in %APPDATA%\Orbit, and removing",
+            "this folder removes the program.",
+            "",
+            "Windows 10 and 11 already have the WebView2 runtime that Orbit draws",
+            "its interface with. On an older or stripped-down Windows, install it",
+            "once from https://developer.microsoft.com/microsoft-edge/webview2/"
+          ) -join "`r`n"
+          Set-Content -Path "$portable/Read me.txt" -Value $readme -Encoding utf8
+          Compress-Archive -Path "$portable/*" -DestinationPath "$out/Orbit-$version-windows-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ Linux
+  linux:
+    name: Linux (deb, rpm, AppImage)
+    # 22.04 on purpose: what is built on it runs on anything newer, and glibc
+    # only moves forward. A newer runner would produce a binary that refuses to
+    # start on Debian 12 or Ubuntu 22.04.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the system libraries Tauri needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libfuse2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        run: npx tauri build --bundles deb,rpm,appimage
+
+      - name: Collect the packages
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_amd64.deb"
+          cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.x86_64.rpm"
+          cp web/src-tauri/target/release/bundle/appimage/*.AppImage "artifacts/Orbit-${version}-linux-x86_64.AppImage"
+          chmod +x artifacts/*.AppImage
+
+          # A plain tarball as well, for anyone who would rather not have a
+          # package manager involved, and for Arch and NixOS to unpack by hand.
+          portable="Orbit-${version}-linux-portable"
+          mkdir -p "$portable"
+          cp web/src-tauri/target/release/orbit "$portable/orbit"
+          cp packaging/linux/orbit.desktop "$portable/orbit.desktop"
+          cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
+          tar -czf "artifacts/$portable.tar.gz" "$portable"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------- Fedora
+  fedora:
+    name: Fedora (native rpm)
+    runs-on: ubuntu-latest
+    # Fedora's own libraries, and Fedora's own rpm. Best effort: if this job
+    # needs a package name that has moved, the Linux job's rpm still works.
+    continue-on-error: true
+    container: fedora:latest
+    steps:
+      - name: Install what the build needs
+        run: |
+          dnf install -y \
+            @development-tools nodejs npm rust cargo \
+            webkit2gtk4.1-devel openssl-devel curl wget file \
+            libappindicator-gtk3-devel librsvg2-devel rpm-build \
+            gtk3-devel libsoup3-devel patchelf
+          # Named differently across Fedora releases, and not needed for the
+          # package itself.
+          dnf install -y libxdo-devel || dnf install -y xdotool-devel || true
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build the rpm
+        working-directory: web
+        run: npx tauri build --bundles rpm
+
+      - name: Collect it
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.fc.x86_64.rpm"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------- Arch
+  arch:
+    name: Arch (pacman package)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container: archlinux:latest
+    steps:
+      - name: Install what the build needs
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git nodejs npm rust sudo \
+            webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg openssl \
+            libsoup3 xdotool
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      # --no-bundle: Arch has no use for a .deb, and makepkg below makes the
+      # package that pacman does understand.
+      - name: Build
+        working-directory: web
+        run: npx tauri build --no-bundle
+
+      - name: Package it for pacman
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          work="$(mktemp -d)"
+          cp packaging/arch/PKGBUILD "$work/"
+          cp web/src-tauri/target/release/orbit "$work/orbit"
+          cp packaging/linux/orbit.desktop "$work/orbit.desktop"
+          cp web/src-tauri/icons/128x128.png "$work/orbit.png"
+          sed -i "s/^pkgver=.*/pkgver=$version/" "$work/PKGBUILD"
+
+          # makepkg refuses to run as root, which is what a container gives you,
+          # so it runs as a user that owns the work folder.
+          useradd -m builder
+          chown -R builder "$work"
+          cd "$work"
+          sudo -u builder makepkg -f
+          cp "$work"/*.pkg.tar.zst "$GITHUB_WORKSPACE/artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ NixOS
+  nix:
+    name: NixOS (flake)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      # A fresh flake cannot know the hash of the front end's dependencies, and
+      # nix reports it in the error. This takes it from there and puts it in,
+      # which is the same thing `nix build` would tell a person to do by hand.
+      - name: Fill in the npm dependencies hash
+        run: |
+          set +e
+          message=$(nix build .# --no-link 2>&1)
+          hash=$(printf '%s' "$message" | grep -oP 'got:\s+\K\S+' | head -1)
+          if [ -n "$hash" ]; then
+            sed -i "s|npmDepsHash = .*|npmDepsHash = \"$hash\";|" flake.nix
+          fi
+          echo "$message" | tail -20
+
+      - name: Build
+        run: nix build .# --print-build-logs
+
+      - name: Collect it
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p "artifacts/Orbit-${version}-nix-x86_64/bin"
+          cp -r result/bin/. "artifacts/Orbit-${version}-nix-x86_64/bin/"
+          cp packaging/linux/orbit.desktop "artifacts/Orbit-${version}-nix-x86_64/orbit.desktop"
+          cp web/src-tauri/icons/128x128.png "artifacts/Orbit-${version}-nix-x86_64/orbit.png"
+          printf '%s\n' \
+            "Orbit ${version}, built with Nix." \
+            "" \
+            "Either add this folder to your PATH and run bin/orbit," \
+            "or build from source with:  nix build github:MarchTheDev/Orbit" \
+            > "artifacts/Orbit-${version}-nix-x86_64/Read me.txt"
+          tar -czf "artifacts/Orbit-${version}-nix-x86_64.tar.gz" "artifacts/Orbit-${version}-nix-x86_64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nix
+          path: artifacts/Orbit-*-nix-x86_64.tar.gz
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- the release
+  release:
+    name: Attach everything to a release
+    # Everything that produces a file, including the best-effort jobs: a
+    # platform that failed to build must not stop the others from shipping.
+    needs: [windows, linux, fedora, arch, nix]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: files
+
+      - name: Write what is in each file
+        run: |
+          version="${ORBIT_VERSION#v}"
+          cat > notes.md <<EOF
+          Orbit ${version}.
+
+          **Windows** - \`Orbit-${version}-windows-setup.exe\` installs it.
+          \`Orbit-${version}-windows-standalone.exe\` is the program on its own,
+          and \`Orbit-${version}-windows-portable.zip\` is the same thing in a
+          folder you can delete when you are done with it.
+
+          **Linux** - \`.AppImage\` runs on any distribution (chmod +x it first),
+          \`.deb\` is for Debian, Ubuntu and Mint, and the \`.rpm\` is for Fedora,
+          RHEL and openSUSE.
+
+          **Arch** - \`pacman -U orbit-${version}-1-x86_64.pkg.tar.zst\`.
+
+          **NixOS** - \`nix build github:MarchTheDev/Orbit\`, or unpack the
+          tarball and run \`bin/orbit\`.
+
+          Orbit looks for games in your Steam library and adds them when you
+          ask it to; nothing is read or launched until you do.
+          EOF
+          ls -R files
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: files/*/*
+          body_path: notes.md
+          fail_on_unmatched_files: false

@@ -1,0 +1,53 @@
+# Maintainer: Orbit
+#
+# Packages a binary that has already been built.
+#
+# The build itself needs Node and a full Rust toolchain and takes a few minutes,
+# so this deliberately does not do it: CI builds `orbit` (see
+# .github/workflows/release.yml), drops the binary next to this file, and runs
+# `makepkg -f`. That keeps the package building in seconds, which is what
+# somebody installing it wants.
+#
+# To do it by hand:
+#   1. npm ci && npx tauri build --no-bundle      (in web/)
+#   2. copy web/src-tauri/target/release/orbit here, with orbit.desktop and
+#      orbit.png (from web/src-tauri/icons/128x128.png)
+#   3. makepkg -f
+pkgname=orbit
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A library for the games on your PC: launches them, times them, and shows where the disk space went"
+arch=('x86_64')
+url="https://github.com/MarchTheDev/Orbit"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
+options=('!strip')
+source=('orbit' 'orbit.desktop' 'orbit.png')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 "$srcdir/orbit" "$pkgdir/usr/bin/orbit"
+  install -Dm644 "$srcdir/orbit.desktop" "$pkgdir/usr/share/applications/orbit.desktop"
+  install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/orbit.png"
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE" <<'LICENSE'
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+LICENSE
+}

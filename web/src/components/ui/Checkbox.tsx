@@ -32,7 +32,9 @@ export function CheckboxBox({
         className="peer size-3.5 cursor-pointer appearance-none rounded-[4px] border border-line bg-panel transition checked:border-accent checked:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
       />
       <Check
-        className="pointer-events-none absolute size-2.5 text-white opacity-0 transition peer-checked:opacity-100"
+        className="pointer-events-none absolute size-2.5 opacity-0 transition peer-checked:opacity-100"
+        // The tick has to read on the accent, which is not white on every theme.
+        style={{ color: 'var(--c-on-accent, #fff)' }}
         strokeWidth={3}
         aria-hidden
       />

@@ -1,13 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, LoaderCircle, Square, X } from 'lucide-react';
+import {
+  CircleAlert,
+  CircleCheck,
+  FolderOpen,
+  Info,
+  LoaderCircle,
+  MoveRight,
+  Pencil,
+  Play,
+  Square,
+  Star,
+  Trash2,
+  X,
+} from 'lucide-react';
 import type { Game, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { clearLibrary, isNative, setPlaytime, steamLibrary } from './services/native';
 import { onFileDrop } from './services/desktop';
+import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav } from './components/TopNav';
+import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { Hero } from './components/Hero';
 import { ContinueRow } from './components/ContinueRow';
 import { Toolbar, type Filter } from './components/Toolbar';
@@ -61,6 +76,11 @@ export default function App() {
   const [showSteam, setShowSteam] = useState(false);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
+  /** Where the right-click menu is, and which game it is about. */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  /** Which tab the drawer should open on, and a counter that forces a reopen. */
+  const [detailTab, setDetailTab] = useState<'overview' | 'edit'>('overview');
+  const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
   /** Programs dragged onto the window, waiting to be added. */
   const [droppedPaths, setDroppedPaths] = useState<string[] | null>(null);
@@ -333,6 +353,69 @@ export default function App() {
     [visible, order, setSettings],
   );
 
+  /** Open the drawer on a particular tab, wherever it is already. */
+  const openDetail = (id: string, tab: 'overview' | 'edit' = 'overview') => {
+    setDetailTab(tab);
+    setDetailNonce((n) => n + 1);
+    setSelectedId(id);
+  };
+
+  /**
+   * What can be done to a game from the library, without opening it.
+   *
+   * Built here rather than in the grid or the list, because these are the app's
+   * own actions: the two views only know how to report a right click.
+   */
+  const menuGame = menu ? (games.find((g) => g.id === menu.id) ?? null) : null;
+  const menuItems: MenuItem[] = menuGame
+    ? [
+        { kind: 'label', label: menuGame.title },
+        { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
+        { label: 'Edit details', icon: Pencil, onSelect: () => openDetail(menuGame.id, 'edit') },
+        { kind: 'sep' },
+        menuGame.running || session?.gameId === menuGame.id
+          ? {
+              label: 'Stop session',
+              icon: Square,
+              onSelect: () => void stop(),
+            }
+          : {
+              label: 'Play',
+              icon: Play,
+              onSelect: () => void startGame(menuGame),
+            },
+        {
+          label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
+          icon: Star,
+          onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
+        },
+        { kind: 'sep' },
+        {
+          label: 'Move to another folder…',
+          icon: MoveRight,
+          disabled: !menuGame.installDir,
+          onSelect: () => setMoveId(menuGame.id),
+        },
+        {
+          label: 'Show in Explorer',
+          icon: FolderOpen,
+          disabled: !menuGame.installDir,
+          onSelect: () => void revealInExplorer(menuGame.installDir ?? ''),
+        },
+        { kind: 'sep' },
+        {
+          label: 'Remove from library',
+          icon: Trash2,
+          danger: true,
+          onSelect: () => {
+            if (!confirm(`Remove ${menuGame.title} from library? Its sessions go too.`)) return;
+            removeGame(menuGame.id);
+            setSelectedId((current) => (current === menuGame.id ? null : current));
+          },
+        },
+      ]
+    : [];
+
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const moving = games.find((g) => g.id === moveId) ?? null;
   // The drawer draws its own live clock, so it gets the stored numbers rather
@@ -508,6 +591,10 @@ export default function App() {
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
                   coverTint={settings.coverTint !== false}
+                  onContextMenu={(g, e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, id: g.id });
+                  }}
                 />
               ) : (
                 <GameList
@@ -517,6 +604,10 @@ export default function App() {
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
+                  onContextMenu={(g, e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, id: g.id });
+                  }}
                 />
               )}
             </div>
@@ -590,8 +681,9 @@ export default function App() {
 
       {selected && (
         <GameDetail
-          key={selected.id}
+          key={`${selected.id}:${detailNonce}`}
           game={selected}
+          initialTab={detailTab}
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
           context={page === 'backlog' ? 'backlog' : 'library'}
@@ -659,6 +751,10 @@ export default function App() {
           onClose={() => setShowSteam(false)}
         />
       )}
+      {menu && menuGame && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+
       {moving && settings && (
         <MoveDriveModal
           game={moving}

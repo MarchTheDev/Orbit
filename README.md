@@ -124,3 +124,38 @@ web/
     storage.rs             drives, folder sizes, safe moves
     store.rs               settings.json
 ```
+
+## Releases
+
+Everything Orbit ships as is built by GitHub, in
+[`.github/workflows/release.yml`](.github/workflows/release.yml).
+
+To build them: **Actions → Release → Run workflow**. The files appear as
+artifacts on that run. Push a tag (`git tag v0.1.0 && git push origin v0.1.0`)
+and the same files are attached to a GitHub release, which is where a download
+link points.
+
+| Platform | Files |
+| --- | --- |
+| Windows | `-windows-setup.exe` (the installer), `-windows-standalone.exe` (the program on its own), `-windows-portable.zip` (the program in a folder) |
+| Linux | `.AppImage` (one file, any distribution), `.deb` (Debian, Ubuntu, Mint), `.rpm` (Fedora, RHEL, openSUSE), `-linux-portable.tar.gz` |
+| Arch | `.pkg.tar.zst`, installed with `pacman -U` |
+| NixOS | a tarball, or `nix build github:MarchTheDev/Orbit` |
+
+The Arch, Fedora and NixOS builds are marked as best effort in the workflow:
+they run in each distribution's own container, and a package name that has moved
+between releases shows up as a failed job rather than as a wrong package. The
+Windows and Linux files are what the release itself depends on.
+
+Building by hand, on the distribution in question:
+
+```sh
+cd web
+npm ci
+npx tauri build                  # everything this platform can make
+npx tauri build --no-bundle      # just the program, in src-tauri/target/release
+```
+
+On Arch, [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) turns that binary
+into a package. On NixOS, `nix build` from the repository root builds Orbit from
+source with [`flake.nix`](flake.nix).

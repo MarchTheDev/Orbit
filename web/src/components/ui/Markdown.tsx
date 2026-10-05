@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import type { ReactNode } from 'react';
 import { openExternal } from '../../services/desktop';
 import { cn } from '../../utils/cn';
@@ -241,4 +242,186 @@ function Bullet({ item }: { item: { text: string; box?: boolean; done?: boolean 
       </span>
     </li>
   );
+}
+
+
+/* ------------------------------------------------------------------ writing */
+
+/**
+ * Notes, written in one pane with the markdown applied as it is typed.
+ *
+ * A textarea cannot style what is inside it, so the styling is drawn behind it
+ * instead: a mirror layer holds the same characters with the markers muted and
+ * the content styled, and the textarea sits on top with transparent text, its
+ * caret and its selection still its own. That is the same shape as Discord's
+ * message box, where `**this**` turns bold while the asterisks stay visible.
+ *
+ * Everything is monospace and every line is the same height, on purpose: the
+ * textarea's own metrics are what place the caret, so the mirror has to agree
+ * with them to the pixel, and a monospace face keeps its advance width when it
+ * is bold. Nothing is parsed twice: the same subset as the reader above.
+ */
+export function MarkdownEditor({
+  value,
+  onChange,
+  rows = 6,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  rows?: number;
+  placeholder?: string;
+  className?: string;
+}) {
+  const mirror = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+
+  // The mirror does not scroll on its own, so it follows the box that does.
+  const follow = () => {
+    if (mirror.current && area.current) mirror.current.scrollTop = area.current.scrollTop;
+  };
+
+  return (
+    <div className={cn('relative overflow-hidden rounded-lg border border-line bg-bg/60', className)}>
+      <div
+        ref={mirror}
+        aria-hidden
+        // `pr-8` is the scrollbar's width: the box on top reserves that much
+        // for one, so the mirror has to as well or a wrapped line breaks in a
+        // different place than the caret thinks it does.
+        className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2 pr-8 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words"
+      >
+        <Highlight text={value} />
+      </div>
+      <textarea
+        ref={area}
+        value={value}
+        rows={rows}
+        spellCheck={false}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={follow}
+        placeholder={placeholder}
+        // The characters are painted by the mirror; the box keeps the caret,
+        // the selection and the scroll.
+        style={{ scrollbarGutter: 'stable' }}
+        className="relative block w-full resize-y bg-transparent px-3 py-2 font-mono text-[13px] leading-6 text-transparent caret-accent outline-none placeholder:text-muted/60 focus:outline-none selection:bg-accent/30"
+      />
+    </div>
+  );
+}
+
+/** The mirror: the same text, with the markdown that carries meaning shown. */
+function Highlight({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, i) => (
+        <div key={i}>{shape(line) ?? '\u200b'}</div>
+      ))}
+    </>
+  );
+}
+
+/** The marker characters, dimmed rather than hidden, so the syntax stays visible. */
+function Marker({ children }: { children: ReactNode }) {
+  return <span className="text-muted/45">{children}</span>;
+}
+
+/** One line, styled by what it starts with. */
+function shape(line: string): ReactNode {
+  const heading = /^(#{1,3})(\s)(.*)$/.exec(line);
+  if (heading) {
+    return (
+      <>
+        <Marker>{heading[1]}</Marker>
+        {heading[2]}
+        <span className="font-bold text-fg">{inlineStyled(heading[3])}</span>
+      </>
+    );
+  }
+  const bullet = /^(\s*)([-*])(\s)(.*)$/.exec(line);
+  if (bullet) {
+    return (
+      <>
+        {bullet[1]}
+        <Marker>{bullet[2]}</Marker>
+        {bullet[3]}
+        <span className="text-muted">{inlineStyled(bullet[4])}</span>
+      </>
+    );
+  }
+  const numbered = /^(\s*)(\d+[.)])(\s)(.*)$/.exec(line);
+  if (numbered) {
+    return (
+      <>
+        {numbered[1]}
+        <Marker>{numbered[2]}</Marker>
+        {numbered[3]}
+        {inlineStyled(numbered[4])}
+      </>
+    );
+  }
+  const quote = /^(\s*)(>)(\s?)(.*)$/.exec(line);
+  if (quote) {
+    return (
+      <>
+        {quote[1]}
+        <Marker>{quote[2]}</Marker>
+        {quote[3]}
+        <span className="italic text-muted">{inlineStyled(quote[4])}</span>
+      </>
+    );
+  }
+  if (/^(\s*)(-{3,}|\*{3,}|_{3,})$/.test(line)) return <Marker>{line}</Marker>;
+  return <>{inlineStyled(line)}</>;
+}
+
+/** Bold, italic, code and links, with their markers left in place. */
+function inlineStyled(line: string): ReactNode[] {
+  return line
+    .split(TOKEN)
+    .filter((piece) => piece !== '')
+    .map((piece, i) => {
+      const bold = /^(\*\*|__)(.+)(\*\*|__)$/.exec(piece);
+      if (bold) {
+        return (
+          <span key={i}>
+            <Marker>{bold[1]}</Marker>
+            <strong className="font-bold text-fg">{bold[2]}</strong>
+            <Marker>{bold[3]}</Marker>
+          </span>
+        );
+      }
+      const italic = /^(\*|_)(.+)(\*|_)$/.exec(piece);
+      if (italic) {
+        return (
+          <span key={i}>
+            <Marker>{italic[1]}</Marker>
+            <em>{italic[2]}</em>
+            <Marker>{italic[3]}</Marker>
+          </span>
+        );
+      }
+      const code = /^`(.+)`$/.exec(piece);
+      if (code) {
+        return (
+          <span key={i}>
+            <Marker>`</Marker>
+            <span className="rounded-sm bg-accent/15 text-accent">{code[1]}</span>
+            <Marker>`</Marker>
+          </span>
+        );
+      }
+      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(piece);
+      if (link) {
+        return (
+          <span key={i}>
+            <Marker>[</Marker>
+            <span className="text-accent underline decoration-accent/40 underline-offset-2">{link[1]}</span>
+            <Marker>]({link[2]})</Marker>
+          </span>
+        );
+      }
+      return piece;
+    });
 }

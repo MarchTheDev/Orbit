@@ -49,9 +49,9 @@ export function SaveButton({
         // extra press this one has earned: it sinks into the panel on the way
         // down and the glow goes with it.
         btnGradient,
-        'active:scale-[0.98] active:shadow-[0_2px_8px_-4px_var(--c-accent)]',
+        'active:scale-[0.98]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
-        state === 'done' && 'from-emerald-500 to-emerald-400 shadow-[0_6px_18px_-6px_rgb(16_185_129)] hover:brightness-100',
+        state === 'done' && 'btn-grad-done',
         state === 'busy' && 'cursor-wait opacity-90',
         className,
       )}

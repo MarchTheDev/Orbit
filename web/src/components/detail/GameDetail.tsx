@@ -43,6 +43,15 @@ interface Props {
    * somebody is deciding to play, so nothing about launching belongs in it.
    */
   context?: 'library' | 'backlog';
+  /**
+   * Which tab to open on.
+   *
+   * The right-click menu in the library can go straight to Edit, and a drawer
+   * that opens on Overview and then jumps is worse than one that opens where it
+   * was asked to. The app gives the drawer a new key when it changes, so this is
+   * read once per opening.
+   */
+  initialTab?: 'overview' | 'edit';
   /** The running session, if it is for this game. */
   session: ActiveSession | null;
   now: number;
@@ -64,6 +73,7 @@ const SOURCE_LABEL: Record<string, string> = {
 export function GameDetail({
   game,
   context = 'library',
+  initialTab = 'overview',
   session,
   now,
   onUpdate,
@@ -78,7 +88,7 @@ export function GameDetail({
   const [loadingHltb, setLoadingHltb] = useState(false);
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions' | 'edit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions' | 'edit'>(initialTab);
   /** The backlog drawer is a smaller thing: four tabs, and no launch settings. */
   const backlog = context === 'backlog';
   const showing = backlog

@@ -77,6 +77,57 @@ body::before {
   .fade-in { animation: none !important; }
 }
 
+/* The one gradient every button that does something wears.
+ *
+ * Written as one class rather than a handful of Tailwind utilities for two
+ * reasons. It matches the theme properly: the blend starts from the theme's own
+ * accent, lightened, and only reaches the second colour in the far corner, so a
+ * Mars button is orange and a Nebula button is violet rather than both reading
+ * as the same purple-to-pink wash. And it is one place to change, so the add
+ * button, Save, Fetch, Import, Start session and the rest cannot drift apart
+ * from one another again.
+ *
+ * The text colour comes from the theme too, because white on Aurora's cyan does
+ * not read and dark on Nebula's violet reads worse. */
+.btn-grad {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c-accent) 84%, white) 0%,
+    var(--c-accent) 42%,
+    color-mix(in srgb, var(--c-accent) 58%, var(--c-accent2)) 100%
+  );
+  color: var(--c-on-accent, #fff);
+  font-weight: 600;
+  box-shadow:
+    0 6px 18px -8px color-mix(in srgb, var(--c-accent) 75%, transparent),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.18);
+  transition: filter 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+.btn-grad:hover {
+  filter: brightness(1.09) saturate(1.04);
+  box-shadow:
+    0 10px 26px -8px color-mix(in srgb, var(--c-accent) 85%, transparent),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.22);
+}
+.btn-grad:active { transform: translateY(1px); filter: brightness(0.95); }
+.btn-grad:disabled,
+.btn-grad[disabled] {
+  opacity: 0.5;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.btn-grad:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c-accent) 65%, transparent);
+  outline-offset: 2px;
+}
+/* The same button, having just done what it said it would. */
+.btn-grad-done {
+  background-image: linear-gradient(135deg, color-mix(in srgb, #10b981 84%, white) 0%, #10b981 45%, #34d399 100%);
+  box-shadow: 0 6px 18px -8px rgb(16 185 129 / 0.75), inset 0 1px 0 0 rgb(255 255 255 / 0.2);
+}
+
 /* The tick on a button that has just saved, so the confirmation lands. */
 .save-tick { animation: pop 0.3s ease-out; }
 @keyframes pop {

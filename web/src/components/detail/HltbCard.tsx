@@ -59,11 +59,6 @@ export function HltbCard({
       ].filter((r) => r.hours > 0)
     : [];
 
-  // The first target that has not been passed is the one worth showing as the
-  // goal: saying "90% of the completionist run" to somebody halfway through the
-  // story is true and useless.
-  const next = rows.find((r) => played < r.hours) ?? null;
-
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -92,11 +87,13 @@ export function HltbCard({
 
           {rows.map((r) => {
             const g = grade(played, r.hours);
-            const isGoal = next?.label === r.label;
             return (
-              <div key={r.label} className={isGoal ? 'rounded-lg bg-bg/40 p-2 -mx-2' : ''}>
+              // Just the three rows. Which one is next is not marked: a box
+              // drawn around one of them read as a selection to be made rather
+              // than as a comparison to be read.
+              <div key={r.label}>
                 <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
-                  <span className={isGoal ? 'font-medium text-fg' : 'text-muted'}>{r.label}</span>
+                  <span className="text-muted">{r.label}</span>
                   <span className="flex items-baseline gap-2">
                     <span className="font-mono font-semibold">{r.hours}h</span>
                     <span className="w-10 text-right font-mono text-[10px]" style={{ color: g.colour }} title={g.word}>
@@ -120,7 +117,7 @@ export function HltbCard({
 
           {/* A game played past every estimate is worth saying plainly: the
               numbers are other people's averages, not a rule. */}
-          {played > 0 && rows.length > 0 && !next && (
+          {played > 0 && rows.length > 0 && played > Math.max(...rows.map((r) => r.hours)) && (
             <p className="text-[11px] text-emerald-400">
               Past every estimate, by {Math.round(played - rows[rows.length - 1].hours)}h.
             </p>
