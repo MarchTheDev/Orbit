@@ -50,17 +50,28 @@ body::before {
 .fade-in { animation: fade .25s ease; }
 @keyframes fade { from { opacity: 0; } }
 
-.orbit-ring { animation: spin 14s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* The Orbit mark: the two orbits turn against each other, carrying the bodies
+   that sit on them. Each orbit group is already centred on the drawing by a
+   `translate` in the markup, so the origin here is that group's own 0 0 — which
+   is the middle of the mark in every engine, with no `transform-box` to rely
+   on. */
+.orbit-spin-inner,
+.orbit-spin-outer {
+  transform-origin: 0 0;
+}
+.orbit-spin-inner { animation: orbit-spin 34s linear infinite; }
+.orbit-spin-outer { animation: orbit-spin-reverse 52s linear infinite; }
+@keyframes orbit-spin { to { transform: rotate(360deg); } }
+@keyframes orbit-spin-reverse { to { transform: rotate(-360deg); } }
 
-/* The Orbit mark: the moon travels around the ring. */
-.orbit-moon { animation: orbit-turn 9s linear infinite; }
-@keyframes orbit-turn { to { transform: rotate(360deg); } }
+.orbit-twinkle { animation: orbit-twinkle 3.6s ease-in-out infinite; }
+@keyframes orbit-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* Nobody who has asked for less motion gets a spinning anything. */
 @media (prefers-reduced-motion: reduce) {
-  .orbit-ring,
-  .orbit-moon,
+  .orbit-spin-inner,
+  .orbit-spin-outer,
+  .orbit-twinkle,
   .drawer-in,
   .fade-in { animation: none !important; }
 }

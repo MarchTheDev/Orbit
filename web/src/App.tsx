@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, LoaderCircle, Orbit, Square, X } from 'lucide-react';
+import { CircleAlert, CircleCheck, LoaderCircle, Square, X } from 'lucide-react';
 import type { Game, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
@@ -11,6 +11,7 @@ import { TopNav } from './components/TopNav';
 import { Hero } from './components/Hero';
 import { ContinueRow } from './components/ContinueRow';
 import { Toolbar, type Filter } from './components/Toolbar';
+import { Logo } from './components/ui/Logo';
 import { GameGrid } from './components/GameGrid';
 import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
@@ -268,7 +269,7 @@ export default function App() {
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
           <div className="rounded-3xl border-2 border-dashed border-accent px-12 py-10 text-center">
-            <Orbit className="orbit-ring mx-auto size-14 text-accent" />
+            <Logo className="mx-auto size-16 text-accent" animated />
             <p className="mt-3 text-lg font-semibold">Drop to add</p>
             <p className="mt-1 text-sm text-muted">A game program, or a folder full of them</p>
           </div>
@@ -338,7 +339,7 @@ export default function App() {
             <div>
               {!ready ? null : visible.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted">
-                  <Orbit className="size-14 opacity-50" />
+                  <Logo className="size-16 opacity-50" />
                   <p>{games.length === 0 ? 'Nothing in this orbit yet.' : 'Nothing matches that.'}</p>
                   {games.length === 0 && (
                     <p className="text-xs">Drop a game program on the window, or use Add game.</p>
