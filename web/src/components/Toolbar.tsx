@@ -1,4 +1,4 @@
-import { FolderSearch, LayoutGrid, List, Plus, Search } from 'lucide-react';
+import { LayoutGrid, List, Plus, Search, Gamepad2 } from 'lucide-react';
 import type { Game, SortKey, ViewMode } from '../types';
 import { cn } from '../utils/cn';
 import { btnGhost } from './ui/Modal';
@@ -18,8 +18,8 @@ interface Props {
   sort: SortKey;
   setSort: (s: SortKey) => void;
   onAdd: () => void;
-  onImport: () => void;
-  importing: boolean;
+  /** Opens the Steam import dialog. */
+  onSteam: () => void;
 }
 
 const FILTERS: { id: Filter; label: string }[] = [
@@ -44,8 +44,7 @@ export function Toolbar({
   sort,
   setSort,
   onAdd,
-  onImport,
-  importing,
+  onSteam,
 }: Props) {
   return (
     <div className="mt-8 space-y-3 px-6">
@@ -93,9 +92,9 @@ export function Toolbar({
             </button>
           ))}
         </div>
-        <button className={btnGhost} onClick={onImport} disabled={importing}>
-          <FolderSearch className="mr-1.5 inline size-4" />
-          {importing ? 'Scanning…' : 'Browse folder'}
+        <button className={`${btnGhost} flex items-center gap-2`} onClick={onSteam}>
+          <Gamepad2 className="size-4" />
+          Steam library
         </button>
         <button
           onClick={onAdd}

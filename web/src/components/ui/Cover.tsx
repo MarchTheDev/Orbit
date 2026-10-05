@@ -7,39 +7,37 @@ import { cn } from '../../utils/cn';
  * Cover art, best source first:
  *
  * 1. a cover already sitting next to the game on disk
- * 2. the one fetched from IGDB
+ * 2. the store's own artwork
  * 3. initials on a gradient, which always works
+ *
+ * Shapes are not assumed. A grid tile is a tall rectangle, and a store banner is
+ * a wide one, so pasting a banner into a tile crops most of it away — which is
+ * exactly what a wrong-looking thumbnail is. Instead the picture says how wide
+ * it is when it loads: tall art fills the frame, wide art is fitted whole over a
+ * blurred copy of itself, so nothing is ever cut off.
  */
 export function Cover({ game, className }: { game: Game; className?: string }) {
   const [localFailed, setLocalFailed] = useState(false);
   const [remoteFailed, setRemoteFailed] = useState(false);
+  const [headerFailed, setHeaderFailed] = useState(false);
 
   // A new game means a new cover to try, and a failed one must not stick.
   useEffect(() => {
     setLocalFailed(false);
     setRemoteFailed(false);
-  }, [game.coverPath, game.igdb?.coverUrl]);
+    setHeaderFailed(false);
+  }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl]);
 
   if (game.coverPath && !localFailed) {
-    return (
-      <img
-        src={fileSrc(game.coverPath)}
-        alt={game.title}
-        onError={() => setLocalFailed(true)}
-        className={cn('object-cover', className)}
-      />
-    );
+    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} onFail={() => setLocalFailed(true)} />;
   }
 
-  if (game.igdb?.coverUrl && !remoteFailed) {
-    return (
-      <img
-        src={game.igdb.coverUrl}
-        alt={game.title}
-        onError={() => setRemoteFailed(true)}
-        className={cn('object-cover', className)}
-      />
-    );
+  if (game.meta?.coverUrl && !remoteFailed) {
+    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} onFail={() => setRemoteFailed(true)} />;
+  }
+
+  if (game.meta?.headerUrl && !headerFailed) {
+    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} onFail={() => setHeaderFailed(true)} />;
   }
 
   const initials = game.title
@@ -56,6 +54,50 @@ export function Cover({ game, className }: { game: Game; className?: string }) {
       <div className="absolute size-[140%] rounded-full border border-white/15" />
       <div className="absolute size-[90%] rounded-full border border-white/10" />
       <span className="relative text-3xl font-black tracking-tight text-white/90 drop-shadow">{initials}</span>
+    </div>
+  );
+}
+
+/**
+ * One picture in a frame of any shape.
+ *
+ * The frame's size comes from the caller's classes, so all this decides is how
+ * the picture sits inside it: filled when it is already taller than it is wide,
+ * and letterboxed over a blur when it is not.
+ */
+function Artwork({
+  src,
+  alt,
+  className,
+  onFail,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  onFail: () => void;
+}) {
+  const [wide, setWide] = useState(false);
+
+  return (
+    <div className={cn('relative overflow-hidden', className)}>
+      {/* First in the document so it stays behind: the blur fills the bars on
+          either side with the picture's own colours, so a wide banner reads as
+          artwork rather than as a gap with a picture in it. */}
+      {wide && (
+        <img
+          src={src}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-xl"
+        />
+      )}
+      <img
+        src={src}
+        alt={alt}
+        onLoad={(e) => setWide(e.currentTarget.naturalWidth > e.currentTarget.naturalHeight)}
+        onError={onFail}
+        className={cn('relative size-full', wide ? 'object-contain' : 'object-cover')}
+      />
     </div>
   );
 }

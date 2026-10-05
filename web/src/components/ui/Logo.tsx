@@ -10,13 +10,14 @@
  * orbits needs the pieces as separate groups.
  *
  * Colour comes from `currentColor`, so the mark follows the theme and whatever
- * it is sitting on. `animated` sets the two orbits turning against each other;
- * the motion is CSS (see index.css) and stops for anyone who has asked for less
- * of it.
+ * it is sitting on. The two orbits turn against each other all the time — the
+ * mark is the one thing in the app that is always moving, which is what makes it
+ * recognisable as Orbit — unless `animated` is turned off. The motion is CSS
+ * (see index.css) and stops for anyone who has asked for less of it.
  */
 export function Logo({
   className,
-  animated = false,
+  animated = true,
   title = 'Orbit',
 }: {
   className?: string;

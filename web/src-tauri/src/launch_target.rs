@@ -1,9 +1,11 @@
 //! How a game gets started.
 //!
-//! A game is launched one of four ways: not at all (Orbit only times it), by
-//! running a program, by asking Steam, or by feeding a ROM to an emulator. The
-//! choice is stored on the game as one small JSON object, so adding a kind later
-//! does not mean another migration.
+//! Two ways are offered: running a program, or not starting anything at all and
+//! letting Orbit keep the clock. A third exists for games brought in from a
+//! Steam library, which have to go through Steam to start properly; it is not
+//! something the launch editor offers, but a game imported from Steam is
+//! launched that way and the choice is kept in the same small JSON object, so
+//! adding a kind later does not mean another migration.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -31,13 +33,10 @@ pub enum LaunchTarget {
         #[serde(default)]
         working_dir: Option<PathBuf>,
     },
+    /// Started through Steam, which is how an imported Steam game has to be
+    /// run: the executable inside its folder usually will not start on its own.
     Steam {
         app_id: u32,
-    },
-    Emulator {
-        emulator_path: PathBuf,
-        args_template: String,
-        rom_path: PathBuf,
     },
 }
 
@@ -61,7 +60,6 @@ impl LaunchTarget {
             LaunchTarget::None => "Time only".to_string(),
             LaunchTarget::Executable { path, .. } => file_name(path),
             LaunchTarget::Steam { app_id } => format!("Steam · {app_id}"),
-            LaunchTarget::Emulator { rom_path, .. } => file_name(rom_path),
         }
     }
 
@@ -76,7 +74,6 @@ impl LaunchTarget {
             LaunchTarget::None => None,
             LaunchTarget::Executable { path, .. } => Some(path),
             LaunchTarget::Steam { .. } => None,
-            LaunchTarget::Emulator { emulator_path, .. } => Some(emulator_path),
         }
     }
 }
@@ -126,32 +123,6 @@ pub fn spawn(target: &LaunchTarget) -> Result<Option<Child>, String> {
             open_url(&format!("steam://rungameid/{app_id}"))?;
             Ok(None)
         }
-        LaunchTarget::Emulator {
-            emulator_path,
-            args_template,
-            rom_path,
-        } => {
-            if !rom_path.exists() {
-                return Err(format!("{} is not there any more.", rom_path.display()));
-            }
-            if !emulator_path.exists() {
-                return Err(format!(
-                    "{} is not there any more.",
-                    emulator_path.display()
-                ));
-            }
-            let args = expand_template(args_template, rom_path);
-            let mut cmd = Command::new(emulator_path);
-            if !args.trim().is_empty() {
-                cmd.args(parse_args(&args));
-            }
-            if let Some(dir) = emulator_path.parent() {
-                cmd.current_dir(dir);
-            }
-            Ok(Some(quiet(&mut cmd).map_err(|e| {
-                format!("Could not start {}: {e}", emulator_path.display())
-            })?))
-        }
     }
 }
 
@@ -171,35 +142,6 @@ fn open_url(url: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not open {url}: {e}"))
-}
-
-/// Put the ROM path into an emulator's argument string.
-///
-/// Both spellings are accepted because emulator front ends disagree about which
-/// one they use, and neither is worth a preference setting.
-pub fn expand_template(template: &str, rom: &Path) -> String {
-    let rom = rom.to_string_lossy().to_string();
-    template.replace("{rom}", &rom).replace("%ROM%", &rom)
-}
-
-/// Take an app id out of whatever was pasted into the box.
-///
-/// The Steam store page is what most people copy, so a URL is accepted as well
-/// as a bare number. Anything else is refused rather than guessed at, because a
-/// wrong app id starts the wrong game.
-pub fn parse_steam_id(text: &str) -> Option<u32> {
-    let text = text.trim().trim_end_matches('/');
-    if let Some(index) = text.find("/app/") {
-        let digits: String = text[index + 5..]
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect();
-        return digits.parse().ok();
-    }
-    if text.is_empty() || !text.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    text.parse().ok()
 }
 
 /// Find cover art sitting next to a game.
@@ -230,28 +172,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_pasted_store_link_becomes_an_app_id() {
-        assert_eq!(parse_steam_id("620"), Some(620));
-        assert_eq!(
-            parse_steam_id("https://store.steampowered.com/app/620/"),
-            Some(620)
-        );
-        assert_eq!(parse_steam_id("  1091500  "), Some(1_091_500));
-        assert_eq!(parse_steam_id("Portal 2"), None);
-        assert_eq!(parse_steam_id(""), None);
-    }
-
-    #[test]
-    fn both_rom_placeholders_are_filled_in() {
-        let rom = Path::new(r"C:\ROMs\Chrono Trigger.sfc");
-        assert_eq!(
-            expand_template("-f {rom} --fullscreen", rom),
-            r"-f C:\ROMs\Chrono Trigger.sfc --fullscreen"
-        );
-        assert_eq!(expand_template("%ROM%", rom), r"C:\ROMs\Chrono Trigger.sfc");
-    }
-
-    #[test]
     fn a_target_survives_a_json_round_trip() {
         let target = LaunchTarget::Steam { app_id: 620 };
         let text = target.to_json();
@@ -261,16 +181,11 @@ mod tests {
     }
 
     #[test]
-    fn a_target_written_by_the_front_end_is_understood() {
+    fn a_target_from_an_older_orbit_still_parses() {
+        // Emulator support was removed, but a game saved with it must still
+        // open: an unknown shape falls back to the timer rather than an error.
         let from_ui = r#"{"kind":"emulator","emulatorPath":"C:\\Retro\\retroarch.exe","argsTemplate":"-f {rom}","romPath":"D:\\Roms\\game.nes"}"#;
-        assert_eq!(
-            LaunchTarget::parse(Some(from_ui)),
-            LaunchTarget::Emulator {
-                emulator_path: PathBuf::from(r"C:\Retro\retroarch.exe"),
-                args_template: "-f {rom}".to_string(),
-                rom_path: PathBuf::from(r"D:\Roms\game.nes"),
-            }
-        );
+        assert_eq!(LaunchTarget::parse(Some(from_ui)), LaunchTarget::None);
     }
 
     #[test]

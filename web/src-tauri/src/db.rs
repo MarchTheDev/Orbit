@@ -12,7 +12,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Bumped whenever the schema below changes, and never guessed at.
-const SCHEMA_VERSION: i64 = 1;
+///
+/// 2 — the metadata column is called `meta` rather than `igdb`, since Orbit no
+///     longer talks to IGDB at all, and a game can list the programs it wants
+///     started alongside it.
+const SCHEMA_VERSION: i64 = 2;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -62,10 +66,14 @@ pub struct GameRow {
     pub manual_play_secs: i64,
     pub cover_path: Option<String>,
     pub launch: Value,
-    pub igdb: Option<Value>,
+    /// What a store knows about the game. The field was called `igdb` before
+    /// IGDB was dropped; the name now says what it holds rather than where it
+    /// came from.
+    pub meta: Option<Value>,
     pub hltb: Option<Value>,
+    /// Programs Orbit starts at the same time as the game.
+    pub companions: Vec<Companion>,
     pub notes: String,
-    pub logs: Value,
     pub hue: i64,
     #[serde(rename = "addedAt")]
     pub created_at: String,
@@ -76,6 +84,16 @@ pub struct GameRow {
     pub longest_secs: i64,
     /// True while a session for this game is open right now.
     pub running: bool,
+}
+
+/// A program started alongside a game, such as a frame-rate tool or a mod
+/// manager. `args` is kept as typed, exactly like a launch target's.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Companion {
+    pub path: String,
+    #[serde(default)]
+    pub args: String,
 }
 
 /// One play session.
@@ -105,6 +123,9 @@ pub struct SessionRow {
 pub struct GameLogRow {
     pub id: i64,
     pub game_id: String,
+    /// Filled in wherever the game is joined; empty on a bare row.
+    #[serde(default)]
+    pub game_title: String,
     /// When it happened, as Unix seconds, to the minute the player chose.
     pub at: i64,
     /// How much time the note is about, in seconds.
@@ -204,8 +225,9 @@ impl Db {
                 favorite         INTEGER NOT NULL DEFAULT 0,
                 manual_play_secs INTEGER NOT NULL DEFAULT 0,
                 cover_path       TEXT,
-                igdb             TEXT,
+                meta             TEXT,
                 hltb             TEXT,
+                companions       TEXT    NOT NULL DEFAULT '[]',
                 notes            TEXT    NOT NULL DEFAULT '',
                 logs             TEXT    NOT NULL DEFAULT '[]',
                 hue              INTEGER NOT NULL DEFAULT 0,
@@ -244,8 +266,45 @@ impl Db {
         )
         .map_err(|e| format!("Could not build the library: {e}"))?;
 
+        // Anything a version 1 library has that version 2 spells differently.
+        Self::upgrade_to_2(conn)?;
+
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
+        Ok(())
+    }
+
+    /// Bring a version 1 library up to date, or do nothing to a new one.
+    ///
+    /// Both steps are conditional because a fresh library is built by the batch
+    /// above and already has the right shape.
+    fn upgrade_to_2(conn: &Connection) -> Result<(), String> {
+        let names: Vec<String> = {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(games)")
+                .map_err(|e| format!("Could not read the library layout: {e}"))?;
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .map_err(|e| format!("Could not read the library layout: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Could not read the library layout: {e}"))?
+        };
+
+        if names.iter().any(|c| c == "igdb") && !names.iter().any(|c| c == "meta") {
+            // IGDB is gone from the app, but the details it fetched are still
+            // the player's data, kept under a name that says what they are
+            // rather than where they came from.
+            conn.execute("ALTER TABLE games RENAME COLUMN igdb TO meta", [])
+                .map_err(|e| format!("Could not rename the metadata column: {e}"))?;
+            log::info!("renamed games.igdb to games.meta");
+        }
+        if !names.iter().any(|c| c == "companions") {
+            conn.execute(
+                "ALTER TABLE games ADD COLUMN companions TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )
+            .map_err(|e| format!("Could not add the companions column: {e}"))?;
+            log::info!("added games.companions");
+        }
         Ok(())
     }
 
@@ -265,7 +324,7 @@ impl Db {
                 r#"
                 SELECT g.id, g.title, g.launch, g.exe_path, g.install_dir, g.size_bytes,
                        g.status, g.favorite, g.manual_play_secs, g.cover_path,
-                       g.igdb, g.hltb, g.notes, g.logs, g.hue, g.created_at,
+                       g.meta, g.hltb, g.notes, g.companions, g.hue, g.created_at,
                        COALESCE(SUM(s.duration_secs), 0)              AS total_secs,
                        COUNT(s.id)                                    AS session_count,
                        COALESCE(MAX(s.duration_secs), 0)              AS longest_secs,
@@ -283,9 +342,9 @@ impl Db {
         let rows = stmt
             .query_map([], |r| {
                 let launch: Option<String> = r.get(2)?;
-                let igdb: Option<String> = r.get(10)?;
+                let meta: Option<String> = r.get(10)?;
                 let hltb: Option<String> = r.get(11)?;
-                let logs: Option<String> = r.get(13)?;
+                let companions: Option<String> = r.get(13)?;
                 let created_at: i64 = r.get(15)?;
                 let total_secs: i64 = r.get(16)?;
                 let session_count: i64 = r.get(17)?;
@@ -318,10 +377,10 @@ impl Db {
                     favorite: r.get::<_, i64>(7)? != 0,
                     manual_play_secs,
                     cover_path: r.get(9)?,
-                    igdb: igdb.as_deref().and_then(|v| serde_json::from_str(v).ok()),
+                    meta: meta.as_deref().and_then(|v| serde_json::from_str(v).ok()),
                     hltb: hltb.as_deref().and_then(|v| serde_json::from_str(v).ok()),
                     notes: r.get(12)?,
-                    logs: parse(logs.as_deref(), "[]"),
+                    companions: parse_vec(companions.as_deref()),
                     hue: r.get(14)?,
                     created_at: iso8601(created_at),
                     last_played: last_end.map(iso8601),
@@ -358,8 +417,8 @@ impl Db {
         conn.execute(
             r#"
             INSERT INTO games (id, title, launch, exe_path, install_dir, size_bytes,
-                               status, favorite, manual_play_secs, cover_path, igdb,
-                               hltb, notes, logs, hue, created_at, updated_at)
+                               status, favorite, manual_play_secs, cover_path, meta,
+                               hltb, notes, companions, hue, created_at, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 title            = excluded.title,
@@ -371,10 +430,10 @@ impl Db {
                 favorite         = excluded.favorite,
                 manual_play_secs = excluded.manual_play_secs,
                 cover_path       = excluded.cover_path,
-                igdb             = excluded.igdb,
+                meta             = excluded.meta,
                 hltb             = excluded.hltb,
                 notes            = excluded.notes,
-                logs             = excluded.logs,
+                companions       = excluded.companions,
                 hue              = excluded.hue,
                 updated_at       = excluded.updated_at
             "#,
@@ -394,10 +453,10 @@ impl Db {
                 i64::from(game.favorite),
                 game.manual_play_secs.max(0),
                 game.cover_path,
-                game.igdb.as_ref().map(|v| v.to_string()),
+                game.meta.as_ref().map(|v| v.to_string()),
                 game.hltb.as_ref().map(|v| v.to_string()),
                 game.notes,
-                json(&Value::Array(game.logs.clone())),
+                serde_json::to_string(&game.companions).unwrap_or_else(|_| "[]".into()),
                 game.hue,
                 now(),
             ],
@@ -649,10 +708,11 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, game_id, at, secs, note, created_at
-                   FROM game_logs
-                  WHERE game_id = ?1
-                  ORDER BY at DESC, id DESC",
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.created_at, COALESCE(g.title, '')
+                   FROM game_logs l
+                   LEFT JOIN games g ON g.id = l.game_id
+                  WHERE l.game_id = ?1
+                  ORDER BY l.at DESC, l.id DESC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -660,6 +720,7 @@ impl Db {
                 Ok(GameLogRow {
                     id: r.get(0)?,
                     game_id: r.get(1)?,
+                    game_title: r.get(6)?,
                     at: r.get(2)?,
                     secs: r.get(3)?,
                     note: r.get(4)?,
@@ -693,11 +754,72 @@ impl Db {
         Ok(GameLogRow {
             id,
             game_id: game_id.to_string(),
+            // The caller already knows which game this is.
+            game_title: String::new(),
             at,
             secs: secs.max(0),
             note: note.trim().to_string(),
             created_at: now(),
         })
+    }
+
+    /// Every note in the library, newest moment first.
+    ///
+    /// The Logs page shows all of them at once, so they arrive in one read with
+    /// their game's title attached rather than as one query per game.
+    pub fn list_all_logs(&self, limit: i64, offset: i64) -> Result<Vec<GameLogRow>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.created_at, COALESCE(g.title, '')
+                   FROM game_logs l
+                   LEFT JOIN games g ON g.id = l.game_id
+                  ORDER BY l.at DESC, l.id DESC
+                  LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(|e| format!("Could not read the logs: {e}"))?;
+        let rows = stmt
+            .query_map(params![limit.clamp(1, 5_000), offset.max(0)], |r| {
+                Ok(GameLogRow {
+                    id: r.get(0)?,
+                    game_id: r.get(1)?,
+                    game_title: r.get(6)?,
+                    at: r.get(2)?,
+                    secs: r.get(3)?,
+                    note: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })
+            .map_err(|e| format!("Could not read the logs: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read the logs: {e}"))
+    }
+
+    /// How many notes there are, for paging.
+    pub fn count_logs(&self) -> Result<i64, String> {
+        let conn = self.lock()?;
+        conn.query_row("SELECT COUNT(*) FROM game_logs", [], |r| r.get(0))
+            .map_err(|e| format!("Could not count the logs: {e}"))
+    }
+
+    /// Write the "Started playing" note the first time a game is ever launched.
+    ///
+    /// Called before the session row exists, which is what makes "first" mean
+    /// first: a game the player has already played, or already written about,
+    /// gets nothing. A failure here is never worth stopping a launch for, so the
+    /// caller logs it and carries on.
+    pub fn add_started_log_if_first(&self, game_id: &str, at: i64) -> Result<bool, String> {
+        let conn = self.lock()?;
+        let written = conn
+            .execute(
+                "INSERT INTO game_logs (game_id, at, secs, note, created_at)
+                 SELECT ?1, ?2, 0, 'Started playing', ?2
+                  WHERE NOT EXISTS (SELECT 1 FROM game_logs WHERE game_id = ?1)
+                    AND NOT EXISTS (SELECT 1 FROM sessions WHERE game_id = ?1)",
+                params![game_id, at],
+            )
+            .map_err(|e| format!("Could not write the first note: {e}"))?;
+        Ok(written > 0)
     }
 
     /// Edit a note in place, so a date or a time can be corrected later.
@@ -808,10 +930,12 @@ pub struct GameWrite {
     pub manual_play_secs: i64,
     pub cover_path: Option<String>,
     pub launch: Option<Value>,
-    pub igdb: Option<Value>,
+    pub meta: Option<Value>,
     pub hltb: Option<Value>,
+    /// Programs to start alongside the game, in the order they were added.
+    #[serde(default)]
+    pub companions: Vec<Companion>,
     pub notes: String,
-    pub logs: Vec<Value>,
     pub hue: i64,
 }
 
@@ -832,6 +956,15 @@ fn session_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 
 fn json(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
+}
+
+/// Read a JSON array column as typed rows.
+///
+/// A column that is missing, empty or unreadable reads as no rows at all: a
+/// game with damaged side data is still a game worth launching.
+fn parse_vec<T: serde::de::DeserializeOwned>(text: Option<&str>) -> Vec<T> {
+    text.and_then(|t| serde_json::from_str::<Vec<T>>(t).ok())
+        .unwrap_or_default()
 }
 
 fn parse(text: Option<&str>, fallback: &str) -> Value {

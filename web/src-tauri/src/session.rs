@@ -77,6 +77,16 @@ impl Runner {
             .game(game_id)?
             .ok_or_else(|| "That game is not in the library any more.".to_string())?;
 
+        // The first launch of a game writes its own note, so the log starts
+        // itself off with the date the player began. Done before the session
+        // exists, which is what makes "first" mean first, and never allowed to
+        // stop a launch.
+        match self.db.add_started_log_if_first(&game.id, now()) {
+            Ok(true) => log::info!("wrote the first-play note for {}", game.title),
+            Ok(false) => {}
+            Err(e) => log::warn!("could not write the first-play note: {e}"),
+        }
+
         // The row is opened first, so the session exists even for a game Orbit
         // only times, and a failure below has something to roll back.
         let session_id = self.db.open_session(&game.id, now(), category)?;
@@ -89,6 +99,18 @@ impl Runner {
                 return Err(e);
             }
         };
+
+        // Companion programs ride along with the game: started after it, and
+        // never watched, so their exit cannot end the session. One failing is
+        // worth a line in the log but not a failed launch.
+        for companion in &game.companions {
+            let path = std::path::Path::new(&companion.path);
+            if let Err(e) = crate::launch::spawn_detached(path, &companion.args) {
+                log::warn!("companion {} did not start: {e}", companion.path);
+            } else {
+                log::info!("started companion {}", companion.path);
+            }
+        }
 
         let view = ActiveView {
             session_id,

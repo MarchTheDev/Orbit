@@ -11,6 +11,7 @@ mod launch;
 mod launch_target;
 mod metadata;
 mod session;
+mod steam;
 mod storage;
 mod store;
 
@@ -116,7 +117,6 @@ fn launch_info(launch: serde_json::Value) -> LaunchInfo {
             LaunchTarget::None => "none",
             LaunchTarget::Executable { .. } => "executable",
             LaunchTarget::Steam { .. } => "steam",
-            LaunchTarget::Emulator { .. } => "emulator",
         }
         .to_string(),
         label: target.label(),
@@ -125,12 +125,6 @@ fn launch_info(launch: serde_json::Value) -> LaunchInfo {
             .primary_path()
             .map(|p| p.to_string_lossy().to_string()),
     }
-}
-
-/// Pull an app id out of a pasted Steam store link, or return `None`.
-#[tauri::command]
-fn parse_steam_id(text: String) -> Option<u32> {
-    launch_target::parse_steam_id(&text)
 }
 
 /// Change only how a game is launched, leaving the rest of it alone.
@@ -158,6 +152,23 @@ fn set_playtime(orbit: State<'_, Orbit>, id: String, total_secs: i64) -> Result<
 #[tauri::command]
 fn list_game_logs(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<GameLogRow>, String> {
     orbit.db.list_game_logs(&game_id)
+}
+
+/// Every note in the library, newest first, with its game's title attached.
+#[tauri::command]
+fn list_all_logs(
+    orbit: State<'_, Orbit>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<GameLogRow>, String> {
+    orbit
+        .db
+        .list_all_logs(limit.unwrap_or(500), offset.unwrap_or(0))
+}
+
+#[tauri::command]
+fn count_logs(orbit: State<'_, Orbit>) -> Result<i64, String> {
+    orbit.db.count_logs()
 }
 
 /// Write a note against a game.
@@ -425,8 +436,9 @@ fn drive_of(path: String) -> String {
 
 /// Make an HTTP request the browser would not be allowed to make.
 ///
-/// Used for IGDB, which has no CORS headers, and anything else that needs a
-/// header the page cannot set.
+/// Kept for requests that need a header a page cannot set, and for the ones a
+/// browser would block outright. Nothing in Orbit needs it today; the store and
+/// HowLongToBeat are both fetched in Rust.
 #[tauri::command]
 async fn http_request(
     url: String,
@@ -473,24 +485,23 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
 
 /// Everything Orbit can find out about a game with no setup at all.
 ///
-/// The Steam store needs no key, which is the path every game takes by default.
-/// IGDB is richer and used instead when the player has saved a Twitch app; the
-/// token behind it is minted and refreshed here, so nothing expires on them.
+/// The Steam store needs no key and nothing to configure: there is no second
+/// provider, and so nothing that can expire or need a login.
+///
+/// An app id is passed when the caller has one — an import by Steam id, say —
+/// in which case the store page is read directly and the title can be blank,
+/// because the page carries its own name.
 #[tauri::command]
-async fn metadata_lookup(
-    title: String,
-    igdb_client_id: Option<String>,
-    igdb_client_secret: Option<String>,
-) -> Result<metadata::Meta, String> {
-    let igdb = match (igdb_client_id, igdb_client_secret) {
-        (Some(id), Some(secret))
-            if !id.trim().is_empty() && !secret.trim().is_empty() =>
-        {
-            Some((id, secret))
-        }
-        _ => None,
-    };
-    metadata::lookup(&title, igdb).await
+async fn metadata_lookup(title: String, app_id: Option<u64>) -> Result<metadata::Meta, String> {
+    metadata::lookup_or_app(&title, app_id).await
+}
+
+/// The player's installed Steam games, for the import dialog.
+#[tauri::command]
+async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
+    tokio::task::spawn_blocking(steam::installed_games)
+        .await
+        .map_err(|e| format!("Could not read the Steam library: {e}"))?
 }
 
 /// Titles the store suggests for a partial name, for the Add dialog.
@@ -577,11 +588,12 @@ pub fn run() {
             set_launch_target,
             set_playtime,
             list_game_logs,
+            list_all_logs,
+            count_logs,
             add_game_log,
             update_game_log,
             delete_game_log,
             launch_info,
-            parse_steam_id,
             exe_info,
             find_cover,
             resolve_game_folder,
@@ -604,6 +616,7 @@ pub fn run() {
             hltb_search,
             metadata_lookup,
             metadata_suggest,
+            steam_library,
             load_settings,
             save_settings,
             data_dir,

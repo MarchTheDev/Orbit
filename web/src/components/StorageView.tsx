@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, X } from 'lucide-react';
+import { FolderOpen, FolderPlus, HardDrive, MoveRight, PackagePlus, RefreshCw, X } from 'lucide-react';
 import type { Game } from '../types';
 import { diskSpace, folderSize, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { folderOf } from '../utils/paths';
 import { btnGhost } from './ui/Modal';
+import { Cover } from './ui/Cover';
 
 function Bar({ used, total }: { used: number; total: number | null }) {
   if (!total || total <= 0) return <div className="h-2 rounded-full bg-panel2" />;
@@ -21,22 +22,26 @@ function Bar({ used, total }: { used: number; total: number | null }) {
 }
 
 /**
- * Where the disk has gone.
+ * Where the games in the library actually live.
  *
- * Folder sizes come from Rust walking each folder, which is slow on a big
- * library, so they are measured when a folder is added or when Refresh is
- * pressed — not on every edit to a game. Which folder a game belongs to is just
- * a path prefix, so that part is worked out here with no round trips.
+ * This page is about the games Orbit already knows, not about finding new ones:
+ * every game is listed with its drive and folder, and moving one to another
+ * drive is a button rather than a trip through Explorer. The only scanning left
+ * is the folder importer, which sits with the library folders further down.
  */
 export function StorageView({
   games,
   folders,
   setFolders,
+  onMove,
   onImport,
 }: {
   games: Game[];
   folders: string[];
   setFolders: (next: string[]) => void;
+  /** Opens the move dialog for one game. */
+  onMove: (gameId: string) => void;
+  /** Hands a folder to the importer, for games not added yet. */
   onImport: (folder: string) => void;
 }) {
   const [sizes, setSizes] = useState<Record<string, number>>({});
@@ -85,36 +90,133 @@ export function StorageView({
     }
   };
 
-  const owned = useMemo(() => {
-    const map: Record<string, Game[]> = {};
-    for (const f of folders) map[f] = [];
-    const outside: Game[] = [];
+  /**
+   * The games, grouped by the drive they are on.
+   *
+   * A drive is what a player moves a game between, so that is the grouping that
+   * makes the move button obvious. Anything with no recorded folder gets its own
+   * group rather than being hidden.
+   */
+  const byDrive = useMemo(() => {
+    const groups = new Map<string, Game[]>();
     for (const g of games) {
-      const owner = ownerOf(g);
-      if (owner && map[owner]) map[owner].push(g);
-      else outside.push(g);
+      const drive = (g.drive || g.installDir?.slice(0, 2) || '').toUpperCase() || 'Unknown drive';
+      groups.set(drive, [...(groups.get(drive) ?? []), g]);
     }
-    return { map, outside };
-  }, [games, folders, ownerOf]);
+    for (const list of groups.values()) {
+      list.sort((a, b) => b.sizeBytes - a.sizeBytes || a.title.localeCompare(b.title));
+    }
+    // Closest to full first: D: is the one someone is trying to empty.
+    const freeOf = (drive: string) => drives.find((d) => d.drive.toUpperCase().startsWith(drive))?.free ?? Number.MAX_SAFE_INTEGER;
+    return [...groups.entries()].sort((a, b) => freeOf(a[0]) - freeOf(b[0]));
+  }, [games, drives]);
 
+  const totalSize = games.reduce((s, g) => s + (g.sizeBytes || 0), 0);
   const grand = folders.reduce((s, f) => s + (sizes[f] ?? 0), 0);
+  const movable = games.filter((g) => g.installDir).length;
 
   return (
-    <div className="mx-6 mt-5 space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {drives.map((d) => (
-          <div key={d.drive} className="glass rounded-2xl px-4 py-3">
-            <p className="text-[10px] uppercase tracking-widest text-muted">
-              {d.drive} {d.label && d.label !== '' ? d.label : ''}
-            </p>
-            <p className="mt-0.5 text-xl font-bold">{fmtBytes(d.free)}</p>
-            <p className="mb-2 text-[11px] text-muted">free of {fmtBytes(d.total)}</p>
-            <Bar used={d.total - d.free} total={d.total} />
-          </div>
-        ))}
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4 p-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold">
+            <HardDrive className="size-6 text-accent" />
+            Storage
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Where the games in your library live, and how to move them somewhere with more room.
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-lg font-semibold">{fmtBytes(totalSize)}</p>
+          <p className="text-[11px] text-muted">
+            {games.length} {games.length === 1 ? 'game' : 'games'}
+            {movable < games.length && ` · ${games.length - movable} with no folder recorded`}
+          </p>
+        </div>
+      </header>
 
-      <div className="glass rounded-2xl p-4">
+      {drives.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {drives.map((d) => (
+            <div key={d.drive} className="glass rounded-2xl px-4 py-3">
+              <p className="text-[10px] uppercase tracking-widest text-muted">
+                {d.drive} {d.label && d.label !== '' ? d.label : ''}
+              </p>
+              <p className="mt-0.5 text-xl font-bold">{fmtBytes(d.free)}</p>
+              <p className="mb-2 text-[11px] text-muted">free of {fmtBytes(d.total)}</p>
+              <Bar used={d.total - d.free} total={d.total} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <section className="glass rounded-2xl p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-muted">
+            <HardDrive className="size-4" />
+            Your games
+          </h2>
+          <div className="flex-1" />
+          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void measure()} disabled={busy}>
+            <RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
+            {busy ? 'Measuring…' : 'Refresh'}
+          </button>
+        </div>
+
+        {games.length === 0 ? (
+          <p className="py-10 text-center text-sm text-muted">Nothing in the library yet.</p>
+        ) : (
+          <div className="space-y-4">
+            {byDrive.map(([drive, list]) => {
+              const info = drives.find((d) => d.drive.toUpperCase().startsWith(drive));
+              return (
+                <div key={drive}>
+                  <div className="mb-1.5 flex items-baseline gap-2">
+                    <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-accent">{drive}</h3>
+                    <span className="text-[11px] text-muted">
+                      {fmtBytes(list.reduce((s, g) => s + (g.sizeBytes || 0), 0))}
+                      {info ? ` · ${fmtBytes(info.free)} free` : ''}
+                    </span>
+                  </div>
+                  <ul className="space-y-1">
+                    {list.map((g) => (
+                      <li
+                        key={g.id}
+                        className="flex items-center gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2"
+                      >
+                        <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{g.title}</p>
+                          <p className="truncate font-mono text-[11px] text-muted">
+                            {g.installDir ?? 'no folder recorded — Orbit cannot move this one'}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-mono text-xs text-muted">
+                          {g.sizeBytes > 0 ? fmtBytes(g.sizeBytes) : '—'}
+                        </span>
+                        {g.installDir ? (
+                          <button
+                            onClick={() => onMove(g.id)}
+                            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"
+                          >
+                            <MoveRight className="size-3.5" />
+                            Move…
+                          </button>
+                        ) : (
+                          <span className="shrink-0 text-[11px] text-muted">not movable</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="glass rounded-2xl p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Library folders</h2>
           <div className="flex-1" />
@@ -122,27 +224,20 @@ export function StorageView({
             <FolderPlus className="size-4" />
             Add folder
           </button>
-          <button
-            className={`${btnGhost} flex items-center gap-2`}
-            onClick={() => void measure()}
-            disabled={busy}
-          >
-            <RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
-            {busy ? 'Measuring…' : 'Refresh sizes'}
-          </button>
         </div>
 
         {folders.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted">
+          <p className="py-6 text-center text-sm text-muted">
             No library folders yet. Add one and Orbit will only ever move games between folders you list here.
           </p>
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-muted">
-              {fmtBytes(grand)} across {folders.length} {folders.length === 1 ? 'folder' : 'folders'}.
+              {fmtBytes(grand)} across {folders.length} {folders.length === 1 ? 'folder' : 'folders'}. Games are only ever
+              moved between these.
             </p>
             {folders.map((path) => {
-              const list = owned.map[path] ?? [];
+              const list = games.filter((g) => ownerOf(g) === path);
               const free = spaceBy[path];
               return (
                 <div key={path} className="rounded-xl border border-line bg-panel2/50 p-3">
@@ -157,21 +252,18 @@ export function StorageView({
                     <span className="rounded-full bg-panel px-2 py-0.5 text-xs">
                       {list.length} {list.length === 1 ? 'game' : 'games'}
                     </span>
-                    <span className="text-sm font-mono">{sizes[path] !== undefined ? fmtBytes(sizes[path]) : '…'}</span>
-                    <button
-                      className={`${btnGhost} flex items-center gap-2`}
-                      onClick={() => void revealInExplorer(path)}
-                    >
+                    <span className="font-mono text-sm">{sizes[path] !== undefined ? fmtBytes(sizes[path]) : '…'}</span>
+                    <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void revealInExplorer(path)}>
                       <FolderOpen className="size-4" />
                       Open
                     </button>
                     <button
                       className={`${btnGhost} flex items-center gap-2`}
                       onClick={() => onImport(path)}
-                      title="Add the games found in this folder"
+                      title="Look through this folder for games that are not in the library yet"
                     >
                       <PackagePlus className="size-4" />
-                      Add games
+                      Scan for games
                     </button>
                     <button
                       className="flex items-center gap-1.5 text-xs text-muted hover:text-rose-400"
@@ -190,24 +282,7 @@ export function StorageView({
             })}
           </div>
         )}
-      </div>
-
-      {owned.outside.length > 0 && (
-        <div className="glass rounded-2xl border-amber-500/30 p-4">
-          <h2 className="mb-1 text-sm font-semibold uppercase tracking-widest text-muted">Outside your library folders</h2>
-          <p className="mb-3 text-xs text-muted">
-            Orbit will launch and time these, but never move or delete them, because it did not put them there.
-          </p>
-          <div className="space-y-1">
-            {owned.outside.map((g) => (
-              <div key={g.id} className="flex items-center gap-3 text-sm">
-                <span className="flex-1 truncate">{g.title}</span>
-                <span className="truncate font-mono text-xs text-muted">{g.installDir ?? 'no folder recorded'}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      </section>
     </div>
   );
 }

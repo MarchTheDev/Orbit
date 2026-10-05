@@ -1,196 +1,247 @@
 import { useState } from 'react';
-import { AppWindow, FolderOpen, Gamepad2, Joystick, Timer } from 'lucide-react';
-import type { Game, LaunchTarget } from '../../types';
+import { AppWindow, FolderOpen, Plus, Timer, X } from 'lucide-react';
+import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
-import { pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
+import { pickFile, pickFolder } from '../../services/desktop';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 
+// Emulator and Steam used to be choices here. Both are gone: an emulator is just
+// a program with a ROM as an argument, and Steam is not something the player
+// should have to type an app id for — games imported from a Steam library carry
+// that with them.
 const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
   { kind: 'executable', label: 'Program', hint: 'The game is a .exe on this machine.', icon: AppWindow },
-  { kind: 'steam', label: 'Steam', hint: 'Ask Steam to run an app you own.', icon: Gamepad2 },
-  { kind: 'emulator', label: 'Emulator', hint: 'Run a ROM through an emulator.', icon: Joystick },
 ];
 
 /** The one path each kind needs, so it can be summarised in one line. */
-function summarise(t: LaunchTarget): string {
+function summarise(t: LaunchTarget, companions: Companion[]): string {
+  const extra = companions.length ? ` + ${companions.length} alongside` : '';
   switch (t.kind) {
     case 'executable':
-      return t.path;
+      return `${t.path}${extra}`;
     case 'steam':
-      return `Steam app ${t.appId}`;
-    case 'emulator':
-      return `${t.emulatorPath} · ${t.romPath}`;
+      return `Steam app ${t.appId}${extra}`;
     default:
-      return 'Timer only, nothing is launched';
+      return `Timer only, nothing is launched${extra}`;
   }
 }
 
 /**
  * How Orbit starts this game, and what it runs when the clock starts.
  *
- * This is where emulator and Steam games get fixed up, which is why it is on the
- * game itself rather than buried in settings.
+ * "Alongside" is the point of the second half: a game and the tool that has to
+ * be running with it, such as Assetto Corsa and Lossless Scaling. Those programs
+ * are started with the game and never watched, so closing one does not end the
+ * session.
  */
-export function LaunchEditor({ game, onSave }: { game: Game; onSave: (t: LaunchTarget) => void }) {
+export function LaunchEditor({
+  game,
+  onSave,
+}: {
+  game: Game;
+  onSave: (t: LaunchTarget, companions: Companion[]) => void;
+}) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
   const [args, setArgs] = useState(target.kind === 'executable' ? (target.args ?? '') : '');
   const [workingDir, setWorkingDir] = useState(target.kind === 'executable' ? (target.workingDir ?? '') : '');
-  const [romPath, setRomPath] = useState(target.kind === 'emulator' ? target.romPath : '');
-  const [argsTemplate, setArgsTemplate] = useState(target.kind === 'emulator' ? (target.argsTemplate ?? '{rom}') : '{rom}');
+  const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
 
   const switchKind = (kind: LaunchTarget['kind']) => {
     if (kind === 'none') setTarget({ kind: 'none' });
-    else if (kind === 'executable') setTarget({ kind: 'executable', path: game.exePath ?? '', args: '', workingDir: game.installDir });
-    else if (kind === 'steam') setTarget({ kind: 'steam', appId: 0 });
-    else setTarget({ kind: 'emulator', emulatorPath: '', romPath: '', argsTemplate: '{rom}' });
+    else if (kind === 'executable') {
+      setTarget({ kind: 'executable', path: game.exePath ?? '', args: '', workingDir: game.installDir });
+    }
   };
 
   const save = () => {
     if (target.kind === 'executable') {
-      onSave({ kind: 'executable', path: target.path, args, workingDir: workingDir || null });
+      onSave({ kind: 'executable', path: target.path, args, workingDir: workingDir || null }, companions);
     } else if (target.kind === 'steam') {
-      onSave({ kind: 'steam', appId: Number(target.appId) || 0 });
-    } else if (target.kind === 'emulator') {
-      onSave({ kind: 'emulator', emulatorPath: target.emulatorPath, romPath, argsTemplate });
+      onSave({ kind: 'steam', appId: Number(target.appId) || 0 }, companions);
     } else {
-      onSave({ kind: 'none' });
+      onSave({ kind: 'none' }, companions);
     }
+  };
+
+  const setCompanion = (i: number, patch: Partial<Companion>) => {
+    setCompanions((list) => list.map((c, n) => (n === i ? { ...c, ...patch } : c)));
   };
 
   const dirty =
     JSON.stringify(target) !== JSON.stringify(game.launch ?? { kind: 'none' }) ||
-    (target.kind === 'executable' && (args !== (game.launch?.kind === 'executable' ? game.launch.args ?? '' : '') ||
-      workingDir !== (game.launch?.kind === 'executable' ? game.launch.workingDir ?? '' : ''))) ||
-    (target.kind === 'emulator' && (romPath !== (game.launch?.kind === 'emulator' ? game.launch.romPath : '') ||
-      argsTemplate !== (game.launch?.kind === 'emulator' ? game.launch.argsTemplate ?? '{rom}' : '{rom}')));
+    JSON.stringify(companions) !== JSON.stringify(game.companions ?? []) ||
+    (target.kind === 'executable' &&
+      (args !== (game.launch?.kind === 'executable' ? game.launch.args ?? '' : '') ||
+        workingDir !== (game.launch?.kind === 'executable' ? game.launch.workingDir ?? '' : '')));
 
   return (
-    <section className="rounded-xl border border-line bg-panel2 p-4">
-      <h3 className="mb-2 text-sm font-semibold">Launching</h3>
+    <section className="space-y-4 rounded-xl border border-line bg-panel2 p-4">
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">Launching</h3>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {KINDS.map((k) => (
-          <button
-            key={k.kind}
-            onClick={() => switchKind(k.kind)}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
-              target.kind === k.kind ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60'
-            }`}
-          >
-            <k.icon className="size-3.5" />
-            {k.label}
-          </button>
-        ))}
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {KINDS.map((k) => (
+            <button
+              key={k.kind}
+              onClick={() => switchKind(k.kind)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+                target.kind === k.kind ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60'
+              }`}
+            >
+              <k.icon className="size-3.5" />
+              {k.label}
+            </button>
+          ))}
+        </div>
+
+        <p className="mb-3 text-xs text-muted">{KINDS.find((k) => k.kind === target.kind)?.hint}</p>
+
+        {target.kind === 'executable' && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <label className="block flex-1">
+                <span className={labelCls}>Program</span>
+                <input
+                  className={inputCls}
+                  value={target.path}
+                  onChange={(e) => setTarget({ ...target, path: e.target.value })}
+                  spellCheck={false}
+                />
+              </label>
+              {native && (
+                <button
+                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
+                  onClick={() =>
+                    void pickFile('Choose the program', ['exe', 'bat', 'cmd'], target.path || undefined).then(
+                      (p) => p && setTarget({ ...target, path: p }),
+                    )
+                  }
+                >
+                  <FolderOpen className="size-4" />
+                  Browse…
+                </button>
+              )}
+            </div>
+            <label className="block">
+              <span className={labelCls}>Arguments</span>
+              <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="-windowed" spellCheck={false} />
+            </label>
+            <div className="flex gap-2">
+              <label className="block flex-1">
+                <span className={labelCls}>Start in</span>
+                <input
+                  className={inputCls}
+                  value={workingDir}
+                  onChange={(e) => setWorkingDir(e.target.value)}
+                  placeholder="Leave empty for the program's own folder"
+                  spellCheck={false}
+                />
+              </label>
+              {native && (
+                <button
+                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
+                  onClick={() => void pickFolder('Choose the working folder', workingDir || undefined).then((p) => p && setWorkingDir(p))}
+                >
+                  <FolderOpen className="size-4" />
+                  Browse…
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {target.kind === 'steam' && (
+          <p className="rounded-lg border border-line bg-panel px-3 py-2 text-xs text-muted">
+            This game was imported from Steam, so Orbit starts it through Steam (app {target.appId}). Pick{' '}
+            <button className="text-accent hover:underline" onClick={() => switchKind('executable')}>
+              Program
+            </button>{' '}
+            to point at an .exe instead.
+          </p>
+        )}
       </div>
 
-      <p className="mb-3 text-xs text-muted">{KINDS.find((k) => k.kind === target.kind)?.hint}</p>
-
-      {target.kind === 'executable' && (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>Program</span>
-              <input
-                className={inputCls}
-                value={target.path}
-                onChange={(e) => setTarget({ ...target, path: e.target.value })}
-                spellCheck={false}
-              />
-            </label>
-            {native && (
-              <button
-                className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                onClick={() => void pickFile('Choose the program', ['exe', 'bat', 'cmd'], target.path || undefined).then((p) => p && setTarget({ ...target, path: p }))}
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
-          </div>
-          <label className="block">
-            <span className={labelCls}>Arguments</span>
-            <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="-windowed" spellCheck={false} />
-          </label>
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>Start in</span>
-              <input className={inputCls} value={workingDir} onChange={(e) => setWorkingDir(e.target.value)} placeholder="Leave empty for the program's own folder" spellCheck={false} />
-            </label>
-            {native && (
-              <button
-                className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                onClick={() => void pickFolder('Choose the working folder', workingDir || undefined).then((p) => p && setWorkingDir(p))}
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
-          </div>
+      {/* Started with the game, never watched. */}
+      <div className="border-t border-line pt-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">Start alongside</h3>
+          <button
+            onClick={() => setCompanions((list) => [...list, { path: '', args: '' }])}
+            className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"
+          >
+            <Plus className="size-3.5" />
+            Add a program
+          </button>
         </div>
-      )}
+        <p className="mb-3 text-xs text-muted">
+          For anything that has to be running with the game — a frame-rate tool, a controller mapper, a mod loader.
+          Orbit starts these at the same moment and then forgets about them.
+        </p>
 
-      {target.kind === 'steam' && (
-        <label className="block">
-          <span className={labelCls}>Steam app id</span>
-          <input
-            className={inputCls}
-            inputMode="numeric"
-            value={String(target.appId || '')}
-            onChange={(e) => setTarget({ kind: 'steam', appId: Number(e.target.value.replace(/\D/g, '')) || 0 })}
-            placeholder="620"
-          />
-        </label>
-      )}
-
-      {target.kind === 'emulator' && (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>Emulator</span>
-              <input className={inputCls} value={target.emulatorPath} onChange={(e) => setTarget({ ...target, emulatorPath: e.target.value })} spellCheck={false} />
-            </label>
-            {native && (
-              <button
-                className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                onClick={() => void pickFile('Choose the emulator', ['exe', 'bat', 'cmd']).then((p) => p && setTarget({ ...target, emulatorPath: p }))}
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
+        {companions.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
+            Nothing yet. Add one above, such as Lossless Scaling next to Assetto Corsa.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {companions.map((c, i) => (
+              <div key={i} className="rounded-lg border border-line bg-panel p-2.5">
+                <div className="flex gap-2">
+                  <label className="block flex-1">
+                    <span className={labelCls}>Program</span>
+                    <input
+                      className={inputCls}
+                      value={c.path}
+                      onChange={(e) => setCompanion(i, { path: e.target.value })}
+                      placeholder={'C:\Tools\Lossless Scaling\LosslessScaling.exe'}
+                      spellCheck={false}
+                    />
+                  </label>
+                  {native && (
+                    <button
+                      className={`${btnBrowse} mt-5 flex items-center gap-2`}
+                      onClick={() =>
+                        void pickFile('Choose the program', ['exe', 'bat', 'cmd'], c.path || undefined).then(
+                          (p) => p && setCompanion(i, { path: p }),
+                        )
+                      }
+                    >
+                      <FolderOpen className="size-4" />
+                      Browse…
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))}
+                    className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400"
+                    aria-label="Remove this program"
+                    title="Remove"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <label className="mt-2 block">
+                  <span className={labelCls}>Arguments</span>
+                  <input
+                    className={inputCls}
+                    value={c.args}
+                    onChange={(e) => setCompanion(i, { args: e.target.value })}
+                    placeholder="Optional"
+                    spellCheck={false}
+                  />
+                </label>
+              </div>
+            ))}
           </div>
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>ROM or ISO</span>
-              <input className={inputCls} value={romPath} onChange={(e) => setRomPath(e.target.value)} spellCheck={false} />
-            </label>
-            {native && (
-              <button
-                className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                onClick={() => void pickAnyFile('Choose the ROM', target.emulatorPath || undefined).then((p) => p && setRomPath(p))}
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
-          </div>
-          <label className="block">
-            <span className={labelCls}>Arguments</span>
-            <input className={inputCls} value={argsTemplate} onChange={(e) => setArgsTemplate(e.target.value)} spellCheck={false} />
-            <p className="mt-1 text-[11px] text-muted">
-              <code>{'{rom}'}</code> is replaced with the ROM path. Put the flags your emulator needs around it.
-            </p>
-          </label>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div className="mt-3 flex items-center gap-3">
+      <div className="flex items-center gap-3 border-t border-line pt-4">
         <button className={`${btnGhost} !py-1.5`} onClick={save} disabled={!dirty}>
           Save launch settings
         </button>
-        <span className="truncate font-mono text-[11px] text-muted">{summarise(target)}</span>
+        <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>
     </section>
   );

@@ -1,12 +1,5 @@
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
 
-export interface TimeLog {
-  id: string;
-  label: string; // e.g. "Main story", "DLC 2"
-  minutes: number;
-  date: string; // ISO
-}
-
 export interface HltbData {
   main: number; // hours
   mainExtra: number;
@@ -21,29 +14,41 @@ export interface HltbData {
  * from the Steam catalogue by default and from IGDB when a Twitch app has been
  * saved, which is what `source` says.
  */
-export interface IgdbData {
+export interface MetaData {
+  /** What the store calls the game, when the lookup started from an app id. */
+  name?: string | null;
   summary: string;
   genres: string[];
   developer: string;
   releaseYear: number | null;
   rating: number | null;
+  /** Portrait artwork, when the store has it. */
   coverUrl?: string | null;
+  /** The wide header picture, which every store page has. */
+  headerUrl?: string | null;
   /** The store's own id, so Play can hand the game to Steam. */
   steamAppId?: number | null;
-  source?: 'steam' | 'igdb' | 'estimate';
+  source?: 'steam' | 'estimate';
 }
 
 /**
  * How a game gets started.
  *
  * `none` means Orbit only runs the clock, and the player starts the game
- * themselves — Play still works, it just does not launch anything.
+ * themselves — Play still works, it just does not launch anything. `steam` is
+ * not something the launch editor offers: it is set on games brought in from a
+ * Steam library, which have to go through Steam to start at all.
  */
 export type LaunchTarget =
   | { kind: 'none' }
   | { kind: 'executable'; path: string; args: string; workingDir: string | null }
-  | { kind: 'steam'; appId: number }
-  | { kind: 'emulator'; emulatorPath: string; argsTemplate: string; romPath: string };
+  | { kind: 'steam'; appId: number };
+
+/** A program Orbit starts at the same time as the game. */
+export interface Companion {
+  path: string;
+  args: string;
+}
 
 export interface LaunchInfo {
   kind: LaunchTarget['kind'];
@@ -73,10 +78,12 @@ export interface Game {
   lastPlayed: string | null;
   addedAt: string;
   notes: string;
-  logs: TimeLog[];
   coverPath: string | null;
-  igdb?: IgdbData;
+  /** What a store knows about the game. */
+  meta?: MetaData;
   hltb?: HltbData;
+  /** Programs started alongside the game, such as a frame-rate tool. */
+  companions: Companion[];
   hue: number; // fallback cover gradient
   sessionCount: number;
   longestSecs: number;
@@ -88,7 +95,17 @@ export type ViewMode = 'grid' | 'list';
 export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size';
 
 /** The three top-level screens; Settings is reached from the gear. */
-export type Page = 'library' | 'backlog' | 'sessions' | 'storage' | 'settings';
+export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'settings';
+
+/** A game imported from a Steam library. */
+export interface SteamGame {
+  appId: number;
+  name: string;
+  installDir: string;
+  sizeBytes: number;
+  lastPlayed: number | null;
+  library: string;
+}
 
 /** One play session, as stored. */
 export interface Session {
@@ -115,6 +132,8 @@ export interface Session {
 export interface GameLog {
   id: number;
   gameId: string;
+  /** The game's title, filled in when logs are read across the library. */
+  gameTitle?: string;
   /** When it happened, as Unix seconds. */
   at: number;
   /** How much playtime the note is about, in seconds. */
@@ -147,16 +166,6 @@ export interface Stats {
 
 export interface Settings {
   theme: string;
-  /**
-   * A Twitch application, which is entirely optional: details and artwork come
-   * from the Steam catalogue with no key at all, and IGDB is used instead once
-   * these two are filled in. Orbit mints and refreshes the token itself, so
-   * there is nothing here that expires or needs pasting again.
-   */
-  igdbClientId: string;
-  igdbClientSecret: string;
-  /** A token pasted by hand in an older Orbit, still honoured if present. */
-  igdbToken: string;
   /**
    * Folders games are installed in. Orbit will only ever move a game between
    * these, and never touches a game that sits outside them.

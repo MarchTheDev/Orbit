@@ -5,7 +5,7 @@ import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { clearLibrary, isNative, setPlaytime } from './services/native';
 import { onFileDrop } from './services/desktop';
-import { fetchMetadata, metaCredentials } from './services/metadata';
+import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav } from './components/TopNav';
 import { Hero } from './components/Hero';
@@ -18,6 +18,8 @@ import { GameDetail } from './components/detail/GameDetail';
 import { SessionsView } from './components/SessionsView';
 import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
+import { LogsView } from './components/LogsView';
+import { SteamImportModal } from './components/SteamImportModal';
 import { AddGameModal, gameFromDropped } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
@@ -41,6 +43,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showSteam, setShowSteam] = useState(false);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -68,6 +71,9 @@ export default function App() {
    */
   const asked = useRef(new Set<string>());
 
+  /** True for a game still carrying the store's wide banner as its cover. */
+  const artIsWide = (g: Game) => !!g.meta?.steamAppId && !g.meta.coverUrl?.includes('library_600x900');
+
   /**
    * Fill in the gaps in the background.
    *
@@ -80,25 +86,26 @@ export default function App() {
   useEffect(() => {
     if (!ready || !settings || !settings.fetchMetadata || !settings.autoFetchMetadata) return;
     const missing = games
-      .filter((g) => !asked.current.has(g.id) && (!g.igdb || !g.hltb))
+      .filter((g) => !asked.current.has(g.id) && (!g.meta || !g.hltb || artIsWide(g)))
       .slice(0, 6);
     if (missing.length === 0) return;
 
-    const credentials = metaCredentials(settings);
     let alive = true;
     void (async () => {
       setEnriching(missing.length);
       for (const game of missing) {
         asked.current.add(game.id);
-        const wantDetails = !game.igdb;
+        // Artwork fetched before Orbit asked for the portrait picture is worth
+        // asking for again: the wide banner was being cropped into a tall tile.
+        const wantDetails = !game.meta || artIsWide(game);
         const wantTimes = !game.hltb;
         const [meta, hltb] = await Promise.all([
-          wantDetails ? fetchMetadata(game.title, credentials).catch(() => null) : null,
+          wantDetails ? fetchMetadata(game.title).catch(() => null) : null,
           wantTimes ? fetchHltb(game.title).catch(() => null) : null,
         ]);
         if (!alive) return;
         const patch: Partial<Game> = {};
-        if (meta) patch.igdb = meta;
+        if (meta) patch.meta = meta;
         if (hltb) patch.hltb = hltb;
         if (Object.keys(patch).length > 0) updateGame(game.id, patch);
         setEnriching((n) => Math.max(0, n - 1));
@@ -228,13 +235,12 @@ export default function App() {
     setSelectedId(g.id);
     asked.current.add(g.id);
     if (!fetchMeta || !settings) return;
-    const credentials = metaCredentials(settings);
     const [meta, hltb] = await Promise.all([
-      fetchMetadata(g.title, credentials).catch(() => null),
+      fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null),
       fetchHltb(g.title).catch(() => null),
     ]);
     const patch: Partial<Game> = {};
-    if (meta) patch.igdb = meta;
+    if (meta) patch.meta = meta;
     if (hltb) patch.hltb = hltb;
     if (Object.keys(patch).length > 0) updateGame(g.id, patch);
   };
@@ -251,7 +257,11 @@ export default function App() {
   const byRecent = [...games].filter((g) => g.lastPlayed).sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''));
   const heroGame = runningGame ?? byRecent[0] ?? games[0];
   const continueGames = byRecent.filter((g) => g.id !== heroGame?.id && g.status !== 'completed').slice(0, 6);
-  const showHome = page === 'library' && filter === 'all' && !query;
+  // The hero stays on screen while the category chips are used — that is the
+  // point of it being "jump back in" rather than a summary of the current
+  // filter. Only a search takes it away, because then the player is looking for
+  // one particular game.
+  const showHome = page === 'library' && !query;
 
   // Nothing can be drawn until the settings have loaded, which also decides the
   // theme. Every hook above has already run, so this is safe.
@@ -259,12 +269,7 @@ export default function App() {
 
   return (
     <div className="relative h-full overflow-y-auto text-fg">
-      <TopNav
-        page={page}
-        setPage={setPage}
-        theme={settings?.theme ?? 'nebula'}
-        setTheme={(theme) => setSettings({ theme })}
-      />
+      <TopNav page={page} setPage={setPage} />
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
@@ -282,6 +287,7 @@ export default function App() {
             <SettingsView
               settings={settings}
               setSettings={setSettings}
+              onImportSteam={() => setShowSteam(true)}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}
@@ -297,11 +303,14 @@ export default function App() {
           />
         ) : page === 'sessions' ? (
           <SessionsView games={games} onChanged={() => void reload()} />
+        ) : page === 'logs' ? (
+          <LogsView games={games} />
         ) : page === 'storage' ? (
           <StorageView
             games={games}
             folders={settings.libraryFolders}
             setFolders={(libraryFolders) => setSettings({ libraryFolders })}
+            onMove={setMoveId}
             onImport={(folder) => {
               setImportFolder(folder);
               setShowImport(true);
@@ -330,11 +339,7 @@ export default function App() {
               sort={sort}
               setSort={setSort}
               onAdd={() => setShowAdd(true)}
-              onImport={() => {
-                setImportFolder(null);
-                setShowImport(true);
-              }}
-              importing={false}
+              onSteam={() => setShowSteam(true)}
             />
             <div>
               {!ready ? null : visible.length === 0 ? (
@@ -421,7 +426,6 @@ export default function App() {
         <GameDetail
           key={selected.id}
           game={selected}
-          settings={settings}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
@@ -456,11 +460,19 @@ export default function App() {
         <ImportModal
           existing={games}
           initialFolder={importFolder}
-          credentials={metaCredentials(settings)}
           fetchMetadata={settings.fetchMetadata}
           onAdd={addGames}
           onUpdate={(id, patch) => updateGame(id, patch)}
           onClose={() => setShowImport(false)}
+        />
+      )}
+      {showSteam && settings && (
+        <SteamImportModal
+          existing={games}
+          fetchMeta={settings.fetchMetadata}
+          onAdd={addGames}
+          onUpdate={(id, patch) => updateGame(id, patch)}
+          onClose={() => setShowSteam(false)}
         />
       )}
       {moving && settings && (

@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Database, FolderOpen, HardDrive, Info, Palette, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
+import { Database, Download, FolderOpen, HardDrive, Palette, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
 import type { Settings } from '../types';
 import { THEMES } from '../data/themes';
 import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
-import { btnBrowse, inputCls, labelCls } from './ui/Modal';
+import { btnBrowse, inputCls } from './ui/Modal';
+import { Checkbox } from './ui/Checkbox';
 
 export function SettingsView({
   settings,
   setSettings,
+  onImportSteam,
   onClearLibrary,
   onReset,
 }: {
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings>) => void;
+  /** Opens the Steam import dialog. */
+  onImportSteam: () => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -82,76 +86,39 @@ export function SettingsView({
           where descriptions, genres, release years and cover art come from by default.
         </p>
 
-        <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/50 p-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={settings.fetchMetadata}
-            onChange={(e) => setSettings({ fetchMetadata: e.target.checked })}
-          />
-          <span>
-            Look games up when they are added
-            <span className="block text-xs text-muted">
-              Fills in a summary, genres, cover art and HowLongToBeat times. Turn it off to add games offline.
-            </span>
-          </span>
-        </label>
+        <Checkbox
+          checked={settings.fetchMetadata}
+          onChange={(v) => setSettings({ fetchMetadata: v })}
+          label="Look games up when they are added"
+          hint="Fills in a summary, genres, cover art and HowLongToBeat times. Turn it off to add games offline."
+        />
 
-        <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/50 p-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={settings.autoFetchMetadata}
-            onChange={(e) => setSettings({ autoFetchMetadata: e.target.checked })}
-          />
-          <span>
-            Fill in the gaps in the background
-            <span className="block text-xs text-muted">
-              Games already in the library, or ones added while offline, are looked up quietly — a few at a time.
-            </span>
-          </span>
-        </label>
+        <Checkbox
+          checked={settings.autoFetchMetadata}
+          onChange={(v) => setSettings({ autoFetchMetadata: v })}
+          label="Fill in the gaps in the background"
+          hint="Games already in the library, or ones added while offline, are looked up quietly — a few at a time."
+        />
 
-        <h3 className="flex items-center gap-2 pt-1 text-sm font-semibold">
-          <Info className="size-4 text-muted" />
-          IGDB <span className="font-normal text-muted">(optional)</span>
-        </h3>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Download className="size-4 text-accent" />
+          Steam library
+        </h2>
         <p className="text-sm text-muted">
-          IGDB has richer descriptions and ratings. Create an application at{' '}
-          <span className="font-mono text-xs">dev.twitch.tv/console/apps</span> and paste its Client ID and Client
-          Secret here — Orbit fetches and renews the access token itself, so nothing expires and there is no token to
-          copy. Leave both blank to keep using the store.
+          Orbit can read the Steam library installed on this PC and bring games over, one at a time or all at once. It
+          never runs on its own: nothing is imported until you open the dialog, and nothing already in Orbit is
+          changed.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className={labelCls}>Client ID</span>
-            <input
-              value={settings.igdbClientId}
-              onChange={(e) => setSettings({ igdbClientId: e.target.value })}
-              placeholder="Client ID"
-              className={inputCls}
-              spellCheck={false}
-            />
-          </label>
-          <label className="block">
-            <span className={labelCls}>Client Secret</span>
-            <input
-              type="password"
-              value={settings.igdbClientSecret}
-              onChange={(e) => setSettings({ igdbClientSecret: e.target.value })}
-              placeholder="Client Secret"
-              className={inputCls}
-              spellCheck={false}
-            />
-          </label>
-        </div>
-        {settings.igdbToken && (
-          <p className="flex items-center gap-2 text-xs text-muted">
-            <AlertTriangle className="size-3.5 text-amber-400" />
-            A hand-pasted access token from an older version is still being used. Those expire; a Client Secret does
-            not.
-          </p>
-        )}
+        <button
+          onClick={onImportSteam}
+          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent"
+        >
+          <Download className="size-4" />
+          Import from Steam…
+        </button>
       </section>
 
       <section className="space-y-3">

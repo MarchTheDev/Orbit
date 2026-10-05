@@ -8,9 +8,22 @@
  * work.
  */
 import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { isNative } from './native';
+
+/**
+ * Hand a link to the system: a web page, or a `steam://` address that opens the
+ * Steam client on the right game.
+ */
+export async function openExternal(url: string): Promise<void> {
+  if (!isNative()) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  await openUrl(url);
+}
 
 /** Ask for a folder. `null` means the player cancelled. */
 export async function pickFolder(title: string, startAt?: string): Promise<string | null> {

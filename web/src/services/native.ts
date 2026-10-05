@@ -5,7 +5,16 @@
  * browser (`npm run dev`, no Tauri) the same calls fall back to a preview, so
  * the UI can be worked on in a normal tab without the desktop shell.
  */
-import type { ActiveSession, Game, GameLog, LaunchInfo, LaunchTarget, Session, Stats } from '../types';
+import type {
+  ActiveSession,
+  Game,
+  GameLog,
+  LaunchInfo,
+  LaunchTarget,
+  Session,
+  Stats,
+  SteamGame,
+} from '../types';
 import { SAMPLE_GAMES } from '../data/sampleGames';
 
 interface TauriCore {
@@ -140,6 +149,20 @@ export function deleteGameLog(id: number): Promise<void> {
   return call('delete_game_log', { id }, () => undefined);
 }
 
+/**
+ * Every note in the library at once, newest first.
+ *
+ * The Logs page lists all of them, so they arrive in one read with their game's
+ * title attached rather than as one request per game.
+ */
+export function listAllLogs(limit = 500, offset = 0): Promise<GameLog[]> {
+  return call('list_all_logs', { limit, offset }, async () => []);
+}
+
+export function countLogs(): Promise<number> {
+  return call('count_logs', {}, async () => 0);
+}
+
 /** What pressing Play will do for a given target. */
 export function launchInfo(launch: LaunchTarget): Promise<LaunchInfo> {
   return call('launch_info', { launch }, async () => ({
@@ -148,14 +171,6 @@ export function launchInfo(launch: LaunchTarget): Promise<LaunchInfo> {
     startsSomething: launch.kind !== 'none',
     path: launch.kind === 'executable' ? launch.path : null,
   }));
-}
-
-/** Pull an app id out of a pasted Steam store link. */
-export function parseSteamId(text: string): Promise<number | null> {
-  return call('parse_steam_id', { text }, async () => {
-    const match = /\/app\/(\d+)/.exec(text) ?? /^(\d+)$/.exec(text.trim());
-    return match ? Number(match[1]) : null;
-  });
 }
 
 /** Look for cover art sitting next to a game. */
@@ -334,48 +349,40 @@ export async function httpJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-/** What Orbit needs to reach IGDB, all of it optional. */
-export interface MetaCredentials {
-  clientId: string;
-  clientSecret: string;
-  /** A token pasted by hand, from before Orbit minted its own. */
-  token: string;
-}
-
 /**
  * Details and artwork for a title.
  *
- * Rust uses the Steam catalogue, which needs no key, and switches to IGDB when
- * credentials are saved. A browser preview has neither, so it answers with
- * something deterministic and says it is only an estimate.
+ * Rust asks the Steam catalogue, which needs no key at all. A browser preview
+ * has no stores to ask, so it answers with something deterministic and says it
+ * is only an estimate.
  */
-export function metadataLookup<T>(title: string, credentials: MetaCredentials): Promise<T> {
-  return call(
-    'metadata_lookup',
-    {
-      title,
-      igdbClientId: credentials.clientId,
-      igdbClientSecret: credentials.clientSecret,
-    },
-    async () => {
-      await sleep(400);
-      return {
-        summary: `Details for "${title}" appear here once Orbit runs as the desktop app.`,
-        genres: [],
-        developer: '',
-        releaseYear: null,
-        rating: null,
-        coverUrl: null,
-        steamAppId: null,
-        source: 'estimate',
-      } as T;
-    },
-  );
+export function metadataLookup<T>(title: string, appId?: number): Promise<T> {
+  return call('metadata_lookup', { title, appId: appId ?? null }, async () => {
+    await sleep(400);
+    return {
+      summary: appId
+        ? `Details for Steam app ${appId} appear here once Orbit runs as the desktop app.`
+        : `Details for "${title}" appear here once Orbit runs as the desktop app.`,
+      genres: [],
+      developer: '',
+      releaseYear: null,
+      rating: null,
+      coverUrl: null,
+      headerUrl: null,
+      steamAppId: null,
+      source: 'estimate',
+    } as T;
+  });
 }
 
 /** Titles a store suggests for a partial name. */
 export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
+}
+
+/** The player's installed Steam games, for the import dialog. */
+export function steamLibrary(): Promise<SteamGame[]> {
+  return call('steam_library', {}, async () => []);
 }
 
 /** Completion-time estimates from HowLongToBeat. */

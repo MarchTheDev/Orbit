@@ -171,6 +171,31 @@ fn kill_tree(pid: u32) {
         .status();
 }
 
+/// Start a program Orbit is not going to watch, such as a companion tool.
+///
+/// These are deliberately fire-and-forget: the frame-rate overlay or the mod
+/// manager is not the game, so its exit must never end the session. A failure
+/// is returned so the UI can say which one did not start.
+pub fn spawn_detached(path: &Path, args: &str) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("{} is not there any more.", path.display()));
+    }
+    let mut cmd = std::process::Command::new(path);
+    let args = args.trim();
+    if !args.is_empty() {
+        cmd.args(parse_args(args));
+    }
+    if let Some(dir) = path.parent() {
+        cmd.current_dir(dir);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Could not start {}: {e}", path.display()))
+}
+
 /// Split a user-typed argument string, honouring double quotes.
 ///
 /// The settings screen gives one flat string, so this needs to behave like a

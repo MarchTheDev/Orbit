@@ -32,7 +32,17 @@ const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete',
  * makes "10h · 08-12-26 · finished main story" a thing they typed rather than a
  * thing the tracker guessed at.
  */
-export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: string }) {
+export function GameLogView({
+  gameId,
+  gameTitle,
+  onChanged,
+}: {
+  gameId: string;
+  gameTitle: string;
+  /** Told after a note is written, corrected or removed, so a page showing
+   *  counts for every game can catch up. */
+  onChanged?: () => void;
+}) {
   const [rows, setRows] = useState<GameLog[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +58,12 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
   }, [gameId]);
 
   useEffect(() => load(), [load]);
+
+  /** Re-read, and let whoever is showing totals know they have moved. */
+  const refresh = useCallback(() => {
+    load();
+    onChanged?.();
+  }, [load, onChanged]);
 
   const total = rows.reduce((s, r) => s + r.secs, 0);
 
@@ -68,7 +84,7 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
       if (draft.id === null) await addGameLog(gameId, at, secs, draft.note);
       else await updateGameLog(draft.id, at, secs, draft.note);
       setDraft(null);
-      load();
+      refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -197,7 +213,7 @@ export function GameLogView({ gameId, gameTitle }: { gameId: string; gameTitle: 
                 <button
                   onClick={() => {
                     if (confirm('Remove this note?')) {
-                      void deleteGameLog(r.id).then(load);
+                      void deleteGameLog(r.id).then(refresh);
                     }
                   }}
                   className="text-muted hover:text-rose-400"

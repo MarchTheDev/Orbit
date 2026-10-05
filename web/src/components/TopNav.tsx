@@ -1,26 +1,18 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, Settings as SettingsIcon } from 'lucide-react';
-import type { Page, Settings } from '../types';
-import { ThemeToggle } from './ThemeToggle';
+import { HardDrive, Library, ListOrdered, NotebookPen, ScrollText, Settings as SettingsIcon } from 'lucide-react';
+import type { Page } from '../types';
 import { Logo } from './ui/Logo';
 
+// Sessions sits right after the library, because that is the tab anyone reaches
+// for next. The theme button is gone: themes live in Settings.
 const TABS: { id: Page; label: string; Icon: typeof Library }[] = [
   { id: 'library', label: 'Library', Icon: Library },
-  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
+  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
+  { id: 'logs', label: 'Logs', Icon: ScrollText },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
 
-export function TopNav({
-  page,
-  setPage,
-  theme,
-  setTheme,
-}: {
-  page: Page;
-  setPage: (p: Page) => void;
-  theme: Settings['theme'];
-  setTheme: (id: Settings['theme']) => void;
-}) {
+export function TopNav({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1400px] items-center gap-5 px-6 py-3">
@@ -52,7 +44,6 @@ export function TopNav({
         </nav>
 
         <div className="flex-1" />
-        <ThemeToggle theme={theme} onChange={setTheme} />
         <button
           onClick={() => setPage('settings')}
           aria-label="Settings"

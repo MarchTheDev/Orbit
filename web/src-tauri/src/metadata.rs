@@ -1,21 +1,19 @@
-//! Game details without asking the player for a key.
+//! Game details without asking the player for anything.
 //!
 //! The Steam store answers questions about a title with no credentials at all —
 //! description, genres, developer, release year and artwork — which is what
-//! makes Orbit work out of the box. IGDB has richer data but needs a Twitch
-//! application, so it is used instead when the player has saved one: Orbit
-//! mints the app-access token itself and refreshes it when it expires, so
-//! there is never a token to paste or a login to redo.
+//! makes Orbit work out of the box. There is no second provider to configure:
+//! IGDB was dropped, so nothing here can expire, need a key, or fail because
+//! somebody's token ran out.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 const STORE: &str = "https://store.steampowered.com";
-const IGDB: &str = "https://api.igdb.com/v4/games";
-const TWITCH_TOKEN: &str = "https://id.twitch.tv/oauth2/token";
+/// Steam's portrait artwork, the same picture the client shows in its library.
+const PORTRAIT: &str = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps";
 
 /// A description longer than this is trimmed: it is shown in a drawer, not read
 /// like an article, and Steam's detailed description can run to several pages.
@@ -25,6 +23,9 @@ const SUMMARY_LIMIT: usize = 1500;
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Meta {
+    /// What the store calls the game. Only filled in when the lookup started
+    /// from an app id — a title search already knows the name it asked about.
+    pub name: Option<String>,
     pub summary: String,
     pub genres: Vec<String>,
     pub developer: String,
@@ -33,39 +34,49 @@ pub struct Meta {
     pub release_year: Option<i32>,
     /// Out of 100, or absent when nobody has scored it.
     pub rating: Option<i32>,
+    /// Portrait artwork, if the store has it. The front end falls back to the
+    /// wide one below before it falls back to initials.
     pub cover_url: Option<String>,
-    /// Where these details came from: `steam` or `igdb`.
+    /// The wide header picture, which every store page has.
+    pub header_url: Option<String>,
+    /// Where these details came from. Only `steam` for now, but a field so the
+    /// front end does not have to guess if that ever changes.
     pub source: &'static str,
 }
 
-/// Look a title up, IGDB first when it can be used, Steam otherwise.
+/// Look a title up in the store.
 ///
-/// A failure from the richer source is never fatal: the point of this module is
-/// that a game added without any setup still gets a description and a cover.
-pub async fn lookup(title: &str, igdb: Option<(String, String)>) -> Result<Meta, String> {
+/// The only failure that matters is the store not knowing the title, which is
+/// reported as a sentence rather than an error code: a game with no details is
+/// still perfectly playable.
+pub async fn lookup(title: &str) -> Result<Meta, String> {
     let title = title.trim();
     if title.is_empty() {
         return Err("No title to look up.".into());
     }
     let client = client()?;
+    steam_lookup(&client, title).await
+}
 
-    let mut igdb_error: Option<String> = None;
-    if let Some((client_id, secret)) = igdb {
-        match igdb_lookup(&client, &client_id, &secret, title).await {
-            Ok(meta) => return Ok(meta),
-            Err(e) => {
-                log::warn!("IGDB lookup failed, falling back to the store: {e}");
-                igdb_error = Some(e);
-            }
+/// Look up one app id directly.
+///
+/// This is what makes importing by id worth doing: no name is needed to start
+/// with, because the store page brings its own.
+pub async fn lookup_app(app_id: u64) -> Result<Meta, String> {
+    let client = client()?;
+    let app = app_details(&client, app_id).await?;
+    Ok(meta_from_app(app_id, app))
+}
+
+/// The same, but the app id is only used when the store has no page for the
+/// title — which is the case for a game that is not sold any more.
+pub async fn lookup_or_app(title: &str, app_id: Option<u64>) -> Result<Meta, String> {
+    if let Some(id) = app_id {
+        if let Ok(meta) = lookup_app(id).await {
+            return Ok(meta);
         }
     }
-
-    steam_lookup(&client, title).await.map_err(|store| match igdb_error {
-        // Both were tried, so the message names both rather than blaming
-        // whichever happened to be last.
-        Some(igdb) => format!("IGDB: {igdb} · and the store: {store}"),
-        None => store,
-    })
+    lookup(title).await
 }
 
 // ------------------------------------------------------------------- the store
@@ -92,6 +103,8 @@ struct AppDetails {
 
 #[derive(Debug, Default, Deserialize)]
 struct SteamApp {
+    #[serde(default)]
+    name: String,
     #[serde(default, rename = "type")]
     kind: String,
     #[serde(default)]
@@ -141,6 +154,15 @@ async fn steam_lookup(client: &reqwest::Client, title: &str) -> Result<Meta, Str
         .map(|item| item.id)
         .ok_or_else(|| format!("the store has no match for \"{title}\""))?;
 
+    let app = app_details(client, app_id)
+        .await
+        .map_err(|_| format!("the store has no page for \"{title}\""))?;
+
+    Ok(meta_from_app(app_id, app))
+}
+
+/// The store page for one app id.
+async fn app_details(client: &reqwest::Client, app_id: u64) -> Result<SteamApp, String> {
     let reply: HashMap<String, AppDetails> = client
         .get(format!("{STORE}/api/appdetails"))
         .query(&[
@@ -155,17 +177,20 @@ async fn steam_lookup(client: &reqwest::Client, title: &str) -> Result<Meta, Str
         .await
         .map_err(|e| format!("the store answered something unexpected: {e}"))?;
 
-    let app = reply
+    reply
         .into_values()
         .next()
         .filter(|r| r.success)
         .and_then(|r| r.data)
-        .ok_or_else(|| format!("the store has no page for \"{title}\""))?;
+        .ok_or_else(|| format!("the store has no page for app {app_id}"))
+}
 
+/// Shape a store page into what the front end stores.
+fn meta_from_app(app_id: u64, app: SteamApp) -> Meta {
     // A bundle or a soundtrack is not what a player means by a game title, but
     // it is still better than nothing when it is all the store has.
     if !app.kind.is_empty() && app.kind != "game" {
-        log::info!("the store matched \"{title}\" to a {}", app.kind);
+        log::info!("the store matched app {app_id} to a {}", app.kind);
     }
 
     let summary = if app.short_description.trim().is_empty() {
@@ -174,7 +199,17 @@ async fn steam_lookup(client: &reqwest::Client, title: &str) -> Result<Meta, Str
         plain(&app.short_description)
     };
 
-    Ok(Meta {
+    let header = if app.header_image.is_empty() {
+        app.capsule_image
+    } else {
+        app.header_image
+    };
+    // The portrait picture is what a grid of covers actually wants; not every
+    // game has one, which is why the header travels with it.
+    let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
+
+    Meta {
+        name: app.name.clone().filter(|n| !n.trim().is_empty()),
         summary,
         genres: names(&app.genres),
         // A few store pages leave the developer empty and only credit the
@@ -188,14 +223,10 @@ async fn steam_lookup(client: &reqwest::Client, title: &str) -> Result<Meta, Str
         steam_app_id: Some(app_id),
         release_year: year_in(&app.release_date.date),
         rating: app.metacritic.and_then(|m| m.score).filter(|s| *s > 0),
-        cover_url: Some(if app.header_image.is_empty() {
-            app.capsule_image
-        } else {
-            app.header_image
-        })
-        .filter(|url| !url.is_empty()),
+        cover_url: Some(portrait),
+        header_url: Some(header).filter(|url| !url.is_empty()),
         source: "steam",
-    })
+    }
 }
 
 /// Ask the store what it has for a name.
@@ -254,181 +285,6 @@ fn best_match<'a>(items: &'a [SteamItem], title: &str) -> Option<&'a SteamItem> 
         })
         .max_by(|a, b| a.0.cmp(&b.0))
         .map(|(_, item)| item)
-}
-
-// --------------------------------------------------------------------- IGDB
-
-#[derive(Debug, Deserialize)]
-struct TwitchToken {
-    access_token: String,
-    #[serde(default)]
-    expires_in: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct IgdbGame {
-    #[serde(default)]
-    summary: Option<String>,
-    #[serde(default)]
-    genres: Option<Vec<Named>>,
-    #[serde(default)]
-    involved_companies: Option<Vec<Involved>>,
-    #[serde(default)]
-    first_release_date: Option<i64>,
-    #[serde(default)]
-    total_rating: Option<f64>,
-    #[serde(default)]
-    cover: Option<Cover>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Involved {
-    #[serde(default)]
-    developer: bool,
-    #[serde(default)]
-    company: Option<Named>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Cover {
-    #[serde(default)]
-    image_id: Option<String>,
-}
-
-/// A token and the moment it stops being usable.
-struct Token {
-    value: String,
-    expires_at: i64,
-    client_id: String,
-}
-
-fn token_cache() -> &'static Mutex<Option<Token>> {
-    static CACHE: OnceLock<Mutex<Option<Token>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
-}
-
-/// The app-access token, reused until it is nearly expired.
-///
-/// This is the piece that makes IGDB plug and play: the player saves a Client
-/// ID and Secret once and never sees a token, because Orbit asks Twitch for one
-/// itself and replaces it before it lapses.
-async fn twitch_token(
-    client: &reqwest::Client,
-    client_id: &str,
-    secret: &str,
-) -> Result<String, String> {
-    let now = now();
-    if let Ok(cache) = token_cache().lock() {
-        if let Some(token) = cache.as_ref() {
-            if token.client_id == client_id && token.expires_at - 60 > now {
-                return Ok(token.value.clone());
-            }
-        }
-    }
-
-    let reply = client
-        .post(TWITCH_TOKEN)
-        .query(&[
-            ("client_id", client_id),
-            ("client_secret", secret),
-            ("grant_type", "client_credentials"),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Twitch is unreachable: {e}"))?;
-    let status = reply.status();
-    let text = reply.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("Twitch refused the credentials ({status})."));
-    }
-    let token: TwitchToken = serde_json::from_str(&text)
-        .map_err(|e| format!("Twitch answered something unexpected: {e}"))?;
-
-    let value = token.access_token;
-    if let Ok(mut cache) = token_cache().lock() {
-        *cache = Some(Token {
-            value: value.clone(),
-            expires_at: now + token.expires_in.max(600),
-            client_id: client_id.to_string(),
-        });
-    }
-    Ok(value)
-}
-
-async fn igdb_lookup(
-    client: &reqwest::Client,
-    client_id: &str,
-    secret: &str,
-    title: &str,
-) -> Result<Meta, String> {
-    let token = twitch_token(client, client_id, secret).await?;
-
-    // IGDB queries are a small language of their own; the title is quoted inside
-    // it, so anything that would close the quote is dropped first.
-    let body = format!(
-        "search \"{}\"; fields summary,genres.name,involved_companies.developer,\
-         involved_companies.company.name,first_release_date,total_rating,cover.image_id; limit 1;",
-        title.replace(&['"', '\\'][..], " ")
-    );
-
-    let games: Vec<IgdbGame> = client
-        .post(IGDB)
-        .header("Client-ID", client_id)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
-        .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::CONTENT_TYPE, "text/plain")
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| format!("IGDB is unreachable: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("IGDB answered something unexpected: {e}"))?;
-
-    let game = games
-        .into_iter()
-        .next()
-        .ok_or_else(|| format!("IGDB has no match for \"{title}\""))?;
-
-    Ok(Meta {
-        summary: game.summary.map(|s| plain(&s)).unwrap_or_default(),
-        genres: names(&game.genres.unwrap_or_default()),
-        developer: game
-            .involved_companies
-            .unwrap_or_default()
-            .into_iter()
-            .find(|c| c.developer)
-            .and_then(|c| c.company)
-            .map(|c| c.name)
-            .unwrap_or_default(),
-        steam_app_id: None,
-        release_year: game
-            .first_release_date
-            .and_then(|secs| chrono_year(secs)),
-        rating: game.total_rating.map(|r| r.round() as i32),
-        cover_url: game.cover.and_then(|c| c.image_id).map(|id| {
-            format!("https://images.igdb.com/igdb/image/upload/t_cover_big/{id}.jpg")
-        }),
-        source: "igdb",
-    })
-}
-
-/// The year part of a Unix timestamp, without dragging in a date library.
-fn chrono_year(secs: i64) -> Option<i32> {
-    if secs <= 0 {
-        return None;
-    }
-    let days = secs / 86_400;
-    // Civil-from-days, the same arithmetic the calendar has used since 1970.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    Some((year + if month <= 2 { 1 } else { 0 }) as i32)
 }
 
 // -------------------------------------------------------------------- helpers
@@ -508,13 +364,6 @@ fn normalize(s: &str) -> String {
         .collect()
 }
 
-fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(concat!(
@@ -562,12 +411,6 @@ mod tests {
         assert_eq!(year_in("Dec 17, 2020"), Some(2020));
         assert_eq!(year_in("Q1 2024"), Some(2024));
         assert_eq!(year_in("To be announced"), None);
-    }
-
-    #[test]
-    fn a_unix_release_date_gives_the_same_year_as_the_calendar() {
-        // 2018-09-04.
-        assert_eq!(chrono_year(1_536_019_200), Some(2018));
     }
 
     #[test]

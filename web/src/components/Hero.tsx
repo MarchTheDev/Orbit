@@ -19,7 +19,7 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
             {running ? 'Now playing' : 'Jump back in'}
           </p>
           <h1 className="text-4xl font-black leading-tight md:text-5xl">{game.title}</h1>
-          <p className="mt-3 line-clamp-2 text-sm text-muted">{game.igdb?.summary}</p>
+          <p className="mt-3 line-clamp-2 text-sm text-muted">{game.meta?.summary}</p>
           <div className="mt-4 flex flex-wrap gap-5 text-sm">
             <div><p className="text-[10px] uppercase tracking-widest text-muted">Played</p><p className="font-bold">{fmtMinutes(game.playMinutes)}</p></div>
             <div><p className="text-[10px] uppercase tracking-widest text-muted">Last session</p><p className="font-bold">{fmtDate(game.lastPlayed)}</p></div>

@@ -7,6 +7,7 @@ import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
+import { CheckboxBox } from './ui/Checkbox';
 
 /** A game Orbit found on disk, with the player's say-so on each one. */
 interface Candidate {
@@ -30,7 +31,6 @@ interface Candidate {
 export function ImportModal({
   existing,
   initialFolder,
-  credentials,
   fetchMetadata,
   onAdd,
   onUpdate,
@@ -39,8 +39,6 @@ export function ImportModal({
   existing: Game[];
   /** A folder chosen elsewhere, such as on the Storage page. */
   initialFolder: string | null;
-  /** IGDB credentials, if the player saved any. The store needs none. */
-  credentials: { clientId: string; clientSecret: string; token: string };
   fetchMetadata: boolean;
   onAdd: (games: Game[]) => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
@@ -120,7 +118,7 @@ export function ImportModal({
         sessionCount: 0,
         longestSecs: 0,
         running: false,
-        logs: [],
+            companions: [],
       }));
       onAdd(games);
 
@@ -131,11 +129,11 @@ export function ImportModal({
         await Promise.all(
           games.map(async (g) => {
             const [meta, hltb] = await Promise.allSettled([
-              fetchGameMetadata(g.title, credentials),
+              fetchGameMetadata(g.title),
               fetchHltb(g.title),
             ]);
             onUpdate(g.id, {
-              ...(meta.status === 'fulfilled' ? { igdb: meta.value } : {}),
+              ...(meta.status === 'fulfilled' ? { meta: meta.value } : {}),
               ...(hltb.status === 'fulfilled' ? { hltb: hltb.value } : {}),
             });
           }),
@@ -207,19 +205,18 @@ export function ImportModal({
           <ul className="space-y-1">
             {rows.map((r) => (
               <li key={r.key}>
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2 hover:border-accent/60">
-                  <input type="checkbox" checked={r.include} onChange={() => toggle(r.key)} />
+                <div className="flex items-center gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2 hover:border-accent/60">
+                  <CheckboxBox checked={r.include} onChange={() => toggle(r.key)} title={r.title} />
                   <span className="min-w-0 flex-1">
                     <input
                       value={r.title}
                       onChange={(e) => setRows((cur) => cur.map((x) => (x.key === r.key ? { ...x, title: e.target.value } : x)))}
-                      onClick={(e) => e.preventDefault()}
                       className="w-full bg-transparent text-sm font-medium outline-none"
                     />
                     <span className="block truncate font-mono text-[11px] text-muted">{r.exePath}</span>
                   </span>
                   <span className="shrink-0 text-xs text-muted">{fmtBytes(r.sizeBytes)}</span>
-                </label>
+                </div>
               </li>
             ))}
           </ul>

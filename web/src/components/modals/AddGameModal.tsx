@@ -5,6 +5,7 @@ import { exeInfo, isNative, scanFolder } from '../../services/native';
 import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
 import { hashHue, uid } from '../../utils/format';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
+import { CheckboxInline } from '../ui/Checkbox';
 
 /** What the player has told us so far. */
 interface Draft {
@@ -17,10 +18,6 @@ interface Draft {
   favorite: boolean;
   notes: string;
   coverPath: string | null;
-  steamAppId: string;
-  emulatorPath: string;
-  romPath: string;
-  argsTemplate: string;
 }
 
 /**
@@ -29,11 +26,12 @@ interface Draft {
  * Three ways in, because people keep games in different places:
  * - drop the `.exe` on the window
  * - Browse for the `.exe`, which finds the folder around it by itself
- * - Browse for a folder
- * - or type the path, which is the only option in a browser preview
+ * - Browse for a folder (or type a path, which is all a browser preview can do)
  *
- * Steam and emulator games are handled too, since those have no `.exe` of their
- * own: pick the emulator and the ROM, and Orbit builds the command line.
+ * Steam and emulator games are not added here any more. Steam games arrive
+ * through the import dialog, which reads the Steam library directly, and an
+ * emulator is just a program with a ROM as an argument, which the game's own
+ * launch settings can express.
  */
 export function AddGameModal({
   onClose,
@@ -49,7 +47,7 @@ export function AddGameModal({
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
-  const [mode, setMode] = useState<'auto' | 'exe' | 'folder' | 'steam' | 'emulator'>('auto');
+  const [mode, setMode] = useState<'auto' | 'exe' | 'folder'>('auto');
   const [fetchMeta, setFetchMeta] = useState(true);
   const [dropped, setDropped] = useState<string[]>([]);
   const [d, setD] = useState<Draft>(() => blank());
@@ -123,19 +121,6 @@ export function AddGameModal({
     if (picked) await takeFolder(picked);
   };
 
-  const browseRom = async () => {
-    const picked = await pickAnyFile('Choose the ROM', d.emulatorPath || undefined);
-    if (picked) {
-      set('romPath', picked);
-      if (!d.title) set('title', picked.replace(/\\[^\\]+$/, '').split('\\').pop() ?? '');
-    }
-  };
-
-  const browseEmulator = async () => {
-    const picked = await pickFile('Choose the emulator', ['exe', 'bat', 'cmd']);
-    if (picked) set('emulatorPath', picked);
-  };
-
   const browseCover = async () => {
     const picked = await pickAnyFile('Choose cover art', d.installDir || undefined);
     if (picked) set('coverPath', picked);
@@ -160,7 +145,7 @@ export function AddGameModal({
     if (!d.title.trim()) return;
     setBusy(true);
     try {
-      onAdd(buildGame(d, mode), fetchMeta);
+      onAdd(buildGame(d), fetchMeta);
     } finally {
       setBusy(false);
     }
@@ -171,20 +156,7 @@ export function AddGameModal({
    * Without this the game would save as a timer and the reason would only turn up
    * when Play did nothing.
    */
-  const missing =
-    mode === 'steam'
-      ? d.steamAppId.trim()
-        ? null
-        : 'a Steam app id'
-      : mode === 'emulator'
-        ? !d.emulatorPath
-          ? 'the emulator'
-          : !d.romPath
-            ? 'the ROM'
-            : null
-        : !d.exePath.trim()
-          ? 'the program'
-          : null;
+  const missing = !d.exePath.trim() ? 'the program' : null;
 
   return (
     <Modal
@@ -194,10 +166,7 @@ export function AddGameModal({
       onClose={onClose}
       footer={
         <div className="flex items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-xs text-muted">
-            <input type="checkbox" checked={fetchMeta} onChange={(e) => setFetchMeta(e.target.checked)} />
-            Fetch artwork and details
-          </label>
+          <CheckboxInline checked={fetchMeta} onChange={setFetchMeta} label="Fetch artwork and details" />
           <div className="flex gap-2">
             <button type="button" className={`${btnGhost} flex items-center gap-2`} onClick={onClose}>
               <X className="size-4" />
@@ -243,8 +212,6 @@ export function AddGameModal({
                 ['auto', 'Just a program'],
                 ['exe', 'Browse for .exe'],
                 ['folder', 'Browse for folder'],
-                ['steam', 'Steam'],
-                ['emulator', 'Emulator + ROM'],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -284,110 +251,49 @@ export function AddGameModal({
           </label>
           {native && (
             <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void search()} disabled={searching}>
-              {searching ? 'Searching…' : 'Search IGDB'}
+              {searching ? 'Searching…' : 'Look up title'}
             </button>
           )}
         </div>
 
-        {(mode === 'auto' || mode === 'exe' || mode === 'folder') && (
-          <>
-            <div className="flex gap-2">
-              <label className="block flex-1">
-                <span className={labelCls}>Program</span>
-                <input
-                  className={inputCls}
-                  value={d.exePath}
-                  onChange={(e) => set('exePath', e.target.value)}
-                  placeholder="D:\Games\Hollow Knight\hollow_knight.exe"
-                  spellCheck={false}
-                />
-              </label>
-              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseExe()}>
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <label className="block flex-1">
-                <span className={labelCls}>Install folder</span>
-                <input
-                  className={inputCls}
-                  value={d.installDir}
-                  onChange={(e) => set('installDir', e.target.value)}
-                  placeholder="D:\Games\Hollow Knight"
-                  spellCheck={false}
-                />
-              </label>
-              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseFolder()}>
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            </div>
-          </>
-        )}
-
-        {mode === 'steam' && (
-          <div className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
-            <label className="block">
-              <span className={labelCls}>Steam app id</span>
+        {/* The program and the folder around it are one question — where the
+            game lives — so they are one section rather than two blocks with a
+            gap down the middle. */}
+        <section className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
+          <span className={labelCls}>Where the game lives</span>
+          <div className="flex gap-2">
+            <label className="block flex-1">
+              <span className={labelCls}>Program</span>
               <input
                 className={inputCls}
-                value={d.steamAppId}
-                onChange={(e) => set('steamAppId', e.target.value.replace(/\D/g, ''))}
-                placeholder="367520, or 620 for Portal 2"
-                inputMode="numeric"
-              />
-            </label>
-            <p className="text-xs text-muted">
-              Open the game in Steam. The number at the end of the store page URL is the app id. Orbit asks Steam to run it, so
-              this only works for games in your own library.
-            </p>
-          </div>
-        )}
-
-        {mode === 'emulator' && (
-          <div className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
-            <div className="flex gap-2">
-              <label className="block flex-1">
-                <span className={labelCls}>Emulator</span>
-                <input
-                  className={inputCls}
-                  value={d.emulatorPath}
-                  onChange={(e) => set('emulatorPath', e.target.value)}
-                  placeholder="C:\\Retro\\rpcs3.exe"
-                  spellCheck={false}
-                />
-              </label>
-              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseEmulator()}>
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <label className="block flex-1">
-                <span className={labelCls}>ROM or ISO</span>
-                <input className={inputCls} value={d.romPath} onChange={(e) => set('romPath', e.target.value)} spellCheck={false} />
-              </label>
-              <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseRom()}>
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            </div>
-            <label className="block">
-              <span className={labelCls}>Extra arguments</span>
-              <input
-                className={inputCls}
-                value={d.argsTemplate}
-                onChange={(e) => set('argsTemplate', e.target.value)}
-                placeholder="--fullscreen -f {rom}"
+                value={d.exePath}
+                onChange={(e) => set('exePath', e.target.value)}
+                placeholder="D:\Games\Hollow Knight\hollow_knight.exe"
                 spellCheck={false}
               />
-              <p className="mt-1 text-[11px] text-muted">
-                <code>{'{rom}'}</code> is where the ROM path goes. Everything else is passed through as written.
-              </p>
             </label>
+            <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseExe()}>
+              <FolderOpen className="size-4" />
+              Browse…
+            </button>
           </div>
-        )}
+          <div className="flex gap-2">
+            <label className="block flex-1">
+              <span className={labelCls}>Install folder</span>
+              <input
+                className={inputCls}
+                value={d.installDir}
+                onChange={(e) => set('installDir', e.target.value)}
+                placeholder="Leave empty and Orbit will look for it"
+                spellCheck={false}
+              />
+            </label>
+            <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void browseFolder()}>
+              <FolderOpen className="size-4" />
+              Browse…
+            </button>
+          </div>
+        </section>
 
         <div className="flex gap-2">
           <label className="block flex-1">
@@ -402,7 +308,7 @@ export function AddGameModal({
                 className={inputCls}
                 value={d.coverPath ?? ''}
                 onChange={(e) => set('coverPath', e.target.value || null)}
-                placeholder="Leave empty and Orbit will look next to the game"
+                placeholder="Leave empty and Orbit will look for it"
                 spellCheck={false}
               />
               <button type="button" className={`${btnBrowse} flex items-center gap-2`} onClick={() => void browseCover()}>
@@ -434,10 +340,9 @@ export function AddGameModal({
               <option value="dropped">Dropped</option>
             </select>
           </label>
-          <label className="flex items-end gap-2 pb-2 text-sm">
-            <input type="checkbox" checked={d.favorite} onChange={(e) => set('favorite', e.target.checked)} />
-            Favorite
-          </label>
+          <div className="flex items-end pb-1.5">
+            <CheckboxInline checked={d.favorite} onChange={(v) => set('favorite', v)} label="Favorite" />
+          </div>
           <label className="block">
             <span className={labelCls}>Notes</span>
             <input className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
@@ -468,10 +373,6 @@ function blank(): Draft {
     favorite: false,
     notes: '',
     coverPath: null,
-    steamAppId: '',
-    emulatorPath: '',
-    romPath: '',
-    argsTemplate: '',
   };
 }
 
@@ -531,31 +432,19 @@ export async function findDroppedExe(paths: string[]): Promise<string | null> {
 export async function gameFromDropped(paths: string[]): Promise<Game | null> {
   const exe = await findDroppedExe(paths);
   if (!exe) return null;
-  return buildGame({ ...blank(), ...(await describeExe(exe)) }, 'exe');
+  return buildGame({ ...blank(), ...(await describeExe(exe)) });
 }
 
 /**
  * Turn the form into the row the database expects.
  *
- * The chosen mode decides the launch target, rather than being kept alongside it,
- * so a game picked as Steam or emulator cannot be saved as a timer by accident.
- * A mode that is missing its pieces still saves as a timer, which is the honest
- * outcome: Orbit would otherwise hold a target it could not run.
+ * A game with no program still saves, as a timer only: that is the honest
+ * outcome, and the launch settings on the game itself can fill the gap later.
  */
-export function buildGame(d: Draft, mode: 'auto' | 'exe' | 'folder' | 'steam' | 'emulator'): Game {
-  let launch: LaunchTarget = { kind: 'none' };
-  if (mode === 'steam' && d.steamAppId) {
-    launch = { kind: 'steam', appId: Number(d.steamAppId) };
-  } else if (mode === 'emulator' && d.emulatorPath && d.romPath) {
-    launch = {
-      kind: 'emulator',
-      emulatorPath: d.emulatorPath,
-      romPath: d.romPath,
-      argsTemplate: d.argsTemplate || '{rom}',
-    };
-  } else if (mode !== 'steam' && mode !== 'emulator' && d.exePath) {
-    launch = { kind: 'executable', path: d.exePath, args: '', workingDir: d.installDir || null };
-  }
+export function buildGame(d: Draft): Game {
+  const launch: LaunchTarget = d.exePath
+    ? { kind: 'executable', path: d.exePath, args: '', workingDir: d.installDir || null }
+    : { kind: 'none' };
 
   return {
     id: uid(),
@@ -578,6 +467,6 @@ export function buildGame(d: Draft, mode: 'auto' | 'exe' | 'folder' | 'steam' | 
     sessionCount: 0,
     longestSecs: 0,
     running: false,
-    logs: [],
+    companions: [],
   };
 }
