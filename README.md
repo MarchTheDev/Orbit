@@ -130,10 +130,28 @@ web/
 Everything Orbit ships as is built by GitHub, in
 [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-To build them: **Actions → Release → Run workflow**. The files appear as
-artifacts on that run. Push a tag (`git tag v0.1.0 && git push origin v0.1.0`)
-and the same files are attached to a GitHub release, which is where a download
-link points.
+Two ways to set it off.
+
+**Push a tag.** This works from any branch, so it works today:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The builds run, and every file is attached to a GitHub release for that tag,
+which is where a download link points.
+
+**Or press the button.** Actions → Release → Run workflow, then pick the branch.
+The files come out as artifacts of that run instead of a release. GitHub only
+shows that button for workflow files that exist on the repository's default
+branch, so if it is not there yet, use a tag, or merge this file into the
+default branch. Once the workflow has run at least once it can be started from
+a command line too:
+
+```sh
+gh workflow run release.yml --ref arena/01a10cff-orbit
+```
 
 | Platform | Files |
 | --- | --- |
