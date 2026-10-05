@@ -132,7 +132,7 @@ function parse(text: string): Block[] {
       flush();
       const last = out[out.length - 1];
       // Consecutive quote lines are one quote, not five of them.
-      if (last?.kind === 'quote') last.text += `\n${quote[1]}`;
+      if (last?.kind === 'quote') last.text += '\n' + quote[1];
       else out.push({ kind: 'quote', text: quote[1] });
       continue;
     }
@@ -178,7 +178,8 @@ function Inline({ text }: { text: string }) {
   );
 }
 
-const TOKEN = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+const TOKEN =
+  /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
 
 function inline(line: string): ReactNode[] {
   return line
@@ -202,7 +203,7 @@ function inline(line: string): ReactNode[] {
           </code>
         );
       }
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(piece);
+      const link = /^\[([^\]]+)\]\([^)\s]+\)$/.exec(piece);
       if (link) {
         const [, label, href] = link;
         return (
@@ -251,15 +252,16 @@ function Bullet({ item }: { item: { text: string; box?: boolean; done?: boolean 
  * Notes, written in one pane with the markdown applied as it is typed.
  *
  * A textarea cannot style what is inside it, so the styling is drawn behind it
- * instead: a mirror layer holds the same characters with the markers muted and
+ * instead: a mirror layer holds the same characters with the markers dimmed and
  * the content styled, and the textarea sits on top with transparent text, its
- * caret and its selection still its own. That is the same shape as Discord's
- * message box, where `**this**` turns bold while the asterisks stay visible.
+ * caret, its selection and its scrolling still its own. That is the same shape
+ * as Discord's message box, where `**this**` turns bold while the asterisks stay
+ * visible.
  *
  * Everything is monospace and every line is the same height, on purpose: the
  * textarea's own metrics are what place the caret, so the mirror has to agree
  * with them to the pixel, and a monospace face keeps its advance width when it
- * is bold. Nothing is parsed twice: the same subset as the reader above.
+ * is bold.
  */
 export function MarkdownEditor({
   value,
@@ -287,10 +289,7 @@ export function MarkdownEditor({
       <div
         ref={mirror}
         aria-hidden
-        // `pr-8` is the scrollbar's width: the box on top reserves that much
-        // for one, so the mirror has to as well or a wrapped line breaks in a
-        // different place than the caret thinks it does.
-        className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2 pr-8 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words"
+        className="pointer-events-none absolute inset-0 z-0 overflow-hidden px-3 py-2 pr-8 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words"
       >
         <Highlight text={value} />
       </div>
@@ -303,9 +302,11 @@ export function MarkdownEditor({
         onScroll={follow}
         placeholder={placeholder}
         // The characters are painted by the mirror; the box keeps the caret,
-        // the selection and the scroll.
-        style={{ scrollbarGutter: 'stable' }}
-        className="relative block w-full resize-y bg-transparent px-3 py-2 font-mono text-[13px] leading-6 text-transparent caret-accent outline-none placeholder:text-muted/60 focus:outline-none selection:bg-accent/30"
+        // the selection and the scroll. Everything that could give the box a
+        // background of its own is turned off here rather than left to a class,
+        // because if the box is opaque the styling behind it is invisible.
+        style={{ background: 'transparent', color: 'transparent', scrollbarGutter: 'stable' }}
+        className="relative z-10 block w-full resize-y border-0 font-mono text-[13px] leading-6 caret-accent outline-none placeholder:text-muted/60 focus:outline-none selection:bg-accent/30"
       />
     </div>
   );
@@ -316,7 +317,7 @@ function Highlight({ text }: { text: string }) {
   return (
     <>
       {text.split('\n').map((line, i) => (
-        <div key={i}>{shape(line) ?? '\u200b'}</div>
+        <div key={i}>{shape(line)}</div>
       ))}
     </>
   );
@@ -372,7 +373,7 @@ function shape(line: string): ReactNode {
       </>
     );
   }
-  if (/^(\s*)(-{3,}|\*{3,}|_{3,})$/.test(line)) return <Marker>{line}</Marker>;
+  if (/^\s*(-{3,}|\*{3,}|_{3,})$/.test(line)) return <Marker>{line}</Marker>;
   return <>{inlineStyled(line)}</>;
 }
 
@@ -412,7 +413,7 @@ function inlineStyled(line: string): ReactNode[] {
           </span>
         );
       }
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(piece);
+      const link = /^\[([^\]]+)\]\([^)\s]+\)$/.exec(piece);
       if (link) {
         return (
           <span key={i}>

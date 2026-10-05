@@ -55,6 +55,9 @@ export function ContextMenu({
 
   useEffect(() => {
     const away = (e: MouseEvent) => {
+      // A right click on another game moves the menu rather than closing it:
+      // the app's own handler reopens it where the pointer is.
+      if (e.type === 'contextmenu' && (e.target as HTMLElement | null)?.closest?.('[data-orbit-game]')) return;
       if (!box.current?.contains(e.target as Node)) onClose();
     };
     const escape = (e: KeyboardEvent) => {

@@ -6,7 +6,6 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { useHoverTint } from '../utils/palette';
 import { cn } from '../utils/cn';
-import type { ContextHandler } from './ui/ContextMenu';
 
 /** What `useDragReorder`'s `bind` hands a tile. */
 type DragBinding = {
@@ -23,8 +22,7 @@ interface Props {
   scale: number;
   /** Set while the library is in the player's own order. */
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
-  /** A right click on a tile, for the menu of things to do with the game. */
-  onContextMenu?: ContextHandler;
+
   /**
    * Whether the tint behind a hovered cover comes from the picture itself or
    * from Orbit's theme. A preference rather than a taste Orbit decides for
@@ -41,7 +39,6 @@ export function GameGrid({
   scale,
   onReorder,
   coverTint = true,
-  onContextMenu,
 }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
@@ -59,7 +56,6 @@ export function GameGrid({
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
-          onContextMenu={onContextMenu}
           bound={bind(g.id)}
           dragging={dragging === g.id}
           over={over === g.id && dragging !== null && dragging !== g.id}
@@ -85,7 +81,6 @@ function Tile({
   onPlay,
   scale,
   coverTint,
-  onContextMenu,
   bound,
   dragging,
   over,
@@ -96,7 +91,6 @@ function Tile({
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
-  onContextMenu?: ContextHandler;
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
@@ -109,7 +103,9 @@ function Tile({
     <div
       onClick={() => onSelect(game.id)}
       onDoubleClick={() => onPlay(game)}
-      onContextMenu={(e) => onContextMenu?.(game, e)}
+      // What the app's one right-click handler looks for, so the menu works
+      // from anywhere on the tile, including the artwork and the title.
+      data-orbit-game={game.id}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       {...bound}
@@ -123,7 +119,10 @@ function Tile({
     >
       <div
         className={cn(
-          'relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-[0_12px_40px_-8px_var(--c-accent)]',
+          // A neutral shadow on hover, not an accent-coloured one: with the
+          // tint set to follow the artwork, nothing from the theme should be
+          // drawn over a cover.
+          'relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
         )}
       >

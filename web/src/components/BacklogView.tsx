@@ -24,7 +24,7 @@ import { useDragReorder } from '../hooks/useDragReorder';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { btnGhost, inputCls } from './ui/Modal';
-import { btnGradient } from './ui/buttons';
+import { btnAccent } from './ui/buttons';
 
 /**
  * How long the main story takes, for the two orders that read by length.
@@ -346,7 +346,7 @@ export function BacklogView({
               placeholder="A game you plan to play, owned or not"
               spellCheck={false}
             />
-            <button className={`${btnGradient} flex items-center gap-2 rounded-lg px-4 py-2 text-sm`} disabled={busy || !planning.trim()}>
+            <button className={`${btnAccent} flex items-center gap-2 rounded-lg px-4 py-2 text-sm`} disabled={busy || !planning.trim()}>
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}
               {busy ? 'Adding…' : 'Add to backlog'}
             </button>

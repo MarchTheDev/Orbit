@@ -26,7 +26,7 @@ import { cn } from '../utils/cn';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
 import { Select } from './ui/Select';
-import { btnGradient } from './ui/buttons';
+import { btnAccent } from './ui/buttons';
 import { orderedTabs } from './TopNav';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
@@ -339,7 +339,7 @@ export function SettingsView({
               Browse…
             </button>
           )}
-          <button className={cn(btnGradient, 'rounded-lg px-4 py-2 text-sm')}>Add folder</button>
+          <button className={cn(btnAccent, 'rounded-lg px-4 py-2 text-sm')}>Add folder</button>
         </form>
         {drives.length > 0 && (
           <div className="flex flex-wrap gap-2">

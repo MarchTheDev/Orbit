@@ -5,7 +5,6 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { cn } from '../utils/cn';
 import { StatusBadge } from './StatusBadge';
-import type { ContextHandler } from './ui/ContextMenu';
 
 interface Props {
   games: Game[];
@@ -16,11 +15,9 @@ interface Props {
   scale: number;
   /** Set while the library is in the player's own order. */
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
-  /** A right click on a row, for the menu of things to do with the game. */
-  onContextMenu?: ContextHandler;
 }
 
-export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder, onContextMenu }: Props) {
+export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
@@ -39,7 +36,8 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
             key={g.id}
             onClick={() => onSelect(g.id)}
             onDoubleClick={() => onPlay(g)}
-            onContextMenu={(e) => onContextMenu?.(g, e)}
+            // What the app's one right-click handler looks for.
+            data-orbit-game={g.id}
             {...bind(g.id)}
             className={cn(
               'grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
@@ -72,7 +70,7 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
                 onPlay(g);
               }}
               title={`Play ${g.title}`}
-              className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
+              className="btn-accent flex items-center justify-center gap-2 rounded-lg px-4 py-1.5 text-sm"
             >
               <Play className="size-4" fill="currentColor" strokeWidth={0} />
               Play

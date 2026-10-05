@@ -38,8 +38,8 @@ function themeTint(): string {
   );
 }
 
-/** Sampled pairs, so a cover already measured is never measured twice. */
-const CACHE = new Map<string, [string, string] | null>();
+/** Sampled colours, so a cover already measured is never measured twice. */
+const CACHE = new Map<string, number | null>();
 
 /** The picture a game's tile is showing, in the same order `Cover` tries them. */
 function coverArt(game: Game): string | null {
@@ -50,12 +50,21 @@ function coverArt(game: Game): string | null {
   return null;
 }
 
-function tintOf(pair: [string, string] | null): string {
-  if (!pair) return SHADOW;
-  const [one, two] = pair;
+/**
+ * The gradient, from one hue and one lightness.
+ *
+ * One colour, not two. A second colour was picked from the next biggest patch
+ * of the picture, and on real cover art that patch is often a highlight, a sky
+ * or a logo, so the gradient came out with a colour that had nothing to do with
+ * the game. The same hue, darker at the bottom and lighter where it fades,
+ * always looks like the picture it came from.
+ */
+function tintOf(hue: number | null, light: number): string {
+  if (hue === null) return SHADOW;
+  const top = Math.round(Math.min(46, light + 12));
   return (
-    `linear-gradient(to top, color-mix(in srgb, ${one} 92%, transparent), ` +
-    `color-mix(in srgb, ${two} 55%, transparent) 55%, transparent 88%)`
+    `linear-gradient(to top, hsl(${hue} 44% ${Math.round(light)}% / 0.95), ` +
+    `hsl(${hue} 40% ${top}% / 0.42) 55%, transparent 88%)`
   );
 }
 
@@ -80,13 +89,13 @@ export function useHoverTint(game: Game, fromCover: boolean, active: boolean): s
     }
     const known = CACHE.get(url);
     if (known !== undefined) {
-      setTint(tintOf(known));
+      setTint(tintOf(known, 26));
       return;
     }
     let alive = true;
-    void dominant(url).then((pair) => {
-      CACHE.set(url, pair);
-      if (alive) setTint(tintOf(pair));
+    void dominant(url).then((hue) => {
+      CACHE.set(url, hue);
+      if (alive) setTint(tintOf(hue, 26));
     });
     return () => {
       alive = false;
@@ -99,14 +108,12 @@ export function useHoverTint(game: Game, fromCover: boolean, active: boolean): s
 /**
  * Read a picture's colours by fetching it and drawing it into a small canvas.
  *
- * The fetch is the whole trick: a `blob:` URL is same-origin, so the canvas that
- * draws it can be read. Pointing an image straight at the remote URL cannot be
- * read at all, whatever the host allows.
+ * Fetching is what makes it possible at all: a cross-origin image taints the
+ * canvas and a tainted canvas cannot be read, whatever the host allows, but a
+ * picture that has been fetched can be drawn from a `blob:` URL that is
+ * same-origin.
  */
-async function dominant(url: string): Promise<[string, string] | null> {
-  // Fetching turns the picture into a `blob:`, which is same-origin, so the
-  // canvas that draws it can be read. Pointing an image straight at a remote URL
-  // gives a canvas that cannot be read at all, whatever the host allows.
+async function dominant(url: string): Promise<number | null> {
   try {
     const reply = await fetch(url, { mode: 'cors', credentials: 'omit' });
     if (reply.ok) {
@@ -114,22 +121,19 @@ async function dominant(url: string): Promise<[string, string] | null> {
       if (blob.type.startsWith('image/')) {
         const objectUrl = URL.createObjectURL(blob);
         try {
-          return coloursOf(await loadImage(objectUrl, false));
+          return hueOf(await loadImage(objectUrl, false));
         } finally {
           URL.revokeObjectURL(objectUrl);
         }
       }
     }
   } catch {
-    // Fall through: the local asset protocol, for one, has to be asked the other
-    // way.
+    // Fall through: the local asset protocol, for one, has to be asked the
+    // other way.
   }
 
-  // Asked for as a cross-origin image, which is refused unless the host says
-  // otherwise, and then read. This is what covers a game's own cover file on
-  // disk, which is served over Tauri's asset protocol.
   try {
-    return coloursOf(await loadImage(url, true));
+    return hueOf(await loadImage(url, true));
   } catch {
     return null;
   }
@@ -145,7 +149,7 @@ function loadImage(src: string, crossOrigin: boolean): Promise<HTMLImageElement>
   });
 }
 
-function coloursOf(img: HTMLImageElement): [string, string] | null {
+function hueOf(img: HTMLImageElement): number | null {
   try {
     const size = 32;
     const canvas = document.createElement('canvas');
@@ -154,7 +158,7 @@ function coloursOf(img: HTMLImageElement): [string, string] | null {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
     ctx.drawImage(img, 0, 0, size, size);
-    return coloursIn(ctx.getImageData(0, 0, size, size).data);
+    return hueIn(ctx.getImageData(0, 0, size, size).data);
   } catch {
     // A tainted canvas throws here rather than anywhere useful.
     return null;
@@ -162,26 +166,23 @@ function coloursOf(img: HTMLImageElement): [string, string] | null {
 }
 
 interface Bucket {
-  n: number;
-  /** Saturation, summed, so a bucket's weight is how colourful it is, not just
-   *  how many pixels it has. A grey sky should not outvote a red logo. */
+  /** Saturation, summed: how colourful a patch is, not how many pixels it has.
+   *  A grey sky should not outvote a red logo. */
   weight: number;
   hueSin: number;
   hueCos: number;
-  light: number;
 }
 
 /**
- * The one or two hues a picture is mostly made of.
+ * The hue a picture is mostly made of.
  *
- * Hues are bucketed in 30 degree slices and weighted by saturation, then turned
- * back into colours at a fixed lightness. Two things matter here and were both
- * wrong before: the hue of a bucket is recovered from the sum of its sines and
- * cosines, so a red that straddles 0 degrees does not average into cyan; and the
- * final saturation and lightness are chosen rather than copied, so the gradient
- * is always dark enough for white text and the Play button to read over it.
+ * Hues are bucketed in 30 degree slices and weighted by saturation, and the hue
+ * of the winning bucket is recovered from the sum of its sines and cosines.
+ * Averaging the degree numbers instead, which is what this did first, sends a
+ * red that straddles 0 degrees straight through orange, yellow and green to
+ * cyan, which is why some tiles came out with a colour that was plainly wrong.
  */
-function coloursIn(data: Uint8ClampedArray): [string, string] | null {
+function hueIn(data: Uint8ClampedArray): number | null {
   const buckets = new Map<number, Bucket>();
   for (let i = 0; i < data.length; i += 4) {
     // Ignore anything transparent: a PNG's empty margin is not a colour.
@@ -191,47 +192,18 @@ function coloursIn(data: Uint8ClampedArray): [string, string] | null {
     // they are most of what a dark game's screenshot is made of.
     if (l < 0.12 || l > 0.9 || s < 0.18) continue;
     const key = Math.floor(h / 30) % 12;
-    const b = buckets.get(key) ?? { n: 0, weight: 0, hueSin: 0, hueCos: 0, light: 0 };
+    const b = buckets.get(key) ?? { weight: 0, hueSin: 0, hueCos: 0 };
     const rad = (h * Math.PI) / 180;
-    b.n += 1;
     b.weight += s;
     b.hueSin += Math.sin(rad) * s;
     b.hueCos += Math.cos(rad) * s;
-    b.light += l;
     buckets.set(key, b);
   }
 
-  const ranked = [...buckets.values()].sort((a, b) => b.weight - a.weight);
-  if (ranked.length === 0) return null;
-
-  const hueOf = (b: Bucket) => {
-    const angle = (Math.atan2(b.hueSin, b.hueCos) * 180) / Math.PI;
-    return (angle + 360) % 360;
-  };
-  const base = hueOf(ranked[0]);
-
-  // A second colour only if it is a genuinely different one; otherwise the same
-  // hue carries the gradient on its own, which looks deliberate rather than
-  // muddy.
-  const other = ranked.slice(1).find((b) => angularDistance(hueOf(b), base) > 35);
-
-  // Lightness stays in a band that white text reads over, and follows the
-  // picture a little so a bright game's tile is not as black as a dark one's.
-  const light = clamp(22 + (ranked[0].light / ranked[0].n) * 22, 22, 40);
-  const strong = `hsl(${Math.round(base)} ${Math.round(clamp(45 + ranked[0].weight / ranked[0].n, 45, 78))}% ${Math.round(light)}%)`;
-  const soft = other
-    ? `hsl(${Math.round(hueOf(other))} ${Math.round(clamp(45 + other.weight / other.n, 45, 72))}% ${Math.round(clamp(light + 12, 30, 52))}%)`
-    : `hsl(${Math.round(base)} 55% ${Math.round(clamp(light + 12, 30, 52))}%)`;
-  return [strong, soft];
-}
-
-function angularDistance(a: number, b: number): number {
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.max(low, Math.min(high, value));
+  const best = [...buckets.values()].sort((a, b) => b.weight - a.weight)[0];
+  if (!best) return null;
+  const angle = (Math.atan2(best.hueSin, best.hueCos) * 180) / Math.PI;
+  return Math.round((angle + 360) % 360);
 }
 
 /** Hue in degrees, saturation and lightness as 0 to 1. */

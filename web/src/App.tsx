@@ -353,6 +353,30 @@ export default function App() {
     [visible, order, setSettings],
   );
 
+  /**
+   * Right click, from one place.
+   *
+   * The handler lives on the window rather than on each tile, because a tile is
+   * made of several elements (the cover, the glow, the title, the buttons) and a
+   * handler per element misses whichever one the pointer happens to be over.
+   * Everything a game is drawn with carries `data-orbit-game`, so the element
+   * under the pointer is asked which game it belongs to, and the browser's own
+   * menu is suppressed at the same time: inside the app, that menu is not the
+   * one anybody wants.
+   */
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-orbit-game]');
+      if (!el) return;
+      const id = el.getAttribute('data-orbit-game');
+      if (!id) return;
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, id });
+    };
+    window.addEventListener('contextmenu', onContextMenu);
+    return () => window.removeEventListener('contextmenu', onContextMenu);
+  }, []);
+
   /** Open the drawer on a particular tab, wherever it is already. */
   const openDetail = (id: string, tab: 'overview' | 'edit' = 'overview') => {
     setDetailTab(tab);
@@ -591,10 +615,6 @@ export default function App() {
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
                   coverTint={settings.coverTint !== false}
-                  onContextMenu={(g, e) => {
-                    e.preventDefault();
-                    setMenu({ x: e.clientX, y: e.clientY, id: g.id });
-                  }}
                 />
               ) : (
                 <GameList
@@ -604,10 +624,6 @@ export default function App() {
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
-                  onContextMenu={(g, e) => {
-                    e.preventDefault();
-                    setMenu({ x: e.clientX, y: e.clientY, id: g.id });
-                  }}
                 />
               )}
             </div>

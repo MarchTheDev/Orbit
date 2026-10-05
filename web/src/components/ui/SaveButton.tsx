@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { btnGradient } from './buttons';
+import { btnAccent } from './buttons';
 
 /**
  * The button that keeps a page of edits.
@@ -48,10 +48,10 @@ export function SaveButton({
         // The same gradient as every other button that does something, plus the
         // extra press this one has earned: it sinks into the panel on the way
         // down and the glow goes with it.
-        btnGradient,
+        btnAccent,
         'active:scale-[0.98]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
-        state === 'done' && 'btn-grad-done',
+        state === 'done' && 'btn-accent-done',
         state === 'busy' && 'cursor-wait opacity-90',
         className,
       )}

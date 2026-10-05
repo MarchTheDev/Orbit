@@ -7,7 +7,7 @@ import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalI
 import { inputCls } from '../ui/Modal';
 import { Select } from '../ui/Select';
 import { MarkdownEditor } from '../ui/Markdown';
-import { btnGradient } from '../ui/buttons';
+import { btnAccent } from '../ui/buttons';
 import { moveInOrder } from '../../utils/reorder';
 import { cn } from '../../utils/cn';
 
@@ -180,12 +180,18 @@ export function GameLogView({
           </h3>
           <p className="text-xs text-muted">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
         </div>
-        <div className="text-right">
-          <p className="font-mono text-sm font-semibold">{fmtClock(total)}</p>
-          <p className="text-[11px] text-muted">
-            across {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
-          </p>
-        </div>
+        {/* The total time is the drawer's business, where the log sits beside
+            the session clock. In the Journal the page is the writing, and the
+            hours above the count were one more set of numbers to read past. */}
+        <p className="text-[11px] text-muted">
+          {withClock ? `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}` : fmtClock(total)}
+          {!withClock && (
+            <>
+              {' '}
+              across {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
+            </>
+          )}
+        </p>
       </div>
 
       {draft ? (
@@ -239,7 +245,7 @@ export function GameLogView({
           <div className="flex gap-2">
             <button
               onClick={() => void save()}
-              className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs', btnGradient)}
+              className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs', btnAccent)}
             >
               <Check className="size-3.5" />
               Save entry

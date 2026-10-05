@@ -4,7 +4,7 @@ import type { Game } from '../../types';
 import { fmtClock, parseDuration } from '../../utils/format';
 import { cn } from '../../utils/cn';
 import { inputCls } from '../ui/Modal';
-import { btnGradient } from '../ui/buttons';
+import { btnAccent } from '../ui/buttons';
 
 interface Props {
   game: Game;
@@ -92,7 +92,7 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
             />
             <button
               disabled={saving}
-              className={cn('flex items-center gap-1.5 rounded-lg px-3 text-sm', btnGradient)}
+              className={cn('flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm', btnAccent)}
             >
               <Check className="size-4" />
               {saving ? 'Saving' : 'Save'}

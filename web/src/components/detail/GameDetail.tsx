@@ -281,7 +281,7 @@ export function GameDetail({
                 {game.planned && (
                   <button
                     onClick={() => onUpdate({ planned: false, status: 'backlog' })}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 py-2.5 font-semibold text-white shadow-lg shadow-accent/30 hover:brightness-110"
+                    className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5"
                   >
                     <Check className="size-4" />
                     I own this now
@@ -293,7 +293,7 @@ export function GameDetail({
             <div className="flex gap-2">
               <button
                 onClick={() => onUpdate({ planned: false, status: 'backlog' })}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 py-2.5 font-semibold text-white shadow-lg shadow-accent/30 hover:brightness-110"
+                className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5"
               >
                 <Check className="size-4" />
                 I own this now
@@ -309,12 +309,12 @@ export function GameDetail({
           ) : (
           <div className="flex gap-2">
             {running ? (
-              <button onClick={onStop} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-500 py-2.5 font-semibold text-white hover:brightness-110">
+              <button onClick={onStop} className="btn-danger flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
                 <Square className="size-4" fill="currentColor" strokeWidth={0} />
                 Stop session
               </button>
             ) : (
-              <button onClick={onPlay} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent2 py-2.5 font-semibold text-white shadow-lg shadow-accent/30 hover:brightness-110">
+              <button onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
                 <Play className="size-4" fill="currentColor" strokeWidth={0} />
                 Play
               </button>
