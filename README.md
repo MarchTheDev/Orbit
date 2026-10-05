@@ -165,15 +165,45 @@ they run in each distribution's own container, and a package name that has moved
 between releases shows up as a failed job rather than as a wrong package. The
 Windows and Linux files are what the release itself depends on.
 
-Building by hand, on the distribution in question:
+### Building the installers yourself
 
-```sh
+**Windows.** What is needed once: Rust (`rustup`, the MSVC toolchain), the
+"Desktop development with C++" workload from Visual Studio Build Tools, Node 20
+or newer, and the WebView2 runtime, which Windows 10 and 11 already have.
+
+```powershell
+npm install                # at the repository root; this installs web/ too
 cd web
-npm ci
-npx tauri build                  # everything this platform can make
-npx tauri build --no-bundle      # just the program, in src-tauri/target/release
+npx tauri build --bundles nsis,msi
 ```
 
-On Arch, [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) turns that binary
-into a package. On NixOS, `nix build` from the repository root builds Orbit from
-source with [`flake.nix`](flake.nix).
+That leaves three things behind:
+
+| What | Where |
+| --- | --- |
+| The setup exe | `web/src-tauri/target/release/bundle/nsis/Orbit_0.1.0_x64-setup.exe` |
+| An msi, for anyone who wants one | `web/src-tauri/target/release/bundle/msi/` |
+| The program on its own | `web/src-tauri/target/release/orbit.exe` |
+
+The standalone and portable builds are that last file: the interface is inlined
+into it, so copying it somewhere as `Orbit.exe` is a working portable install,
+and zipping that folder is the portable download. Nothing is written next to it;
+the library and the settings live in `%APPDATA%\Orbit`.
+
+**Linux.** What is needed once, on Debian or Ubuntu:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+cd web && npm ci && npx tauri build --bundles deb,appimage,rpm
+```
+
+**Arch.** `sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3
+libappindicator-gtk3 librsvg openssl nodejs npm rust`, then
+`npx tauri build --no-bundle` in `web/`, copy the binary next to
+[packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) with `orbit.desktop` and
+`orbit.png`, and run `makepkg -f`.
+
+**NixOS.** `nix build` from the repository root. The first run stops with the
+hash of the front end's dependencies in the error; put that in `npmDepsHash` in
+[`flake.nix`](flake.nix) and build again, or let the workflow do it.
