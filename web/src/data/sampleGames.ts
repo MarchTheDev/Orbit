@@ -5,6 +5,15 @@ const d = (daysAgo: number) => new Date(Date.now() - daysAgo * 864e5).toISOStrin
 /** Used when Orbit is opened in a browser, where there is no real library. */
 export const SAMPLE_GAMES: Game[] = [
   {
+    id: 'g9', title: 'Silksong', launch: { kind: 'none' },
+    exePath: null, installDir: null, drive: '',
+    sizeBytes: 0, sizeGb: 0,
+    status: 'backlog', favorite: false, manualPlaySecs: 0, playMinutes: 0, lastPlayed: null, addedAt: d(12),
+    // Written down before it is owned: it lives on the Backlog page only.
+    notes: '', hue: 275, coverPath: null, planned: true, sessionCount: 0, longestSecs: 0, running: false, companions: [],
+    meta: { summary: '', genres: [], developer: 'Team Cherry', releaseYear: null, rating: null },
+  },
+  {
     id: 'g1', title: 'Elden Ring', launch: { kind: 'none' },
     exePath: 'C:\\Games\\ELDEN RING\\eldenring.exe', installDir: 'C:\\Games\\ELDEN RING', drive: 'C:',
     sizeBytes: 49.2e9, sizeGb: 49.2,

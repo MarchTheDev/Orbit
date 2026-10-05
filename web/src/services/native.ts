@@ -412,7 +412,16 @@ export function metadataSuggest(title: string): Promise<string[]> {
  * of similar titles is much easier with the picture in front of you.
  */
 export function gameSuggestions(title: string): Promise<GameSuggestion[]> {
-  return call('metadata_cards', { title }, async () => []);
+  return call('metadata_cards', { title }, async () => {
+    // In a browser there is no store to ask, so a few plausible titles stand in
+    // and the layout can still be looked at.
+    await sleep(250);
+    return ['Silksong', 'Hollow Knight: Silksong', 'Crowsworn'].map((name, index) => ({
+      appId: 9000 + index,
+      name: `${name}${title.trim() ? ` (${title.trim()})` : ''}`,
+      coverUrl: null,
+    }));
+  });
 }
 
 /**
@@ -423,7 +432,16 @@ export function gameSuggestions(title: string): Promise<GameSuggestion[]> {
  * this comes back.
  */
 export function fetchAchievements(gameId: string): Promise<Achievement[]> {
-  return call('achievements_fetch', { gameId }, async () => []);
+  return call('achievements_fetch', { gameId }, async () => {
+    await sleep(250);
+    // Four rows so the ticks, the filters and the counters can be tried out.
+    return [
+      { id: 'FIRST_STEPS', name: 'First Steps', description: 'Set foot in the ruins', icon: '', percent: 88.4, unlocked: false },
+      { id: 'NO_SHORTCUTS', name: 'No Shortcuts', description: 'Finish the story without a guide', icon: '', percent: 12.1, unlocked: false },
+      { id: 'COLLECTOR', name: 'Collector', description: 'Find every trinket', icon: '', percent: 4.7, unlocked: false },
+      { id: 'SPEEDRUN', name: 'Two Hours Flat', description: 'Beat the game in under two hours', icon: '', percent: 0.9, unlocked: false },
+    ];
+  });
 }
 
 /** Put one game's notes in the order they were dragged into. */
