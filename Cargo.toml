@@ -1,0 +1,55 @@
+[package]
+name = "orbit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Orbit - a modern game launcher and playtime tracker"
+license = "MIT"
+default-run = "orbit"
+
+[[bin]]
+name = "orbit"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["serde"] }
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Storage_FileSystem",
+] }
+directories = "6.0.0"
+eframe = { version = "0.31", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
+egui = "0.31"
+egui_extras = { version = "0.31", features = ["image"] }
+image = { version = "0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+    "webp",
+] }
+opener = "0.9.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls"] }
+rfd = "0.17.2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: var(--c-bg);
+  --color-panel: var(--c-panel);
+  --color-panel2: var(--c-panel2);
+  --color-line: var(--c-border);
+  --color-fg: var(--c-text);
+  --color-muted: var(--c-muted);
+  --color-accent: var(--c-accent);
+  --color-accent2: var(--c-accent2);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --c-bg: #0b0a16; --c-panel: #14122a; --c-panel2: #1d1a3a; --c-border: #2c2852;
+  --c-text: #ecebff; --c-muted: #9a96c4; --c-accent: #8b5cf6; --c-accent2: #ec4899;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--c-bg); color: var(--c-text); overflow: hidden; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+body {
+  background:
+    radial-gradient(ellipse 60% 50% at 85% -10%, color-mix(in srgb, var(--c-accent) 28%, transparent), transparent),
+    radial-gradient(ellipse 50% 40% at -5% 100%, color-mix(in srgb, var(--c-accent2) 20%, transparent), transparent),
+    var(--c-bg);
+}
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .35;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, var(--c-text), transparent),
+    radial-gradient(1px 1px at 70% 60%, var(--c-text), transparent),
+    radial-gradient(1px 1px at 40% 80%, var(--c-text), transparent),
+    radial-gradient(1.5px 1.5px at 90% 20%, var(--c-text), transparent),
+    radial-gradient(1px 1px at 10% 70%, var(--c-text), transparent);
+  background-size: 400px 400px;
+}
+.glass {
+  background: color-mix(in srgb, var(--c-panel) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-border) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+}
+.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1); }
+@keyframes drawer { from { transform: translateX(100%); opacity: 0; } }
+.fade-in { animation: fade .25s ease; }
+@keyframes fade { from { opacity: 0; } }
+
+.orbit-ring { animation: spin 14s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
