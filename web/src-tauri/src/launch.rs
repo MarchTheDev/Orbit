@@ -485,7 +485,7 @@ mod tests {
         assert!(!names.contains(&"_CommonRedist".to_string()));
         // The folder's own programs come before the ones buried deeper.
         let first = found.first().expect("at least one");
-        assert_eq!(first.exe_path, dir.join("launcher.exe").to_string_lossy());
+        assert_eq!(first.exe_path, dir.join("launcher.exe").to_string_lossy().to_string());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
