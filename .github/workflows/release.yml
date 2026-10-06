@@ -26,7 +26,6 @@ name: Release
 #   Debian   orbit_<version>_debian_amd64.deb       built against Debian's libs
 #   Fedora   orbit-<version>-1.fc.x86_64.rpm        built against Fedora's libs
 #   Arch     orbit-<version>-1-x86_64.pkg.tar.zst   pacman -U
-#   NixOS    Orbit-<version>-nix-x86_64.tar.gz      nix build, or unpack and run
 
 on:
   push:
@@ -36,9 +35,9 @@ on:
       - 'VERSION'
       # Changing what builds the releases is a good moment to build them, and
       # it is also how this file is worked on before it has reached master,
-      # where the Run workflow button lives. The flake is in here for the same
-      # reason: it is what the Nix package is made of, and it ships in a release.
+      # where the Run workflow button lives.
       - '.github/workflows/release.yml'
+      # The flake is how the version is set, so changing it is a reason to build.
       - 'flake.nix'
       # What the program is built out of is as much a part of a release as the
       # number on it: these change what ends up inside the installers.
@@ -224,7 +223,7 @@ jobs:
           chmod +x artifacts/*.AppImage
 
           # A plain tarball as well, for anyone who would rather not have a
-          # package manager involved, and for Arch and NixOS to unpack by hand.
+          # package manager involved, and for Arch to unpack by hand.
           portable="Orbit-${version}-linux-portable"
           mkdir -p "$portable"
           cp web/src-tauri/target/release/orbit "$portable/orbit"
@@ -412,102 +411,12 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
-  # ------------------------------------------------------------------ NixOS
-  nix:
-    name: NixOS (flake)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: version
-    env:
-      ORBIT_VERSION: ${{ needs.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set the version
-        run: node packaging/version.mjs "$ORBIT_VERSION"
-
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      # A fresh flake cannot know the hash of the front end's dependencies, and
-      # nix reports it in the error. This takes it from there and puts it in,
-      # which is the same thing `nix build` would tell a person to do by hand.
-      #
-      # Whatever nix says is written into the job's summary as well. When the
-      # build fails, the summary is the part of the log that GitHub will hand
-      # back through its API, so the reason for a failure is readable without
-      # opening the run page.
-      - name: Fill in the npm dependencies hash
-        run: |
-          message=$(nix build .# --no-link 2>&1) || true
-          printf '%s\n' "$message" | tail -20
-          hash=$(printf '%s' "$message" | grep -oP 'got:\s+\K\S+' | head -1)
-          if [ -n "$hash" ]; then
-            sed -i "s|npmDepsHash = .*|npmDepsHash = \"$hash\";|" flake.nix
-            echo "npmDepsHash filled in: $hash" >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "### nix did not get as far as asking for a hash"
-              echo '```'
-              printf '%s\n' "$message" | tail -40
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Build
-        run: |
-          set +e
-          nix build .# --print-build-logs 2>&1 | tee /tmp/nix-build.log | tail -60
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            {
-              echo "### nix build failed"
-              echo '```'
-              tail -60 /tmp/nix-build.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            # The summary is for a person; the annotation is for anything
-            # reading the run back through the API, which is the only part of a
-            # log GitHub hands over that way and has a size limit of its own. A
-            # compiler prints a lot of "Compiling ..." in between the things
-            # that went wrong, so only those are taken.
-            # Errors and failing tests both: a test result line is preceded by
-            # the names of the tests that produced it and by their panic
-            # messages, which is the whole of what a person needs to see.
-            message=$(grep -nE -B 45 "test result:|error(\[|:)" /tmp/nix-build.log | tail -110)
-            message=${message//'%'/'%25'}
-            message=${message//$'\n'/'%0A'}
-            echo "::error title=Nix build failed::${message}"
-            exit 1
-          fi
-
-      - name: Collect it
-        run: |
-          version="${ORBIT_VERSION#v}"
-          mkdir -p "artifacts/Orbit-${version}-nix-x86_64/bin"
-          cp -r result/bin/. "artifacts/Orbit-${version}-nix-x86_64/bin/"
-          cp packaging/linux/orbit.desktop "artifacts/Orbit-${version}-nix-x86_64/orbit.desktop"
-          cp web/src-tauri/icons/128x128.png "artifacts/Orbit-${version}-nix-x86_64/orbit.png"
-          printf '%s\n' \
-            "Orbit ${version}, built with Nix." \
-            "" \
-            "Either add this folder to your PATH and run bin/orbit," \
-            "or build from source with:  nix build github:MarchTheDev/Orbit" \
-            > "artifacts/Orbit-${version}-nix-x86_64/Read me.txt"
-          tar -czf "artifacts/Orbit-${version}-nix-x86_64.tar.gz" "artifacts/Orbit-${version}-nix-x86_64"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nix
-          path: artifacts/Orbit-*-nix-x86_64.tar.gz
-          if-no-files-found: error
-
   # --------------------------------------------------------------- the release
   release:
     name: Draft a release
     # Everything that produces a file, including the best-effort jobs: a platform
     # that failed to build must not stop the others from being offered.
-    needs: [version, windows, linux, debian, fedora, arch, nix]
+    needs: [version, windows, linux, debian, fedora, arch]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     env:
@@ -537,9 +446,6 @@ jobs:
           RHEL and openSUSE.
 
           **Arch** - \`pacman -U orbit-${version}-1-x86_64.pkg.tar.zst\`.
-
-          **NixOS** - \`nix build github:MarchTheDev/Orbit\`, or unpack the
-          tarball and run \`bin/orbit\`.
 
           Orbit looks for games in your Steam library and adds them when you
           ask it to; nothing is read or launched until you do.
