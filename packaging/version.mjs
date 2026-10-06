@@ -37,6 +37,23 @@ const stringify = (file, pattern, replace) => {
 stringify('web/src-tauri/tauri.conf.json', /("version"\s*:\s*")[^"]*(")/, `$1${wanted}$2`);
 stringify('web/package.json', /("version"\s*:\s*")[^"]*(")/, `$1${wanted}$2`);
 stringify('web/src-tauri/Cargo.toml', /^(version\s*=\s*")[^"]*(")/m, `$1${wanted}$2`);
+// The lock file carries the package's own version in two places, and leaving
+// them behind makes `npm ci` disagree with `package.json` about what is being
+// built. Only the first two lines of the file are touched: every dependency has
+// a version of its own, and those are npm's business.
+// A lock file records the package's own version twice, at the head and in the
+// entry for the folder itself, and leaving those behind makes `npm ci` disagree
+// with `package.json` about what is being built. Nothing else in the lock is
+// touched: every dependency has a version of its own, and those are npm's.
+const lock = path.join(root, 'web/package-lock.json');
+const lockBefore = readFileSync(lock, 'utf8');
+const lockAfter = lockBefore
+  .replace(/^(\{\s*"name":\s*"orbit",\s*"version":\s*")[^"]*(")/m, `$1${wanted}$2`)
+  .replace(/("":\s*\{\s*"name":\s*"orbit",\s*"version":\s*")[^"]*(")/, `$1${wanted}$2`);
+if (lockAfter !== lockBefore) {
+  writeFileSync(lock, lockAfter);
+  changed.push('web/package-lock.json');
+}
 
 const versionFile = path.join(root, 'VERSION');
 const current = readFileSync(versionFile, 'utf8').trim();
