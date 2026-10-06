@@ -110,7 +110,13 @@ export function MusicButton({
             label="Keep playing when Orbit is not in front"
           />
 
-          <button onClick={onOpenSettings} className="text-xs text-muted underline decoration-dotted hover:text-accent">
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings();
+            }}
+            className="text-xs text-muted underline decoration-dotted hover:text-accent"
+          >
             All sound settings
           </button>
         </div>

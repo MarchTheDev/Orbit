@@ -37,8 +37,6 @@ on:
       # it is also how this file is worked on before it has reached master,
       # where the Run workflow button lives.
       - '.github/workflows/release.yml'
-      # The flake is how the version is set, so changing it is a reason to build.
-      - 'flake.nix'
       # What the program is built out of is as much a part of a release as the
       # number on it: these change what ends up inside the installers.
       - 'web/src-tauri/Cargo.toml'

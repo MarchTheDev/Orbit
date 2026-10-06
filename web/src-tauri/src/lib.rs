@@ -10,6 +10,7 @@ mod format;
 mod hltb;
 mod launch;
 mod launch_target;
+mod launchers;
 mod metadata;
 mod session;
 mod steam;
@@ -823,6 +824,17 @@ async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
         .map_err(|e| format!("Could not read the Steam library: {e}"))?
 }
 
+/// Installed games described by other launcher manifests or Windows records.
+///
+/// This read-only scan is called only when the player opens the import dialog;
+/// it is never part of startup and does not contact any launcher service.
+#[tauri::command]
+async fn launcher_games() -> Result<Vec<launchers::LauncherGame>, String> {
+    tokio::task::spawn_blocking(launchers::installed_games)
+        .await
+        .map_err(|e| format!("Could not scan other game launchers: {e}"))?
+}
+
 /// Titles the store suggests for a partial name, for the Add dialog.
 #[tauri::command]
 async fn metadata_suggest(title: String) -> Result<Vec<String>, String> {
@@ -997,6 +1009,7 @@ pub fn run() {
             artwork_candidates,
             reorder_game_logs,
             steam_library,
+            launcher_games,
             folder_programs,
             load_settings,
             save_settings,

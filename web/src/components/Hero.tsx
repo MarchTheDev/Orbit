@@ -15,7 +15,7 @@ interface Props {
 export function Hero({ game, running, onPlay, onDetails, onHide }: Props) {
   const pct = game.hltb ? Math.min(100, Math.round((game.playSecs / 3600 / game.hltb.main) * 100)) : null;
   return (
-    <section className="relative mx-6 mt-5 overflow-hidden rounded-3xl border border-line">
+    <section className="orbit-hero-enter relative mx-6 mt-5 overflow-hidden rounded-3xl border border-line">
       {/* The way out is on the panel itself: somebody who does not want to be
           greeted by a game should not have to go looking in Settings for it. */}
       <button

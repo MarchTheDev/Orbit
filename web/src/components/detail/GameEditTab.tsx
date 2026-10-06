@@ -453,7 +453,7 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
-            markdown, applied as you type: **bold**, - list, # heading, `code`
+            Markdown source, with a rendered Preview when you need it
           </span>
         </span>
         <MarkdownEditor

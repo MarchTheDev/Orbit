@@ -38,17 +38,14 @@ stringify('web/src-tauri/tauri.conf.json', /("version"\s*:\s*")[^"]*(")/, `$1${w
 stringify('web/package.json', /("version"\s*:\s*")[^"]*(")/, `$1${wanted}$2`);
 stringify('web/src-tauri/Cargo.toml', /^(version\s*=\s*")[^"]*(")/m, `$1${wanted}$2`);
 
-// The Rust lock file records the version of the crate itself, and a lock that
-// disagrees with Cargo.toml is refused by a fetch that runs offline, which is
-// exactly how Nix builds this. Only the crate's own entry is touched.
+// The Rust lock file records the version of the crate itself. Only the crate's
+// own entry is touched; dependency versions remain Cargo's business.
 stringify(
   'web/src-tauri/Cargo.lock',
   /(\[\[package\]\]\nname = "orbit"\nversion = ")[^"]*(")/,
   `$1${wanted}$2`,
 );
 
-// The flake's own version, so a Nix build says which version it is.
-stringify('flake.nix', /(^\s*version = ")[^"]*(";)/m, `$1${wanted}$2`);
 // The lock file carries the package's own version in two places, and leaving
 // them behind makes `npm ci` disagree with `package.json` about what is being
 // built. Only the first two lines of the file are touched: every dependency has

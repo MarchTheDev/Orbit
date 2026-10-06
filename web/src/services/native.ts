@@ -17,6 +17,7 @@ import type {
   FolderProgram,
   Achievement,
   GameSuggestion,
+  LauncherGame,
 } from '../types';
 import { SAMPLE_GAMES } from '../data/sampleGames';
 
@@ -508,6 +509,11 @@ export function folderPrograms(path: string, maxDepth = 3): Promise<FolderProgra
 /** The player's installed Steam games, for the import dialog. */
 export function steamLibrary(): Promise<SteamGame[]> {
   return call('steam_library', {}, async () => []);
+}
+
+/** Installed games from other launchers, read only when the import page is opened. */
+export function launcherGames(): Promise<LauncherGame[]> {
+  return call('launcher_games', {}, async () => []);
 }
 
 /** Completion-time estimates from HowLongToBeat. */

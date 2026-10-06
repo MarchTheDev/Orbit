@@ -358,15 +358,14 @@ export function GameLogView({
       )}
 
       {/* The game's own notes, underneath the entries: what the player wants to
-          remember about playing it, as opposed to what happened when. Written in
-          one box with the markdown applied as it is typed, so there is no mode
-          to be in: the styling is simply there. */}
+          remember about playing it, as opposed to what happened when. Write in
+          ordinary Markdown, then switch to Preview to see how it will read. */}
       {onNotes && (
         <div className="mt-5 border-t border-line pt-4">
           <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
             <span className="text-[11px] uppercase tracking-widest text-muted">Notes on {gameTitle}</span>
             <span className="text-[11px] text-muted/70">
-              markdown, applied as you type: **bold**, - list, # heading, `code`, - [ ] todo
+              Markdown source, with a rendered Preview when you need it
             </span>
           </div>
           <MarkdownEditor

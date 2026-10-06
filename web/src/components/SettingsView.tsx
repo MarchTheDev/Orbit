@@ -14,6 +14,8 @@ import {
   Palette,
   Piano,
   RefreshCw,
+  Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Volume2,
@@ -104,18 +106,18 @@ function Section({
   return (
     <section
       id={id}
-      className="scroll-mt-6 rounded-2xl border border-line bg-panel2/30 p-5 transition-shadow"
+      className="scroll-mt-28 rounded-3xl border border-line/90 bg-gradient-to-br from-panel/95 via-panel/85 to-panel2/65 p-5 shadow-[0_18px_42px_-30px_rgba(0,0,0,0.9)] transition-shadow sm:p-6"
     >
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/25 bg-accent/10 text-accent">
-          <Icon className="size-4" strokeWidth={1.9} />
+      <div className="flex items-start gap-3.5">
+        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-gradient-to-br from-accent/20 to-accent2/10 text-accent shadow-inner">
+          <Icon className="size-[18px]" strokeWidth={1.9} />
         </span>
-        <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold leading-9">{title}</h2>
-          {lead && <p className="text-xs leading-relaxed text-muted">{lead}</p>}
+        <div className="min-w-0 pt-0.5">
+          <h2 className="text-base font-semibold leading-6 text-fg">{title}</h2>
+          {lead && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">{lead}</p>}
         </div>
       </div>
-      <div className="mt-4 space-y-3">{children}</div>
+      <div className="mt-5 space-y-4">{children}</div>
     </section>
   );
 }
@@ -123,7 +125,7 @@ function Section({
 /** A heading inside a card, with a hairline running out to the edge. */
 function SubHead({ children }: { children: ReactNode }) {
   return (
-    <h3 className="flex items-center gap-3 pt-1 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-muted">
+    <h3 className="flex items-center gap-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">
       {children}
       <span className="h-px flex-1 bg-line" aria-hidden />
     </h3>
@@ -132,7 +134,7 @@ function SubHead({ children }: { children: ReactNode }) {
 
 /** A box inside a card, for the settings that belong closer together. */
 function Group({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('space-y-3 rounded-xl border border-line bg-bg/30 p-4', className)}>{children}</div>;
+  return <div className={cn('space-y-3 rounded-2xl border border-line/75 bg-bg/45 p-4 shadow-inner', className)}>{children}</div>;
 }
 
 /**
@@ -186,6 +188,7 @@ const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
   { id: 'orbit-playing', label: 'Playing' },
+  { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
   { id: 'orbit-sound', label: 'Sound' },
@@ -194,10 +197,38 @@ const SECTIONS = [
   { id: 'orbit-about', label: 'About' },
 ];
 
+const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
+  { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
+  { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
+  { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
+  { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
+  { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
+  { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
+  { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
+  { label: 'Library folders and drives', section: 'orbit-library', keywords: 'where installed paths storage folders drives move' },
+  { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
+  { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
+  { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
+  { label: 'Steam library scan', section: 'orbit-libraries', keywords: 'steam import installed games scan' },
+  { label: 'Steam startup check', section: 'orbit-libraries', keywords: 'steam import automatic launch startup new games' },
+  { label: 'Epic, Ubisoft, GOG and EA installs', section: 'orbit-libraries', keywords: 'epic ubisoft gog ea launcher import read only' },
+  { label: 'Other game launchers', section: 'orbit-libraries', keywords: 'epic ubisoft gog ea launcher import' },
+  { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
+  { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
+  { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
+  { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
+  { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
+  { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
+  { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
+  { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
+  { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
+];
+
 export function SettingsView({
   settings,
   setSettings,
   onImportSteam,
+  onImportLaunchers,
   onClearLibrary,
   onReset,
   update,
@@ -208,6 +239,8 @@ export function SettingsView({
   setSettings: (patch: Partial<Settings>) => void;
   /** Opens the Steam import dialog. */
   onImportSteam: () => void;
+  /** Opens the read-only scan for other installed launchers. */
+  onImportLaunchers: () => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -223,6 +256,7 @@ export function SettingsView({
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [installStep, setInstallStep] = useState<InstallStep | null>(null);
   const [updateNote, setUpdateNote] = useState('');
+  const [settingsQuery, setSettingsQuery] = useState('');
 
   const lookForUpdate = async () => {
     setChecking(true);
@@ -272,20 +306,74 @@ export function SettingsView({
   const jump = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('settings-spot');
     window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
   };
 
+  const searchResults = settingsQuery.trim()
+    ? SETTINGS_SEARCH_ITEMS.filter((item) => `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()))
+    : [];
+
   return (
-    <div className="mx-auto max-w-3xl space-y-5 p-8">
-      <header className="space-y-1 px-1">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted">Everything here saves as you change it. Nothing needs a Save button.</p>
+    <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
+      <header className="relative overflow-hidden rounded-3xl border border-accent/25 bg-gradient-to-br from-accent/15 via-panel/90 to-panel2/65 p-5 shadow-xl sm:p-6">
+        <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
+        <div className="relative flex items-start gap-4">
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
+            <SlidersHorizontal className="size-5" strokeWidth={1.8} />
+          </span>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">Your Orbit</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">Settings</h1>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
+              Make Orbit feel right for you. Changes save as you make them—there is no Save button to hunt for.
+            </p>
+          </div>
+        </div>
       </header>
 
-      {/* The page is long, so it says what is on it before it starts. */}
-      <nav className="flex flex-wrap gap-1.5 px-1">
+      <div className="relative z-20">
+        <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+        <input
+          value={settingsQuery}
+          onChange={(event) => setSettingsQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setSettingsQuery('');
+            if (event.key === 'Enter' && searchResults[0]) {
+              jump(searchResults[0].section);
+              setSettingsQuery('');
+            }
+          }}
+          placeholder="Search settings, e.g. sound, Steam, folders…"
+          aria-label="Search settings"
+          className="w-full rounded-2xl border border-line bg-bg/80 py-3 pl-11 pr-4 text-sm text-fg shadow-inner outline-none transition placeholder:text-muted focus:border-accent"
+        />
+        {settingsQuery.trim() && (
+          <div className="absolute inset-x-0 top-full mt-2 max-h-64 overflow-y-auto rounded-2xl border border-line bg-panel p-1.5 shadow-2xl">
+            {searchResults.length === 0 ? (
+              <p className="px-3 py-3 text-sm text-muted">No matching settings. Try a shorter search.</p>
+            ) : (
+              searchResults.map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    jump(item.section);
+                    setSettingsQuery('');
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-panel2"
+                >
+                  <span className="font-medium text-fg">{item.label}</span>
+                  <span className="shrink-0 text-xs text-muted">{SECTIONS.find((section) => section.id === item.section)?.label}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* A quick map stays nearby while the longer cards scroll past. */}
+      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap gap-1.5 rounded-2xl border border-line/80 bg-bg/90 p-2 shadow-lg backdrop-blur-xl">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -301,7 +389,7 @@ export function SettingsView({
         id="orbit-appearance"
         icon={Palette}
         title="Appearance"
-        lead="The colours Orbit is drawn in, and how the covers behave."
+        lead="Choose a theme, tune the library's look, and decide what happens when Orbit opens."
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
@@ -329,7 +417,7 @@ export function SettingsView({
           checked={settings.coverTint !== false}
           onChange={(v) => setSettings({ coverTint: v })}
           label="Tint a cover's hover with its own colours"
-          hint="On: the glow behind a tile is taken from its artwork, so each game looks like itself. Off: the theme's colours are used, so every tile matches the app."
+          hint="On uses each cover's colours for its hover glow. Off uses your theme colours for a more uniform library."
         />
 
         <SubHead>When the app opens</SubHead>
@@ -337,7 +425,7 @@ export function SettingsView({
           checked={settings.startupAnimation !== false}
           onChange={(v) => setSettings({ startupAnimation: v })}
           label="Play the opening when Orbit starts"
-          hint="The mark, a ring and the name, about a second and a half, which is the time the library takes to arrive anyway. Off: the app is simply there."
+          hint="Show Orbit's short animated opening. Turn this off to go straight to the library."
         />
       </Section>
 
@@ -345,14 +433,14 @@ export function SettingsView({
         id="orbit-library"
         icon={LibraryIcon}
         title="Library and Backlog"
-        lead="What Orbit does with a game the moment it is added, and where it keeps your folders."
+        lead="Choose where new games appear and which folders Orbit keeps track of."
       >
         <SubHead>Adding games</SubHead>
         <Checkbox
           checked={settings.syncBacklog === true}
           onChange={(v) => setSettings({ syncBacklog: v })}
           label="Also add new games to the Backlog"
-          hint="A game added with nothing to point at waits on the Backlog as well, so one list covers what you own and what you mean to play. Off: it stays in the library."
+          hint="Also put title-only games on the Backlog. Off keeps them in the Library only."
         />
 
         <SubHead>Jump back in</SubHead>
@@ -360,7 +448,7 @@ export function SettingsView({
           checked={settings.showHero !== false}
           onChange={(v) => setSettings({ showHero: v })}
           label="Show the Jump back in panel"
-          hint="The panel at the top of the library, with the game you played last. It has a small cross of its own; this is the switch that brings it back."
+          hint="Keep the recently played game and its Play button at the top of the Library."
         />
 
         <SubHead>Hidden games</SubHead>
@@ -430,7 +518,7 @@ export function SettingsView({
         id="orbit-playing"
         icon={Monitor}
         title="Playing"
-        lead="What Orbit does with its own window around a session, and how it treats the Steam library on this PC."
+        lead="Choose what Orbit does with its window when a game starts or closes."
       >
         <SubHead>Orbit's window around a game</SubHead>
         <p className="text-xs leading-relaxed text-muted">
@@ -478,23 +566,39 @@ export function SettingsView({
           ]}
         />
 
-        <SubHead>Steam library</SubHead>
-        <p className="text-xs leading-relaxed text-muted">
-          Importing lives in Add game, where games are added from. These two are the other side of it: keeping up with
-          what is installed, and taking Steam games back out.
-        </p>
+      </Section>
+
+      <Section
+        id="orbit-libraries"
+        icon={LibraryIcon}
+        title="Libraries"
+        lead="Orbit only reads local launcher records when you ask it to. It never signs in, changes launcher settings, or adds games automatically from these scans."
+      >
+        <SubHead>Steam</SubHead>
         <Checkbox
           checked={settings.steamOnLaunch}
           onChange={(v) => setSettings({ steamOnLaunch: v })}
           label="Check Steam for new games when Orbit starts"
-          hint="Adds anything installed on Steam that is not in the library yet. It never removes or changes a game, and a game you removed by hand comes back the next time you launch. Off by default."
+          hint="When enabled, Orbit reads the installed Steam manifests at startup and adds games missing from your library. It never changes files in Steam."
         />
         <button
           onClick={onImportSteam}
-          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent"
+          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm transition hover:border-accent"
         >
           <Download className="size-4" />
           Scan the Steam library…
+        </button>
+
+        <SubHead>Other launchers</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          Scan Epic Games, Ubisoft Connect, GOG Galaxy and EA app install records on this device. Nothing is imported until you select it.
+        </p>
+        <button
+          onClick={onImportLaunchers}
+          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm transition hover:border-accent"
+        >
+          <Download className="size-4" />
+          Scan other launchers…
         </button>
       </Section>
 
@@ -502,19 +606,19 @@ export function SettingsView({
         id="orbit-details"
         icon={Sparkles}
         title="Artwork and details"
-        lead="Where the description, the genres, the release year and the cover come from: the Steam store, which asks for no key and nothing to set up."
+        lead="Orbit can use Steam's public catalogue for artwork and details. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
       >
         <Checkbox
           checked={settings.fetchMetadata}
           onChange={(v) => setSettings({ fetchMetadata: v })}
           label="Look games up when they are added"
-          hint="Fills in a summary, genres, cover art and HowLongToBeat times. Off: games are added offline and stay as they were typed."
+          hint="Fetch a summary, genres, cover art and playtime estimates as you add a game."
         />
         <Checkbox
           checked={settings.autoFetchMetadata}
           onChange={(v) => setSettings({ autoFetchMetadata: v })}
           label="Fill in the gaps in the background"
-          hint="Games already in the library, or ones added while offline, are looked up quietly, a few at a time."
+          hint="Fill in missing details for older games in the background, a few at a time."
         />
       </Section>
 
@@ -529,7 +633,7 @@ export function SettingsView({
         id="orbit-sound"
         icon={Piano}
         title="Sound"
-        lead="A slow melody Orbit makes itself, so nothing is downloaded and nothing is licensed."
+        lead="A composed, gentle background phrase—made locally, with no audio downloads."
       >
         <Group>
           <Checkbox
@@ -538,7 +642,7 @@ export function SettingsView({
               setSettings({ sound: { enabled: v, volume: settings.sound?.volume ?? 0.35, unfocused: settings.sound?.unfocused === true } })
             }
             label="Play something quiet in the background"
-            hint="Soft notes from a pentatonic scale, so no interval ever lands wrong, one at a time and slowly."
+            hint="A slow, repeating major-pentatonic melody over one steady soft chord. No random notes or chord changes."
           />
 
           <label className={cn('block space-y-1', settings.sound?.enabled !== true && 'opacity-50')}>

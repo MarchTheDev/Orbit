@@ -16,8 +16,8 @@ const __dirname = path.dirname(__filename);
  * the bundles are named, and what the GitHub release is called all come from
  * one line in one place.
  *
- * A build that is only handed this folder, as the Nix package is, has no
- * repository above it to read from, so it passes the number in instead.
+ * A build of this folder on its own has no repository above it to read from,
+ * so the number is passed in by the build job instead.
  */
 const VERSION =
   process.env.ORBIT_VERSION?.trim() ||

@@ -1,15 +1,7 @@
-/**
- * What a note looks like once it is drawn.
- *
- * The reading is React elements rather than HTML, so this renders a note to
- * markup the same way the app does and checks what came out. It is the only way
- * to see a rendered note without a browser, and it is what caught the heading
- * that never grew and the link whose address was dropped.
- */
+/** Check the rendered Markdown reader, including heading sizes and list text. */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Markdown } from '../src/components/ui/Markdown.tsx';
-import { markdownToHtml } from '../src/utils/markdownDom.ts';
+import { Markdown } from '../src/components/ui/MarkdownPreview.tsx';
 
 let failures = 0;
 
@@ -39,32 +31,27 @@ const note = [
   '---',
   '',
   'Press `F5` to reload.',
+  '',
+  '***bold and italic***, __underline__, ~~strike~~, ||spoiler||.',
+  '',
+  '```js',
+  'const answer = 42;',
+  '```',
 ].join('\n');
 
 const html = renderToStaticMarkup(createElement(Markdown, { text: note }));
 
-console.log('the reading');
-check('a heading, and a big one', html.includes('text-xl'), html.slice(0, 120));
-check('bold', html.includes('<strong'));
-check('italic', html.includes('<em>'));
-check('an unordered list', html.includes('<ul'));
-check('a numbered list', html.includes('<ol'));
-check('a quote', html.includes('<blockquote'));
-check('a rule', html.includes('<hr'));
-check('inline code', html.includes('<code'));
-check('a link, with its address kept', html.includes('title="https://example.com"'), html.match(/<button[^>]*the wiki/)?.[0] ?? 'no link');
-check('a ticked box', html.includes('\u2713'));
-check('plain body text is not bolded', !/text-sm leading-relaxed text-fg">\s*<p>\s*<strong/.test(html));
-
-console.log('\nthe box the note is typed in');
-const box = markdownToHtml(note);
-check('a heading line', box.includes('data-md="h1"'), box.slice(0, 120));
-check('a bullet line', box.includes('data-md="ul"'));
-check('a ticked line', box.includes('data-md="task-done"'));
-check('an unticked line', box.includes('data-md="task"'));
-check('a numbered line', box.includes('data-n="1"'));
-check('a quote line', box.includes('data-md="quote"'));
-check('a rule line', box.includes('data-md="rule"'));
-check('a blank line, so paragraphs stay apart', box.includes('<div><br></div>'));
+console.log('the rendered note');
+check('a semantic, large heading', html.includes('<h1') && html.includes('text-2xl'), html.slice(0, 160));
+check('bold and italic text', html.includes('<strong') && html.includes('<em'));
+check('unordered and numbered lists', html.includes('<ul') && html.includes('<ol'));
+check('plain bullet text is visible', html.includes('a plain bullet'), html);
+check('task text and its checked mark are visible', html.includes('found the key') && html.includes('✓'), html);
+check('a quote and a rule', html.includes('<blockquote') && html.includes('<hr'));
+check('inline code', html.includes('<code') && html.includes('F5'));
+check('combined emphasis, underline and strikethrough render semantically', html.includes('<strong') && html.includes('<u>underline</u>') && html.includes('<del>strike</del>'));
+check('spoilers are initially concealed behind an accessible control', html.includes('aria-label="Reveal spoiler"') && html.includes('>Spoiler</button>'));
+check('fenced code renders in a preformatted block', html.includes('<pre') && html.includes('const answer = 42;') && html.includes('>js</p>'));
+check('a link keeps its address', html.includes('title="https://example.com"'), html.match(/<button[^>]*the wiki/)?.[0] ?? 'no link');
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

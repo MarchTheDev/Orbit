@@ -180,6 +180,16 @@ export interface SteamGame {
   library: string;
 }
 
+/** A locally discovered install from a launcher other than Steam. */
+export interface LauncherGame {
+  launcher: string;
+  name: string;
+  installDir: string;
+  /** A path recorded by Epic, if it still exists; imports do not auto-launch it. */
+  exePath: string | null;
+  sizeBytes: number;
+}
+
 /** One play session, as stored. */
 export interface Session {
   id: number;

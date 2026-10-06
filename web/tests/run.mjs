@@ -16,8 +16,11 @@ const dir = path.join('.test-build');
 mkdirSync(dir, { recursive: true });
 const checks = [
   'tests/markdown.test.mjs',
-  'tests/typing.test.mjs',
+  'tests/markdownInput.test.mjs',
   'tests/reader.test.mjs',
+  'tests/editor.test.mjs',
+  'tests/gameTitle.test.mjs',
+  'tests/steam.test.mjs',
   'tests/updates.test.mjs',
 ];
 
@@ -31,7 +34,7 @@ try {
       platform: 'node',
       outfile: out,
       // Left to Node, so the bundle finds the copies installed here.
-      external: ['jsdom', 'react', 'react-dom', 'react-dom/server'],
+      external: ['jsdom', 'react', 'react-dom', 'react-dom/server', 'lucide-react'],
       jsx: 'automatic',
       logLevel: 'silent',
     });

@@ -1,28 +1,26 @@
 /**
- * The markdown Orbit understands, read once and used twice.
+ * Discord-like Markdown for Orbit's game notes and journal entries.
  *
- * The reader draws a note as it is stored, and the editor draws the same note
- * while somebody is typing it, so both are fed from this: one parser, and no
- * chance of the two disagreeing about what `- [x] done` means.
- *
- * It is deliberately small. This is not a markdown engine: it is the subset
- * somebody writes in a note about a game, and every rule here exists because a
- * line of a game log turns up that way. Nothing is interpreted as markup beyond
- * this list, and nothing here can execute: the reader turns these nodes into
- * React elements rather than into HTML.
+ * It intentionally renders a small safe subset as React nodes rather than
+ * turning Markdown into HTML. The editor and reader share this parser so the
+ * Preview always agrees with what is saved.
  */
 
 export type Inline =
   | { kind: 'text'; text: string }
   | { kind: 'br' }
   | { kind: 'strong'; text: string }
+  | { kind: 'strongEm'; text: string }
   | { kind: 'em'; text: string }
+  | { kind: 'underline'; text: string }
+  | { kind: 'strike'; text: string }
+  | { kind: 'spoiler'; text: string }
   | { kind: 'code'; text: string }
   | { kind: 'link'; text: string; href: string };
 
 export interface ListItem {
   inlines: Inline[];
-  /** A `- [ ]` line, which is drawn as a box rather than as a dot. */
+  /** A `- [ ]` line, which is drawn as a checkbox rather than a dot. */
   box?: boolean;
   done?: boolean;
   /** The number a `3.` line was written with, kept so it stays that number. */
@@ -30,37 +28,33 @@ export interface ListItem {
 }
 
 export type Block =
-  /** A blank line. Nothing is drawn for it, but it is what separates one
-   *  paragraph from the next, so it has to survive being read. */
   | { kind: 'blank' }
   | { kind: 'p'; inlines: Inline[] }
   | { kind: 'h'; level: 1 | 2 | 3; inlines: Inline[] }
   | { kind: 'ul'; items: ListItem[] }
   | { kind: 'ol'; items: ListItem[] }
   | { kind: 'quote'; inlines: Inline[] }
+  | { kind: 'code'; text: string; language: string }
   | { kind: 'rule' };
 
 const HEADING = /^(#{1,3})\s+(.*)$/;
-const BULLET = /^[-*]\s+(.*)$/;
-const NUMBERED = /^\d+[.)]\s+(.*)$/;
+const BULLET = /^[-*+]\s+(.*)$/;
+const NUMBERED = /^(\d+)[.)]\s+(.*)$/;
 const CHECK = /^\[([ xX])\]\s+(.*)$/;
-const RULE = /^(-{3,}|\*{3,}|_{3,})$/;
-const QUOTE = /^>\s?(.*)$/;
+const RULE = /^(---+|\*\*\*+|___+)$/;
+const QUOTE = /^(>{1,3})\s?(.*)$/;
 
-/** The pieces of a line that carry meaning, markers and all. */
+/** Markdown markers that are common in Discord messages, ordered longest first. */
 const TOKEN =
-  /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+  /(\*\*\*[^*]+\*\*\*|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|\|\|[^|]+\|\||\*[^*\n]+\*|_[^_\n]+_|`[^`]+`|\[[^\]]+\]\([^)\s]+\)|<https?:\/\/[^>\s]+>|https?:\/\/[^\s<>]+)/gi;
 
-/**
- * The lines of a note, grouped into the blocks they make.
- *
- * A blank line starts a new paragraph, a run of `-` lines is one list rather
- * than five lists of one, and everything else keeps the shape it was typed in.
- */
+/** The lines of a note, grouped into the blocks they make. */
 export function parseBlocks(text: string): Block[] {
   const out: Block[] = [];
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   let paragraph: string[] = [];
+  let fenced: { language: string; lines: string[] } | null = null;
+  let quoteAll = false;
 
   const flush = () => {
     if (paragraph.length === 0) return;
@@ -68,40 +62,73 @@ export function parseBlocks(text: string): Block[] {
     paragraph = [];
   };
 
+  const appendQuoteLine = (line: string) => {
+    const last = out[out.length - 1];
+    if (last?.kind === 'quote') last.inlines.push({ kind: 'br' }, ...parseInline(line));
+    else out.push({ kind: 'quote', inlines: parseInline(line) });
+  };
+
   for (const raw of lines) {
     const trimmed = raw.trim();
+
+    if (fenced) {
+      if (/^```\s*$/.test(trimmed)) {
+        out.push({ kind: 'code', text: fenced.lines.join('\n'), language: fenced.language });
+        fenced = null;
+      } else {
+        fenced.lines.push(raw);
+      }
+      continue;
+    }
+
+    if (/^```/.test(trimmed)) {
+      flush();
+      fenced = { language: trimmed.slice(3).trim().split(/\s+/)[0] ?? '', lines: [] };
+      quoteAll = false;
+      continue;
+    }
+
     if (trimmed === '') {
       flush();
+      quoteAll = false;
       out.push({ kind: 'blank' });
       continue;
     }
-    if (RULE.test(trimmed)) {
+
+    // Discord's `>>>` form quotes every following line up to the next blank.
+    if (quoteAll && !QUOTE.test(trimmed)) {
       flush();
-      out.push({ kind: 'rule' });
+      appendQuoteLine(raw.trimEnd());
       continue;
     }
+
     const heading = HEADING.exec(trimmed);
     if (heading) {
       flush();
-      out.push({
-        kind: 'h',
-        level: heading[1].length as 1 | 2 | 3,
-        inlines: parseInline(heading[2]),
-      });
+      quoteAll = false;
+      out.push({ kind: 'h', level: heading[1].length as 1 | 2 | 3, inlines: parseInline(heading[2]) });
       continue;
     }
+
+    if (RULE.test(trimmed)) {
+      flush();
+      quoteAll = false;
+      out.push({ kind: 'rule' });
+      continue;
+    }
+
     const quote = QUOTE.exec(trimmed);
     if (quote) {
       flush();
-      const last = out[out.length - 1];
-      // Consecutive quote lines are one quote, not five of them.
-      if (last?.kind === 'quote') last.inlines.push({ kind: 'br' }, ...parseInline(quote[1]));
-      else out.push({ kind: 'quote', inlines: parseInline(quote[1]) });
+      appendQuoteLine(quote[2]);
+      quoteAll = quoteAll || quote[1].length === 3;
       continue;
     }
+
     const bullet = BULLET.exec(trimmed);
     if (bullet) {
       flush();
+      quoteAll = false;
       const item: ListItem = { inlines: parseInline(bullet[1]) };
       const box = CHECK.exec(collapse(item.inlines));
       if (box) {
@@ -114,45 +141,93 @@ export function parseBlocks(text: string): Block[] {
       else out.push({ kind: 'ul', items: [item] });
       continue;
     }
+
     const numbered = NUMBERED.exec(trimmed);
     if (numbered) {
       flush();
+      quoteAll = false;
+      const item: ListItem = { inlines: parseInline(numbered[2]), number: Number.parseInt(numbered[1], 10) };
       const last = out[out.length - 1];
-      const item: ListItem = {
-        inlines: parseInline(numbered[1]),
-        number: Number.parseInt(trimmed, 10) || undefined,
-      };
       if (last?.kind === 'ol') last.items.push(item);
       else out.push({ kind: 'ol', items: [item] });
       continue;
     }
-    paragraph.push(trimmed);
+
+    quoteAll = false;
+    paragraph.push(raw.trimEnd());
   }
+
   flush();
+  if (fenced) out.push({ kind: 'code', text: fenced.lines.join('\n'), language: fenced.language });
   return out;
 }
 
 /** The text of a run of inlines, markers dropped: used to look for a check box. */
 function collapse(inlines: Inline[]): string {
-  return inlines.map((i) => (i.kind === 'br' ? '\n' : i.text)).join('');
+  return inlines.map((inline) => (inline.kind === 'br' ? '\n' : inline.text)).join('');
 }
 
-/** One line's worth of inlines. */
+/** One line's worth of Discord-style inline formatting. */
 export function parseInline(text: string): Inline[] {
-  return text
-    .split(TOKEN)
-    .filter((piece) => piece !== '')
-    .map((piece) => {
-      const bold = /^(\*\*|__)(.+)(\*\*|__)$/.exec(piece);
-      if (bold) return { kind: 'strong', text: bold[2] } as Inline;
-      const italic = /^(\*|_)(.+)(\*|_)$/.exec(piece);
-      if (italic) return { kind: 'em', text: italic[2] } as Inline;
-      const code = /^`(.+)`$/.exec(piece);
-      if (code) return { kind: 'code', text: code[1] } as Inline;
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(piece);
-      if (link) return { kind: 'link', text: link[1], href: link[2] } as Inline;
-      return { kind: 'text', text: piece } as Inline;
-    });
+  const out: Inline[] = [];
+  for (const piece of text.split(TOKEN).filter((part) => part !== '')) {
+    const both = /^\*\*\*(.+)\*\*\*$/.exec(piece);
+    if (both) {
+      out.push({ kind: 'strongEm', text: both[1] });
+      continue;
+    }
+    const bold = /^\*\*(.+)\*\*$/.exec(piece);
+    if (bold) {
+      out.push({ kind: 'strong', text: bold[1] });
+      continue;
+    }
+    const underline = /^__(.+)__$/.exec(piece);
+    if (underline) {
+      out.push({ kind: 'underline', text: underline[1] });
+      continue;
+    }
+    const strike = /^~~(.+)~~$/.exec(piece);
+    if (strike) {
+      out.push({ kind: 'strike', text: strike[1] });
+      continue;
+    }
+    const spoiler = /^\|\|(.+)\|\|$/.exec(piece);
+    if (spoiler) {
+      out.push({ kind: 'spoiler', text: spoiler[1] });
+      continue;
+    }
+    const italic = /^(\*|_)(.+)\1$/.exec(piece);
+    if (italic) {
+      out.push({ kind: 'em', text: italic[2] });
+      continue;
+    }
+    const code = /^`(.+)`$/.exec(piece);
+    if (code) {
+      out.push({ kind: 'code', text: code[1] });
+      continue;
+    }
+    const link = /^\[([^\]]+)\]\(((?:https?:\/\/|steam:\/\/)[^)\s]+)\)$/i.exec(piece);
+    if (link) {
+      out.push({ kind: 'link', text: link[1], href: link[2] });
+      continue;
+    }
+    const autolink = /^<(https?:\/\/[^>\s]+)>$/i.exec(piece);
+    if (autolink) {
+      out.push({ kind: 'link', text: autolink[1], href: autolink[1] });
+      continue;
+    }
+    const url = /^(https?:\/\/[^\s<>]+)$/i.exec(piece);
+    if (url) {
+      // Sentence punctuation belongs after the link, not in its address.
+      const href = url[1].replace(/[.,!?;:]+$/, '');
+      const trailing = url[1].slice(href.length);
+      if (href) out.push({ kind: 'link', text: href, href });
+      if (trailing) out.push({ kind: 'text', text: trailing });
+      continue;
+    }
+    out.push({ kind: 'text', text: piece });
+  }
+  return out;
 }
 
 /** Lines of one paragraph, with the line breaks the player typed kept. */

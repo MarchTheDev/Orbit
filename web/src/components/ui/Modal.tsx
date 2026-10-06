@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
@@ -48,7 +48,7 @@ export function Modal({
 }) {
   const [id] = useState(() => nextDialogId++);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     openDialogs.push(id);
     return () => {
       const at = openDialogs.lastIndexOf(id);
@@ -57,11 +57,19 @@ export function Modal({
   }, [id]);
 
   // Escape closes the dialog on top, and only that one.
+  const closeIfTopmost = () => {
+    // Nested dialogs are separate portals. Only the one visually on top owns a
+    // close gesture; this also protects the dialog underneath if a click or key
+    // event happens during the short interval before React removes the top one.
+    if (openDialogs[openDialogs.length - 1] === id) onClose();
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (openDialogs[openDialogs.length - 1] !== id) return;
-      event.stopPropagation();
+      event.preventDefault();
+      event.stopImmediatePropagation();
       onClose();
     };
     window.addEventListener('keydown', onKey);
@@ -78,14 +86,20 @@ export function Modal({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 z-50 flex items-center justify-center p-4',
+        'modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center p-4',
         bare ? 'bg-bg/85' : 'bg-black/60 backdrop-blur-sm',
       )}
-      onClick={onClose}
+      onClick={(event) => {
+        // Ignore clicks that bubble out of a dialog and only close the top
+        // layer when the backdrop itself was pressed.
+        if (event.target !== event.currentTarget) return;
+        event.stopPropagation();
+        closeIfTopmost();
+      }}
     >
       <div
         className={cn(
-          'flex w-full flex-col overflow-hidden border border-line bg-panel shadow-2xl',
+          'modal-panel-enter flex w-full flex-col overflow-hidden border border-line bg-panel shadow-2xl',
           bare ? 'max-h-[92vh] max-w-6xl rounded-3xl' : `max-h-[88vh] ${SIZES[size]} rounded-2xl`,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -99,7 +113,7 @@ export function Modal({
             {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
           </div>
           <button
-            onClick={onClose}
+            onClick={closeIfTopmost}
             aria-label="Close"
             className="rounded-lg p-1 text-muted hover:bg-panel2 hover:text-fg"
           >

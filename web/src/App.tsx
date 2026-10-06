@@ -18,7 +18,7 @@ import {
 import type { Game, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
-import { clearLibrary, isNative, setPlaytime, steamLibrary } from './services/native';
+import { clearLibrary, isNative, setPlaytime, steamLibrary, windowReady } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { revealInExplorer } from './services/native';
@@ -26,6 +26,7 @@ import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav } from './components/TopNav';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
+import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Hero } from './components/Hero';
 import { ContinueRow } from './components/ContinueRow';
 import { Toolbar, type Filter } from './components/Toolbar';
@@ -38,6 +39,7 @@ import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
 import { LogsView } from './components/LogsView';
 import { SteamImportModal, gameFromSteam } from './components/SteamImportModal';
+import { OtherLauncherImportModal } from './components/OtherLauncherImportModal';
 import { AddGameModal } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
@@ -76,11 +78,19 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
+  const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   /** Whether the opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
+  /** A settings section to reveal after navigation, with a token for repeated jumps. */
+  const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
+  const settingsJumpToken = useRef(0);
+  const windowRevealScheduled = useRef(false);
+  const windowRevealDone = useRef(false);
   const [showImport, setShowImport] = useState(false);
   const [showSteam, setShowSteam] = useState(false);
+  const [showOtherLaunchers, setShowOtherLaunchers] = useState(false);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
   /** Where the right-click menu is, and which game it is about. */
@@ -107,6 +117,26 @@ export default function App() {
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+
+  // Tauri keeps the window hidden until the app has loaded its saved theme and
+  // painted the opening screen. Showing it on the first React frame exposed the
+  // unthemed shell for a moment before the animation covered it.
+  useEffect(() => {
+    if (!settings || windowRevealDone.current || windowRevealScheduled.current) return;
+    windowRevealScheduled.current = true;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        windowRevealDone.current = true;
+        void windowReady();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+      if (!windowRevealDone.current) windowRevealScheduled.current = false;
+    };
+  }, [settings]);
 
   // Toasts come from a one-line channel rather than a callback threaded through
   // every layer, so a button several components down can still say "saved".
@@ -467,6 +497,9 @@ export default function App() {
     setShowAdd(false);
     setShowImport(false);
     setShowSteam(false);
+    setShowOtherLaunchers(false);
+    setRemoveConfirmId(null);
+    setRemoveSteamConfirm(false);
     setMoveId(null);
   }, [page]);
 
@@ -532,17 +565,15 @@ export default function App() {
           label: 'Remove from library',
           icon: Trash2,
           danger: true,
-          onSelect: () => {
-            if (!confirm(`Remove ${menuGame.title} from library? Its sessions go too.`)) return;
-            removeGame(menuGame.id);
-            setSelectedId((current) => (current === menuGame.id ? null : current));
-          },
+          onSelect: () => setRemoveConfirmId(menuGame.id),
         },
       ]
     : [];
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const moving = games.find((g) => g.id === moveId) ?? null;
+  const removalTarget = games.find((g) => g.id === removeConfirmId) ?? null;
+  const steamRemovalIds = games.filter((g) => g.launch.kind === 'steam').map((g) => g.id);
   // The drawer draws its own live clock, so it gets the stored numbers rather
   // than these, and nothing is counted twice.
   const runningGame = played.find((g) => g.id === session?.gameId) ?? null;
@@ -574,10 +605,17 @@ export default function App() {
     setSelectedId(g.id);
     asked.current.add(g.id);
     if (!fetchMeta || !settings) return;
+    const reviewedByPlayer = !!g.meta?.edited;
     const [meta, hltb] = await Promise.all([
-      fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null),
+      reviewedByPlayer ? Promise.resolve(null) : fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null),
       fetchHltb(g.title).catch(() => null),
     ]);
+    if (reviewedByPlayer) {
+      // Keep the details the player just reviewed, while still letting the
+      // independent playtime lookup fill in the new game's completion estimate.
+      if (hltb) updateGame(g.id, { hltb }, 'player');
+      return;
+    }
     const patch: Partial<Game> = {};
     if (meta) patch.meta = meta;
     if (hltb) patch.hltb = hltb;
@@ -611,23 +649,36 @@ export default function App() {
   // filter. Only a search takes it away, because then the player is looking for
   // one particular game.
   /**
-   * Open Settings, at one of its cards when the caller knows which one.
+   * Scroll to a requested Settings card after the new page has committed.
    *
-   * Settings is long, so every door into it that is about one thing brings that
-   * thing to the top and marks it for a moment, rather than leaving somebody to
-   * scroll a page looking for the switch they pressed a button about.
+   * Two animation frames are more reliable than a fixed timeout: the first
+   * renders Settings, the next lets layout settle before the scroll position is
+   * calculated. The card's scroll margin leaves room below the sticky top bar
+   * and the quick-jump row.
    */
+  useEffect(() => {
+    if (page !== 'settings' || !settingsJump) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const card = document.getElementById(settingsJump.id);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add('settings-spot');
+          window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
+        }
+        setSettingsJump(null);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [page, settingsJump]);
+
   const openSettings = useCallback((at?: string) => {
+    setSettingsJump(at ? { id: at, token: ++settingsJumpToken.current } : null);
     setPage('settings');
-    if (!at) return;
-    // After the page has been drawn, so there is something to scroll to.
-    window.setTimeout(() => {
-      const card = document.getElementById(at);
-      if (!card) return;
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      card.classList.add('settings-spot');
-      window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
-    }, 80);
   }, []);
 
   const showHome = page === 'library' && !query;
@@ -680,13 +731,14 @@ export default function App() {
         </div>
       )}
 
-      <main className="pb-24">
+      <main key={page} className="orbit-tab-enter pb-24">
         {!settings ? null : page === 'settings' ? (
           <div className="glass mx-6 mt-5 rounded-3xl">
             <SettingsView
               settings={settings}
               setSettings={setSettings}
               onImportSteam={() => setShowSteam(true)}
+              onImportLaunchers={() => setShowOtherLaunchers(true)}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}
@@ -762,6 +814,8 @@ export default function App() {
               sort={sort}
               setSort={setSort}
               onAdd={() => setShowAdd(true)}
+              showHero={settings.showHero !== false}
+              onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
               scale={scale}
               setScale={(n) => setSettings({ coverScale: n })}
             />
@@ -887,6 +941,35 @@ export default function App() {
         ))}
       </div>
 
+      {removalTarget && (
+        <ConfirmDialog
+          title={`Remove ${removalTarget.title}?`}
+          description="This removes the game's Orbit entry, notes and session history. The installed game and its files on disk are not touched."
+          confirmLabel="Remove from Orbit"
+          onCancel={() => setRemoveConfirmId(null)}
+          onConfirm={() => {
+            removeGame(removalTarget.id);
+            setSelectedId((current) => (current === removalTarget.id ? null : current));
+            setRemoveConfirmId(null);
+          }}
+        />
+      )}
+
+      {removeSteamConfirm && steamRemovalIds.length > 0 && (
+        <ConfirmDialog
+          title={`Remove ${steamRemovalIds.length} Steam ${steamRemovalIds.length === 1 ? 'game' : 'games'}?`}
+          description="This removes the selected Steam entries from Orbit, including their session history and notes. The games installed by Steam and all launcher data remain untouched."
+          confirmLabel="Remove from Orbit"
+          onCancel={() => setRemoveSteamConfirm(false)}
+          onConfirm={() => {
+            for (const id of steamRemovalIds) removeGame(id);
+            if (selectedId && steamRemovalIds.includes(selectedId)) setSelectedId(null);
+            toast({ text: `Removed ${steamRemovalIds.length} ${steamRemovalIds.length === 1 ? 'game' : 'games'} that came from Steam` });
+            setRemoveSteamConfirm(false);
+          }}
+        />
+      )}
+
       {selected && (
         <GameDetail
           key={`${selected.id}:${detailNonce}`}
@@ -904,12 +987,7 @@ export default function App() {
           }}
           onPlay={() => void startGame(selected)}
           onStop={() => void stop()}
-          onRemove={() => {
-            if (confirm(`Remove ${selected.title} from library? Its sessions go too.`)) {
-              removeGame(selected.id);
-              setSelectedId(null);
-            }
-          }}
+          onRemove={() => setRemoveConfirmId(selected.id)}
           onClose={() => setSelectedId(null)}
         />
       )}
@@ -937,6 +1015,13 @@ export default function App() {
           onClose={() => setShowImport(false)}
         />
       )}
+      {showOtherLaunchers && (
+        <OtherLauncherImportModal
+          existing={games}
+          onAdd={addGames}
+          onClose={() => setShowOtherLaunchers(false)}
+        />
+      )}
       {showSteam && settings && (
         <SteamImportModal
           existing={games}
@@ -944,24 +1029,7 @@ export default function App() {
           from={page === 'backlog' ? 'backlog' : 'library'}
           onAdd={addGames}
           onUpdate={(id, patch) => updateGame(id, patch)}
-          onRemoveSteam={() => {
-            // Only the games that came in from Steam, which are the ones that
-            // start through it. `meta.steamAppId` is not a marker for that: it
-            // is set by any lookup the store answered, so a game added by title
-            // had been counted as a Steam import and offered up for removal.
-            const ids = games.filter((g) => g.launch.kind === 'steam').map((g) => g.id);
-            if (ids.length === 0) return;
-            if (
-              !confirm(
-                `Remove ${ids.length} Steam ${ids.length === 1 ? 'game' : 'games'} from Orbit? Their sessions and notes go too. Nothing on disk is touched.`,
-              )
-            ) {
-              return;
-            }
-            for (const id of ids) removeGame(id);
-            if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-            toast({ text: `Removed ${ids.length} ${ids.length === 1 ? 'game' : 'games'} that came from Steam` });
-          }}
+          onRemoveSteam={() => setRemoveSteamConfirm(true)}
           onClose={() => setShowSteam(false)}
         />
       )}

@@ -1,4 +1,4 @@
-import { ArrowDownUp, LayoutGrid, List, Plus, Rows3 } from 'lucide-react';
+import { ArrowDownUp, Eye, EyeOff, LayoutGrid, List, Plus, Rows3 } from 'lucide-react';
 import type { Game, SortKey, ViewMode } from '../types';
 import { cn } from '../utils/cn';
 import { SearchField } from './ui/SearchField';
@@ -19,6 +19,8 @@ interface Props {
   sort: SortKey;
   setSort: (s: SortKey) => void;
   onAdd: () => void;
+  showHero: boolean;
+  onToggleHero: () => void;
   /** How big the covers are drawn, as a percentage of the base size. */
   scale: number;
   setScale: (n: number) => void;
@@ -49,6 +51,8 @@ export function Toolbar({
   sort,
   setSort,
   onAdd,
+  showHero,
+  onToggleHero,
   scale,
   setScale,
 }: Props) {
@@ -61,6 +65,16 @@ export function Toolbar({
         </h2>
 
         <SearchField value={query} onChange={setQuery} />
+
+        <button
+          onClick={onToggleHero}
+          aria-pressed={showHero}
+          title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
+          className="flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-2 text-xs font-medium text-muted transition hover:border-accent/60 hover:text-fg"
+        >
+          {showHero ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          <span className="hidden xl:inline">{showHero ? 'Hide' : 'Show'} Jump back in</span>
+        </button>
 
         <Select
           value={sort}

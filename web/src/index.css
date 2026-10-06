@@ -50,6 +50,37 @@ body::before {
 .fade-in { animation: fade .25s ease; }
 @keyframes fade { from { opacity: 0; } }
 
+/* Shared entrance motions: restrained enough to keep navigation quick, with a
+ * reduced-motion fallback for players who prefer an immediate interface. */
+.modal-backdrop-enter { animation: modal-backdrop-enter 0.18s ease-out both; }
+.modal-panel-enter { animation: modal-panel-enter 0.24s cubic-bezier(.2,.8,.2,1) both; }
+.orbit-tab-enter { animation: orbit-tab-enter 0.32s cubic-bezier(.2,.8,.2,1) both; }
+.orbit-hero-enter { animation: orbit-hero-enter 0.42s cubic-bezier(.2,.8,.2,1) both; }
+
+@keyframes modal-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-panel-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes orbit-tab-enter {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes orbit-hero-enter {
+  from { opacity: 0; transform: translateY(12px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop-enter,
+  .modal-panel-enter,
+  .orbit-tab-enter,
+  .orbit-hero-enter { animation: none !important; }
+}
+
 /* The Orbit mark: the two orbits turn against each other, carrying the bodies
    that sit on them. Each orbit group is already centred on the drawing by a
    `translate` in the markup, so the origin here is that group's own 0 0, which
@@ -77,13 +108,6 @@ body::before {
   .fade-in { animation: none !important; }
 }
 
-/* The note editor: one pane, and the markdown turns into itself as it is typed.
- *
- * The whole reason this is a `contenteditable` rather than a textarea is here:
- * the styles below are drawn *in* the text that holds the caret, so `**bold**`
- * is really bold with the asterisks gone and the caret still lands where the
- * letters are.
- */
 /* A card that was jumped to from somewhere else says so for a moment, so a
  * press on "All sound settings" lands somewhere that is clearly the place. */
 .settings-spot {
@@ -102,102 +126,11 @@ body::before {
   }
 }
 
-.md-editor:focus {
-  outline: none;
-}
-
-/* Nothing written yet: say what the box is for, without it being text. */
-.md-editor[data-empty='true']::before {
-  content: attr(data-placeholder);
-  color: var(--c-muted);
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.md-editor strong {
-  font-weight: 700;
-  color: var(--c-text);
-}
-.md-editor em {
-  font-style: italic;
-}
-.md-editor code {
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--c-accent) 18%, transparent);
-  padding: 0 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.92em;
-  color: var(--c-text);
-}
-.md-editor a {
-  color: var(--c-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* A heading has to look like a heading the moment the space after `#` is typed,
- * which is the whole point of doing this as it is written. The line height stays
- * where it is, so the text under it does not jump around as the level changes. */
-.md-editor [data-md='h1'] {
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  line-height: 28px;
-}
-.md-editor [data-md='h2'] {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 26px;
-}
-.md-editor [data-md='h3'] {
-  font-size: 15.5px;
-  font-weight: 700;
-  line-height: 24px;
-}
-
-.md-editor [data-md='ul']::before,
-.md-editor [data-md='ol']::before {
-  color: var(--c-muted);
-}
-.md-editor [data-md='ul']::before {
-  content: '\2022\00a0\00a0';
-}
-.md-editor [data-md='ol']::before {
-  content: attr(data-n) '.\00a0\00a0';
-}
-.md-editor [data-md='task']::before,
-.md-editor [data-md='task-done']::before {
-  color: var(--c-accent);
-}
-.md-editor [data-md='task']::before {
-  content: '\2610\00a0\00a0';
-}
-.md-editor [data-md='task-done']::before {
-  content: '\2611\00a0\00a0';
-}
-.md-editor [data-md='task-done'] {
-  color: var(--c-muted);
-  text-decoration: line-through;
-}
-.md-editor [data-md='quote'] {
-  border-left: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
-  padding-left: 10px;
-  font-style: italic;
-  color: var(--c-muted);
-}
-/* A horizontal rule drawn where the line is, with the line itself invisible. */
-.md-editor [data-md='rule'] {
-  position: relative;
-  color: transparent;
-}
-.md-editor [data-md='rule']::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  border-top: 1px solid color-mix(in srgb, var(--c-text) 25%, transparent);
+/* The note editor uses an ordinary textarea for writing and a separate, safe
+ * Markdown rendering for preview. Native text editing keeps caret movement,
+ * spaces, selections, undo and keyboard navigation predictable. */
+.md-preview {
+  overflow-wrap: anywhere;
 }
 
 /* ------------------------------------------------------------ the calendar */
@@ -306,7 +239,9 @@ input[type='datetime-local'] {
  * it does can affect where anything else is drawn.
  */
 .orbit-startup {
-  animation: fade 0.25s ease both;
+  /* Opaque on its very first paint: a fading overlay let the unfinished shell
+     flash through before the opening animation began. */
+  background-color: var(--c-bg);
 }
 
 .orbit-startup-out {

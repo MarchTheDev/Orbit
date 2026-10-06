@@ -5,6 +5,7 @@ import { exeInfo, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
+import { gameFolderFromExecutable, gameTitleFromExecutable, gameTitleFromPath } from '../../utils/gameTitle';
 import type { FolderProgram } from '../../types';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
 import { CheckboxInline } from '../ui/Checkbox';
@@ -21,6 +22,39 @@ interface Draft {
   favorite: boolean;
   notes: string;
   coverPath: string | null;
+}
+
+/** The catalogue details Orbit found, editable before the game is saved. */
+interface DetailsDraft {
+  developer: string;
+  releaseYear: string;
+  rating: string;
+  genres: string;
+  summary: string;
+  coverUrl: string;
+  backgroundUrl: string;
+}
+
+const EMPTY_DETAILS: DetailsDraft = {
+  developer: '',
+  releaseYear: '',
+  rating: '',
+  genres: '',
+  summary: '',
+  coverUrl: '',
+  backgroundUrl: '',
+};
+
+function detailsFromMeta(meta: MetaData | null): DetailsDraft {
+  return {
+    developer: meta?.developer ?? '',
+    releaseYear: meta?.releaseYear ? String(meta.releaseYear) : '',
+    rating: meta?.rating !== null && meta?.rating !== undefined ? String(meta.rating) : '',
+    genres: (meta?.genres ?? []).join(', '),
+    summary: meta?.summary ?? '',
+    coverUrl: meta?.coverUrl ?? '',
+    backgroundUrl: meta?.backgroundUrl ?? '',
+  };
 }
 
 /**
@@ -66,6 +100,9 @@ export function AddGameModal({
   const [matches, setMatches] = useState<GameSuggestion[]>([]);
   const [match, setMatch] = useState<GameSuggestion | null>(null);
   const [meta, setMeta] = useState<MetaData | null>(null);
+  const [details, setDetails] = useState<DetailsDraft>(EMPTY_DETAILS);
+  const [detailsEdited, setDetailsEdited] = useState(false);
+  const [coverUrlEdited, setCoverUrlEdited] = useState(false);
   const [fetchMeta, setFetchMeta] = useState(true);
   const [dropped, setDropped] = useState<string[]>([]);
   const [programs, setPrograms] = useState<FolderProgram[]>([]);
@@ -73,65 +110,115 @@ export function AddGameModal({
   /** The draft as it stands right now, for a handler that finishes later. */
   const draft = useRef(d);
   draft.current = d;
+  /** Manual titles take precedence over a guess made from a program path. */
+  const titleWasEdited = useRef(false);
+  /** Ignore a slower lookup if the title or executable has since changed. */
+  const lookupSequence = useRef(0);
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setD((current) => ({ ...current, [key]: value }));
   }, []);
 
+  const editDetails = useCallback(<K extends keyof DetailsDraft,>(key: K, value: DetailsDraft[K]) => {
+    setDetails((current) => ({ ...current, [key]: value }));
+    setDetailsEdited(true);
+    if (key === 'coverUrl') setCoverUrlEdited(true);
+  }, []);
+
+  const editTitle = (value: string) => {
+    titleWasEdited.current = true;
+    lookupSequence.current += 1;
+    setLooking(false);
+    // Preserve the suggested catalogue details while the player corrects the
+    // display title. They can explicitly search again if they mean another game.
+    set('title', value);
+  };
+
   /**
-   * Ask the store what this title is.
+   * Ask the catalogue what this title is, then let the player review its answer.
    *
-   * The first answer is taken as the game, and the others are kept so a wrong
-   * guess is one click to fix rather than something to type around. It runs on
-   * its own after a drop, which is the moment the title is a file name and
-   * nothing else.
+   * The best match is suggested, not treated as certain: alternatives stay
+   * visible, and the title and details can all be corrected before saving.
    */
   const lookUp = useCallback(async (title: string): Promise<void> => {
     const wanted = title.trim();
     if (wanted.length < 2) return;
+    const request = ++lookupSequence.current;
     setLooking(true);
     setLooked(true);
+    setMatches([]);
+    setMatch(null);
+    setMeta(null);
+    setDetails(EMPTY_DETAILS);
+    setDetailsEdited(false);
+    setCoverUrlEdited(false);
     try {
       const found = await searchGames(wanted);
+      if (request !== lookupSequence.current) return;
       setMatches(found);
       const best = found[0] ?? null;
       setMatch(best);
-      if (best) setD((current) => ({ ...current, title: best.name }));
-      setMeta(best ? await fetchMetadata(best.name, best.appId).catch(() => null) : null);
+      if (best && !titleWasEdited.current) setD((current) => ({ ...current, title: best.name }));
+      if (!best && !titleWasEdited.current) {
+        setD((current) => ({ ...current, title: current.title || wanted }));
+      }
+      const nextMeta = best ? await fetchMetadata(best.name, best.appId).catch(() => null) : null;
+      if (request !== lookupSequence.current) return;
+      setMeta(nextMeta);
+      setDetails(detailsFromMeta(nextMeta));
     } catch {
+      if (request !== lookupSequence.current) return;
       setMatches([]);
       setMatch(null);
       setMeta(null);
+      setDetails(EMPTY_DETAILS);
+      setDetailsEdited(false);
+      setCoverUrlEdited(false);
+      if (!titleWasEdited.current) setD((current) => ({ ...current, title: current.title || wanted }));
     } finally {
-      setLooking(false);
+      if (request === lookupSequence.current) setLooking(false);
     }
   }, []);
 
-  /** One of the store's answers, taken as the game. */
+  /** Take one of the catalogue's answers as the game. */
   const takeMatch = useCallback(async (choice: GameSuggestion) => {
+    const request = ++lookupSequence.current;
+    titleWasEdited.current = false;
     setMatch(choice);
     setD((current) => ({ ...current, title: choice.name }));
     setLooking(true);
+    setMeta(null);
+    setDetails(EMPTY_DETAILS);
+    setDetailsEdited(false);
+    setCoverUrlEdited(false);
     try {
-      setMeta(await fetchMetadata(choice.name, choice.appId).catch(() => null));
+      const nextMeta = await fetchMetadata(choice.name, choice.appId).catch(() => null);
+      if (request !== lookupSequence.current) return;
+      setMeta(nextMeta);
+      setDetails(detailsFromMeta(nextMeta));
     } finally {
-      setLooking(false);
+      if (request === lookupSequence.current) setLooking(false);
     }
   }, []);
 
   /**
-   * A program tells us where it lives, how big it is, and a guess at the title.
-   *
-   * The guess is the file's own name, which is exactly what a store lookup is
-   * for: `Hades.exe` in a folder called `Hades v1.382-win` is Hades. It returns
-   * the title to look up, so the caller can ask the store about it.
+   * Read a program's path, but use its game folder—not its .exe filename—as the
+   * title guess. A previous store match is discarded when a different program
+   * is chosen, so its cover or app id cannot leak into the next game.
    */
-  const takeExe = useCallback(async (exe: string, guessTitle?: string): Promise<string> => {
+  const takeExe = useCallback(async (exe: string): Promise<string> => {
     const info = await describeExe(exe);
-    // A title already typed, or one picked from a store match, wins over the
-    // file name.
-    const wanted = draft.current.title.trim() || guessTitle || info.title || '';
-    setD((current) => ({ ...current, ...info, title: current.title || wanted }));
+    const manuallyNamed = titleWasEdited.current && draft.current.title.trim();
+    const wanted = manuallyNamed ? draft.current.title.trim() : gameTitleFromExecutable(exe) || info.title || '';
+    lookupSequence.current += 1;
+    setLooking(false);
+    setMatch(null);
+    setMatches([]);
+    setMeta(null);
+    setDetails(EMPTY_DETAILS);
+    setDetailsEdited(false);
+    setCoverUrlEdited(false);
+    setD((current) => ({ ...current, sizeGb: 0, ...info, title: manuallyNamed ? current.title : wanted }));
     return wanted;
   }, []);
 
@@ -149,8 +236,8 @@ export function AddGameModal({
       const exe = paths.find((p) => /\.(exe|bat|cmd)$/i.test(p));
       if (exe) {
         setPrograms([]);
-        // Asked about straight away, because the title is a file name and the
-        // store is what turns it into the game's name.
+        // Start from the containing game folder. A launcher or packaged build
+        // often gives the executable a name that is not the game's title.
         void lookUp(await takeExe(exe));
         return true;
       }
@@ -161,8 +248,8 @@ export function AddGameModal({
       if (!best) {
         // A folder with nothing to run is still worth adding as a timer: the
         // folder says where it lives and the store says what it is.
-        setD((current) => ({ ...current, installDir: folder, drive: driveOf(folder) }));
-        void lookUp(baseName(folder));
+        setD((current) => ({ ...current, exePath: '', sizeGb: 0, installDir: folder, drive: driveOf(folder) }));
+        void lookUp(gameTitleFromPath(folder));
         return true;
       }
       setPrograms(found.slice(0, 8));
@@ -188,7 +275,9 @@ export function AddGameModal({
   const title = d.title.trim();
   // The picture the tile would wear: the store's portrait cover, then one the
   // store's search showed, then a file on disk, then the initials placeholder.
-  const storeCover = meta?.coverUrl ?? (match ? portraitOf(match.appId) : null);
+  const storeCover = coverUrlEdited
+    ? details.coverUrl.trim() || null
+    : details.coverUrl.trim() || meta?.coverUrl || match?.coverUrl || (match ? portraitOf(match.appId) : null);
 
   const browseExe = async () => {
     const picked = await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
@@ -205,7 +294,12 @@ export function AddGameModal({
     if (!title) return;
     setBusy(true);
     try {
-      onAdd(buildGame(d, meta, match?.appId ?? null), fetchMeta);
+      const appId = match?.appId ?? null;
+      const reviewedCover = coverUrlEdited
+        ? details.coverUrl.trim()
+        : details.coverUrl.trim() || meta?.coverUrl || match?.coverUrl || (match ? portraitOf(match.appId) : '');
+      const reviewedMeta = metadataForReview(meta, { ...details, coverUrl: reviewedCover }, title, appId, detailsEdited);
+      onAdd(buildGame(d, reviewedMeta, appId), fetchMeta);
       // The dialog has done its job, so it closes rather than leaving the
       // player looking at a form for the game they just added.
       onClose();
@@ -217,7 +311,7 @@ export function AddGameModal({
   return (
     <Modal
       title="Add a game"
-      subtitle="Drop a program on the window, or browse for it. Orbit looks the title up before it is added."
+      subtitle="Add a local game by title or program. A catalogue lookup can fill in details to review before saving."
       size="lg"
       onClose={onClose}
       footer={
@@ -259,50 +353,55 @@ export function AddGameModal({
         {/* What Orbit made of the drop, before anything is saved. The title is
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
-          <section className="flex items-start gap-3 rounded-2xl border border-line bg-panel2/40 p-3">
-            <div className="grid h-20 w-[3.75rem] shrink-0 place-items-center overflow-hidden rounded-lg bg-panel">
-              {d.coverPath ? (
-                <img src={fileSrc(d.coverPath)} alt="" className="size-full object-cover" />
-              ) : storeCover ? (
-                <img src={storeCover} alt="" className="size-full object-cover" />
-              ) : (
-                <span
-                  className="grid size-full place-items-center text-sm font-black text-white/90"
-                  style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
-                  }}
-                >
-                  {initials(title || 'Orbit')}
+          <section className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+            <div className="flex items-start gap-3">
+              <div className="grid h-24 w-[4.5rem] shrink-0 place-items-center overflow-hidden rounded-xl border border-line bg-panel shadow-lg">
+                {d.coverPath ? (
+                  <img src={fileSrc(d.coverPath)} alt="" className="size-full object-cover" />
+                ) : storeCover ? (
+                  <img src={storeCover} alt="" className="size-full object-cover" />
+                ) : (
+                  <span
+                    className="grid size-full place-items-center text-sm font-black text-white/90"
+                    style={{
+                      background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    }}
+                  >
+                    {initials(title || 'Orbit')}
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1 space-y-1">
+                <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+                  {looking ? 'Checking the catalogue' : match ? 'Suggested match' : 'Review details'}
+                  {looking && <LoaderCircle className="size-3 animate-spin" />}
                 </span>
-              )}
+                <p className="truncate text-base font-semibold text-fg">{title || 'Untitled game'}</p>
+                <p className="text-xs leading-relaxed text-muted">
+                  {details.developer || details.releaseYear || details.genres
+                    ? [details.developer, details.releaseYear, details.genres].filter(Boolean).join(' · ')
+                    : match
+                      ? 'The catalogue found a title. Check the details below before adding it.'
+                      : 'No exact catalogue match yet. You can still fill these details in yourself.'}
+                </p>
+              </div>
             </div>
 
-            <div className="min-w-0 flex-1 space-y-1">
-              <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-muted">
-                {match ? 'Found in the store' : 'Nothing found'}
-                {looking && <LoaderCircle className="size-3 animate-spin" />}
-              </span>
-              <p className="truncate text-sm font-medium">{match?.name ?? title ?? ''}</p>
-              <p className="text-xs text-muted">
-                {meta
-                  ? [meta.developer, meta.releaseYear, meta.genres.slice(0, 2).join(', ')].filter(Boolean).join(' · ') ||
-                    'No details on its store page'
-                  : match
-                    ? 'Looking the details up…'
-                    : 'Orbit could not match this title, so the name is yours to write.'}
-              </p>
-              {matches.length > 1 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {matches.slice(0, 4).map((m) => (
+            {matches.length > 1 && (
+              <div className="space-y-1.5 border-t border-line/70 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Choose the right match</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {matches.slice(0, 5).map((m) => (
                     <button
                       key={m.appId}
                       type="button"
                       onClick={() => void takeMatch(m)}
                       title={m.name}
-                      className={`flex max-w-[11rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 text-[11px] ${
+                      className={`flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition ${
                         m.appId === match?.appId
-                          ? 'border-accent/60 text-accent'
-                          : 'border-line text-muted hover:border-accent/50 hover:text-fg'
+                          ? 'border-accent/60 bg-accent/10 text-accent'
+                          : 'border-line bg-panel/60 text-muted hover:border-accent/50 hover:text-fg'
                       }`}
                     >
                       {m.coverUrl && <img src={m.coverUrl} alt="" className="h-4 w-6 shrink-0 rounded-sm object-cover" />}
@@ -310,7 +409,77 @@ export function AddGameModal({
                     </button>
                   ))}
                 </div>
-              )}
+              </div>
+            )}
+
+            <div className="grid gap-3 border-t border-line/70 pt-3 sm:grid-cols-2">
+              <label className="block">
+                <span className={labelCls}>Developer / author</span>
+                <input
+                  className={inputCls}
+                  value={details.developer}
+                  onChange={(e) => editDetails('developer', e.target.value)}
+                  placeholder="Studio or creator"
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Release year</span>
+                <input
+                  className={inputCls}
+                  value={details.releaseYear}
+                  onChange={(e) => editDetails('releaseYear', e.target.value)}
+                  placeholder="2024"
+                  inputMode="numeric"
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Score out of 100</span>
+                <input
+                  className={inputCls}
+                  value={details.rating}
+                  onChange={(e) => editDetails('rating', e.target.value)}
+                  placeholder="Optional"
+                  inputMode="decimal"
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Genres</span>
+                <input
+                  className={inputCls}
+                  value={details.genres}
+                  onChange={(e) => editDetails('genres', e.target.value)}
+                  placeholder="Action, RPG"
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className={labelCls}>Description</span>
+                <textarea
+                  className={`${inputCls} min-h-20 resize-y`}
+                  value={details.summary}
+                  onChange={(e) => editDetails('summary', e.target.value)}
+                  placeholder="A short description, if you want one."
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className={labelCls}>Store cover image URL</span>
+                <input
+                  className={inputCls}
+                  value={details.coverUrl}
+                  onChange={(e) => editDetails('coverUrl', e.target.value)}
+                  placeholder="Paste a cover URL or choose a local image below"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className={labelCls}>Background image URL (optional)</span>
+                <input
+                  className={inputCls}
+                  value={details.backgroundUrl}
+                  onChange={(e) => editDetails('backgroundUrl', e.target.value)}
+                  placeholder="Wide art for the game's detail page"
+                  spellCheck={false}
+                />
+              </label>
             </div>
           </section>
         )}
@@ -321,7 +490,7 @@ export function AddGameModal({
             <input
               className={inputCls}
               value={d.title}
-              onChange={(e) => set('title', e.target.value)}
+              onChange={(e) => editTitle(e.target.value)}
               placeholder="Hollow Knight"
             />
           </label>
@@ -330,10 +499,10 @@ export function AddGameModal({
             className={`${btnBrowse} mt-5 flex items-center gap-2`}
             onClick={() => void lookUp(d.title)}
             disabled={looking || d.title.trim().length < 2}
-            title="Ask the store what this title is"
+            title={match ? 'Search for a different match in the catalogue' : 'Search the catalogue for this title'}
           >
             {looking ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
-            {match ? 'Not this one' : 'Look up'}
+            {match ? 'Find another match' : 'Search catalogue'}
           </button>
         </div>
 
@@ -483,21 +652,26 @@ export function AddGameModal({
 
         <button type="submit" className="hidden" />
 
-        {/* The second door, under everything that is typed by hand: a game that
-            is already installed on Steam is brought over rather than typed in. */}
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
-          <p className="text-xs text-muted">
-            Already installed on Steam? Bring games over from the Steam library rather than typing them in.
-          </p>
-          <button
-            type="button"
-            onClick={onImportSteam}
-            className="flex shrink-0 items-center gap-2 rounded-lg border border-line bg-panel px-3 py-1.5 text-xs hover:border-accent hover:text-accent"
-          >
-            <Download className="size-3.5" />
-            From Steam…
-          </button>
-        </div>
+        {/* Steam is deliberately the last way into the form: the manual review
+            stays together, with the library import offered as a separate route. */}
+        <section className="border-t border-line pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent/20 bg-gradient-to-r from-accent/10 via-panel2/50 to-panel2/30 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-fg">Already installed through Steam?</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                Import it from Steam instead of filling in these details by hand.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onImportSteam}
+              className="flex shrink-0 items-center gap-2 rounded-lg border border-accent/35 bg-panel px-3 py-2 text-xs font-semibold text-accent transition hover:border-accent hover:bg-accent/10"
+            >
+              <Download className="size-3.5" />
+              Import from Steam
+            </button>
+          </div>
+        </section>
       </form>
     </Modal>
   );
@@ -532,9 +706,9 @@ export function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-/** A file name is a guess at a title, so the extension comes off it. */
+/** A file or folder name is a title guess; ignore versions and build directories. */
 function titleFromPath(path: string): string {
-  return baseName(path).replace(/\.[a-z0-9]{1,4}$/i, '');
+  return gameTitleFromPath(path);
 }
 
 function driveOf(folder: string): string {
@@ -553,16 +727,18 @@ export function portraitOf(appId: number): string {
  * spreading this over a draft never throws away something the player filled in.
  */
 async function describeExe(exe: string): Promise<Partial<Draft>> {
-  const folder = exe.replace(/[\\/][^\\/]*$/, '');
+  const executableFolder = exe.replace(/[\\/][^\\/]*$/, '');
+  const installDir = gameFolderFromExecutable(exe) || executableFolder;
   const out: Partial<Draft> = {
-    title: baseName(folder),
+    title: gameTitleFromExecutable(exe) || baseName(executableFolder),
     exePath: exe,
-    installDir: folder,
-    drive: driveOf(folder),
+    installDir,
+    drive: driveOf(installDir),
   };
   try {
     const info = await exeInfo(exe);
-    if (info.title) out.title = info.title;
+    // The executable may be called Launcher or Shipping; keep the folder-based
+    // title guess instead of replacing it with that internal program name.
     if (info.sizeBytes > 0) out.sizeGb = Math.round((info.sizeBytes / 1e9) * 10) / 10;
     if (info.coverPath) out.coverPath = info.coverPath;
     if (info.drive) out.drive = info.drive;
@@ -570,6 +746,43 @@ async function describeExe(exe: string): Promise<Partial<Draft>> {
     // A path that cannot be measured is still worth adding.
   }
   return out;
+}
+
+/**
+ * Save exactly what the review form shows, including any corrections the player
+ * made to the catalogue's name, author, cover or other details.
+ */
+function metadataForReview(
+  meta: MetaData | null,
+  details: DetailsDraft,
+  title: string,
+  appId: number | null,
+  edited: boolean,
+): MetaData | null {
+  const hasManualDetails = Object.values(details).some((value) => value.trim() !== '');
+  if (!meta && appId === null && !hasManualDetails) return null;
+
+  const year = Number(details.releaseYear.trim());
+  const rating = Number(details.rating.trim());
+  const genres = details.genres
+    .split(',')
+    .map((genre) => genre.trim())
+    .filter(Boolean);
+
+  return {
+    summary: details.summary.trim(),
+    genres,
+    developer: details.developer.trim(),
+    releaseYear: Number.isFinite(year) && year > 0 ? Math.trunc(year) : null,
+    rating: details.rating.trim() !== '' && Number.isFinite(rating) ? rating : null,
+    coverUrl: details.coverUrl.trim() || null,
+    backgroundUrl: details.backgroundUrl.trim() || null,
+    headerUrl: meta?.headerUrl ?? null,
+    name: meta?.name ?? title,
+    steamAppId: meta?.steamAppId ?? appId,
+    source: meta?.source,
+    ...(meta?.edited || edited ? { edited: true } : {}),
+  };
 }
 
 /**
@@ -597,7 +810,7 @@ export function buildGame(d: Draft, meta: MetaData | null, appId: number | null)
     launch,
     exePath: d.exePath || null,
     installDir: d.installDir || null,
-    drive: d.drive || d.installDir.slice(0, 2) || '',
+    drive: d.drive || driveOf(d.installDir),
     sizeBytes: Math.round(d.sizeGb * 1e9),
     sizeGb: d.sizeGb,
     status: d.status,
