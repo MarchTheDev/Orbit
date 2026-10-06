@@ -67,6 +67,15 @@ on:
 permissions:
   contents: write
 
+# One build at a time per branch. Pushing three times in a row used to start
+# three builds of the same version, and the release step then had three of them
+# trying to draft the same tag at once, which the API answers with a refusal
+# that reads like a permissions problem. The newest push is the one that
+# matters, so the older ones are dropped.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ----------------------------------------------------------------- the number
   version:
@@ -477,14 +486,34 @@ jobs:
       # is what creates the tag, puts the release on the releases page, and lets
       # the app's own update check see it. Overwriting means running this twice
       # replaces the files instead of failing on them.
-      - uses: softprops/action-gh-release@v2
+      # Drafted with the API rather than an action, so that a draft which is
+      # already there is added to instead of fought over, and so that a refusal
+      # says what it was refused for.
+      - name: Draft the release
         if: steps.published.outputs.state != 'false'
-        with:
-          tag_name: v${{ env.ORBIT_VERSION }}
-          name: Orbit v${{ env.ORBIT_VERSION }}
-          target_commitish: ${{ github.sha }}
-          draft: true
-          overwrite_files: true
-          files: files/*/*
-          body_path: notes.md
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${ORBIT_VERSION#v}"
+          tag="v$version"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                 --jq ".[] | select(.tag_name==\"$tag\") | .id" | head -1)
+          if [ -z "$id" ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f "tag_name=$tag" -f "name=Orbit $version" \
+              -F draft=true -f "body=$(cat notes.md)" --jq .id > /dev/null
+            echo "Drafted $tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Added to the draft of $tag that was already there." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Every file that was built, replaced rather than added beside, so
+          # running this twice does not leave two of everything.
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(find files -type f)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Nothing was built this run, so the draft was left as it is." >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            echo "Uploaded ${#files[@]} files." >> "$GITHUB_STEP_SUMMARY"
+          fi
