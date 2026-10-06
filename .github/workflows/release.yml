@@ -450,16 +450,19 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            # The compiler's own account of what is wrong, not a summary of it.
-            message=$(tail -300 /tmp/nix-build.log)
             {
               echo "### nix build failed"
               echo '```'
-              printf '%s\n' "$message"
+              tail -60 /tmp/nix-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            # The summary is for a person; this is for anything reading the
-            # run back through the API.
+            # The summary is for a person; the annotation is for anything
+            # reading the run back through the API, which is the only part of a
+            # log GitHub hands over that way and has a size limit of its own. A
+            # compiler prints a lot of "Compiling ..." in between the things
+            # that went wrong, so only those are taken.
+            message=$(grep -nE "error(\[|:)|test result|panicked|failures:|Cannot build|Reason:|Last [0-9]+ log lines" \
+              /tmp/nix-build.log | tail -70)
             message=${message//'%'/'%25'}
             message=${message//$'\n'/'%0A'}
             echo "::error title=Nix build failed::${message}"
