@@ -1,11 +1,10 @@
 /**
  * The version this build is.
  *
- * Filled in at build time from the `VERSION` file at the repository root, which
- * is also what the release workflow reads, so the number the app reports and
- * the number on the GitHub release are the same number by construction rather
- * than by remembering to update two files.
+ * The number itself is written into the bundle by `vite.config.ts` from the
+ * `VERSION` file at the repository root, which is also what the release
+ * workflow reads, so what the app says it is and what the release is called
+ * come from one line in one place rather than from remembering to update two
+ * files.
  */
-declare const __ORBIT_VERSION__: string | undefined;
-
-export const APP_VERSION: string = typeof __ORBIT_VERSION__ === 'string' ? __ORBIT_VERSION__ : '0.0.0';
+export { APP_VERSION } from 'virtual:orbit-version';

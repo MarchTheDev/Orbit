@@ -128,42 +128,68 @@ web/
 ## Releases
 
 Everything Orbit ships as is built by GitHub, in
-[`.github/workflows/release.yml`](.github/workflows/release.yml).
+[`.github/workflows/release.yml`](.github/workflows/release.yml), and put on a
+**draft release** for you to look at before anybody else can see it. Nothing is
+published automatically: publishing is what creates the tag and what makes the
+app's own update check notice.
 
-Two ways to set it off.
+### Cutting a release
 
-**Push a tag.** This works from any branch, so it works today:
+1. Put the number in [`VERSION`](VERSION), for example `0.2.0`.
+2. Commit and push it. That is the trigger: any push that changes that one file
+   starts a build, on any branch, so a release can be cut before this workflow
+   has ever reached the default branch.
+3. Wait for Actions → Release to go green, then open the repository's Releases
+   page. There is a draft there with every file attached.
+4. Read the notes, check the files, and press **Publish**. That creates the
+   `v0.2.0` tag, makes the release public, and is the moment the app's update
+   check starts offering it to anybody running an older Orbit.
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The builds run, and every file is attached to a GitHub release for that tag,
-which is where a download link points.
-
-**Or press the button.** Actions → Release → Run workflow, then pick the branch.
-The files come out as artifacts of that run instead of a release. GitHub only
-shows that button for workflow files that exist on the repository's default
-branch, so if it is not there yet, use a tag, or merge this file into the
-default branch. Once the workflow has run at least once it can be started from
-a command line too:
+To build without changing the version, press Actions → Release → Run workflow
+and type a version, or leave it empty to use `VERSION`. GitHub only shows that
+button for workflow files on the repository's default branch, so right after a
+workflow change it may not be there yet; a push to `VERSION` always works. From
+a command line:
 
 ```sh
 gh workflow run release.yml --ref arena/01a10cff-orbit
 ```
 
+`packaging/version.mjs` is what keeps the number in one place: the workflow runs
+it before each build, and it writes the version into `VERSION`,
+`web/src-tauri/tauri.conf.json`, `web/package.json` and
+`web/src-tauri/Cargo.toml`, so the number inside the app, the number on the
+files in the release and the number in the release's name are the same number.
+
 | Platform | Files |
 | --- | --- |
-| Windows | `-windows-setup.exe` (the installer), `-windows-standalone.exe` (the program on its own), `-windows-portable.zip` (the program in a folder) |
+| Windows | `-windows-setup.exe` (the installer), `-windows-standalone.exe` (the program on its own), `-windows.msi`, `-windows-portable.zip` (the program in a folder) |
 | Linux | `.AppImage` (one file, any distribution), `.deb` (Debian, Ubuntu, Mint), `.rpm` (Fedora, RHEL, openSUSE), `-linux-portable.tar.gz` |
+| Debian | `_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
+| Fedora | a native `.rpm`, built in a Fedora container |
 | Arch | `.pkg.tar.zst`, installed with `pacman -U` |
 | NixOS | a tarball, or `nix build github:MarchTheDev/Orbit` |
 
-The Arch, Fedora and NixOS builds are marked as best effort in the workflow:
-they run in each distribution's own container, and a package name that has moved
-between releases shows up as a failed job rather than as a wrong package. The
-Windows and Linux files are what the release itself depends on.
+The Debian, Fedora, Arch and NixOS builds are marked as best effort in the
+workflow: they run in each distribution's own container, and a package name that
+has moved between releases shows up as a failed job rather than as a wrong
+package. The Windows and Linux files are what the release itself depends on.
+
+### Updates
+
+Orbit has no updater of its own. It cannot patch itself safely without signed
+releases, and a self-updater that cannot check a signature is worse than none.
+What it does instead, a few seconds after it opens, is ask GitHub's public
+releases API for the newest published release. One request, no account, nothing
+about your library, and a switch in Settings to turn it off.
+
+If there is something newer, a toast appears that stays until it is answered:
+**Go to settings**, **Release notes**, or **Later**. In Settings → Updates the
+install button downloads that release's own installer into a temporary folder
+and hands it to the system, which is exactly what would have happened if the file
+had been downloaded by hand. Or take the release page and pick a file yourself.
+Draft releases are invisible to the check, so nothing is offered before it is
+published.
 
 ### Building the installers yourself
 
@@ -203,6 +229,10 @@ libappindicator-gtk3 librsvg openssl nodejs npm rust`, then
 `npx tauri build --no-bundle` in `web/`, copy the binary next to
 [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) with `orbit.desktop` and
 `orbit.png`, and run `makepkg -f`.
+
+Every one of these stamps the version from [`VERSION`](VERSION) into the app,
+so bump that file first if the build needs to say something other than what is
+there.
 
 **NixOS.** `nix build` from the repository root. The first run stops with the
 hash of the front end's dependencies in the error; put that in `npmDepsHash` in
