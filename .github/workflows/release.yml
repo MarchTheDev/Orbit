@@ -1,48 +1,87 @@
 name: Release
 
-# Builds everything Orbit ships as, and attaches all of it to a GitHub release.
+# Builds everything Orbit ships as, and puts it on a draft release for review.
 #
-# How to run it: Actions -> Release -> Run workflow. On a manual run the files
-# come out as workflow artifacts to download. Push a tag like v0.1.0 and the
-# same files are also attached to a release, which is what a download link
-# needs.
+# How to start it:
+#   * Actions -> Release -> Run workflow (needs this file on the default branch)
+#   * or push a change to the VERSION file, on any branch. GitHub reads the
+#     workflow out of the commit that was pushed, so that works even before this
+#     file has reached master, which is what makes the first run possible.
+#
+# What it does: builds every platform, gathers the files, and creates a *draft*
+# release tagged v<version>. Nothing is visible to anybody until it is published
+# from the Releases page, which is also the moment the tag appears and the
+# moment the app's own update check starts seeing it.
 #
 # What comes out:
 #   Windows  Orbit-<version>-windows-setup.exe      the installer
 #            Orbit-<version>-windows-standalone.exe the program on its own
+#            Orbit-<version>-windows.msi            the same installer, msi
 #            Orbit-<version>-windows-portable.zip   the program in a folder
 #   Linux    Orbit-<version>-linux-x86_64.AppImage  one file, any distribution
 #            orbit_<version>_amd64.deb              Debian, Ubuntu, Mint
 #            orbit-<version>-1.x86_64.rpm           Fedora, RHEL, openSUSE
 #            Orbit-<version>-linux-portable.tar.gz  the binary and a .desktop
+#   Debian   orbit_<version>_debian_amd64.deb       built against Debian's libs
+#   Fedora   orbit-<version>-1.fc.x86_64.rpm        built against Fedora's libs
 #   Arch     orbit-<version>-1-x86_64.pkg.tar.zst   pacman -U
 #   NixOS    Orbit-<version>-nix-x86_64.tar.gz      nix build, or unpack and run
 
 on:
   push:
-    tags:
-      - 'v*'
+    # A push that changes the version is a release. Restricting it to that one
+    # file keeps a build of six platforms off every ordinary commit.
+    paths:
+      - 'VERSION'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to call the files (only used for naming)'
+        description: 'Version to build (leave empty to use the VERSION file)'
         required: false
-        default: '0.1.0'
+        default: ''
 
 permissions:
   contents: write
 
-env:
-  # Every job reads this: the tag if there is one, otherwise what was typed in.
-  ORBIT_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
-
 jobs:
+  # ----------------------------------------------------------------- the number
+  version:
+    name: Work out the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag push, then whatever was typed by hand, then the VERSION file: the
+      # file is the normal way in, the other two are for one-off runs.
+      - id: read
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          TYPED: ${{ inputs.version }}
+        run: |
+          raw="${TAG:-${TYPED:-$(cat VERSION)}}"
+          raw="${raw#v}"
+          if [ -z "$raw" ]; then
+            echo "No version: put one in VERSION, or type one when running this." >&2
+            exit 1
+          fi
+          echo "version=$raw" >> "$GITHUB_OUTPUT"
+          echo "Building Orbit $raw"
+
   # ---------------------------------------------------------------- Windows
   windows:
     name: Windows (setup, standalone, portable)
     runs-on: windows-latest
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set the version
+        run: node packaging/version.mjs "$env:ORBIT_VERSION"
+        shell: pwsh
 
       - uses: actions/setup-node@v4
         with:
@@ -117,8 +156,14 @@ jobs:
     # only moves forward. A newer runner would produce a binary that refuses to
     # start on Debian 12 or Ubuntu 22.04.
     runs-on: ubuntu-22.04
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
 
       - name: Install the system libraries Tauri needs
         run: |
@@ -172,13 +217,64 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
+  # ----------------------------------------------------------------- Debian
+  debian:
+    name: Debian (native deb)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    # Debian's own libraries and Debian's own dpkg, so the package is built
+    # against the system it is meant for rather than against Ubuntu's. Best
+    # effort: if a package name has moved, the Linux job's deb still works.
+    container: debian:13
+    steps:
+      - name: Install what the build needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential curl wget file git ca-certificates \
+            libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev \
+            nodejs npm rustc cargo
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build the deb
+        working-directory: web
+        run: npx tauri build --bundles deb
+
+      - name: Collect it
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_debian_amd64.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian
+          path: artifacts/*
+          if-no-files-found: error
+
   # ----------------------------------------------------------------- Fedora
   fedora:
     name: Fedora (native rpm)
     runs-on: ubuntu-latest
-    # Fedora's own libraries, and Fedora's own rpm. Best effort: if this job
-    # needs a package name that has moved, the Linux job's rpm still works.
     continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     container: fedora:latest
     steps:
       - name: Install what the build needs
@@ -196,6 +292,9 @@ jobs:
 
       # A container's files are not owned by the user git runs as.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
 
       - name: Install the front end's dependencies
         working-directory: web
@@ -222,6 +321,9 @@ jobs:
     name: Arch (pacman package)
     runs-on: ubuntu-latest
     continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     container: archlinux:latest
     steps:
       - name: Install what the build needs
@@ -235,6 +337,9 @@ jobs:
 
       # A container's files are not owned by the user git runs as.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
 
       - name: Install the front end's dependencies
         working-directory: web
@@ -276,8 +381,14 @@ jobs:
     name: NixOS (flake)
     runs-on: ubuntu-latest
     continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
 
       - uses: DeterminateSystems/nix-installer-action@main
 
@@ -320,19 +431,24 @@ jobs:
 
   # --------------------------------------------------------------- the release
   release:
-    name: Attach everything to a release
-    # Everything that produces a file, including the best-effort jobs: a
-    # platform that failed to build must not stop the others from shipping.
-    needs: [windows, linux, fedora, arch, nix]
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+    name: Draft a release
+    # Everything that produces a file, including the best-effort jobs: a platform
+    # that failed to build must not stop the others from being offered.
+    needs: [version, windows, linux, debian, fedora, arch, nix]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           path: files
 
-      - name: Write what is in each file
+      - name: List what was built
+        run: ls -R files || true
+
+      - name: Write the release notes
         run: |
           version="${ORBIT_VERSION#v}"
           cat > notes.md <<EOF
@@ -355,10 +471,18 @@ jobs:
           Orbit looks for games in your Steam library and adds them when you
           ask it to; nothing is read or launched until you do.
           EOF
-          ls -R files
 
+      # A draft on purpose: the files are there to be looked at, and publishing
+      # is what creates the tag, puts the release on the releases page, and lets
+      # the app's own update check see it. Overwriting means running this twice
+      # replaces the files instead of failing on them.
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.ORBIT_VERSION }}
+          name: Orbit v${{ env.ORBIT_VERSION }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          overwrite_files: true
           files: files/*/*
           body_path: notes.md
           fail_on_unmatched_files: false

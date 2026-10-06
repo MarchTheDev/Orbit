@@ -25,7 +25,7 @@ export function Markdown({ text, className }: { text: string; className?: string
   const blocks = parse(text);
   if (blocks.length === 0) return null;
   return (
-    <div className={cn('space-y-2 text-sm leading-relaxed', className)}>
+    <div className={cn('space-y-2 text-sm leading-relaxed text-fg', className)}>
       {blocks.map((block, i) => {
         switch (block.kind) {
           case 'p':
@@ -39,10 +39,10 @@ export function Markdown({ text, className }: { text: string; className?: string
               <p
                 key={i}
                 className={cn(
-                  'font-semibold text-fg',
-                  block.level === 1 && 'text-base',
-                  block.level === 2 && 'text-sm',
-                  block.level === 3 && 'text-[13px]',
+                  'font-bold tracking-tight text-fg',
+                  block.level === 1 && 'mt-1 text-lg',
+                  block.level === 2 && 'mt-1 text-base',
+                  block.level === 3 && 'text-[15px]',
                 )}
               >
                 <Inline text={block.text} />
@@ -188,7 +188,7 @@ function inline(line: string): ReactNode[] {
     .map((piece, i) => {
       if (/^(\*\*|__).+(\*\*|__)$/.test(piece)) {
         return (
-          <strong key={i} className="font-semibold text-fg">
+          <strong key={i} className="font-bold text-fg">
             {piece.slice(2, -2)}
           </strong>
         );
@@ -289,7 +289,7 @@ export function MarkdownEditor({
       <div
         ref={mirror}
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 overflow-hidden px-3 py-2 pr-8 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words"
+        className="pointer-events-none absolute inset-0 z-0 overflow-hidden px-3 py-2 pr-8 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words text-fg"
       >
         <Highlight text={value} />
       </div>
@@ -336,18 +336,47 @@ function shape(line: string): ReactNode {
       <>
         <Marker>{heading[1]}</Marker>
         {heading[2]}
-        <span className="font-bold text-fg">{inlineStyled(heading[3])}</span>
+        <span
+          className={cn(
+            // `leading-6` on purpose: the mirror has to keep the textarea's
+            // 24px line boxes, or the caret drifts away from the colour.
+            'font-bold leading-6 tracking-tight text-fg',
+            heading[1].length === 1 && 'text-[17px]',
+            heading[1].length === 2 && 'text-[15.5px]',
+            heading[1].length === 3 && 'text-[14px]',
+          )}
+        >
+          {inlineStyled(heading[3])}
+        </span>
       </>
     );
   }
   const bullet = /^(\s*)([-*])(\s)(.*)$/.exec(line);
   if (bullet) {
+    // `- [x] did it` reads as a ticked box while it is being typed, without
+    // touching a character: the box stays on screen, dimmed, and the line
+    // behind it is struck through, so the mirror still holds exactly what the
+    // textarea holds and the caret stays where the pointer put it.
+    const box = /^(\[([ xX])\])(\s)(.*)$/.exec(bullet[4]);
+    if (box) {
+      const done = box[1][1].toLowerCase() === 'x';
+      return (
+        <>
+          {bullet[1]}
+          <Marker>{bullet[2]}</Marker>
+          {bullet[3]}
+          <Marker>{box[1]}</Marker>
+          {box[2]}
+          <span className={done ? 'text-muted line-through' : undefined}>{inlineStyled(box[3])}</span>
+        </>
+      );
+    }
     return (
       <>
         {bullet[1]}
         <Marker>{bullet[2]}</Marker>
         {bullet[3]}
-        <span className="text-muted">{inlineStyled(bullet[4])}</span>
+        {inlineStyled(bullet[4])}
       </>
     );
   }

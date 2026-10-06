@@ -42,13 +42,14 @@ import { SettingsView } from './components/SettingsView';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { onDisk } from './utils/library';
-import { onToast } from './utils/toast';
+import { announce, onToast, type ToastMessage } from './utils/toast';
+import { APP_VERSION } from './version';
+import { checkForUpdate, type ReleaseInfo } from './services/updates';
+import { openExternal } from './services/desktop';
 
 /** A short message in the corner: what just happened, and whether it worked. */
-interface Toast {
+interface Toast extends ToastMessage {
   id: number;
-  text: string;
-  tone: 'ok' | 'error';
 }
 
 export default function App() {
@@ -96,23 +97,72 @@ export default function App() {
   const order = settings?.sortOrder ?? [];
   const scale = settings?.coverScale ?? 100;
   const [toasts, setToasts] = useState<Toast[]>([]);
+  /** The newer release, if one has been found. Settings shows and installs it. */
+  const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
 
   // Toasts come from a one-line channel rather than a callback threaded through
   // every layer, so a button several components down can still say "saved".
 
-  const toast = useCallback((text: string, tone: Toast['tone'] = 'ok') => {
+  const toast = useCallback((message: ToastMessage) => {
     const id = Date.now() + Math.random();
-    setToasts((current) => [...current, { id, text, tone }]);
-    // Long enough to read, short enough not to pile up.
-    setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 6000);
+    setToasts((current) => [...current, { ...message, id }]);
+    // Long enough to read, short enough not to pile up. A toast with buttons is
+    // asking something, so it waits for the answer.
+    if (!message.actions?.length && !message.sticky) {
+      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 6000);
+    }
   }, []);
 
   // Anything anywhere can say something: `toast` is the one that draws, and
   // `say` only passes the message along. Registering `say` here instead made it
   // call itself, which is why nothing ever appeared.
   useEffect(() => onToast(toast), [toast]);
+
+  /**
+   * Look for a newer version, once, a moment after the app opens.
+   *
+   * A few seconds late on purpose: the library, the covers and the session
+   * clock all matter more than this does, and a check that fails quietly (being
+   * offline is not news) should never be the reason the app feels slow.
+   */
+  useEffect(() => {
+    if (settings?.updateCheck === false) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void checkForUpdate().then((found) => {
+        if (!alive || !found) return;
+        setUpdate(found);
+        // A question rather than a note: it stays until it is answered, and one
+        // of the answers is "not now".
+        announce({
+          text: `Orbit ${found.version} is out. This is ${APP_VERSION}.`,
+          sticky: true,
+          actions: [
+            {
+              label: 'Go to settings',
+              onSelect: () => {
+                setPage('settings');
+                // Settings is long, so the update section is brought to the top
+                // rather than left for the player to find.
+                setTimeout(
+                  () => document.getElementById('orbit-updates')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                  60,
+                );
+              },
+            },
+            { label: 'Release notes', onSelect: () => void openExternal(found.url) },
+            { label: 'Later', onSelect: () => undefined },
+          ],
+        });
+      });
+    }, 3000);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [settings?.updateCheck]);
 
   /**
    * Games whose details have already been asked for.
@@ -207,17 +257,17 @@ export default function App() {
             if (!g) {
               setDroppedPaths(state.paths);
               setShowAdd(true);
-              toast('No program to run in that drop. Pick one below.', 'error');
+              toast({ text: 'No program to run in that drop. Pick one below.', tone: 'error' });
               return;
             }
             void handleAddRef.current?.(g, true);
-            toast(`${g.title} added · details on the way`);
+            toast({ text: `${g.title} added · details on the way` });
           })
           .catch((e: unknown) => {
             if (!alive) return;
             setDroppedPaths(state.paths);
             setShowAdd(true);
-            toast(e instanceof Error ? e.message : 'That drop could not be read.', 'error');
+            toast({ text: e instanceof Error ? e.message : 'That drop could not be read.', tone: 'error' });
           });
         return;
       }
@@ -253,7 +303,7 @@ export default function App() {
       if (fresh.length === 0) return;
       const added: Game[] = fresh.map(gameFromSteam);
       addGames(added);
-      toast(`${added.length} Steam ${added.length === 1 ? 'game' : 'games'} added`);
+      toast({ text: `${added.length} Steam ${added.length === 1 ? 'game' : 'games'} added` });
       for (const g of added) {
         const meta = await fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null);
         if (meta) updateGame(g.id, { meta, title: meta.name || g.title }, 'auto');
@@ -404,7 +454,7 @@ export default function App() {
               onSelect: () => void stop(),
             }
           : {
-              label: 'Play',
+              label: 'Start Game',
               icon: Play,
               onSelect: () => void startGame(menuGame),
             },
@@ -534,6 +584,8 @@ export default function App() {
                 void clearLibrary().then(() => location.reload());
               }}
               onReset={resetEverything}
+              update={update}
+              onFoundUpdate={setUpdate}
             />
           </div>
         ) : page === 'backlog' ? (
@@ -683,7 +735,31 @@ export default function App() {
             ) : (
               <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-400" />
             )}
-            <span className="flex-1">{t.text}</span>
+            <div className="flex-1">
+              <span>{t.text}</span>
+              {t.actions?.length ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {t.actions.map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={() => {
+                        action.onSelect();
+                        // Answering is what the buttons are for, so the toast
+                        // goes as soon as one of them is pressed.
+                        setToasts((current) => current.filter((x) => x.id !== t.id));
+                      }}
+                      className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                        t.tone === 'error'
+                          ? 'border-rose-300/40 text-rose-50 hover:bg-rose-400/20'
+                          : 'border-accent/50 text-accent hover:bg-accent/15 hover:text-fg'
+                      }`}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <button
               onClick={() => setToasts((current) => current.filter((x) => x.id !== t.id))}
               className="shrink-0 text-muted hover:text-fg"
@@ -762,7 +838,7 @@ export default function App() {
             }
             for (const id of ids) removeGame(id);
             if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-            toast(`Removed ${ids.length} ${ids.length === 1 ? 'game' : 'games'} that came from Steam`);
+            toast({ text: `Removed ${ids.length} ${ids.length === 1 ? 'game' : 'games'} that came from Steam` });
           }}
           onClose={() => setShowSteam(false)}
         />

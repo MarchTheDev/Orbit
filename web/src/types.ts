@@ -296,6 +296,14 @@ export interface Settings {
    */
   backlogOrder: string[];
   /**
+   * Whether Orbit asks GitHub for a newer release when it opens.
+   *
+   * One request to a public API, with nothing attached to it. On by default
+   * because a build that never says a new version exists is a build nobody
+   * updates, but it is a request leaving the machine, so it is a switch.
+   */
+  updateCheck?: boolean;
+  /**
    * What Orbit's own window does while a game is starting and when it closes.
    *
    * Both are deliberate choices rather than conveniences: closing on launch

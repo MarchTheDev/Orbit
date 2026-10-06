@@ -8,7 +8,28 @@
  */
 export type ToastTone = 'ok' | 'error';
 
-type Listener = (text: string, tone: ToastTone) => void;
+/** A button along the bottom of a toast. */
+export interface ToastAction {
+  label: string;
+  onSelect: () => void;
+}
+
+export interface ToastMessage {
+  text: string;
+  tone?: ToastTone;
+  /**
+   * Buttons, for a toast that is asking something rather than telling. Choosing
+   * one closes the toast, so "Later" is an action that does nothing.
+   */
+  actions?: ToastAction[];
+  /**
+   * Stay until it is dealt with. A note about something that just happened can
+   * fade on its own; a question cannot.
+   */
+  sticky?: boolean;
+}
+
+type Listener = (message: ToastMessage) => void;
 
 let listener: Listener | null = null;
 
@@ -22,5 +43,14 @@ export function onToast(fn: Listener): () => void {
 
 /** Say something, from anywhere in the app. */
 export function say(text: string, tone: ToastTone = 'ok'): void {
-  listener?.(text, tone);
+  listener?.({ text, tone });
+}
+
+/**
+ * Say something that needs an answer: a message with buttons under it and no
+ * timer, because a question that disappears while it is being read is worse
+ * than no question at all.
+ */
+export function announce(message: ToastMessage): void {
+  listener?.({ tone: 'ok', ...message });
 }

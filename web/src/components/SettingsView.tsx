@@ -27,6 +27,14 @@ import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
 import { Select } from './ui/Select';
 import { btnAccent } from './ui/buttons';
+import { APP_VERSION } from '../version';
+import {
+  RELEASES_URL,
+  checkForUpdate,
+  installUpdate,
+  type InstallStep,
+  type ReleaseInfo,
+} from '../services/updates';
 import { orderedTabs } from './TopNav';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
@@ -118,6 +126,8 @@ export function SettingsView({
   onImportSteam,
   onClearLibrary,
   onReset,
+  update,
+  onFoundUpdate,
 }: {
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
@@ -127,10 +137,44 @@ export function SettingsView({
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
+  /** The newer release the app already found when it opened, if there was one. */
+  update: ReleaseInfo | null;
+  /** Reports what a check from in here found, so the offer travels with the app. */
+  onFoundUpdate: (info: ReleaseInfo | null) => void;
 }) {
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [folder, setFolder] = useState('');
   const [where, setWhere] = useState<{ path: string; size: number } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [installStep, setInstallStep] = useState<InstallStep | null>(null);
+  const [updateNote, setUpdateNote] = useState('');
+
+  const lookForUpdate = async () => {
+    setChecking(true);
+    setUpdateNote('');
+    const found = await checkForUpdate();
+    onFoundUpdate(found);
+    setCheckedAt(Date.now());
+    setChecking(false);
+    if (!found) setUpdateNote(`Orbit is up to date. This is ${APP_VERSION}.`);
+  };
+
+  const install = async () => {
+    if (!update) return;
+    setUpdateNote('');
+    try {
+      const note = await installUpdate(update, setInstallStep);
+      setUpdateNote(
+        note ??
+          'The installer has opened. Orbit can stay open; if it asks you to close Orbit, say yes and start it again afterwards.',
+      );
+    } catch (e) {
+      setUpdateNote(`That did not work: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setInstallStep(null);
+    }
+  };
 
   useEffect(() => {
     if (!isNative()) return;
@@ -412,6 +456,67 @@ export function SettingsView({
             <Trash2 className="size-4" />
             Delete games only
           </button>
+        </div>
+      </section>
+
+      {/* Updates, at the bottom of the page but reachable straight from the
+          toast that says one is waiting: the id is what that scrolls to. */}
+      <section id="orbit-updates" className="scroll-mt-8 space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Download className="size-4 text-accent" />
+          Updates
+        </h2>
+        <div className="space-y-3 rounded-xl border border-line bg-panel/60 p-4 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-medium text-fg">Orbit {APP_VERSION}</p>
+              <p className="text-xs text-muted">
+                {update
+                  ? `Version ${update.version} is ready to install.`
+                  : checkedAt
+                    ? 'Nothing newer just now.'
+                    : 'Orbit looks for a new version when it opens.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => void lookForUpdate()}
+                disabled={checking}
+                className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs')}
+              >
+                {checking ? 'Checking…' : 'Check now'}
+              </button>
+              {update && (
+                <button
+                  onClick={() => void install()}
+                  disabled={installStep !== null}
+                  className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs')}
+                >
+                  {installStep === 'downloading'
+                    ? 'Downloading…'
+                    : installStep === 'opening'
+                      ? 'Opening…'
+                      : `Install ${update.version}`}
+                </button>
+              )}
+              <button
+                onClick={() => void openExternal(update?.url ?? RELEASES_URL)}
+                className="flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-xs hover:border-accent hover:text-fg"
+              >
+                <GitBranch className="size-3.5" />
+                Release notes
+              </button>
+            </div>
+          </div>
+
+          {updateNote && <p className="text-xs text-muted">{updateNote}</p>}
+
+          <Checkbox
+            checked={settings.updateCheck !== false}
+            onChange={(v) => setSettings({ updateCheck: v })}
+            label="Look for a new version when Orbit opens"
+            hint="One request to GitHub's public releases API. No account, no identifier, and nothing about your library is sent."
+          />
         </div>
       </section>
 

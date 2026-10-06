@@ -15,6 +15,7 @@ mod session;
 mod steam;
 mod storage;
 mod store;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -943,6 +944,9 @@ pub fn run() {
             disk_space,
             drive_of,
             http_request,
+            update::download_update,
+            update::run_update,
+            update::forget_update,
             hltb_search,
             metadata_lookup,
             metadata_suggest,

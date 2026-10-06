@@ -515,6 +515,30 @@ export function hltbSearch<T>(title: string): Promise<T> {
   });
 }
 
+// ------------------------------------------------------------------- updates
+
+/**
+ * Fetch a new version's installer into a temporary folder, and answer where it
+ * landed. Only the desktop shell can write files, so a browser says so.
+ */
+export function downloadUpdate(url: string, fileName: string): Promise<string> {
+  return call('download_update', { url, fileName }, async () => {
+    throw new Error('Downloading an update needs the desktop app.');
+  });
+}
+
+/** Hand a downloaded installer to the system. */
+export function runUpdate(path: string): Promise<void> {
+  return call('run_update', { path }, async () => {
+    throw new Error('Running an installer needs the desktop app.');
+  });
+}
+
+/** Throw away a downloaded installer that is not wanted. */
+export function forgetUpdate(path: string): Promise<void> {
+  return call('forget_update', { path }, () => undefined);
+}
+
 /** Open a folder in Explorer. */
 export function revealInExplorer(path: string): Promise<void> {
   return call('reveal_in_explorer', { path }, () => undefined);
