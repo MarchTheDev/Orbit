@@ -10,7 +10,7 @@ type SoundSettings = Settings['sound'];
  * The music, where the sound is.
  *
  * A switch for something you can hear belongs beside the thing playing it: the
- * top bar can start and stop the pad, set how loud it is, and say whether it
+ * top bar can start and stop the music, set how loud it is, and say whether it
  * carries on when Orbit is not the window in front. Settings still has all of
  * it, because that is where somebody goes when they do not know where anything
  * is.

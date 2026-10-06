@@ -3,9 +3,18 @@
  *
  * There is no music file to ship. Orbit makes the sound itself, with the Web
  * Audio API, which has three good consequences: nothing to download, nothing to
- * license, and nothing that sounds the same twice. It is a slow, warm pad: four
- * chords that change every so often, a gentle filter drifting over them, and a
- * breath of air underneath, quiet enough to leave running for hours.
+ * license, and nothing that sounds the same twice. It is a slow melody rather
+ * than a wall of sound: one soft note at a time, plucked and left to ring, over
+ * a very low bed.
+ *
+ * Two things keep it from ever being annoying:
+ *
+ * - The notes come from a pentatonic scale, five notes to the octave with no
+ *   semitones in it. There is no interval in that scale that sounds wrong, so a
+ *   note picked by a coin toss still lands on the chord underneath.
+ * - The melody walks rather than jumps. Each note is one or two steps from the
+ *   one before it, and a quarter of the turns are rests, which is what makes a
+ *   line sound like it is going somewhere rather than being generated.
  *
  * It is off until somebody turns it on. Browsers (and the webview) refuse to
  * start audio until the page has been interacted with, so this tries when asked
@@ -14,33 +23,26 @@
  * be a silent app, not a broken one.
  */
 
-/** A chord as semitone offsets from the root, and where the root sits. */
-interface Chord {
-  root: number;
-  notes: number[];
+/** The five notes of the scale, as semitones from the root. */
+const SCALE = [0, 2, 4, 7, 9];
+
+/** How far the melody may wander: two octaves down, one up, from the root. */
+const LOWEST = -2 * SCALE.length;
+const HIGHEST = SCALE.length;
+
+/** A minor pentatonic rooted at A3, which is where a quiet melody sits. */
+const ROOT = 220.0;
+
+/** The note a semitone offset makes, from the root of the scale. */
+function note(semitones: number): number {
+  return ROOT * Math.pow(2, semitones / 12);
 }
 
-/**
- * Four chords that belong together in A minor, which is the key most ambient
- * music is written in because nothing in it ever sounds wrong.
- *
- * They sit high: the roots are around A3 rather than A2, and the notes stack up
- * from there. Low chords are what make a pad sound heavy, and this one is meant
- * to sit behind somebody reading, not under them.
- */
-const PROGRESSION: Chord[] = [
-  { root: 220.0, notes: [0, 7, 12, 14, 19] }, // A minor 9
-  { root: 174.61, notes: [0, 7, 12, 16, 19] }, // F major 9
-  { root: 261.63, notes: [0, 7, 12, 16, 19] }, // C major 9
-  { root: 196.0, notes: [0, 7, 12, 14, 19] }, // G major 9
-];
-
-/** How long one chord is held before the next one drifts in. */
-const CHORD_SECONDS = 32;
-
-/** The note a semitone offset makes, from a root frequency. */
-function note(root: number, semitones: number): number {
-  return root * Math.pow(2, semitones / 12);
+/** The semitone offset of one step of the scale, `degree` steps from the root. */
+function degreeToSemitones(degree: number): number {
+  const octave = Math.floor(degree / SCALE.length);
+  const step = SCALE[((degree % SCALE.length) + SCALE.length) % SCALE.length];
+  return step + 12 * octave;
 }
 
 export class Ambient {
@@ -48,8 +50,12 @@ export class Ambient {
   private master: GainNode | null = null;
   private timer: number | null = null;
   private voices: { osc: OscillatorNode; gain: GainNode }[] = [];
-  private step = 0;
   private pad: BiquadFilterNode | null = null;
+  private padTimer: number | null = null;
+  private padVoices: { osc: OscillatorNode; gain: GainNode }[] = [];
+  private step = 0;
+  /** Where the melody currently is, in scale steps from the root. */
+  private degree = 0;
   private wanted = false;
   private volume = 0.35;
   private resumeOn: (() => void) | null = null;
@@ -68,6 +74,7 @@ export class Ambient {
   stop(): void {
     this.wanted = false;
     this.clearTimer();
+    this.stopPad();
     if (!this.context) return;
     // A moment to fall away rather than a click, then silence.
     try {
@@ -79,7 +86,7 @@ export class Ambient {
     }
     this.voices.forEach((v) => {
       try {
-        v.osc.stop(this.context!.currentTime + 1.6);
+        v.osc.stop(this.context!.currentTime + 2.4);
       } catch {
         // Already stopped.
       }
@@ -89,7 +96,7 @@ export class Ambient {
     // running an audio graph for nothing.
     window.setTimeout(() => {
       if (!this.wanted) void this.context?.suspend().catch(() => {});
-    }, 1800);
+    }, 2600);
   }
 
   /** Volume, 0 to 1. Safe to call before anything is playing. */
@@ -124,7 +131,7 @@ export class Ambient {
 
   // ------------------------------------------------------------------ private
 
-  /** Make the audio graph, and start the progression. */
+  /** Make the audio graph, and start playing. */
   private ensure(): void {
     if (!this.context) {
       try {
@@ -141,13 +148,13 @@ export class Ambient {
     // simply has no sound rather than an error.
     if (this.context.state === 'suspended') {
       void this.context.resume().then(
-        () => this.beginProgression(),
+        () => this.begin(),
         () => this.waitForGesture(),
       );
       if (this.context.state === 'suspended') this.waitForGesture();
       return;
     }
-    this.beginProgression();
+    this.begin();
   }
 
   private waitForGesture(): void {
@@ -156,7 +163,7 @@ export class Ambient {
       this.removeGesture();
       if (!this.wanted || !this.context) return;
       void this.context.resume().then(
-        () => this.beginProgression(),
+        () => this.begin(),
         () => {},
       );
     };
@@ -172,7 +179,7 @@ export class Ambient {
     this.resumeOn = null;
   }
 
-  /** The master gain, a warm filter, and a little air underneath. */
+  /** The master gain, the space the notes ring in, and a little air underneath. */
   private build(): void {
     const ctx = this.context;
     if (!ctx) return;
@@ -181,74 +188,70 @@ export class Ambient {
     this.master.gain.value = 0;
     this.master.connect(ctx.destination);
 
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 1600;
-    filter.Q.value = 0.5;
-    filter.connect(this.master);
+    // The soft top end every note goes through. Nothing here is bright, because
+    // a bright note is the one that gets noticed on the twentieth repeat.
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 2600;
+    tone.Q.value = 0.4;
+    tone.connect(this.master);
 
-    // The deep end is taken out before anything reaches the pad. This is the
+    // Space: a short delay with a little of itself fed back in, which turns one
+    // plucked note into a room. Kept away from the melody's own path so the
+    // notes stay in front of their own echo.
+    const delay = ctx.createDelay(2);
+    delay.delayTime.value = 0.42;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.3;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.26;
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass';
+    damp.frequency.value = 1800;
+    tone.connect(delay);
+    delay.connect(damp).connect(feedback).connect(delay);
+    delay.connect(wet).connect(this.master);
+
+    // The deep end is taken out before anything reaches the notes. This is the
     // difference between a chord that floats and one that sits on your chest,
     // and no amount of turning it down makes the second one pleasant.
     const rumbleCut = ctx.createBiquadFilter();
     rumbleCut.type = 'highpass';
-    rumbleCut.frequency.value = 130;
+    rumbleCut.frequency.value = 140;
     rumbleCut.Q.value = 0.6;
-    rumbleCut.connect(filter);
+    rumbleCut.connect(tone);
 
-    // Air: a very quiet, very slow noise bed, so the pad has something behind it
-    // rather than starting from digital silence. Filtered to the point where it
-    // is more a texture than a sound.
+    // Air: a very quiet, very slow noise bed, so the melody has something behind
+    // it rather than starting from digital silence. Filtered to the point where
+    // it is more a texture than a sound.
     const noise = ctx.createBufferSource();
     const seconds = 4;
     const buffer = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     let last = 0;
     for (let i = 0; i < data.length; i += 1) {
-      // Brown-ish noise: smoother than white, and it sits under a chord without
+      // Brown-ish noise: smoother than white, and it sits under a note without
       // hissing.
       last = (last + Math.random() * 2 - 1) * 0.5;
-      data[i] = last * 0.035;
+      data[i] = last * 0.02;
     }
     noise.buffer = buffer;
     noise.loop = true;
     const airGain = ctx.createGain();
-    airGain.gain.value = 0.35;
+    airGain.gain.value = 0.3;
     const airFilter = ctx.createBiquadFilter();
     airFilter.type = 'bandpass';
-    airFilter.frequency.value = 780;
+    airFilter.frequency.value = 640;
     airFilter.Q.value = 0.3;
     noise.connect(airFilter).connect(airGain).connect(rumbleCut);
     noise.start();
 
-    this.pad = filter;
+    this.pad = tone;
   }
 
-  /** Put a chord up, and bring the one before it down. */
-  private beginProgression(): void {
+  /** Start playing, from silence. */
+  private begin(): void {
     if (!this.wanted || !this.context || this.timer !== null) return;
-    this.clearTimer();
-    this.voice(PROGRESSION[this.step % PROGRESSION.length], 4);
-    this.step += 1;
-    this.timer = window.setInterval(() => {
-      if (!this.wanted) return;
-      this.voice(PROGRESSION[this.step % PROGRESSION.length], 8);
-      this.step += 1;
-    }, CHORD_SECONDS * 1000);
-
-    // The filter drifts, so the pad opens and closes rather than sitting still.
-    if (this.pad && this.context) {
-      try {
-        const now = this.context.currentTime;
-        this.pad.frequency.cancelScheduledValues(now);
-        this.pad.frequency.setValueAtTime(1100, now);
-        this.pad.frequency.linearRampToValueAtTime(2100, now + CHORD_SECONDS * 0.6);
-        this.pad.frequency.linearRampToValueAtTime(1300, now + CHORD_SECONDS * 1.2);
-      } catch {
-        // Left where it is.
-      }
-    }
-
     if (this.master && this.context) {
       try {
         this.master.gain.cancelScheduledValues(this.context.currentTime);
@@ -257,45 +260,140 @@ export class Ambient {
         // Left where it is.
       }
     }
+    // The first note arrives a moment in, so the sound fades up rather than
+    // starting on top of whatever the player was doing.
+    this.voices = [];
+    this.beginPad();
+    this.timer = window.setTimeout(() => this.play(), 1400);
+  }
+
+  /** One note at a time, each one scheduled when the last has had its turn. */
+  private play(): void {
+    if (!this.wanted) return;
+    this.timer = null;
+    // A quarter of the turns are rests, which is what makes the line breathe.
+    if (Math.random() > 0.25) this.pluck(degreeToSemitones(this.walk()));
+    // Between two and a half and six seconds to the next note: slow enough to
+    // sit under a game, and uneven enough not to become a pulse.
+    const gap = 2400 + Math.random() * 3600;
+    this.timer = window.setTimeout(() => this.play(), gap);
   }
 
   /**
-   * One chord: a triangle for the body and a sine an octave up for a little
-   * brightness, each with its own slow swell so the notes arrive one after
-   * another rather than all at once.
+   * The next note of the melody, as a step of the scale.
+   *
+   * A walk, not a jump: one or two steps up or down, with a nudge back toward
+   * the middle when it has wandered far enough that the next note would be thin
+   * or muddy.
    */
-  private voice(chord: Chord, fadeIn: number): void {
+  private walk(): number {
+    const room = [1, 1, 1, 2, 2, -1, -1, -1, -2, -2];
+    let step = room[Math.floor(Math.random() * room.length)];
+    if (this.degree > HIGHEST - 2) step -= 2;
+    else if (this.degree < LOWEST + 2) step += 2;
+    this.degree = Math.max(LOWEST, Math.min(HIGHEST, this.degree + step));
+    return this.degree;
+  }
+
+  /**
+   * One note: a soft pluck that rings out rather than a sustained voice.
+   *
+   * The tiny second sine an octave up is what makes it read as a bell or a
+   * string rather than a test tone, and it is very quiet: the fundamental is
+   * the note, and this is only its colour.
+   */
+  private pluck(semitones: number): void {
     const ctx = this.context;
     const pad = this.pad;
     if (!ctx || !pad) return;
 
     const now = ctx.currentTime;
-    chord.notes.forEach((semitones, i) => {
-      const frequency = note(chord.root, semitones);
+    const frequency = note(semitones);
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(pad);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = frequency;
+    osc.connect(gain);
+
+    const shine = ctx.createGain();
+    shine.gain.value = 0.14;
+    const upper = ctx.createOscillator();
+    upper.type = 'sine';
+    upper.frequency.value = frequency * 2;
+    upper.connect(shine).connect(gain);
+
+    // Plucked, then left: a fast soft attack and a long fall, so two notes that
+    // overlap blend instead of fighting.
+    const level = 0.24;
+    const ring = 4.5 + Math.random() * 1.5;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(level, now + 0.045);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + ring);
+
+    osc.start(now);
+    upper.start(now);
+    osc.stop(now + ring + 0.2);
+    upper.stop(now + ring + 0.2);
+    osc.onended = () => {
+      try {
+        gain.disconnect();
+      } catch {
+        // Nothing to disconnect.
+      }
+    };
+    this.voices.push({ osc: upper, gain: shine });
+    // The finished ones are left to the garbage collector; the list only has to
+    // say which are still worth fading out on Stop.
+    if (this.voices.length > 64) this.voices = this.voices.slice(-32);
+  }
+
+  /** The bed under the melody: root and fifth, very low, changing rarely. */
+  private beginPad(): void {
+    const ctx = this.context;
+    if (!ctx || this.padTimer !== null) return;
+    const roots = [0, -3, -5, 2];
+    const up = () => {
+      if (!this.wanted) return;
+      this.padChord(roots[this.step % roots.length]);
+      this.step += 1;
+    };
+    up();
+    this.padTimer = window.setInterval(up, 40000);
+  }
+
+  /**
+   * One chord of the bed: the root, its fifth and its octave, at a level that
+   * is felt more than heard.
+   *
+   * Only the root and the fifth, because thirds are what decide whether a chord
+   * is happy or sad, and a bed that changes mood under a melody that has not
+   * changed yet is what sounds wrong.
+   */
+  private padChord(root: number): void {
+    const ctx = this.context;
+    const pad = this.pad;
+    if (!ctx || !pad) return;
+    const now = ctx.currentTime;
+    const fade = 9;
+    [0, 7, 12].forEach((interval, i) => {
       const gain = ctx.createGain();
       gain.gain.value = 0;
       gain.connect(pad);
-
       const osc = ctx.createOscillator();
       osc.type = 'sine';
-      // A few cents apart from the note it is meant to be, so two notes in the
-      // same chord beat very slowly against each other instead of sounding
-      // exactly the same.
-      osc.frequency.value = frequency * (1 + (Math.random() - 0.5) * 0.0015);
-      osc.detune.value = (Math.random() - 0.5) * 4;
+      osc.frequency.value = note(root + interval) / 2;
       osc.connect(gain);
-
-      const level = 0.12 / (1 + i * 0.4);
-      const arrives = now + i * 0.9;
+      const level = 0.09 / (1 + i * 0.7);
       gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(level, arrives + fadeIn);
-      // A long fall, so the chords overlap and the change is never heard as a
-      // change.
-      gain.gain.setTargetAtTime(0, arrives + fadeIn + CHORD_SECONDS * 0.6, CHORD_SECONDS * 0.25);
-
+      gain.gain.linearRampToValueAtTime(level, now + fade);
+      // A long fall, so the changes overlap and are never heard as a change.
+      gain.gain.setTargetAtTime(0, now + fade + 30, 8);
       osc.start(now);
-      osc.stop(now + CHORD_SECONDS * 1.6);
-      // Automatically dropped from the graph when it stops.
+      osc.stop(now + fade + 60);
       osc.onended = () => {
         try {
           gain.disconnect();
@@ -303,21 +401,34 @@ export class Ambient {
           // Nothing to disconnect.
         }
       };
-      this.voices.push({ osc, gain });
+      this.padVoices.push({ osc, gain });
     });
+    if (this.padVoices.length > 24) this.padVoices = this.padVoices.slice(-12);
+  }
 
-    // Oscillators that have finished are left to the garbage collector; the
-    // list only has to say which ones are still worth fading out on Stop.
-    if (this.voices.length > 64) this.voices = this.voices.slice(-32);
+  private stopPad(): void {
+    if (this.padTimer !== null) {
+      window.clearInterval(this.padTimer);
+      this.padTimer = null;
+    }
+    const at = this.context ? this.context.currentTime + 3 : 0;
+    this.padVoices.forEach((v) => {
+      try {
+        v.osc.stop(at);
+      } catch {
+        // Already stopped.
+      }
+    });
+    this.padVoices = [];
   }
 
   private clearTimer(): void {
     if (this.timer !== null) {
-      window.clearInterval(this.timer);
+      window.clearTimeout(this.timer);
       this.timer = null;
     }
   }
 }
 
-/** One sound for the whole app: two of these would be two pads at once. */
+/** One sound for the whole app: two of these would be two melodies at once. */
 export const ambient = new Ambient();

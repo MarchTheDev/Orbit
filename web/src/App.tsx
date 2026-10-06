@@ -148,15 +148,7 @@ export default function App() {
           actions: [
             {
               label: 'Go to settings',
-              onSelect: () => {
-                setPage('settings');
-                // Settings is long, so the update section is brought to the top
-                // rather than left for the player to find.
-                setTimeout(
-                  () => document.getElementById('orbit-updates')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
-                  60,
-                );
-              },
+              onSelect: () => openSettings('orbit-updates'),
             },
             { label: 'Release notes', onSelect: () => void openExternal(found.url) },
             { label: 'Later', onSelect: () => undefined },
@@ -191,7 +183,7 @@ export default function App() {
    * Whether the window is being looked at, so the music can step aside.
    *
    * The listener is what makes the setting mean something while the app is
-   * open: click away to a game and the pad sinks under it, click back and it
+   * open: click away to a game and the music sinks under it, click back and it
    * returns.
    */
   useEffect(() => {
@@ -618,6 +610,26 @@ export default function App() {
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
   // one particular game.
+  /**
+   * Open Settings, at one of its cards when the caller knows which one.
+   *
+   * Settings is long, so every door into it that is about one thing brings that
+   * thing to the top and marks it for a moment, rather than leaving somebody to
+   * scroll a page looking for the switch they pressed a button about.
+   */
+  const openSettings = useCallback((at?: string) => {
+    setPage('settings');
+    if (!at) return;
+    // After the page has been drawn, so there is something to scroll to.
+    window.setTimeout(() => {
+      const card = document.getElementById(at);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      card.classList.add('settings-spot');
+      window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
+    }, 80);
+  }, []);
+
   const showHome = page === 'library' && !query;
 
   // Nothing can be drawn until the settings have loaded, which also decides the
@@ -650,6 +662,7 @@ export default function App() {
       <TopNav
         page={page}
         setPage={setPage}
+        onOpenSettings={openSettings}
         order={settings?.tabOrder}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
