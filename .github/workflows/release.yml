@@ -483,10 +483,33 @@ jobs:
     env:
       ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
+      # Download only installable release bundles. Debug logs are separate
+      # artifacts and must never become public release files.
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          path: files
+          name: windows
+          path: files/windows
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: linux
+          path: files/linux
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: debian
+          path: files/debian
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: fedora
+          path: files/fedora
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: arch
+          path: files/arch
 
       - name: List what was built
         run: ls -R files || true
