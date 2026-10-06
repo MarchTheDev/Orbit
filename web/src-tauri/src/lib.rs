@@ -506,6 +506,37 @@ fn log_manual_session(
 }
 
 /// Library-wide totals for the statistics row.
+/// Put the window on screen, once there is something in it to look at.
+///
+/// The window is created hidden, because a webview that has not drawn yet shows
+/// as a frame of empty window: on a slow start that is a flash of the wrong
+/// colour between the launcher and the opening animation. The front end asks for
+/// the window as soon as it has painted; nothing is shown before that.
+#[tauri::command]
+fn window_ready(app: tauri::AppHandle) {
+    show_main_window(&app);
+}
+
+/// Show the main window, and put it in front, if it is not already up.
+///
+/// Called by the front end when it has drawn, and again from a timer in case it
+/// never gets that far: an app that never shows a window at all would be a worse
+/// failure than one that flashes.
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(true) {
+        return;
+    }
+    if let Err(e) = window.show() {
+        log::warn!("could not show the window: {e}");
+        return;
+    }
+    let _ = window.set_focus();
+}
+
 #[tauri::command]
 fn library_stats(orbit: State<'_, Orbit>) -> Result<Stats, String> {
     orbit.db.stats()
@@ -899,6 +930,16 @@ pub fn run() {
                 });
             }
 
+            // A belt for the pair of braces the front end wears: if the page
+            // never gets as far as asking for the window, this shows it anyway.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(6));
+                    show_main_window(&handle);
+                });
+            }
+
             // The tray is allowed to fail: the window behaviour that needs it
             // falls back to a plain minimize, and the app is otherwise fine.
             if let Err(e) = build_tray(app.handle()) {
@@ -935,6 +976,7 @@ pub fn run() {
             delete_session,
             log_manual_session,
             library_stats,
+            window_ready,
             list_drives,
             folder_size,
             cached_sizes,

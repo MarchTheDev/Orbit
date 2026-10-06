@@ -88,6 +88,18 @@ export function clearLibrary(): Promise<void> {
 }
 
 /** Executables already tracked, so an import can skip them. */
+/**
+ * Tell Orbit the front end has drawn its first frame.
+ *
+ * The window is created hidden, so the first thing anybody sees is the app
+ * rather than a frame of empty window that the animation then covers. This is
+ * what puts it on screen; Rust shows it anyway after a few seconds, so a front
+ * end that never gets this far still ends up with a window.
+ */
+export function windowReady(): Promise<void> {
+  return call('window_ready', {}, () => undefined);
+}
+
 export function knownExePaths(): Promise<string[]> {
   return call('db_known_exe_paths', {}, async () => []);
 }
