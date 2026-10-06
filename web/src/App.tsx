@@ -38,7 +38,7 @@ import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
 import { LogsView } from './components/LogsView';
 import { SteamImportModal, gameFromSteam } from './components/SteamImportModal';
-import { AddGameModal, gameFromDropped } from './components/modals/AddGameModal';
+import { AddGameModal } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { SettingsView } from './components/SettingsView';
@@ -289,27 +289,12 @@ export default function App() {
           setDroppedPaths(state.paths);
           return;
         }
-        // Dropping something runnable means "add this", so it is saved straight
-        // away. Only a drop Orbit cannot make a game out of is handed to a
-        // person, because that one needs a decision rather than a keystroke.
-        void gameFromDropped(state.paths)
-          .then((g) => {
-            if (!alive) return;
-            if (!g) {
-              setDroppedPaths(state.paths);
-              setShowAdd(true);
-              toast({ text: 'No program to run in that drop. Pick one below.', tone: 'error' });
-              return;
-            }
-            void handleAddRef.current?.(g, true);
-            toast({ text: `${g.title} added · details on the way` });
-          })
-          .catch((e: unknown) => {
-            if (!alive) return;
-            setDroppedPaths(state.paths);
-            setShowAdd(true);
-            toast({ text: e instanceof Error ? e.message : 'That drop could not be read.', tone: 'error' });
-          });
+        // A drop opens the Add dialog rather than saving behind it. A game
+        // dragged in is usually named after its file, and the dialog is where
+        // the store's name, author and cover are put in front of the player
+        // before anything is added.
+        setDroppedPaths(state.paths);
+        setShowAdd(true);
         return;
       }
       setDragOver(state.type === 'enter' || state.type === 'over');
@@ -919,11 +904,9 @@ export default function App() {
       {showAdd && (
         <AddGameModal
           initialPaths={droppedPaths}
-          onImportSteam={() => {
-            setShowAdd(false);
-            setDroppedPaths(null);
-            setShowSteam(true);
-          }}
+          // The Steam library opens over this dialog rather than instead of it,
+          // so closing it comes back to the form rather than to the library.
+          onImportSteam={() => setShowSteam(true)}
           onClose={() => {
             setShowAdd(false);
             setDroppedPaths(null);

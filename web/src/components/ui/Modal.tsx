@@ -1,7 +1,18 @@
 import { X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
+
+/**
+ * The dialogs that are open, oldest first.
+ *
+ * One dialog can be opened from another, which is what the Add game dialog does
+ * with the Steam library: Escape and the backdrop belong to the newest one, and
+ * closing it puts the one underneath back rather than taking both away.
+ */
+const openDialogs: number[] = [];
+let nextDialogId = 1;
 
 const SIZES = {
   sm: 'max-w-sm',
@@ -35,6 +46,28 @@ export function Modal({
   /** Pinned to the bottom, for long forms that should not scroll their buttons away. */
   footer?: ReactNode;
 }) {
+  const [id] = useState(() => nextDialogId++);
+
+  useEffect(() => {
+    openDialogs.push(id);
+    return () => {
+      const at = openDialogs.lastIndexOf(id);
+      if (at !== -1) openDialogs.splice(at, 1);
+    };
+  }, [id]);
+
+  // Escape closes the dialog on top, and only that one.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (openDialogs[openDialogs.length - 1] !== id) return;
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [id, onClose]);
+
   // Drawn at the end of the document rather than where it is written.
   //
   // A dialog is positioned against the window, and an ancestor with a transform

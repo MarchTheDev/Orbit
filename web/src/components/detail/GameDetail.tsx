@@ -25,6 +25,7 @@ import { fetchHltb } from '../../services/hltb';
 import { listGameLogs } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { driveLabel } from '../../utils/drive';
+import { isSteamGame, storeAppId } from '../../utils/steam';
 import { Cover } from '../ui/Cover';
 import { HltbCard } from './HltbCard';
 import { Select } from '../ui/Select';
@@ -66,12 +67,6 @@ interface Props {
   onRemove: () => void;
   onClose: () => void;
 }
-
-/** Where the details on screen came from, said out loud. */
-const SOURCE_LABEL: Record<string, string> = {
-  steam: 'Steam catalogue',
-  estimate: 'preview',
-};
 
 export function GameDetail({
   game,
@@ -179,9 +174,11 @@ export function GameDetail({
     if (fresh) onUpdate({ title: next, hltb: fresh });
   };
 
-  // The store number for this game, whether it was imported from Steam or found
-  // by a lookup. Both buttons below are web pages, so they open in the browser.
-  const steamAppId = game.meta?.steamAppId ?? (game.launch.kind === 'steam' ? game.launch.appId : null);
+  // A Steam game is one Orbit hands to Steam to start, and nothing else in
+  // here says Steam: the store's id is only what its page and its achievements
+  // are read from.
+  const onSteam = isSteamGame(game);
+  const steamAppId = storeAppId(game);
 
   return (
     <>
@@ -454,16 +451,6 @@ export function GameDetail({
           )}
           {!backlog && (
           <div className="space-y-1.5">
-            {steamAppId !== null && (
-              <button
-                onClick={() => void openExternal(`https://steamdb.info/app/${steamAppId}/`)}
-                title="Open this game on SteamDB, which tracks prices, updates and stats"
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel2 py-2 text-xs hover:border-accent"
-              >
-                <ExternalLink className="size-3.5" />
-                Open in SteamDB
-              </button>
-            )}
             <button
               onClick={() => void openExternal(`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.title)}`)}
               title="Fixes, save file locations and configuration on PCGamingWiki"
@@ -481,21 +468,32 @@ export function GameDetail({
               <h3 className="flex items-center gap-2 text-sm font-semibold">
                 <Info className="size-4 text-accent" />
                 About
-                {game.meta?.source && (
-                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-normal text-muted">
-                    {SOURCE_LABEL[game.meta.source] ?? game.meta.source}
+                {onSteam && (
+                  <span className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] font-normal text-accent">
+                    From Steam
                   </span>
                 )}
               </h3>
-              <button
-                onClick={getDetails}
-                disabled={loadingDetails}
-                className="flex items-center gap-1.5 text-xs text-accent hover:underline disabled:opacity-50"
-                title="Look this title up again"
-              >
-                <RefreshCw className={`size-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
-                {game.meta ? 'Refresh' : 'Fetch'}
-              </button>
+              <div className="flex items-center gap-3">
+                {steamAppId !== null && (
+                  <button
+                    onClick={() => void openExternal(`https://steamdb.info/app/${steamAppId}/`)}
+                    title="This game's page on SteamDB, which tracks prices, updates and stats"
+                    className="text-xs text-muted hover:text-accent hover:underline"
+                  >
+                    SteamDB
+                  </button>
+                )}
+                <button
+                  onClick={getDetails}
+                  disabled={loadingDetails}
+                  className="flex items-center gap-1.5 text-xs text-accent hover:underline disabled:opacity-50"
+                  title="Look this title up again"
+                >
+                  <RefreshCw className={`size-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
+                  {game.meta ? 'Refresh' : 'Fetch'}
+                </button>
+              </div>
             </div>
             <p className="text-sm leading-relaxed text-muted">
               {game.meta?.summary || 'No details yet. Fetching works with no setup: the Steam catalogue needs no key.'}

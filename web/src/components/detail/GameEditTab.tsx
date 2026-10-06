@@ -129,7 +129,9 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
       coverFit: fit === 'auto' ? undefined : fit,
       headerUrl: meta?.headerUrl ?? null,
       steamAppId: meta?.steamAppId ?? null,
-      source: meta?.source ?? 'steam',
+      // A source is where the details came from. A game nobody has looked up
+      // has none, rather than being called a Steam game by default.
+      source: meta?.source,
     };
 
     const hoursIn = [hours(main), hours(mainExtra), hours(completionist)];

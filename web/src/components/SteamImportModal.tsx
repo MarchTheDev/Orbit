@@ -8,6 +8,7 @@ import { fmtBytes, fmtDate, hashHue, uid } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
+import { isSteamGame } from '../utils/steam';
 
 /**
  * Bring games over from the Steam library installed on this PC.
@@ -61,7 +62,7 @@ export function SteamImportModal({
   /** Games already here, by Steam id and by name, so nothing arrives twice. */
   const byId = existing.filter((g) => g.meta?.steamAppId).map((g) => g.meta!.steamAppId!);
   const byTitle = existing.map((g) => g.title.trim().toLowerCase());
-  const fromSteam = existing.filter((g) => g.launch.kind === 'steam' || g.meta?.steamAppId);
+  const fromSteam = existing.filter(isSteamGame);
 
   const scan = async () => {
     setBusy(true);
