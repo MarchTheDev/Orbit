@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        version = "0.1.1";
+        version = "0.1.2";
 
         # The interface, built by npm. Its own derivation so that changing a
         # line of Rust does not rebuild the front end and the other way round.
