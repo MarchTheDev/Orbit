@@ -40,6 +40,10 @@ on:
       # reason: it is what the Nix package is made of, and it ships in a release.
       - '.github/workflows/release.yml'
       - 'flake.nix'
+      # What the program is built out of is as much a part of a release as the
+      # number on it: these change what ends up inside the installers.
+      - 'web/src-tauri/Cargo.toml'
+      - 'web/src-tauri/Cargo.lock'
   workflow_dispatch:
     inputs:
       version:
