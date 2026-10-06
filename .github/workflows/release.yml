@@ -55,6 +55,7 @@ on:
       - 'web/index.html'
       - 'web/package.json'
       - 'web/package-lock.json'
+      - 'packaging/tauri-build.sh'
   workflow_dispatch:
     inputs:
       version:
@@ -213,7 +214,15 @@ jobs:
 
       - name: Build
         working-directory: web
-        run: npx tauri build --bundles deb,rpm,appimage
+        run: bash ../packaging/tauri-build.sh --bundles deb,rpm,appimage
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-linux
+          path: tauri-build.log
+          if-no-files-found: error
 
       - name: Collect the packages
         run: |
@@ -290,7 +299,15 @@ jobs:
 
       - name: Build the deb
         working-directory: web
-        run: npx tauri build --bundles deb
+        run: bash ../packaging/tauri-build.sh --bundles deb
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-debian
+          path: tauri-build.log
+          if-no-files-found: error
 
       - name: Collect it
         run: |
@@ -352,7 +369,15 @@ jobs:
 
       - name: Build the rpm
         working-directory: web
-        run: npx tauri build --bundles rpm
+        run: bash ../packaging/tauri-build.sh --bundles rpm
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-fedora
+          path: tauri-build.log
+          if-no-files-found: error
 
       - name: Collect it
         run: |
@@ -412,7 +437,15 @@ jobs:
       # package that pacman does understand.
       - name: Build
         working-directory: web
-        run: npx tauri build --no-bundle
+        run: bash ../packaging/tauri-build.sh --no-bundle
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-arch
+          path: tauri-build.log
+          if-no-files-found: error
 
       - name: Package it for pacman
         run: |
