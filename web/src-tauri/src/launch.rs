@@ -22,6 +22,10 @@ const HANDOFF_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 pub const FOLDER_WATCH: u32 = 0;
 
 /// What the watcher has learned about a game.
+///
+/// Compared and printed, because the tests ask a process what it is doing and
+/// say what they expected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     /// Still going.
     Running,
@@ -817,7 +821,7 @@ mod tests {
         assert!(launched.manual);
         assert_eq!(launched.pid, 0);
         // Nothing was started, so there is nothing to ask about.
-        assert_eq!(sessions.check(0), None);
+        assert!(sessions.check(0).is_none());
     }
 
     /// A real long-lived process, because killing one is the whole point.
@@ -848,7 +852,7 @@ mod tests {
 
         // No longer tracked, and the process really is gone rather than merely
         // forgotten: `kill` only returns once it has seen the exit.
-        assert_eq!(sessions.check(launched.pid), None);
+        assert!(sessions.check(launched.pid).is_none());
     }
 
     #[test]
