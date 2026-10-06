@@ -449,10 +449,11 @@ export function applyTyping(root: HTMLElement, selection: Selection): TypingResu
       target.setStart(node, range.startOffset - edit.length);
       target.setEnd(node, range.startOffset);
       replaceRange(target, edit.html, selection);
-      // The caret is standing after the new element; a holder makes that a
-      // place it can type a space into without going back inside.
+      // The caret goes into the holder rather than beside the element, so the
+      // next character typed lands in a real text node instead of being
+      // swallowed by the thing it is next to.
       const after = lineOf(root, selection.getRangeAt(0).startContainer);
-      if (after) padLine(after);
+      if (after) caretInto(selection, after);
       return TYPING.changed;
     }
   }

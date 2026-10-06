@@ -302,3 +302,17 @@ console.log('the caret can leave what it is in, and never takes the holder with 
     return r;
   })()));
 }
+
+{
+  // Padding is not something that adds up: a line gets one holder however many
+  // times it is tidied, so typing inside a code span cannot grow a tail of
+  // invisible characters.
+  const el = box('`code`');
+  const line = el.firstElementChild;
+  tidy(el);
+  tidy(el);
+  padLine(line);
+  const holders = (line.textContent ?? '').split('\u200b').length - 1;
+  check('one line keeps one holder however often it is tidied', holders === 1, `${holders}`);
+  check('and the note still reads as the code alone', htmlToMarkdown(el) === '`code`');
+}
