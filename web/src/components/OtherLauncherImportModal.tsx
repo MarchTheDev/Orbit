@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, LoaderCircle, RefreshCw, Search, X } from 'lucide-react';
-import type { Game, LauncherGame } from '../types';
+import type { Game, LauncherGame, OtherLauncher } from '../types';
 import { isNative, launcherGames } from '../services/native';
 import { fmtBytes, hashHue, uid } from '../utils/format';
 import { Modal, btnGhost, btnPrimary } from './ui/Modal';
@@ -19,8 +19,9 @@ interface Row extends LauncherGame {
  * are added, and they are saved as timer-only games so Orbit never guesses that
  * a game can safely bypass its launcher.
  */
-export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
+export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }: {
   existing: Game[];
+  launcher?: OtherLauncher;
   onAdd: (games: Game[]) => void;
   onClose: () => void;
 }) {
@@ -43,14 +44,16 @@ export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
     setBusy(true);
     setError(null);
     try {
-      const found = await launcherGames();
+      const found = (await launcherGames()).filter((game) => !launcher || game.launcher === launcher);
       found.sort((a, b) => a.launcher.localeCompare(b.launcher) || a.name.localeCompare(b.name));
       setRows(found.map((game) => ({
         ...game,
         include: !knownPaths.has(normalizedPath(game.installDir)) && !knownTitles.has(game.name.trim().toLocaleLowerCase()),
       })));
       if (found.length === 0) {
-        setError('No supported installed games were found. Orbit checked local launcher records only; nothing was contacted or changed.');
+        setError(launcher
+          ? `No ${launcher} installs were found in the local records Orbit supports. Nothing was contacted or changed.`
+          : 'No supported installed games were found. Orbit checked local launcher records only; nothing was contacted or changed.');
       }
     } catch (reason) {
       setRows([]);
@@ -141,8 +144,10 @@ export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
 
   return (
     <Modal
-      title="Other game launchers"
-      subtitle="A read-only scan of local install records. Nothing is added until you select it."
+      title={launcher ? `Import ${launcher}` : 'Other game launchers'}
+      subtitle={launcher
+        ? `A read-only scan of ${launcher} install records on this device. Nothing is added until you select it.`
+        : 'A read-only scan of local install records. Nothing is added until you select it.'}
       size="xl"
       onClose={onClose}
       footer={(
@@ -171,7 +176,7 @@ export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
           <SearchField
             value={filter}
             onChange={setFilter}
-            placeholder="Filter by game, launcher, or folder"
+            placeholder={launcher ? `Filter ${launcher} games or folders` : "Filter by game, launcher, or folder"}
             className="min-w-[14rem] flex-1"
             inputClassName="w-full"
           />

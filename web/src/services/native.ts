@@ -165,6 +165,11 @@ export function deleteGameLog(id: number): Promise<void> {
   return call('delete_game_log', { id }, () => undefined);
 }
 
+/** Remove one game's Journal entries without changing its general notes. */
+export function clearGameLogs(gameId: string): Promise<void> {
+  return call('clear_game_logs', { gameId }, () => undefined);
+}
+
 /**
  * Every note in the library at once, newest first.
  *

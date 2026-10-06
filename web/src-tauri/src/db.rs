@@ -1163,6 +1163,14 @@ impl Db {
         Ok(())
     }
 
+    /// Clear one game's Journal entries without touching its general notes.
+    pub fn clear_game_logs(&self, game_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM game_logs WHERE game_id = ?1", params![game_id])
+            .map_err(|e| format!("Could not clear that game's log: {e}"))?;
+        Ok(())
+    }
+
     /// Record time by hand, for playing on a console or a handheld.
     pub fn log_manual_session(
         &self,
@@ -1387,6 +1395,23 @@ mod tests {
     fn timestamps_come_back_as_iso() {
         assert_eq!(iso8601(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso8601(1_700_000_000), "2023-11-14T22:13:20.000Z");
+    }
+
+    #[test]
+    fn clearing_game_logs_keeps_notes_and_other_games_logs() {
+        let db = Db::open_memory().unwrap();
+        let mut first = game("g1", "Hades");
+        first.notes = "Keep this separate note".into();
+        db.upsert_game(&first).unwrap();
+        db.upsert_game(&game("g2", "Celeste")).unwrap();
+        db.add_game_log("g1", 1_700_000_000, 0, "Finished the story", "").unwrap();
+        db.add_game_log("g2", 1_700_000_100, 0, "Found the summit", "").unwrap();
+
+        db.clear_game_logs("g1").unwrap();
+
+        assert!(db.list_game_logs("g1").unwrap().is_empty());
+        assert_eq!(db.list_game_logs("g2").unwrap().len(), 1);
+        assert_eq!(db.game("g1").unwrap().unwrap().notes, "Keep this separate note");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { HardDrive, Library, ListOrdered, NotebookPen, ScrollText, Settings as SettingsIcon } from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
@@ -73,6 +74,35 @@ export function TopNav({
   showBars: boolean;
 }) {
   const tabs = orderedTabs(order);
+  const tabKey = tabs.map((tab) => tab.id).join('|');
+  const navRef = useRef<HTMLElement>(null);
+  const [indicator, setIndicator] = useState({ x: 0, y: 0, width: 0, height: 0, visible: false });
+  const activeTab = tabs.some((tab) => tab.id === page) ? page : null;
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const update = () => {
+      const button = activeTab ? nav.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`) : null;
+      if (!button) {
+        setIndicator((current) => ({ ...current, visible: false }));
+        return;
+      }
+      const bounds = button.getBoundingClientRect();
+      const navBounds = nav.getBoundingClientRect();
+      setIndicator({
+        x: bounds.left - navBounds.left,
+        y: bounds.top - navBounds.top,
+        width: bounds.width,
+        height: bounds.height,
+        visible: true,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [activeTab, tabKey]);
+
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur-xl">
       {/* The bar is the one thing that spans the whole window rather than sitting
@@ -89,15 +119,25 @@ export function TopNav({
           <span className="text-lg font-bold tracking-tight">Orbit</span>
         </button>
 
-        <nav className="flex items-center gap-1">
+        <nav ref={navRef} className="relative flex items-center gap-1">
+          <span
+            aria-hidden
+            className="topnav-indicator pointer-events-none absolute left-0 top-0 rounded-full border border-accent/35 bg-panel2 shadow-sm"
+            style={{
+              width: indicator.width,
+              height: indicator.height,
+              opacity: indicator.visible ? 1 : 0,
+              transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0)`,
+            }}
+          />
           {tabs.map((t) => (
             <button
               key={t.id}
+              data-tab-id={t.id}
+              aria-current={page === t.id ? 'page' : undefined}
               onClick={() => setPage(t.id)}
-              className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                page === t.id
-                  ? 'bg-panel2 text-fg shadow-sm ring-1 ring-accent/40'
-                  : 'text-muted hover:bg-panel/70 hover:text-fg'
+              className={`relative z-10 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                page === t.id ? 'text-fg' : 'text-muted hover:bg-panel/70 hover:text-fg'
               }`}
             >
               <t.Icon className="size-4" strokeWidth={1.8} />

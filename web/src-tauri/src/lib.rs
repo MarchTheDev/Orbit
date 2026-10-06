@@ -315,6 +315,12 @@ fn count_logs(orbit: State<'_, Orbit>) -> Result<i64, String> {
     orbit.db.count_logs()
 }
 
+/// Clear only the Journal entries for one game; general notes remain untouched.
+#[tauri::command]
+fn clear_game_logs(orbit: State<'_, Orbit>, game_id: String) -> Result<(), String> {
+    orbit.db.clear_game_logs(&game_id)
+}
+
 /// Write a note against a game.
 #[tauri::command]
 fn add_game_log(
@@ -974,6 +980,7 @@ pub fn run() {
             list_game_logs,
             list_all_logs,
             count_logs,
+            clear_game_logs,
             add_game_log,
             update_game_log,
             delete_game_log,

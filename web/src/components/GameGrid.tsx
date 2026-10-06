@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Star } from 'lucide-react';
+import { Pencil, Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtMinutes } from '../utils/format';
 import { Cover } from './ui/Cover';
@@ -18,6 +18,7 @@ interface Props {
   games: Game[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onPlay: (g: Game) => void;
   /** Drawn at this percentage of the base tile, from the toolbar's slider. */
   scale: number;
@@ -36,6 +37,7 @@ export function GameGrid({
   games,
   selectedId,
   onSelect,
+  onEdit,
   onPlay,
   scale,
   onReorder,
@@ -54,6 +56,7 @@ export function GameGrid({
           game={g}
           selected={selectedId === g.id}
           onSelect={onSelect}
+          onEdit={onEdit}
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
@@ -79,6 +82,7 @@ function Tile({
   game,
   selected,
   onSelect,
+  onEdit,
   onPlay,
   scale,
   coverTint,
@@ -89,6 +93,7 @@ function Tile({
   game: Game;
   selected: boolean;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
@@ -132,6 +137,17 @@ function Tile({
           className="absolute inset-0 opacity-0 transition duration-200 group-hover:opacity-100"
           style={{ background: tint }}
         />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(game.id);
+          }}
+          aria-label={`Edit ${game.title}`}
+          title={`Edit ${game.title}`}
+          className="absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full border border-white/20 bg-black/60 text-white opacity-100 shadow-lg backdrop-blur transition hover:bg-black/80 sm:-translate-y-2 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100 focus:translate-y-0 focus:opacity-100"
+        >
+          <Pencil className="size-4" />
+        </button>
         {game.favorite && (
           <span className="absolute left-3 top-3 grid size-7 place-items-center rounded-full bg-black/40 text-yellow-300 backdrop-blur">
             <Star className="size-3.5" fill="currentColor" strokeWidth={0} />

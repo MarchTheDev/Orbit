@@ -60,6 +60,8 @@ export function GameLogView({
   game,
   onChanged,
   onNotes,
+  addRequest,
+  onAddHandled,
   withClock = false,
 }: {
   game: Game;
@@ -69,6 +71,9 @@ export function GameLogView({
   /** Save the game's own notes, which live in here now rather than in a box of
    *  their own on the overview. */
   onNotes?: (notes: string) => void;
+  /** A one-shot request from the Journal context menu to open a fresh entry. */
+  addRequest?: number;
+  onAddHandled?: () => void;
   /** True in the Journal, where there is room to say the time of day as well:
    *  entries written weeks apart are worth telling apart by more than a date. */
   withClock?: boolean;
@@ -94,6 +99,17 @@ export function GameLogView({
   }, [gameId]);
 
   useEffect(() => load(), [load]);
+
+  useEffect(() => {
+    if (addRequest === undefined) return;
+    setError(null);
+    setExpandedId(null);
+    setDetailsDraft('');
+    setDraft(blank());
+    onAddHandled?.();
+    // The request token changes once for each context-menu action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addRequest]);
 
   /** Re-read, and let whoever is showing totals know they have moved. */
   const refresh = useCallback(() => {

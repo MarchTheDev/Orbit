@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NotebookPen } from 'lucide-react';
+import { NotebookPen, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type { Game, GameLog } from '../types';
+import { clearGameLogs } from '../services/native';
 import { countLogs, listAllLogs } from '../services/native';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
+import { ContextMenu, type MenuItem } from './ui/ContextMenu';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 /**
  * The logs: every game's entries, in one place.
@@ -22,11 +25,13 @@ import { moveInOrder } from '../utils/reorder';
 export function LogsView({
   games,
   onUpdate,
+  onEditGame,
   order = [],
   onOrder,
 }: {
   games: Game[];
   onUpdate: (id: string, patch: Partial<Game>) => void;
+  onEditGame: (id: string) => void;
   /** The player's own order for the game list, as ids. */
   order?: string[];
   /** Called with the whole list once one has been dragged somewhere. */
@@ -38,6 +43,11 @@ export function LogsView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [version, setVersion] = useState(0);
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [addRequest, setAddRequest] = useState<{ id: string; token: number } | null>(null);
+  const addToken = useRef(0);
+  const [clearTarget, setClearTarget] = useState<{ game: Game; kind: 'logs' | 'notes' } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     let alive = true;
@@ -112,6 +122,48 @@ export function LogsView({
   );
 
   const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => perGame.has(g.id)) ?? ordered[0] ?? null;
+  const menuGame = menu ? games.find((game) => game.id === menu.id) ?? null : null;
+  const menuItems: MenuItem[] = menuGame
+    ? [
+        { kind: 'label', label: menuGame.title },
+        {
+          label: 'Add log entry',
+          icon: Plus,
+          onSelect: () => {
+            setSelectedId(menuGame.id);
+            setAddRequest({ id: menuGame.id, token: ++addToken.current });
+          },
+        },
+        { label: 'Edit game…', icon: Pencil, onSelect: () => onEditGame(menuGame.id) },
+        { kind: 'sep' },
+        {
+          label: 'Reset log entries…',
+          icon: Trash2,
+          danger: true,
+          onSelect: () => setClearTarget({ game: menuGame, kind: 'logs' }),
+        },
+        {
+          label: 'Reset game notes…',
+          icon: RotateCcw,
+          danger: true,
+          onSelect: () => setClearTarget({ game: menuGame, kind: 'notes' }),
+        },
+      ]
+    : [];
+
+  const clearSelected = () => {
+    if (!clearTarget) return;
+    const target = clearTarget;
+    setClearTarget(null);
+    setActionError(null);
+    if (target.kind === 'logs') {
+      void clearGameLogs(target.game.id)
+        .then(() => setVersion((current) => current + 1))
+        .catch((reason) => setActionError(reason instanceof Error ? reason.message : String(reason)));
+    } else {
+      onUpdate(target.game.id, { notes: '' });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-[1400px] p-6">
@@ -156,6 +208,14 @@ export function LogsView({
                 <li key={g.id}>
                   <button
                     onClick={() => setSelectedId(g.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSelectedId(g.id);
+                      setActionError(null);
+                      setMenu({ x: event.clientX, y: event.clientY, id: g.id });
+                    }}
+                    data-orbit-journal-game={g.id}
                     {...bind(g.id)}
                     className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
                       active ? 'border-accent bg-accent/10' : 'border-line hover:border-accent/60'
@@ -180,14 +240,46 @@ export function LogsView({
 
         <section className="min-w-0">
           {selected ? (
-            <GameLogView
-              key={`${selected.id}-${version}`}
-              game={selected}
-              onChanged={() => setVersion((n) => n + 1)}
-              onNotes={(notes) => onUpdate(selected.id, { notes })}
-              // The wide reading has room for the time of day next to the date.
-              withClock
-            />
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-line/70 bg-panel/50 p-3">
+                <Cover game={selected} className="size-12 shrink-0 rounded-xl" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-sm font-semibold">{selected.title}</h2>
+                  <p className="text-[11px] text-muted">Reset logs and game notes separately.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setClearTarget({ game: selected, kind: 'logs' })}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
+                    title="Remove every Journal entry for this game"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Clear log entries
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClearTarget({ game: selected, kind: 'notes' })}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
+                    title="Clear the game's separate general notes"
+                  >
+                    <RotateCcw className="size-3.5" />
+                    Clear notes
+                  </button>
+                </div>
+              </div>
+              {actionError && <p role="alert" className="mb-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{actionError}</p>}
+              <GameLogView
+                key={`${selected.id}-${version}`}
+                game={selected}
+                onChanged={() => setVersion((n) => n + 1)}
+                onNotes={(notes) => onUpdate(selected.id, { notes })}
+                addRequest={addRequest?.id === selected.id ? addRequest.token : undefined}
+                onAddHandled={() => setAddRequest(null)}
+                // The wide reading has room for the time of day next to the date.
+                withClock
+              />
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">
               <NotebookPen className="size-8 opacity-60" />
@@ -196,6 +288,19 @@ export function LogsView({
           )}
         </section>
       </div>
+
+      {menu && menuGame && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      {clearTarget && (
+        <ConfirmDialog
+          title={clearTarget.kind === 'logs' ? `Reset ${clearTarget.game.title}'s log entries?` : `Reset ${clearTarget.game.title}'s notes?`}
+          description={clearTarget.kind === 'logs'
+            ? 'This permanently removes every Journal entry for this game. Its separate general notes, play sessions, and all other games’ entries stay untouched.'
+            : 'This permanently clears only the game’s general notes. Journal entries, play sessions, and all other game data stay untouched.'}
+          confirmLabel={clearTarget.kind === 'logs' ? 'Reset log entries' : 'Reset notes'}
+          onCancel={() => setClearTarget(null)}
+          onConfirm={clearSelected}
+        />
+      )}
     </div>
   );
 }

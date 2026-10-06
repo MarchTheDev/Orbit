@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
   CircleAlert,
   CircleCheck,
   Eye,
@@ -15,7 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, Page, SortKey, ViewMode } from './types';
+import type { Game, OtherLauncher, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { clearLibrary, isNative, setPlaytime, steamLibrary, windowReady } from './services/native';
@@ -34,6 +35,7 @@ import { Logo } from './components/ui/Logo';
 import { GameGrid } from './components/GameGrid';
 import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
+import { GameEditDialog } from './components/detail/GameEditDialog';
 import { SessionsView } from './components/SessionsView';
 import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
@@ -78,6 +80,7 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -90,13 +93,12 @@ export default function App() {
   const windowRevealDone = useRef(false);
   const [showImport, setShowImport] = useState(false);
   const [showSteam, setShowSteam] = useState(false);
-  const [showOtherLaunchers, setShowOtherLaunchers] = useState(false);
+  const [showOtherLaunchers, setShowOtherLaunchers] = useState<OtherLauncher | null>(null);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
   /** Where the right-click menu is, and which game it is about. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  /** Which tab the drawer should open on, and a counter that forces a reopen. */
-  const [detailTab, setDetailTab] = useState<'overview' | 'edit'>('overview');
+  /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
   /** Programs dragged onto the window, waiting to be added. */
@@ -404,6 +406,10 @@ export default function App() {
     [games, session, liveSecs],
   );
 
+  const hiddenLibraryFilters = settings?.hiddenLibraryFilters ?? [];
+  // If a selected chip is hidden in Settings, fall back to All immediately.
+  const activeFilter: Filter = hiddenLibraryFilters.includes(filter) ? 'all' : filter;
+
   // The game that is playing is marked, so the grid can show it at a glance.
   const visible = useMemo(() => {
     const q = query.toLowerCase();
@@ -420,12 +426,14 @@ export default function App() {
       if (g.planned || (!onDisk(g) && !g.inLibrary)) return false;
       // Hidden games are the library's own drawer: they are in the library, and
       // the Hidden chip is the only place they are shown.
-      if (filter !== 'hidden' && g.hidden) return false;
+      if (activeFilter !== 'hidden' && g.hidden) return false;
       if (q && !g.title.toLowerCase().includes(q)) return false;
-      if (filter === 'hidden') return !!g.hidden;
-      if (filter === 'favorites') return g.favorite;
-      if (filter === 'unplayed') return g.sessionCount === 0;
-      if (filter !== 'all') return g.status === filter;
+      if (activeFilter === 'hidden') return !!g.hidden;
+      if (activeFilter === 'favorites') return g.favorite;
+      if (activeFilter === 'unplayed') return g.sessionCount === 0;
+      // Backlog is a status shelf, not a synonym for games with no sessions.
+      if (activeFilter === 'backlog') return g.status === 'backlog';
+      if (activeFilter !== 'all') return g.status === activeFilter;
       return true;
     });
     const by: Record<SortKey, (a: Game, b: Game) => number> = {
@@ -446,7 +454,7 @@ export default function App() {
       },
     };
     return [...list].sort(by[sort]);
-  }, [played, filter, query, sort, order]);
+  }, [played, activeFilter, query, sort, order]);
 
   /**
    * Move a game to where another one is, dragging one card onto another.
@@ -504,19 +512,26 @@ export default function App() {
    */
   useEffect(() => {
     setShowAdd(false);
+    setEditingGameId(null);
     setShowImport(false);
     setShowSteam(false);
-    setShowOtherLaunchers(false);
+    setShowOtherLaunchers(null);
+    setMenu(null);
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
   }, [page]);
 
-  /** Open the drawer on a particular tab, wherever it is already. */
-  const openDetail = (id: string, tab: 'overview' | 'edit' = 'overview') => {
-    setDetailTab(tab);
+  /** Open the read-only details drawer, even if this game is already selected. */
+  const openDetail = (id: string) => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
+  };
+
+  /** The pencil opens the full, centered editor rather than an Edit drawer tab. */
+  const openGameEditor = (id: string) => {
+    setSelectedId(null);
+    setEditingGameId(id);
   };
 
   /**
@@ -526,60 +541,94 @@ export default function App() {
    * own actions: the two views only know how to report a right click.
    */
   const menuGame = menu ? (games.find((g) => g.id === menu.id) ?? null) : null;
-  const menuItems: MenuItem[] = menuGame
-    ? [
-        { kind: 'label', label: menuGame.title },
-        { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
-        { label: 'Edit details', icon: Pencil, onSelect: () => openDetail(menuGame.id, 'edit') },
-        { kind: 'sep' },
-        // Only the session Orbit is actually tracking. The database can hold a
-        // row left open by a run of the app that was killed, and reading that
-        // as "running" made this menu offer to stop a game nobody had started.
-        session?.gameId === menuGame.id
-          ? {
-              label: 'Stop session',
-              icon: Square,
-              onSelect: () => void stop(),
-            }
-          : {
-              label: 'Start Game',
-              icon: Play,
-              onSelect: () => void startGame(menuGame),
-            },
-        {
-          label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
-          icon: Star,
-          onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
-        },
-        {
-          label: menuGame.hidden ? 'Show in library' : 'Hide from library',
-          icon: menuGame.hidden ? Eye : EyeOff,
-          onSelect: () => updateGame(menuGame.id, { hidden: !menuGame.hidden }),
-        },
-        { kind: 'sep' },
-        {
-          label: 'Move to another folder…',
-          icon: MoveRight,
-          disabled: !menuGame.installDir,
-          onSelect: () => setMoveId(menuGame.id),
-        },
-        {
-          label: 'Show in Explorer',
-          icon: FolderOpen,
-          disabled: !menuGame.installDir,
-          onSelect: () => void revealInExplorer(menuGame.installDir ?? ''),
-        },
-        { kind: 'sep' },
-        {
-          label: 'Remove from library',
-          icon: Trash2,
-          danger: true,
-          onSelect: () => setRemoveConfirmId(menuGame.id),
-        },
-      ]
-    : [];
+  const menuItems: MenuItem[] = !menuGame
+    ? []
+    : page === 'backlog'
+      ? [
+          { kind: 'label', label: menuGame.title },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
+          { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id) },
+          { kind: 'sep' },
+          ...(
+            [
+              ['playing', 'Move to Playing'],
+              ['backlog', 'Move to Backlog'],
+              ['completed', 'Mark Completed'],
+              ['dropped', 'Mark Dropped'],
+            ] as const
+          )
+            .filter(([status]) => status !== menuGame.status)
+            .map(([status, label]) => ({
+              label,
+              onSelect: () => updateGame(menuGame.id, { status }),
+            })),
+          ...(menuGame.planned
+            ? [{ label: 'Mark as owned', icon: Check, onSelect: () => updateGame(menuGame.id, { planned: false, status: 'backlog' }) }]
+            : []),
+          {
+            label: 'Move to another folder…',
+            icon: MoveRight,
+            disabled: !menuGame.installDir,
+            onSelect: () => setMoveId(menuGame.id),
+          },
+          {
+            label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
+            icon: Star,
+            onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
+          },
+          { kind: 'sep' },
+          {
+            label: 'Delete from Orbit…',
+            icon: Trash2,
+            danger: true,
+            onSelect: () => setRemoveConfirmId(menuGame.id),
+          },
+        ]
+      : [
+          { kind: 'label', label: menuGame.title },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
+          { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id) },
+          { kind: 'sep' },
+          // Only the session Orbit is actually tracking. The database can hold
+          // a row left open by a run of the app that was killed, and reading that
+          // as "running" made this menu offer to stop a game nobody had started.
+          session?.gameId === menuGame.id
+            ? { label: 'Stop session', icon: Square, onSelect: () => void stop() }
+            : { label: 'Start game', icon: Play, onSelect: () => void startGame(menuGame) },
+          {
+            label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
+            icon: Star,
+            onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
+          },
+          {
+            label: menuGame.hidden ? 'Show in library' : 'Hide from library',
+            icon: menuGame.hidden ? Eye : EyeOff,
+            onSelect: () => updateGame(menuGame.id, { hidden: !menuGame.hidden }),
+          },
+          { kind: 'sep' },
+          {
+            label: 'Move to another folder…',
+            icon: MoveRight,
+            disabled: !menuGame.installDir,
+            onSelect: () => setMoveId(menuGame.id),
+          },
+          {
+            label: 'Show in Explorer',
+            icon: FolderOpen,
+            disabled: !menuGame.installDir,
+            onSelect: () => void revealInExplorer(menuGame.installDir ?? ''),
+          },
+          { kind: 'sep' },
+          {
+            label: 'Remove from library…',
+            icon: Trash2,
+            danger: true,
+            onSelect: () => setRemoveConfirmId(menuGame.id),
+          },
+        ];
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
+  const editingGame = games.find((g) => g.id === editingGameId) ?? null;
   const moving = games.find((g) => g.id === moveId) ?? null;
   const removalTarget = games.find((g) => g.id === removeConfirmId) ?? null;
   const steamRemovalIds = games.filter((g) => g.launch.kind === 'steam').map((g) => g.id);
@@ -747,7 +796,7 @@ export default function App() {
               settings={settings}
               setSettings={setSettings}
               onImportSteam={() => setShowSteam(true)}
-              onImportLaunchers={() => setShowOtherLaunchers(true)}
+              onImportLaunchers={(launcher) => setShowOtherLaunchers(launcher)}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}
@@ -759,7 +808,8 @@ export default function App() {
         ) : page === 'backlog' ? (
           <BacklogView
             games={played}
-            onSelect={setSelectedId}
+            onSelect={openDetail}
+            onEdit={openGameEditor}
             onStatus={(id, status) => updateGame(id, { status })}
             onAdd={(game) => addGames([game])}
             onUpdate={(id, patch) => updateGame(id, patch)}
@@ -772,11 +822,17 @@ export default function App() {
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
         ) : page === 'sessions' ? (
-          <SessionsView games={games} onChanged={() => void reload()} />
+          <SessionsView
+            games={games}
+            onChanged={() => void reload()}
+            onOpenGame={openDetail}
+            onEditGame={openGameEditor}
+          />
         ) : page === 'logs' ? (
           <LogsView
             games={games}
             onUpdate={(id, patch) => updateGame(id, patch)}
+            onEditGame={openGameEditor}
             // The Journal is read for the game being written about, so it can be
             // arranged in whatever order that reading wants.
             order={settings.logOrder ?? []}
@@ -808,7 +864,7 @@ export default function App() {
             <Toolbar
               count={visible.length}
               total={games.length}
-              filter={filter}
+              filter={activeFilter}
               setFilter={setFilter}
               query={query}
               setQuery={setQuery}
@@ -821,6 +877,8 @@ export default function App() {
               onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
               scale={scale}
               setScale={(n) => setSettings({ coverScale: n })}
+              filterOrder={settings.libraryFilterOrder}
+              hiddenFilters={settings.hiddenLibraryFilters}
             />
             <div>
               {!ready ? null : visible.length === 0 ? (
@@ -836,6 +894,7 @@ export default function App() {
                   games={visible}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  onEdit={openGameEditor}
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
@@ -846,6 +905,7 @@ export default function App() {
                   games={visible}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  onEdit={openGameEditor}
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
@@ -977,7 +1037,6 @@ export default function App() {
         <GameDetail
           key={`${selected.id}:${detailNonce}`}
           game={selected}
-          initialTab={detailTab}
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
           context={page === 'backlog' ? 'backlog' : 'library'}
@@ -995,12 +1054,21 @@ export default function App() {
         />
       )}
 
+      {editingGame && (
+        <GameEditDialog
+          game={editingGame}
+          onUpdate={(patch) => updateGame(editingGame.id, patch)}
+          onClose={() => setEditingGameId(null)}
+        />
+      )}
+
       {showAdd && (
         <AddGameModal
           initialPaths={droppedPaths}
           // The Steam library opens over this dialog rather than instead of it,
           // so closing it comes back to the form rather than to the library.
           onImportSteam={() => setShowSteam(true)}
+          onImportLauncher={(launcher) => setShowOtherLaunchers(launcher)}
           onClose={() => {
             setShowAdd(false);
             setDroppedPaths(null);
@@ -1021,8 +1089,9 @@ export default function App() {
       {showOtherLaunchers && (
         <OtherLauncherImportModal
           existing={games}
+          launcher={showOtherLaunchers}
           onAdd={addGames}
-          onClose={() => setShowOtherLaunchers(false)}
+          onClose={() => setShowOtherLaunchers(null)}
         />
       )}
       {showSteam && settings && (

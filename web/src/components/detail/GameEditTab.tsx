@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, Image, LoaderCircle, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
-import type { Game, HltbData, MetaData } from '../../types';
+import type { Game, GameStatus, HltbData, MetaData } from '../../types';
 import { findArtwork, isNative, type ArtworkPick } from '../../services/native';
 import { say } from '../../utils/toast';
 import { fileSrc, pickAnyFile } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
 import { Cover } from '../ui/Cover';
+import { LaunchEditor } from './LaunchEditor';
+import { Select } from '../ui/Select';
 import { SaveButton } from '../ui/SaveButton';
 import { MarkdownEditor } from '../ui/Markdown';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
@@ -33,7 +35,7 @@ const GROUPS = [
   { kind: 'logo', title: 'Logo', where: 'the name on its own, over the backdrop', shape: 'wide' },
 ] as const;
 
-export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: Partial<Game>) => void }) {
+export function GameEditTab({ game, onUpdate, onSaved }: { game: Game; onUpdate: (patch: Partial<Game>) => void; onSaved?: () => void }) {
   const meta = game.meta;
   const hltb = game.hltb;
 
@@ -53,6 +55,9 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
   const [notes, setNotes] = useState(game.notes);
   const [fit, setFit] = useState<'auto' | 'cover' | 'contain'>(meta?.coverFit ?? 'auto');
   const [planned, setPlanned] = useState(!!game.planned);
+  const [status, setStatus] = useState<GameStatus>(game.status);
+  const [favorite, setFavorite] = useState(game.favorite);
+  const [hidden, setHidden] = useState(!!game.hidden);
   /** Pictures the store offers, once the player asks for them. */
   const [options, setOptions] = useState<ArtworkPick[]>([]);
   const [finding, setFinding] = useState(false);
@@ -77,6 +82,9 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
     setNotes(game.notes);
     setFit(game.meta?.coverFit ?? 'auto');
     setPlanned(!!game.planned);
+    setStatus(game.status);
+    setFavorite(game.favorite);
+    setHidden(!!game.hidden);
     setOptions([]);
     setArtError(null);
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -152,6 +160,9 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
       title: title.trim() || game.title,
       notes,
       planned,
+      status,
+      favorite,
+      hidden,
       coverPath: coverPath.trim() || null,
       sizeBytes: Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1e9) : 0,
       sizeGb: Number.isFinite(gb) && gb > 0 ? gb : 0,
@@ -161,6 +172,7 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
     // Said out loud in the corner rather than next to the button: a line of text
     // appearing beside it moved the row and made the whole footer jump.
     say(planned ? `${nextMeta.name ?? game.title} saved, still not owned` : `${nextMeta.name ?? game.title} saved`);
+    onSaved?.();
   };
 
   return (
@@ -432,6 +444,36 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
           </span>
         </span>
       </label>
+
+      <section className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
+        <h4 className="text-xs font-semibold uppercase tracking-widest text-muted">Library details</h4>
+        <label className="block max-w-sm">
+          <span className={labelCls}>Status</span>
+          <Select
+            value={status}
+            onChange={(value) => setStatus(value as GameStatus)}
+            ariaLabel="Game status"
+            options={[
+              { value: 'backlog', label: 'Backlog' },
+              { value: 'playing', label: 'Playing' },
+              { value: 'completed', label: 'Completed' },
+              { value: 'dropped', label: 'Dropped' },
+            ]}
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <label className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm">
+            <input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} className="accent-[var(--c-accent)]" />
+            Favorite
+          </label>
+          <label className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm">
+            <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} className="accent-[var(--c-accent)]" />
+            Hide from Library
+          </label>
+        </div>
+      </section>
+
+      <LaunchEditor game={game} onSave={(launch, companions) => onUpdate({ launch, companions })} />
 
       <div className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
         <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">

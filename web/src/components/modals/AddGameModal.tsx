@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
-import type { Game, GameSuggestion, LaunchTarget, MetaData } from '../../types';
+import type { Game, GameSuggestion, LaunchTarget, MetaData, OtherLauncher } from '../../types';
+import { OTHER_LAUNCHERS } from '../../data/launchers';
 import { exeInfo, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
@@ -78,6 +79,7 @@ export function AddGameModal({
   onClose,
   onAdd,
   onImportSteam,
+  onImportLauncher,
   initialPaths,
 }: {
   onClose: () => void;
@@ -90,6 +92,8 @@ export function AddGameModal({
    * comes back to the form that was already open.
    */
   onImportSteam: () => void;
+  /** Opens one named launcher library over this Add Game form. */
+  onImportLauncher: (launcher: OtherLauncher) => void;
   /** Programs dropped on the window before the dialog was opened. */
   initialPaths?: string[] | null;
 }) {
@@ -652,14 +656,15 @@ export function AddGameModal({
 
         <button type="submit" className="hidden" />
 
-        {/* Steam is deliberately the last way into the form: the manual review
-            stays together, with the library import offered as a separate route. */}
-        <section className="border-t border-line pt-4">
+        {/* Library import is deliberately separate from the manual form. Each
+            button names the launcher so a scan never feels like one opaque
+            "other" integration. */}
+        <section className="space-y-3 border-t border-line pt-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent/20 bg-gradient-to-r from-accent/10 via-panel2/50 to-panel2/30 px-4 py-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-fg">Already installed through Steam?</p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                Import it from Steam instead of filling in these details by hand.
+                Import from your Steam library instead of filling in the details by hand.
               </p>
             </div>
             <button
@@ -670,6 +675,32 @@ export function AddGameModal({
               <Download className="size-3.5" />
               Import from Steam
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-line/70 bg-panel2/25 p-3">
+            <div className="mb-2">
+              <p className="text-sm font-semibold text-fg">Other game libraries</p>
+              <p className="mt-0.5 text-xs text-muted">Choose one launcher to scan its local install list.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {OTHER_LAUNCHERS.map((launcher) => (
+                <button
+                  key={launcher.id}
+                  type="button"
+                  onClick={() => onImportLauncher(launcher.id)}
+                  className="group flex min-w-0 items-center gap-2.5 rounded-xl border border-line bg-panel/80 px-3 py-2.5 text-left transition hover:border-accent/60 hover:bg-accent/5"
+                >
+                  <span
+                    className="grid size-8 shrink-0 place-items-center rounded-lg border text-[11px] font-black"
+                    style={{ color: launcher.color, borderColor: `${launcher.color}55`, background: `${launcher.color}14` }}
+                  >
+                    {launcher.badge}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-semibold">{launcher.id}</span>
+                  <Download className="size-3.5 shrink-0 text-muted transition group-hover:text-accent" />
+                </button>
+              ))}
+            </div>
           </div>
         </section>
       </form>

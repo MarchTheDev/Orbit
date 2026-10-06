@@ -18,7 +18,7 @@
 }
 
 html, body, #root { height: 100%; }
-body { background: var(--c-bg); color: var(--c-text); overflow: hidden; }
+body { background: var(--c-bg); color: var(--c-text); overflow: hidden; font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 8px; }
@@ -376,6 +376,16 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   100% { transform: scale(1); }
 }
 
+/* The active top-level tab carries a single indicator that travels between
+ * buttons. Resizing is measured in TopNav, so tabs can be reordered without
+ * tying the indicator to a fixed offset. */
+.topnav-indicator {
+  transition: transform 320ms cubic-bezier(.2,.8,.2,1), width 320ms cubic-bezier(.2,.8,.2,1), height 180ms ease, opacity 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .topnav-indicator { transition: none; }
+}
+
 /* The top bar's visualizer: four bars that rise and fall while the music
  * plays. They are drawn from the button's own colour rather than measured from
  * the audio, which would cost a Web Audio analyser to say what the ear already
@@ -391,11 +401,13 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   height: 100%;
   border-radius: 2px;
   background: currentColor;
+  transform: scaleY(0.06);
   transform-origin: bottom;
-  animation: orbit-bar 1.1s ease-in-out infinite;
+  opacity: 0.28;
+  transition: transform 220ms ease, opacity 220ms ease;
 }
-.orbit-bars-paused i {
-  animation-play-state: paused;
+.orbit-bars-active i {
+  animation: orbit-bar 1.1s ease-in-out infinite;
 }
 
 .orbit-bars i:nth-child(2) {
@@ -410,6 +422,10 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   animation-duration: 0.95s;
   animation-delay: 0.05s;
 }
+@media (prefers-reduced-motion: reduce) {
+  .orbit-bars i { animation: none !important; transition: none !important; }
+}
+
 @keyframes orbit-bar {
   0%,
   100% {

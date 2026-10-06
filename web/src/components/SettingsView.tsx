@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import {
   Database,
   Download,
+  Eye,
+  EyeOff,
   FolderOpen,
   Library as LibraryIcon,
   Ghost,
@@ -22,8 +24,9 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { Page, Settings } from '../types';
-import { THEMES } from '../data/themes';
+import type { FontChoice, OtherLauncher, Page, Settings } from '../types';
+import { FONTS, THEMES } from '../data/themes';
+import { OTHER_LAUNCHERS } from '../data/launchers';
 import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
 import { openExternal } from '../services/desktop';
 import { pickFolder } from '../services/desktop';
@@ -43,6 +46,7 @@ import {
   type ReleaseInfo,
 } from '../services/updates';
 import { orderedTabs } from './TopNav';
+import { LIBRARY_FILTERS, orderedLibraryFilters, type Filter } from './Toolbar';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
 
@@ -183,6 +187,71 @@ function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[])
   );
 }
 
+/** The Library chips: ordered by drag, independently hidden with one tap. */
+function LibraryFilterOrder({
+  order,
+  hidden,
+  onChange,
+}: {
+  order: Filter[];
+  hidden: Filter[];
+  onChange: (order: Filter[], hidden: Filter[]) => void;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  const filters = orderedLibraryFilters(order).map((item) => item.id);
+  const hiddenSet = new Set(hidden);
+  const visibleCount = filters.filter((id) => !hiddenSet.has(id)).length;
+  const { bind, dragging, over, active } = useDragReorder(
+    (fromId, toId, after) => onChange(moveInOrder(filters, fromId, toId, after) as Filter[], hidden),
+    { container: list },
+  );
+
+  const toggle = (id: Filter) => {
+    const isHidden = hiddenSet.has(id);
+    if (!isHidden && visibleCount <= 1) return;
+    const next = isHidden ? hidden.filter((item) => item !== id) : [...hidden, id];
+    onChange(filters, next);
+  };
+
+  return (
+    <div ref={list} className={cn('space-y-1', active && 'cursor-grabbing')}>
+      {filters.map((id) => {
+        const definition = LIBRARY_FILTERS.find((item) => item.id === id);
+        if (!definition) return null;
+        const shown = !hiddenSet.has(id);
+        const disabled = shown && visibleCount <= 1;
+        return (
+          <div
+            key={id}
+            {...bind(id)}
+            className={cn(
+              'flex items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm transition',
+              dragging === id && 'opacity-40',
+              over === id && dragging !== id && 'border-accent bg-accent/10',
+              !shown && 'opacity-65',
+            )}
+          >
+            <GripVertical className="size-4 shrink-0 cursor-grab text-muted" />
+            <span className="min-w-0 flex-1 font-medium">{definition.label}</span>
+            <span className="text-[11px] text-muted">{shown ? 'Shown' : 'Hidden'}</span>
+            <button
+              type="button"
+              onClick={() => toggle(id)}
+              disabled={disabled}
+              aria-label={`${shown ? 'Hide' : 'Show'} ${definition.label} filter`}
+              aria-pressed={shown}
+              title={disabled ? 'At least one Library filter must stay visible' : `${shown ? 'Hide' : 'Show'} this filter`}
+              className="grid size-8 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {shown ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Every card, in order, so the row at the top can point at them. */
 const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
@@ -199,20 +268,24 @@ const SECTIONS = [
 
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
+  { label: 'Fonts and typeface', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
   { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
+  { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing backlog completed dropped favorites unplayed hidden reorder show hide' },
   { label: 'Library folders and drives', section: 'orbit-library', keywords: 'where installed paths storage folders drives move' },
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Steam library scan', section: 'orbit-libraries', keywords: 'steam import installed games scan' },
   { label: 'Steam startup check', section: 'orbit-libraries', keywords: 'steam import automatic launch startup new games' },
-  { label: 'Epic, Ubisoft, GOG and EA installs', section: 'orbit-libraries', keywords: 'epic ubisoft gog ea launcher import read only' },
-  { label: 'Other game launchers', section: 'orbit-libraries', keywords: 'epic ubisoft gog ea launcher import' },
+  { label: 'Import Epic Games', section: 'orbit-libraries', keywords: 'epic launcher library import installed' },
+  { label: 'Import Ubisoft Connect', section: 'orbit-libraries', keywords: 'ubisoft launcher library import installed' },
+  { label: 'Import GOG Galaxy', section: 'orbit-libraries', keywords: 'gog launcher library import installed' },
+  { label: 'Import EA app', section: 'orbit-libraries', keywords: 'ea launcher library import installed' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
@@ -239,8 +312,8 @@ export function SettingsView({
   setSettings: (patch: Partial<Settings>) => void;
   /** Opens the Steam import dialog. */
   onImportSteam: () => void;
-  /** Opens the read-only scan for other installed launchers. */
-  onImportLaunchers: () => void;
+  /** Opens a read-only scan for one specific launcher. */
+  onImportLaunchers: (launcher: OtherLauncher) => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -376,12 +449,12 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap gap-1.5 rounded-2xl border border-line/80 bg-bg/90 p-2 shadow-lg backdrop-blur-xl">
+      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-accent/20 bg-gradient-to-r from-accent/10 via-panel/95 to-accent2/10 p-2 shadow-lg backdrop-blur-xl">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => jump(s.id)}
-            className="rounded-full border border-line bg-panel2/50 px-3 py-1 text-xs text-muted transition hover:border-accent/50 hover:text-fg"
+            className="rounded-full border border-line/70 bg-bg/45 px-3 py-1.5 text-xs font-medium text-muted shadow-sm transition hover:border-accent/50 hover:bg-accent/10 hover:text-fg"
           >
             {s.label}
           </button>
@@ -409,6 +482,31 @@ export function SettingsView({
                 <span className="h-3 w-16 rounded" style={{ background: t.panel2 }} />
               </div>
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
+            </button>
+          ))}
+        </div>
+
+        <SubHead>Typeface</SubHead>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {FONTS.map((font) => (
+            <button
+              key={font.id}
+              type="button"
+              onClick={() => setSettings({ fontFamily: font.id as FontChoice })}
+              aria-pressed={(settings.fontFamily ?? 'system') === font.id}
+              className={cn(
+                'rounded-xl border px-3 py-3 text-left transition',
+                (settings.fontFamily ?? 'system') === font.id
+                  ? 'border-accent bg-accent/10 shadow-[0_0_0_1px_var(--c-accent)]'
+                  : 'border-line bg-panel2/40 hover:border-accent/50',
+              )}
+              style={{ fontFamily: font.stack }}
+            >
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="text-sm font-semibold">{font.name}</span>
+                <span className="text-lg font-bold">Aa</span>
+              </span>
+              <span className="mt-1 block text-xs text-muted">{font.sample}</span>
             </button>
           ))}
         </div>
@@ -452,6 +550,16 @@ export function SettingsView({
           onChange={(v) => setSettings({ showHero: v })}
           label="Show the Jump back in panel"
           hint="Keep the recently played game and its Play button at the top of the Library."
+        />
+
+        <SubHead>Library filters</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          Drag to choose the order of the Library chips. Hide the ones you do not use; at least one stays visible.
+        </p>
+        <LibraryFilterOrder
+          order={orderedLibraryFilters(settings.libraryFilterOrder).map((item) => item.id)}
+          hidden={settings.hiddenLibraryFilters ?? []}
+          onChange={(libraryFilterOrder, hiddenLibraryFilters) => setSettings({ libraryFilterOrder, hiddenLibraryFilters })}
         />
 
         <SubHead>Hidden games</SubHead>
@@ -592,17 +700,32 @@ export function SettingsView({
           Scan the Steam library…
         </button>
 
-        <SubHead>Other launchers</SubHead>
+        <SubHead>Other libraries</SubHead>
         <p className="text-xs leading-relaxed text-muted">
-          Scan Epic Games, Ubisoft Connect, GOG Galaxy and EA app install records on this device. Nothing is imported until you select it.
+          Pick a launcher to scan its local install records. Each scan is read-only and nothing is imported until you select it.
         </p>
-        <button
-          onClick={onImportLaunchers}
-          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm transition hover:border-accent"
-        >
-          <Download className="size-4" />
-          Scan other launchers…
-        </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {OTHER_LAUNCHERS.map((launcher) => (
+            <button
+              key={launcher.id}
+              type="button"
+              onClick={() => onImportLaunchers(launcher.id)}
+              className="group flex items-center gap-3 rounded-xl border border-line bg-panel2/45 p-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
+            >
+              <span
+                className="grid size-9 shrink-0 place-items-center rounded-xl border text-xs font-black"
+                style={{ color: launcher.color, borderColor: `${launcher.color}55`, background: `${launcher.color}14` }}
+              >
+                {launcher.badge}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-fg">{launcher.id}</span>
+                <span className="block text-[11px] text-muted">{launcher.description}</span>
+              </span>
+              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+            </button>
+          ))}
+        </div>
       </Section>
 
       <Section

@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   Play,
   Plus,
+  Pencil,
   SquareArrowRight,
   Timer,
   Undo2,
@@ -66,6 +67,7 @@ const ORDERS: { id: Order; label: string; icon: typeof Clock }[] = [
 export function BacklogView({
   games,
   onSelect,
+  onEdit,
   onStatus,
   onAdd,
   onUpdate,
@@ -77,6 +79,7 @@ export function BacklogView({
 }: {
   games: Game[];
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
   /** Saves a game that is only planned, so it can be added without a program. */
   onAdd: (game: Game) => void;
@@ -428,6 +431,7 @@ export function BacklogView({
         games={playing}
         empty="Nothing part-way through."
         onSelect={onSelect}
+        onEdit={onEdit}
         onStatus={onStatus}
         movable={false}
         showTimes={showTimes}
@@ -439,6 +443,7 @@ export function BacklogView({
         games={backlog}
         empty="Nothing waiting. Write one down above, or add a game from the Library."
         onSelect={onSelect}
+        onEdit={onEdit}
         onStatus={onStatus}
         movable={order === 'mine' && query.trim() === ''}
         onMove={move}
@@ -452,6 +457,7 @@ export function BacklogView({
           games={planned}
           empty="Nothing written down that you do not own."
           onSelect={onSelect}
+          onEdit={onEdit}
           onStatus={onStatus}
           movable={false}
           notOwned
@@ -472,6 +478,7 @@ export function BacklogView({
         games={dropped}
         empty="Nothing dropped."
         onSelect={onSelect}
+        onEdit={onEdit}
         onStatus={onStatus}
         movable={false}
         showTimes={showTimes}
@@ -484,6 +491,7 @@ export function BacklogView({
           games={completed}
           empty="Nothing finished yet."
           onSelect={onSelect}
+          onEdit={onEdit}
           onStatus={onStatus}
           movable={false}
           showTimes={showTimes}
@@ -507,6 +515,7 @@ function Section({
   games,
   empty,
   onSelect,
+  onEdit,
   onStatus,
   movable,
   onMove,
@@ -520,6 +529,7 @@ function Section({
   games: Game[];
   empty: string;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
   /** True when this lane is being read in the player's own order. */
   movable: boolean;
@@ -557,6 +567,7 @@ function Section({
             return (
               <li
                 key={g.id}
+                data-orbit-game={g.id}
                 {...bind(g.id)}
                 className={`glass group flex items-center gap-3 rounded-2xl p-3 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
                   over === g.id ? 'ring-2 ring-accent' : ''
@@ -634,6 +645,17 @@ function Section({
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit(g.id);
+                    }}
+                    title={`Edit ${g.title}`}
+                    aria-label={`Edit ${g.title}`}
+                    className="grid size-7 place-items-center rounded-md border border-line bg-panel text-muted opacity-100 transition hover:border-accent hover:text-accent sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
                   {notOwned ? (
                     <div className="flex gap-1">
                       <button

@@ -1,4 +1,4 @@
-import { Play, Star } from 'lucide-react';
+import { Pencil, Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
 import { Cover } from './ui/Cover';
@@ -11,6 +11,7 @@ interface Props {
   games: Game[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onPlay: (g: Game) => void;
   /** Drawn at this percentage of the base row, from the toolbar's slider. */
   scale: number;
@@ -18,7 +19,7 @@ interface Props {
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
-export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder }: Props) {
+export function GameList({ games, selectedId, onSelect, onEdit, onPlay, scale, onReorder }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
@@ -41,7 +42,7 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
             data-orbit-game={g.id}
             {...bind(g.id)}
             className={cn(
-              'grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
+              'group grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
               selectedId === g.id ? 'glass !border-accent' : 'border-transparent hover:bg-panel/60',
               onReorder && 'cursor-grab active:cursor-grabbing',
               over === g.id && 'ring-2 ring-accent',
@@ -65,17 +66,30 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
             <span className="text-muted">{fmtMinutes(g.playSecs / 60)}</span>
             <span className="text-muted">{fmtDate(g.lastPlayed)}</span>
             <span className="text-muted">{driveLabel(g.drive) || '-'}</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPlay(g);
-              }}
-              title={`Play ${g.title}`}
-              className="btn-accent flex items-center justify-center gap-2 rounded-lg px-4 py-1.5 text-sm"
-            >
-              <Play className="size-4" fill="currentColor" strokeWidth={0} />
-              Play
-            </button>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(g.id);
+                }}
+                title={`Edit ${g.title}`}
+                aria-label={`Edit ${g.title}`}
+                className="grid size-8 place-items-center rounded-lg border border-line text-muted opacity-100 transition hover:border-accent hover:text-accent sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay(g);
+                }}
+                title={`Play ${g.title}`}
+                className="btn-accent flex items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm"
+              >
+                <Play className="size-4" fill="currentColor" strokeWidth={0} />
+                Play
+              </button>
+            </div>
           </div>
         ))}
       </div>

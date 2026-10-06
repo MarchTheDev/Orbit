@@ -36,7 +36,7 @@ export function MusicButton({
   const playing = sound?.enabled === true;
   const volume = sound?.volume ?? 0.35;
   const unfocused = sound?.unfocused === true;
-  const pauseBars = volume <= 0 || (!focused && !unfocused);
+  const animateBars = playing && volume > 0 && (focused || unfocused);
 
   /** Keep the bars still when Orbit is out of focus, along with its sound. */
   useEffect(() => {
@@ -68,15 +68,15 @@ export function MusicButton({
         onClick={() => setOpen((v) => !v)}
         aria-label="Music"
         aria-expanded={open}
-        title={playing ? 'Music is on' : 'Music is off'}
+        title={!playing ? 'Music is off' : volume <= 0 ? 'Music is muted' : 'Music is on'}
         className={cn(
           'flex items-center gap-2 rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg',
           playing && 'text-accent hover:text-accent',
         )}
       >
-        {playing ? <Piano className="size-5" strokeWidth={1.8} /> : <VolumeX className="size-5" strokeWidth={1.8} />}
-        {playing && showBars && (
-          <span className={cn('orbit-bars', pauseBars && 'orbit-bars-paused')} aria-hidden>
+        {playing && volume > 0 ? <Piano className="size-5" strokeWidth={1.8} /> : <VolumeX className="size-5" strokeWidth={1.8} />}
+        {showBars && (
+          <span className={cn('orbit-bars', animateBars && 'orbit-bars-active')} aria-hidden>
             <i />
             <i />
             <i />

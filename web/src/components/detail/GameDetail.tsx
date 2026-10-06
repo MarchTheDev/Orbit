@@ -8,7 +8,6 @@ import {
   History,
   Info,
   NotebookPen,
-  Pencil,
   Play,
   RefreshCw,
   Square,
@@ -33,7 +32,6 @@ import { LaunchEditor } from './LaunchEditor';
 import { SessionHistory } from './SessionHistory';
 import { GameLogView } from './GameLogView';
 import { AchievementsTab } from './AchievementsTab';
-import { GameEditTab } from './GameEditTab';
 import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
 
@@ -47,15 +45,6 @@ interface Props {
    * somebody is deciding to play, so nothing about launching belongs in it.
    */
   context?: 'library' | 'backlog';
-  /**
-   * Which tab to open on.
-   *
-   * The right-click menu in the library can go straight to Edit, and a drawer
-   * that opens on Overview and then jumps is worse than one that opens where it
-   * was asked to. The app gives the drawer a new key when it changes, so this is
-   * read once per opening.
-   */
-  initialTab?: 'overview' | 'edit';
   /** The running session, if it is for this game. */
   session: ActiveSession | null;
   now: number;
@@ -71,7 +60,6 @@ interface Props {
 export function GameDetail({
   game,
   context = 'library',
-  initialTab = 'overview',
   session,
   now,
   onUpdate,
@@ -86,12 +74,12 @@ export function GameDetail({
   const [loadingHltb, setLoadingHltb] = useState(false);
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions' | 'edit'>(initialTab);
+  const [tab, setTab] = useState<'overview' | 'achievements' | 'log' | 'sessions'>('overview');
   /** The backlog drawer is a smaller thing: four tabs, and no launch settings. */
   const backlog = context === 'backlog';
   const showing = backlog
-    ? (['overview', 'log', 'sessions', 'edit'] as const)
-    : (['overview', 'achievements', 'log', 'sessions', 'edit'] as const);
+    ? (['overview', 'log', 'sessions'] as const)
+    : (['overview', 'achievements', 'log', 'sessions'] as const);
   const [logCount, setLogCount] = useState(0);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
   const [loggingSession, setLoggingSession] = useState(false);
@@ -238,7 +226,6 @@ export function GameDetail({
               ['achievements', 'Achievements', Trophy],
               ['log', 'Logs', NotebookPen],
               ['sessions', 'Sessions', History],
-              ['edit', 'Edit', Pencil],
             ] as const
           )
             .filter(([id]) => (showing as readonly string[]).includes(id))
@@ -554,8 +541,6 @@ export function GameDetail({
           {tab === 'log' && (
             <GameLogView game={game} onChanged={refreshLogCount} onNotes={(notes) => onUpdate({ notes })} />
           )}
-
-          {tab === 'edit' && <GameEditTab game={game} onUpdate={onUpdate} />}
 
           {tab === 'sessions' && (
             <>

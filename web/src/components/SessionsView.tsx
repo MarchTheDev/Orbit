@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Clock, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, Clock, Info, ListOrdered, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, Session, Stats } from '../types';
 import { DEFAULT_CATEGORY } from '../data/categories';
 import {
@@ -8,10 +8,14 @@ import {
   libraryStats,
   listSessions,
   logManualSession,
+  setPlaytime,
   updateSession,
 } from '../services/native';
 import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, parseDuration, toLocalInput } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
+import { Cover } from './ui/Cover';
+import { ContextMenu, type MenuItem } from './ui/ContextMenu';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Select } from './ui/Select';
 import { DateTimePicker } from './ui/DateTimePicker';
 
@@ -27,7 +31,17 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
-export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: () => void }) {
+export function SessionsView({
+  games,
+  onChanged,
+  onOpenGame,
+  onEditGame,
+}: {
+  games: Game[];
+  onChanged: () => void;
+  onOpenGame: (id: string) => void;
+  onEditGame: (id: string) => void;
+}) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [total, setTotal] = useState(0);
@@ -35,6 +49,17 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
   const [gameFilter, setGameFilter] = useState('');
   const [editing, setEditing] = useState<Session | null>(null);
   const [logging, setLogging] = useState(false);
+  const [loggingGameId, setLoggingGameId] = useState<string | null>(null);
+  const [context, setContext] = useState<
+    | { kind: 'session'; x: number; y: number; row: Session }
+    | { kind: 'game'; x: number; y: number; game: Game }
+    | null
+  >(null);
+  const [removing, setRemoving] = useState<Session | null>(null);
+  const [playtimeGame, setPlaytimeGame] = useState<Game | null>(null);
+  const [playtimeHours, setPlaytimeHours] = useState('');
+  const [playtimeError, setPlaytimeError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [rows, count, totals] = await Promise.all([
@@ -70,55 +95,112 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
     };
   }, [load]);
 
-  const remove = async (row: Session) => {
-    if (!confirm(`Remove this ${fmtClock(row.durationSecs)} session of ${row.gameTitle}?`)) return;
-    await deleteSession(row.id);
-    onChanged();
-    void load();
-  };
-
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const played = useMemo(
     () =>
       [...games]
-        .filter((g) => g.sessionCount > 0)
+        .filter((g) => g.sessionCount > 0 || g.playSecs > 0)
         .sort((a, b) => b.playSecs - a.playSecs)
         .slice(0, 8),
     [games],
   );
 
+  const beginPlaytimeEdit = (game: Game) => {
+    setPlaytimeGame(game);
+    setPlaytimeHours(String(Math.round((game.playSecs / 3600) * 10) / 10));
+    setPlaytimeError(null);
+  };
+
+  const savePlaytime = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!playtimeGame) return;
+    const hours = Number(playtimeHours.replace(',', '.'));
+    if (!playtimeHours.trim() || !Number.isFinite(hours) || hours < 0) {
+      setPlaytimeError('Enter a non-negative number of hours.');
+      return;
+    }
+    setPlaytimeError(null);
+    try {
+      await setPlaytime(playtimeGame.id, Math.round(hours * 3600));
+      onChanged();
+      await load();
+      setPlaytimeGame(null);
+    } catch (reason) {
+      setPlaytimeError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const contextItems: MenuItem[] = context
+    ? context.kind === 'session'
+      ? [
+          { kind: 'label', label: context.row.gameTitle },
+          { label: 'Edit session…', icon: Pencil, onSelect: () => setEditing(context.row) },
+          { label: 'Open game details', icon: Info, onSelect: () => onOpenGame(context.row.gameId) },
+          { kind: 'sep' },
+          { label: 'Delete session…', icon: Trash2, danger: true, onSelect: () => setRemoving(context.row) },
+        ]
+      : [
+          { kind: 'label', label: context.game.title },
+          { label: 'Open game details', icon: Info, onSelect: () => onOpenGame(context.game.id) },
+          { label: 'Edit game…', icon: Pencil, onSelect: () => onEditGame(context.game.id) },
+          { label: 'Edit total playtime…', icon: Clock, onSelect: () => beginPlaytimeEdit(context.game) },
+          { kind: 'sep' },
+          {
+            label: 'Log time by hand…',
+            icon: Plus,
+            onSelect: () => {
+              setLoggingGameId(context.game.id);
+              setLogging(true);
+            },
+          },
+        ]
+    : [];
+
   return (
-    <div className="mx-6 mt-5 space-y-4">
+    <div className="mx-auto max-w-[1500px] space-y-5 px-6 py-6">
+      <header className="relative flex flex-wrap items-center gap-4 overflow-hidden rounded-3xl border border-accent/20 bg-gradient-to-br from-accent/10 via-panel/75 to-accent2/5 p-5 shadow-lg sm:p-6">
+        <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
+          <ListOrdered className="size-6" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">Your play history</p>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight">Sessions</h1>
+          <p className="mt-1 text-sm text-muted">Every tracked and hand-logged session, with its game and time in view.</p>
+        </div>
+        <button
+          className={`${btnGhost} flex shrink-0 items-center gap-2`}
+          onClick={() => {
+            setLoggingGameId(null);
+            setLogging(true);
+          }}
+          disabled={games.length === 0}
+        >
+          <Plus className="size-4" />
+          Log time by hand
+        </button>
+      </header>
+
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <Stat
-            label="Games tracked"
-            value={String(stats.trackedGames)}
-            hint={`of ${stats.totalGames} in the library`}
-          />
+          <Stat label="Games tracked" value={String(stats.trackedGames)} hint={`of ${stats.totalGames} in the library`} />
           <Stat label="Sessions" value={String(stats.sessionCount)} />
-          <Stat
-            label="Longest session"
-            value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '-'}
-          />
-          {/* From the sessions alone. The library's own total includes time
-              typed in by hand, which is not a session and was dragging this
-              number away from anything anybody had actually played. */}
-          <Stat
-            label="Average session"
-            value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.sessionSecs / stats.sessionCount)) : '-'}
-          />
+          <Stat label="Longest session" value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '-'} />
+          <Stat label="Average session" value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.sessionSecs / stats.sessionCount)) : '-'} />
           <Stat label="First played" value={stats.firstPlay ? fmtDate(new Date(stats.firstPlay * 1000).toISOString()) : '-'} />
         </div>
       )}
 
-      <div className="glass rounded-2xl p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Sessions</h2>
+      <section className="glass rounded-3xl p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="mr-auto">
+            <h2 className="text-lg font-semibold">Session history</h2>
+            <p className="mt-0.5 text-xs text-muted">Right-click a session to edit, open its game, or remove it.</p>
+          </div>
           <Select
             value={gameFilter}
-            onChange={(v) => {
-              setGameFilter(v);
+            onChange={(value) => {
+              setGameFilter(value);
               setPage(0);
             }}
             className="w-56"
@@ -126,118 +208,186 @@ export function SessionsView({ games, onChanged }: { games: Game[]; onChanged: (
             ariaLabel="Which game's sessions to show"
             options={[{ value: '', label: 'Every game' }, ...games.map((g) => ({ value: g.id, label: g.title }))]}
           />
-          <div className="flex-1" />
-          <button
-            className={`${btnGhost} flex items-center gap-2`}
-            onClick={() => setLogging(true)}
-            disabled={games.length === 0}
-          >
-            <Plus className="size-4" />
-            Log time by hand
-          </button>
         </div>
 
+        {actionError && <p role="alert" className="mb-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{actionError}</p>}
         {sessions.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted">
-            {total === 0 ? 'No sessions yet. Press Play on a game and it will show up here.' : 'Nothing on this page.'}
-          </p>
+          <div className="rounded-2xl border border-dashed border-line px-4 py-14 text-center">
+            <Clock className="mx-auto size-8 text-muted/70" />
+            <p className="mt-2 text-sm font-medium">{total === 0 ? 'No sessions yet' : 'Nothing on this page'}</p>
+            <p className="mt-1 text-xs text-muted">{total === 0 ? 'Press Play on a game or log time by hand to start your history.' : 'Try another page or clear the game filter.'}</p>
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-[10px] uppercase tracking-widest text-muted">
-                <tr>
-                  <th className="py-2 pr-3 font-medium">Game</th>
-                  <th className="py-2 pr-3 font-medium">Started</th>
-                  <th className="py-2 pr-3 font-medium">Played</th>
-                  <th className="py-2 pr-3 font-medium">Ended</th>
-                  <th className="py-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id} className="border-t border-line/60 hover:bg-panel2/60">
-                    <td className="py-2 pr-3 font-medium">{s.gameTitle}</td>
-                    <td className="py-2 pr-3 text-muted">{fmtDateTime(s.startedAt)}</td>
-                    <td className="py-2 pr-3 font-mono">{fmtClock(s.durationSecs)}</td>
-                    <td className="py-2 pr-3 text-xs text-muted">{fmtEndedBy(s.endedBy, s.manual)}</td>
-                    {/* The buttons sit a comfortable distance from the edge of
-                        the table rather than up against it: a Remove button half
-                        a step from the border is one misclick from being wrong. */}
-                    <td className="py-2 pl-6 pr-4 text-right whitespace-nowrap">
+          <ul className="space-y-2">
+            {sessions.map((row) => {
+              const game = games.find((candidate) => candidate.id === row.gameId);
+              return (
+                <li
+                  key={row.id}
+                  data-orbit-session={row.id}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setActionError(null);
+                    setContext({ kind: 'session', x: event.clientX, y: event.clientY, row });
+                  }}
+                  className="group grid gap-3 rounded-2xl border border-line/70 bg-panel/35 p-3 transition hover:border-accent/40 hover:bg-panel/60 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onOpenGame(row.gameId)}
+                    className="flex min-w-0 items-center gap-3 text-left"
+                    title={`Open ${row.gameTitle}`}
+                  >
+                    {game ? <Cover game={game} className="size-14 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{row.gameTitle}</span>
+                      <span className="mt-1 block text-xs text-muted">{fmtDateTime(row.startedAt)}</span>
+                    </span>
+                  </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+                    <div className="mr-auto min-w-24 sm:mr-0 sm:text-right">
+                      <p className="text-[9px] uppercase tracking-widest text-muted">Played</p>
+                      <p className="font-mono text-sm font-semibold text-fg">{fmtClock(row.durationSecs)}</p>
+                    </div>
+                    <span className="rounded-full border border-line bg-bg/40 px-2.5 py-1 text-[10px] text-muted" title={fmtEndedBy(row.endedBy, row.manual)}>
+                      {fmtEndedBy(row.endedBy, row.manual)}
+                    </span>
+                    <div className="flex shrink-0 gap-1.5">
                       <button
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-accent hover:border-accent"
-                        onClick={() => setEditing(s)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-accent transition hover:border-accent"
+                        onClick={() => setEditing(row)}
                         title="Correct when it started and how long it ran"
                       >
-                        <Pencil className="size-3" />
-                        Edit
+                        <Pencil className="size-3" /> Edit
                       </button>
                       <button
-                        className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-rose-400 hover:text-rose-400"
-                        onClick={() => void remove(s)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400 hover:text-rose-400"
+                        onClick={() => setRemoving(row)}
                         title="Remove this session"
                       >
-                        <Trash2 className="size-3" />
-                        Remove
+                        <Trash2 className="size-3" /> Remove
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
 
         {pages > 1 && (
-          <div className="mt-3 flex items-center justify-center gap-3 text-sm">
-            <button className={btnGhost} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </button>
-            <span className="text-muted">
-              Page {page + 1} of {pages}
-            </span>
-            <button className={btnGhost} disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </button>
+          <div className="mt-4 flex items-center justify-center gap-3 text-sm">
+            <button className={btnGhost} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
+            <span className="text-muted">Page {page + 1} of {pages}</span>
+            <button className={btnGhost} disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
           </div>
         )}
-      </div>
+      </section>
 
       {played.length > 0 && (
-        <div className="glass rounded-2xl p-4">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-muted">Most played</h2>
+        <section className="glass rounded-3xl p-4 sm:p-5">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Most played</h2>
+              <p className="mt-0.5 text-xs text-muted">Right-click a game to adjust its total playtime or open its details.</p>
+            </div>
+            <span className="text-xs text-muted">Top {played.length}</span>
+          </div>
           <div className="space-y-2">
-            {played.map((g) => {
-              const top = played[0].playSecs || 1;
+            {played.map((game, index) => {
+              const top = Math.max(1, played[0].playSecs);
+              const fraction = Math.min(100, (game.playSecs / top) * 100);
               return (
-                <div key={g.id} className="flex items-center gap-3">
-                  <span className="w-40 truncate text-sm">{g.title}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-panel2">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-accent to-accent2"
-                      style={{ width: `${Math.max(2, (g.playSecs / top) * 100)}%` }}
-                    />
+                <div
+                  key={game.id}
+                  data-orbit-session-game={game.id}
+                  onClick={() => onOpenGame(game.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onOpenGame(game.id);
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContext({ kind: 'game', x: event.clientX, y: event.clientY, game });
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className="group flex cursor-pointer items-center gap-3 rounded-2xl border border-line/60 bg-panel/30 p-2.5 text-left transition hover:border-accent/40 hover:bg-panel/55"
+                >
+                  <span className="w-5 shrink-0 text-center font-mono text-xs text-muted">{String(index + 1).padStart(2, '0')}</span>
+                  <Cover game={game} className="size-12 shrink-0 rounded-xl" />
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5">
+                      <span className="truncate text-sm font-medium">{game.title}</span>
+                      <span className="font-mono text-xs text-muted">{fmtClock(game.playSecs)}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-panel2">
+                      <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]" style={{ width: `${fraction}%` }} />
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted">{game.sessionCount > 0 ? `${game.sessionCount} sessions recorded` : 'Manually tracked playtime'}</p>
                   </div>
-                  <span className="w-20 text-right font-mono text-xs text-muted">{fmtClock(g.playSecs)}</span>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
       {editing && <EditSession row={editing} onClose={() => setEditing(null)} onSaved={() => { onChanged(); void load(); }} />}
       {logging && (
         <LogSession
           games={games}
-          onClose={() => setLogging(false)}
+          initialGameId={loggingGameId ?? undefined}
+          onClose={() => {
+            setLogging(false);
+            setLoggingGameId(null);
+          }}
           onSaved={() => { onChanged(); void load(); }}
         />
+      )}
+      {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onClose={() => setContext(null)} />}
+      {removing && (
+        <ConfirmDialog
+          title={`Delete ${removing.gameTitle} session?`}
+          description={`This removes the ${fmtClock(removing.durationSecs)} session from ${fmtDateTime(removing.startedAt)}. The game's other sessions and total playtime stay intact.`}
+          confirmLabel="Delete session"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => {
+            const row = removing;
+            setRemoving(null);
+            setActionError(null);
+            void deleteSession(row.id)
+              .then(() => {
+                onChanged();
+                void load();
+              })
+              .catch((reason) => setActionError(reason instanceof Error ? reason.message : String(reason)));
+          }}
+        />
+      )}
+      {playtimeGame && (
+        <Modal title={`Edit ${playtimeGame.title} playtime`} subtitle={`Current total: ${fmtClock(playtimeGame.playSecs)}.`} onClose={() => setPlaytimeGame(null)}>
+          <form onSubmit={savePlaytime} className="space-y-4">
+            <label className="block">
+              <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Total hours</span>
+              <input type="number" min={0} step={0.1} value={playtimeHours} onChange={(event) => setPlaytimeHours(event.target.value)} className={inputCls} autoFocus />
+            </label>
+            <p className="text-xs leading-relaxed text-muted">This changes the displayed total without rewriting session history. You can edit or remove individual sessions from their own right-click menu.</p>
+            {playtimeError && <p role="alert" className="text-xs text-rose-400">{playtimeError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btnGhost} onClick={() => setPlaytimeGame(null)}>Cancel</button>
+              <button className={btnPrimary}>Save playtime</button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
 }
-
 export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: () => void; onSaved: () => void }) {
   const [hours, setHours] = useState(Math.floor(row.durationSecs / 3600));
   const [minutes, setMinutes] = useState(Math.floor((row.durationSecs % 3600) / 60));

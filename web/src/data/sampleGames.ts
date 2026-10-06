@@ -63,6 +63,9 @@ export const SAMPLE_GAMES: Game[] = [
 /** What Orbit assumes before anything has been saved. */
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
+  fontFamily: 'system',
+  libraryFilterOrder: ['all', 'playing', 'backlog', 'completed', 'dropped', 'favorites', 'unplayed', 'hidden'],
+  hiddenLibraryFilters: [],
   libraryFolders: [],
   steamOnLaunch: false,
   sortOrder: [],

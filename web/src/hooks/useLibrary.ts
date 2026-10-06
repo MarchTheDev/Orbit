@@ -4,7 +4,7 @@ import type { Game, MetaData, Settings } from '../types';
 import { deleteGame as removeFromDb, listGames, saveGame, clearLibrary } from '../services/native';
 import { loadSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
-import { applyTheme } from '../data/themes';
+import { applyFont, applyTheme } from '../data/themes';
 
 /**
  * Fields a person fills in, as opposed to anything Orbit works out.
@@ -56,6 +56,7 @@ export function useLibrary() {
       setGames(loaded);
       setSettingsState(loadedSettings);
       applyTheme(loadedSettings.theme);
+      applyFont(loadedSettings.fontFamily ?? 'system');
       setReady(true);
     })();
     return () => {
@@ -141,6 +142,7 @@ export function useLibrary() {
       if (!current) return current;
       const next = { ...current, ...patch };
       if (patch.theme) applyTheme(patch.theme);
+      if (patch.fontFamily) applyFont(patch.fontFamily);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });
@@ -170,6 +172,7 @@ export function useLibrary() {
       .then(() => saveSettings(DEFAULT_SETTINGS))
       .then(() => {
         applyTheme(DEFAULT_SETTINGS.theme);
+        applyFont(DEFAULT_SETTINGS.fontFamily ?? 'system');
         location.reload();
       })
       .catch(console.error);

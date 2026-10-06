@@ -1,11 +1,12 @@
 import { ArrowDownUp, Eye, EyeOff, LayoutGrid, List, Plus, Rows3 } from 'lucide-react';
-import type { Game, SortKey, ViewMode } from '../types';
+import type { LibraryFilter, SortKey, ViewMode } from '../types';
 import { cn } from '../utils/cn';
 import { SearchField } from './ui/SearchField';
 import { Select } from './ui/Select';
 
 /** The status chips above the library. */
-export type Filter = 'all' | 'favorites' | Game['status'] | 'unplayed' | 'hidden';
+export type Filter = LibraryFilter;
+export type FilterDefinition = { id: Filter; label: string };
 
 interface Props {
   count: number;
@@ -24,9 +25,11 @@ interface Props {
   /** How big the covers are drawn, as a percentage of the base size. */
   scale: number;
   setScale: (n: number) => void;
+  filterOrder?: Filter[];
+  hiddenFilters?: Filter[];
 }
 
-const FILTERS: { id: Filter; label: string }[] = [
+export const LIBRARY_FILTERS: FilterDefinition[] = [
   { id: 'all', label: 'All' },
   { id: 'playing', label: 'Playing' },
   { id: 'backlog', label: 'Backlog' },
@@ -38,6 +41,23 @@ const FILTERS: { id: Filter; label: string }[] = [
   // back to a game that has been hidden.
   { id: 'hidden', label: 'Hidden' },
 ];
+
+/** A saved order can be from an older version; newly added filters go last. */
+export function orderedLibraryFilters(order?: Filter[]): FilterDefinition[] {
+  if (!order?.length) return LIBRARY_FILTERS;
+  const byId = new Map(LIBRARY_FILTERS.map((item) => [item.id, item]));
+  const seen = new Set<Filter>();
+  const result: FilterDefinition[] = [];
+  for (const id of order) {
+    const item = byId.get(id);
+    if (item && !seen.has(id)) {
+      result.push(item);
+      seen.add(id);
+    }
+  }
+  for (const item of LIBRARY_FILTERS) if (!seen.has(item.id)) result.push(item);
+  return result;
+}
 
 export function Toolbar({
   count,
@@ -55,7 +75,13 @@ export function Toolbar({
   onToggleHero,
   scale,
   setScale,
+  filterOrder,
+  hiddenFilters = [],
 }: Props) {
+  const hidden = new Set(hiddenFilters);
+  const visibleFilters = orderedLibraryFilters(filterOrder).filter((item) => !hidden.has(item.id));
+  const categories = visibleFilters.length > 0 ? visibleFilters : [LIBRARY_FILTERS[0]];
+
   return (
     <div className="mt-8 space-y-3 px-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -140,11 +166,12 @@ export function Toolbar({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {FILTERS.map((f) => (
+      <div className="glass flex flex-wrap items-center gap-1.5 rounded-2xl p-1.5">
+        {categories.map((f) => (
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
+            aria-pressed={filter === f.id}
             className={cn(
               'rounded-full border px-3 py-1 text-xs transition',
               filter === f.id ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60',

@@ -1,4 +1,7 @@
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
+export type LibraryFilter = 'all' | 'favorites' | GameStatus | 'unplayed' | 'hidden';
+export type OtherLauncher = 'Epic Games' | 'Ubisoft Connect' | 'GOG Galaxy' | 'EA app';
+export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono';
 
 export interface HltbData {
   main: number; // hours
@@ -267,6 +270,12 @@ export interface Stats {
 
 export interface Settings {
   theme: string;
+  /** The system font stack used throughout the interface. */
+  fontFamily?: FontChoice;
+  /** The order of the Library filter chips. Missing filters are appended. */
+  libraryFilterOrder?: LibraryFilter[];
+  /** Library filters the player has chosen not to show. */
+  hiddenLibraryFilters?: LibraryFilter[];
   /**
    * Folders games are installed in. Orbit will only ever move a game between
    * these, and never touches a game that sits outside them.
