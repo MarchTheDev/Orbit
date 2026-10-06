@@ -2,6 +2,8 @@ import {
   Check,
   Clock,
   ExternalLink,
+  Eye,
+  EyeOff,
   HardDrive,
   History,
   Info,
@@ -342,6 +344,26 @@ export function GameDetail({
                 fill={game.favorite ? 'currentColor' : 'none'}
               />
             </button>
+            {/* Beside the star, because it is the same kind of thing: how this
+                game is filed, not what to do with it. A hidden game keeps its
+                sessions, its notes and its place; it is only out of the way. */}
+            <button
+              onClick={() => onUpdate({ hidden: !game.hidden })}
+              className={`group grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border transition ${
+                game.hidden
+                  ? 'border-accent/50 bg-accent/10'
+                  : 'border-line bg-panel2 hover:border-accent/60 hover:bg-accent/10'
+              }`}
+              title={game.hidden ? 'Show in library again' : 'Hide from library'}
+              aria-label={game.hidden ? 'Show in library again' : 'Hide from library'}
+              aria-pressed={!!game.hidden}
+            >
+              {game.hidden ? (
+                <Eye className="size-5 text-accent" />
+              ) : (
+                <EyeOff className="size-5 text-muted group-hover:text-accent" />
+              )}
+            </button>
           </div>
           )}
 
@@ -379,6 +401,13 @@ export function GameDetail({
           {game.planned && (
             <p className="text-[11px] text-muted">
               Not in the library yet. Orbit will not look for a file until it is.
+            </p>
+          )}
+
+          {game.hidden && (
+            <p className="text-[11px] text-muted">
+              Hidden from the library. Its sessions, notes and playtime are all still here, and the Hidden chip on the
+              library page is where it can be found again.
             </p>
           )}
 

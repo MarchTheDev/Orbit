@@ -17,7 +17,8 @@ use serde_json::Value;
 ///     longer talks to IGDB at all, and a game can list the programs it wants
 ///     started alongside it.
 /// 5, a game can be on the library's shelf before it has a program to start.
-const SCHEMA_VERSION: i64 = 5;
+/// 6, a game can be hidden from the library without being removed from it.
+const SCHEMA_VERSION: i64 = 6;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -82,6 +83,8 @@ pub struct GameRow {
     /// On the library's shelf with nothing to start yet: added by title alone,
     /// waiting for its program or kept as a game timed by hand.
     pub in_library: bool,
+    /// Kept out of the library without being removed from it.
+    pub hidden: bool,
     /// Achievements, as last read, with the ones the player has ticked.
     pub achievements: Vec<serde_json::Value>,
     pub notes: String,
@@ -268,6 +271,7 @@ impl Db {
                 companions       TEXT    NOT NULL DEFAULT '[]',
                 planned          INTEGER NOT NULL DEFAULT 0,
                 in_library       INTEGER NOT NULL DEFAULT 0,
+                hidden           INTEGER NOT NULL DEFAULT 0,
                 achievements     TEXT    NOT NULL DEFAULT '[]',
                 notes            TEXT    NOT NULL DEFAULT '',
                 logs             TEXT    NOT NULL DEFAULT '[]',
@@ -326,6 +330,10 @@ impl Db {
         // Version 5 adds the shelf flag: a game put in the library by hand,
         // which has nothing to start yet but is not a plan either.
         Self::upgrade_to_5(conn)?;
+
+        // Version 6 adds hiding: a game that is still in the library, with its
+        // sessions and its notes, and simply out of the way.
+        Self::upgrade_to_6(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -471,6 +479,32 @@ impl Db {
         Ok(())
     }
 
+    /// Bring a version 5 library up to date.
+    ///
+    /// One column: whether a game is being kept out of sight. Nothing in the
+    /// library is hidden by it, so every game already there behaves as before.
+    fn upgrade_to_6(conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(games)")
+            .map_err(|e| format!("Could not read the library layout: {e}"))?;
+        let columns = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| format!("Could not read the library layout: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read the library layout: {e}"))?;
+        drop(stmt);
+
+        if !columns.iter().any(|c| c == "hidden") {
+            conn.execute(
+                "ALTER TABLE games ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Could not add the hidden column: {e}"))?;
+            log::info!("added games.hidden");
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
         self.conn
             .lock()
@@ -494,7 +528,7 @@ impl Db {
                        MIN(s.started_at)                              AS first_play,
                        MAX(COALESCE(s.ended_at, s.started_at))        AS last_end,
                        COALESCE(SUM(CASE WHEN s.ended_at IS NULL THEN 1 ELSE 0 END), 0) AS open_count,
-                       g.planned, g.achievements, g.in_library
+                       g.planned, g.achievements, g.in_library, g.hidden
                   FROM games g
                   LEFT JOIN sessions s ON s.game_id = g.id
                  GROUP BY g.id
@@ -520,6 +554,7 @@ impl Db {
                 let install_dir: Option<String> = r.get(4)?;
                 let achievements: Option<String> = r.get(23)?;
                 let in_library: i64 = r.get(24)?;
+                let hidden: i64 = r.get(25)?;
 
                 // The typed-in time is time played away from Orbit, so it adds to
                 // what the sessions recorded rather than standing in for it.
@@ -552,6 +587,7 @@ impl Db {
                     companions: parse_vec(companions.as_deref()),
                     planned: r.get::<_, i64>(22)? != 0,
                     in_library: in_library != 0,
+                    hidden: hidden != 0,
                     achievements: achievements
                         .as_deref()
                         .and_then(|v| serde_json::from_str::<Vec<Value>>(v).ok())
@@ -594,8 +630,8 @@ impl Db {
             INSERT INTO games (id, title, launch, exe_path, install_dir, size_bytes,
                                status, favorite, manual_play_secs, cover_path, meta,
                                hltb, notes, companions, hue, planned, achievements,
-                               in_library, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?17, ?18, ?19, ?16, ?16)
+                               in_library, hidden, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?17, ?18, ?19, ?20, ?16, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 title            = excluded.title,
                 launch           = excluded.launch,
@@ -614,6 +650,7 @@ impl Db {
                 planned          = excluded.planned,
                 achievements     = excluded.achievements,
                 in_library       = excluded.in_library,
+                hidden           = excluded.hidden,
                 updated_at       = excluded.updated_at
             "#,
             params![
@@ -641,6 +678,7 @@ impl Db {
                 i64::from(game.planned),
                 serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".into()),
                 i64::from(game.in_library),
+                i64::from(game.hidden),
             ],
         )
         .map_err(|e| format!("Could not save {}: {e}", game.title))?;
@@ -1191,6 +1229,9 @@ pub struct GameWrite {
     /// Added to the library by hand, with nothing to point at yet.
     #[serde(default)]
     pub in_library: bool,
+    /// Kept out of the library without being removed from it.
+    #[serde(default)]
+    pub hidden: bool,
     /// Read from Steam, with the ones the player has ticked kept as they are.
     #[serde(default)]
     pub achievements: Vec<Value>,

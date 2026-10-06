@@ -241,11 +241,9 @@ input[type='datetime-local'] {
 @keyframes orbit-enter {
   from {
     opacity: 0;
-    transform: scale(0.99) translateY(6px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -276,8 +274,101 @@ input[type='datetime-local'] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .orbit-pulse {
+  .orbit-pulse,
+  .orbit-bars i {
     animation: none;
+  }
+}
+
+/* -------------------------------------------------------------- the opening */
+
+/*
+ * The startup screen: the mark, a ring sweeping out past it, the name arriving.
+ * Everything here is an opacity or a transform on its own element, so nothing
+ * it does can affect where anything else is drawn.
+ */
+.orbit-startup {
+  animation: fade 0.25s ease both;
+}
+
+.orbit-startup-out {
+  animation: orbit-startup-out 0.5s ease forwards;
+}
+
+@keyframes orbit-startup-out {
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+
+.orbit-startup-mark {
+  animation: orbit-startup-mark 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes orbit-startup-mark {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.orbit-startup-name {
+  animation: orbit-startup-name 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+}
+
+@keyframes orbit-startup-name {
+  from {
+    opacity: 0;
+    letter-spacing: 0.85em;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* One ring, drawn from the mark outwards. Absolutely centred, so it needs no
+ * transform to be in the right place, which is what lets the ring be a plain
+ * scale. */
+.orbit-ring {
+  position: absolute;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+  animation: orbit-ring 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.orbit-ring-late {
+  animation-delay: 0.35s;
+}
+
+@keyframes orbit-ring {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  35% {
+    opacity: 0.8;
+  }
+  to {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-startup-mark,
+  .orbit-startup-name,
+  .orbit-ring {
+    animation: none;
+  }
+  .orbit-ring {
+    opacity: 0;
   }
 }
 
@@ -351,6 +442,48 @@ input[type='datetime-local'] {
   0% { transform: scale(0.5); opacity: 0; }
   60% { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(1); }
+}
+
+/* The top bar's visualizer: four bars that rise and fall while the music
+ * plays. They are drawn from the button's own colour rather than measured from
+ * the audio, which would cost a Web Audio analyser to say what the ear already
+ * knows, and they stop dead for anybody who asked for less movement. */
+.orbit-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.orbit-bars i {
+  width: 2px;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: orbit-bar 1.1s ease-in-out infinite;
+}
+.orbit-bars i:nth-child(2) {
+  animation-duration: 0.85s;
+  animation-delay: 0.12s;
+}
+.orbit-bars i:nth-child(3) {
+  animation-duration: 1.35s;
+  animation-delay: 0.26s;
+}
+.orbit-bars i:nth-child(4) {
+  animation-duration: 0.95s;
+  animation-delay: 0.05s;
+}
+@keyframes orbit-bar {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
 }
 
 /* The volume slider: the engine's own range input is a system widget, and this

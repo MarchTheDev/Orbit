@@ -5,7 +5,7 @@ import { SearchField } from './ui/SearchField';
 import { Select } from './ui/Select';
 
 /** The status chips above the library. */
-export type Filter = 'all' | 'favorites' | Game['status'] | 'unplayed';
+export type Filter = 'all' | 'favorites' | Game['status'] | 'unplayed' | 'hidden';
 
 interface Props {
   count: number;
@@ -32,6 +32,9 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'dropped', label: 'Dropped' },
   { id: 'favorites', label: 'Favorites' },
   { id: 'unplayed', label: 'Unplayed' },
+  // Last, because it is the one nobody needs every day, and it is the only way
+  // back to a game that has been hidden.
+  { id: 'hidden', label: 'Hidden' },
 ];
 
 export function Toolbar({

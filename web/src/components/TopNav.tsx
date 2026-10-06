@@ -1,6 +1,7 @@
 import { HardDrive, Library, ListOrdered, NotebookPen, ScrollText, Settings as SettingsIcon } from 'lucide-react';
-import type { Page } from '../types';
+import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
+import { MusicButton } from './MusicButton';
 
 // Sessions sits right after the library, because that is the tab anyone reaches
 // for next. The theme button is gone: themes live in Settings.
@@ -46,11 +47,22 @@ export function TopNav({
   page,
   setPage,
   order,
+  sound,
+  setSound,
+  showMusic,
+  showBars,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   /** The player's own tab order from Settings; the default when absent. */
   order?: Page[];
+  /** The background music, so the bar can play it, hush it and set its level. */
+  sound: Settings['sound'];
+  setSound: (next: Settings['sound']) => void;
+  /** Whether the controls are drawn at all. Settings decides. */
+  showMusic: boolean;
+  /** Whether the controls dance while the music plays. */
+  showBars: boolean;
 }) {
   const tabs = orderedTabs(order);
   return (
@@ -87,6 +99,9 @@ export function TopNav({
         </nav>
 
         <div className="flex-1" />
+        {showMusic && (
+          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => setPage('settings')} />
+        )}
         <button
           onClick={() => setPage('settings')}
           aria-label="Settings"

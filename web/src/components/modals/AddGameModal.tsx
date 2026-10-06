@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FolderOpen, LoaderCircle, Plus, TriangleAlert, X } from 'lucide-react';
+import { Download, FolderOpen, LoaderCircle, Plus, TriangleAlert, X } from 'lucide-react';
 import type { Game, LaunchTarget } from '../../types';
 import { exeInfo, isNative, scanFolder } from '../../services/native';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
@@ -37,10 +37,18 @@ interface Draft {
 export function AddGameModal({
   onClose,
   onAdd,
+  onImportSteam,
   initialPaths,
 }: {
   onClose: () => void;
   onAdd: (g: Game, fetchMeta: boolean) => void;
+  /**
+   * Opens the Steam library picker.
+   *
+   * Steam games are not typed in by hand, so the door to them is here rather
+   * than a second form: this closes the dialog and hands over to the list.
+   */
+  onImportSteam: () => void;
   /** Programs dropped on the window before the dialog was opened. */
   initialPaths?: string[] | null;
 }) {
@@ -157,6 +165,22 @@ export function AddGameModal({
       }
     >
       <form onSubmit={submit} className="space-y-4">
+        {/* Two ways to add a game, said once at the top: a program or a title
+            here, or the Steam library over there. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+          <p className="text-xs text-muted">
+            Already installed on Steam? Bring games over from the Steam library rather than typing them in.
+          </p>
+          <button
+            type="button"
+            onClick={onImportSteam}
+            className="flex shrink-0 items-center gap-2 rounded-lg border border-line bg-panel px-3 py-1.5 text-xs hover:border-accent hover:text-accent"
+          >
+            <Download className="size-3.5" />
+            From Steam…
+          </button>
+        </div>
+
         {dropped.length > 0 && (
           <div className="space-y-1 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">

@@ -1,14 +1,31 @@
-import { Info, Play, Square } from 'lucide-react';
+import { Info, Play, Square, X } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
 import { Cover } from './ui/Cover';
 
-interface Props { game: Game; running: boolean; onPlay: () => void; onDetails: () => void }
+interface Props {
+  game: Game;
+  running: boolean;
+  onPlay: () => void;
+  onDetails: () => void;
+  /** Takes the panel away, which Settings can put back. */
+  onHide: () => void;
+}
 
-export function Hero({ game, running, onPlay, onDetails }: Props) {
+export function Hero({ game, running, onPlay, onDetails, onHide }: Props) {
   const pct = game.hltb ? Math.min(100, Math.round((game.playSecs / 3600 / game.hltb.main) * 100)) : null;
   return (
     <section className="relative mx-6 mt-5 overflow-hidden rounded-3xl border border-line">
+      {/* The way out is on the panel itself: somebody who does not want to be
+          greeted by a game should not have to go looking in Settings for it. */}
+      <button
+        onClick={onHide}
+        title="Hide this panel (Settings can bring it back)"
+        aria-label="Hide Jump back in"
+        className="absolute right-3 top-3 z-10 grid size-8 place-items-center rounded-full bg-black/40 text-white/70 backdrop-blur transition hover:bg-black/60 hover:text-white"
+      >
+        <X className="size-4" />
+      </button>
       <Cover game={game} className="absolute inset-0 size-full scale-110 blur-2xl opacity-70 [&_span]:hidden" />
       <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/80 to-transparent" />
       <div className="relative flex items-center gap-8 p-8">

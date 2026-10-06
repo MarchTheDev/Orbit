@@ -44,6 +44,16 @@ on:
       # number on it: these change what ends up inside the installers.
       - 'web/src-tauri/Cargo.toml'
       - 'web/src-tauri/Cargo.lock'
+      # The app itself. A change to what it does is a change to what is inside
+      # the installers, and this is the only way to get those built: the manual
+      # button needs this file on the default branch. It costs a few minutes of
+      # runners per push, which is the price of an installer that is never
+      # older than the code it came from.
+      - 'web/src/**'
+      - 'web/src-tauri/src/**'
+      - 'web/index.html'
+      - 'web/package.json'
+      - 'web/package-lock.json'
   workflow_dispatch:
     inputs:
       version:

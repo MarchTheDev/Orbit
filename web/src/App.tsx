@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CircleAlert,
   CircleCheck,
+  Eye,
+  EyeOff,
   FolderOpen,
   Info,
   LoaderCircle,
@@ -40,6 +42,7 @@ import { AddGameModal, gameFromDropped } from './components/modals/AddGameModal'
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { SettingsView } from './components/SettingsView';
+import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { onDisk } from './utils/library';
@@ -74,6 +77,8 @@ export default function App() {
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  /** Whether the opening has finished and taken itself off the screen. */
+  const [booted, setBooted] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showSteam, setShowSteam] = useState(false);
   const [importFolder, setImportFolder] = useState<string | null>(null);
@@ -132,7 +137,7 @@ export default function App() {
     if (settings?.updateCheck === false) return;
     let alive = true;
     const timer = setTimeout(() => {
-      void checkForUpdate().then((found) => {
+      void checkForUpdate(undefined, settings?.updatePrerelease === true).then((found) => {
         if (!alive || !found) return;
         setUpdate(found);
         // A question rather than a note: it stays until it is answered, and one
@@ -163,7 +168,7 @@ export default function App() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [settings?.updateCheck]);
+  }, [settings?.updateCheck, settings?.updatePrerelease]);
 
   /**
    * The background sound, which is off until somebody asks for it.
@@ -337,7 +342,10 @@ export default function App() {
       const byTitle = new Set(games.map((g) => g.title.trim().toLowerCase()));
       const fresh = found.filter((s) => !byId.has(s.appId) && !byTitle.has(s.name.trim().toLowerCase()));
       if (fresh.length === 0) return;
-      const added: Game[] = fresh.map(gameFromSteam);
+      // These come off the Steam library itself, so they are games on this PC
+      // and belong on the shelf. `map` would hand the index in as the second
+      // argument, which is the flag that says "planned", so it is spelled out.
+      const added: Game[] = fresh.map((g) => gameFromSteam(g));
       addGames(added);
       toast({ text: `${added.length} Steam ${added.length === 1 ? 'game' : 'games'} added` });
       for (const g of added) {
@@ -394,7 +402,11 @@ export default function App() {
       // library from the moment it is added, whether or not there is a program
       // to point at yet.
       if (g.planned || (!onDisk(g) && !g.inLibrary)) return false;
+      // Hidden games are the library's own drawer: they are in the library, and
+      // the Hidden chip is the only place they are shown.
+      if (filter !== 'hidden' && g.hidden) return false;
       if (q && !g.title.toLowerCase().includes(q)) return false;
+      if (filter === 'hidden') return !!g.hidden;
       if (filter === 'favorites') return g.favorite;
       if (filter === 'unplayed') return g.sessionCount === 0;
       if (filter !== 'all') return g.status === filter;
@@ -467,6 +479,20 @@ export default function App() {
     return () => window.removeEventListener('contextmenu', onContextMenu);
   }, []);
 
+  /**
+   * Dialogs belong to the page they were opened from.
+   *
+   * Changing tab with one open used to leave it on top of the new page, which
+   * is how importing from Steam in Settings ended up following the player
+   * around the app.
+   */
+  useEffect(() => {
+    setShowAdd(false);
+    setShowImport(false);
+    setShowSteam(false);
+    setMoveId(null);
+  }, [page]);
+
   /** Open the drawer on a particular tab, wherever it is already. */
   const openDetail = (id: string, tab: 'overview' | 'edit' = 'overview') => {
     setDetailTab(tab);
@@ -505,6 +531,11 @@ export default function App() {
           label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
           icon: Star,
           onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
+        },
+        {
+          label: menuGame.hidden ? 'Show in library' : 'Hide from library',
+          icon: menuGame.hidden ? Eye : EyeOff,
+          onSelect: () => updateGame(menuGame.id, { hidden: !menuGame.hidden }),
         },
         { kind: 'sep' },
         {
@@ -590,8 +621,14 @@ export default function App() {
     .sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''));
   // A game that is only written down is not the thing to jump back into: there
   // is nothing to jump into.
-  const heroGame = runningGame ?? byRecent[0] ?? played.find((g) => !g.planned) ?? null;
-  const continueGames = byRecent.filter((g) => g.id !== heroGame?.id && g.status !== 'completed').slice(0, 6);
+  const heroGame =
+    runningGame ??
+    byRecent.find((g) => !g.hidden) ??
+    played.find((g) => !g.planned && !g.hidden) ??
+    null;
+  const continueGames = byRecent
+    .filter((g) => g.id !== heroGame?.id && g.status !== 'completed' && !g.hidden)
+    .slice(0, 6);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -599,21 +636,41 @@ export default function App() {
   const showHome = page === 'library' && !query;
 
   // Nothing can be drawn until the settings have loaded, which also decides the
-  // theme. Every hook above has already run, so this is safe.
-  if (!settings) return <div className="h-full bg-bg" />;
+  // theme. Every hook above has already run, so this is safe. While that
+  // happens the opening is on screen, which is most of what it is for.
+  if (!settings) {
+    return (
+      <>
+        {!booted && <Startup onDone={() => setBooted(true)} />}
+        <div className="h-full bg-bg" />
+      </>
+    );
+  }
+
+  // The opening is on unless it has been turned off, and it is the same switch
+  // that fades the shell in behind it. It plays once, when the app starts.
+  const opening = !booted && settings.startupAnimation !== false;
 
   return (
-    <div
-      className={
-        // The little entrance, which is on unless it has been turned off. It
-        // plays once, when the shell appears: the settings have arrived by now,
-        // so the choice is known before anything moves.
-        settings.startupAnimation === false
-          ? 'relative h-full overflow-y-auto text-fg'
-          : 'orbit-enter relative h-full overflow-y-auto text-fg'
-      }
-    >
-      <TopNav page={page} setPage={setPage} order={settings?.tabOrder} />
+    <>
+      {opening && <Startup onDone={() => setBooted(true)} />}
+      <div
+        className={
+          // Opacity only, never a transform: an ancestor with a transform on it
+          // becomes the thing a fixed element is measured against, and the
+          // dialogs would then scroll with the page instead of sitting over it.
+          opening ? 'orbit-enter relative h-full overflow-y-auto text-fg' : 'relative h-full overflow-y-auto text-fg'
+        }
+      >
+      <TopNav
+        page={page}
+        setPage={setPage}
+        order={settings?.tabOrder}
+        sound={settings.sound}
+        setSound={(sound) => setSettings({ sound })}
+        showMusic={settings.topbarMusic !== false}
+        showBars={settings.musicBars !== false}
+      />
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
@@ -680,12 +737,18 @@ export default function App() {
           />
         ) : (
           <>
-            {showHome && heroGame && (
+            {showHome && settings.showHero !== false && heroGame && (
               <Hero
                 game={heroGame}
                 running={runningGame?.id === heroGame.id}
                 onPlay={() => void startGame(heroGame)}
                 onDetails={() => setSelectedId(heroGame.id)}
+                onHide={() => {
+                  setSettings({ showHero: false });
+                  announce({
+                    text: 'Jump back in is off. Settings has the switch that brings it back.',
+                  });
+                }}
               />
             )}
             {showHome && <ContinueRow games={continueGames} onSelect={setSelectedId} />}
@@ -856,6 +919,11 @@ export default function App() {
       {showAdd && (
         <AddGameModal
           initialPaths={droppedPaths}
+          onImportSteam={() => {
+            setShowAdd(false);
+            setDroppedPaths(null);
+            setShowSteam(true);
+          }}
           onClose={() => {
             setShowAdd(false);
             setDroppedPaths(null);
@@ -877,12 +945,15 @@ export default function App() {
         <SteamImportModal
           existing={games}
           fetchMeta={settings.fetchMetadata}
+          from={page === 'backlog' ? 'backlog' : 'library'}
           onAdd={addGames}
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => {
-            const ids = games
-              .filter((g) => g.launch.kind === 'steam' || g.meta?.steamAppId)
-              .map((g) => g.id);
+            // Only the games that came in from Steam, which are the ones that
+            // start through it. `meta.steamAppId` is not a marker for that: it
+            // is set by any lookup the store answered, so a game added by title
+            // had been counted as a Steam import and offered up for removal.
+            const ids = games.filter((g) => g.launch.kind === 'steam').map((g) => g.id);
             if (ids.length === 0) return;
             if (
               !confirm(
@@ -916,6 +987,7 @@ export default function App() {
           Browser preview · run <span className="font-mono">npm run tauri dev</span> for files, launching and sessions
         </p>
       )}
-    </div>
+      </div>
+    </>
   );
 }

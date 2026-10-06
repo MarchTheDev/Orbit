@@ -3,10 +3,10 @@ import {
   Database,
   Download,
   FolderOpen,
+  Library as LibraryIcon,
   Ghost,
   GitBranch,
   GripVertical,
-  HardDrive,
   Heart,
   Monitor,
   Palette,
@@ -201,10 +201,10 @@ export function SettingsView({
     <div className="mx-auto max-w-3xl space-y-8 p-8">
       <h1 className="text-2xl font-bold">Settings</h1>
 
-      <section>
+<section>
         <h2 className="mb-3 flex items-center gap-2 font-semibold">
           <Palette className="size-4 text-accent" />
-          Theme
+          Appearance
         </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
@@ -225,9 +225,11 @@ export function SettingsView({
           ))}
         </div>
 
+
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Covers</h3>
         {/* Part of the theme rather than a setting of its own: it decides what
             colour a cover is tinted with when the pointer is over it. */}
-        <div className="mt-3">
+        <div>
           <Checkbox
             checked={settings.coverTint !== false}
             onChange={(v) => setSettings({ coverTint: v })}
@@ -236,11 +238,13 @@ export function SettingsView({
           />
         </div>
 
+
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">When the app opens</h3>
         <Checkbox
           checked={settings.startupAnimation !== false}
           onChange={(v) => setSettings({ startupAnimation: v })}
-          label="Fade the app in when it opens"
-          hint="Under half a second, and it covers the moment the library is still arriving. Off: Orbit is simply there."
+          label="Play the opening when Orbit starts"
+          hint="The mark, a ring and the name, about a second and a half, which is the time the library takes to arrive anyway. Off: the app is simply there."
         />
 
         <Checkbox
@@ -250,27 +254,93 @@ export function SettingsView({
           hint="Off: a title you add without pointing Orbit at anything becomes a library game you can time, which is what somebody playing it elsewhere wants. On: it waits on the Backlog as well, so one list of what to play next covers both."
         />
       </section>
-
       <section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
-          <GripVertical className="size-4 text-accent" />
-          Tabs along the top
+          <LibraryIcon className="size-4 text-accent" />
+          Library and Backlog
         </h2>
-        <p className="text-sm text-muted">
-          Press a tab and move it to put the pages you use most first. Settings is always last, wherever it would have
-          been.
-        </p>
-        <TabOrder
-          order={orderedTabs(settings.tabOrder).map((t) => t.id)}
-          onChange={(next) => setSettings({ tabOrder: next })}
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Adding games</h3>
+
+        <Checkbox
+          checked={settings.syncBacklog === true}
+          onChange={(v) => setSettings({ syncBacklog: v })}
+          label="Also add new games to the Backlog"
+          hint="A game added with no program to point at waits on the Backlog as well, so one list covers both."
         />
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Jump back in</h3>
+
+        <Checkbox
+          checked={settings.showHero !== false}
+          onChange={(v) => setSettings({ showHero: v })}
+          label="Show the Jump back in panel"
+          hint="The panel at the top of the library, with the game you played last. It has a small cross of its own; this is the switch that brings it back."
+        />
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Hidden games</h3>
+
+        <p className="text-sm text-muted">
+          A game can be hidden from its own drawer or from the right-click menu. It keeps its sessions, notes and
+          playtime, and the Hidden chip on the library page is where it comes back.
+        </p>
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Where games live</h3>
+
+<section className="space-y-3">
+        <p className="text-sm text-muted">
+          Games inside these folders are yours as far as Orbit is concerned: it can report what they take and move them
+          between the folders you list. Anything added from elsewhere is listed but never touched.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {settings.libraryFolders.map((f) => (
+            <span key={f} className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-1.5 font-mono text-sm">
+              {f}
+              <button
+                onClick={() => setSettings({ libraryFolders: settings.libraryFolders.filter((x) => x !== f) })}
+                className="text-muted hover:text-rose-400"
+                aria-label={`Remove ${f}`}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+          {settings.libraryFolders.length === 0 && <span className="text-sm text-muted">None yet, add one below.</span>}
+        </div>
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addFolder(folder); }}>
+          <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="D:\Games" className={`${inputCls} flex-1 font-mono`} />
+          {isNative() && (
+            <button type="button" className={`${btnBrowse} flex items-center gap-2`} onClick={() => void pickFolder('Choose a library folder', folder || undefined).then((p) => p && addFolder(p))}>
+              <FolderOpen className="size-4" />
+              Browse…
+            </button>
+          )}
+          <button className={cn(btnAccent, 'rounded-lg px-4 py-2 text-sm')}>Add folder</button>
+        </form>
+        {drives.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {drives.map((d) => (
+              <button
+                key={d.drive}
+                onClick={() => addFolder(`${driveLabel(d.drive)}Games`)}
+                className="rounded-lg border border-line bg-panel2 px-3 py-1.5 text-xs hover:border-accent"
+              >
+                Use {driveLabel(d.drive)}Games · {fmtBytes(d.free)} free
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
       </section>
 
-      <section className="space-y-3">
+<section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
           <Monitor className="size-4 text-accent" />
-          Orbit's window around a game
+          Playing
         </h2>
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Orbit's window around a game</h3>
+
         <p className="text-sm text-muted">
           Both of these do nothing unless you pick something: Orbit never moves itself uninvited.
         </p>
@@ -315,9 +385,29 @@ export function SettingsView({
             { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
           ]}
         />
-      </section>
+        
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Steam library</h3>
 
-      <section className="space-y-3">
+<section className="space-y-3">
+        <p className="text-sm text-muted">
+          Importing from Steam lives in Add game, where games are added from. This is where Orbit looks at the Steam
+          library again, and it is still where Steam games are taken back out of the library.
+        </p>
+        <Checkbox
+          checked={settings.steamOnLaunch}
+          onChange={(v) => setSettings({ steamOnLaunch: v })}
+          label="Check Steam for new games when Orbit starts"
+          hint="Adds anything installed on Steam that is not in the library yet. It never removes or changes a game, and a game you removed by hand comes back the next time you launch. Off by default."
+        />
+        <button
+          onClick={onImportSteam}
+          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent"
+        >
+          <Download className="size-4" />
+          Scan the Steam library…
+        </button>
+      </section>
+      </section><section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
           <Sparkles className="size-4 text-accent" />
           Artwork and details
@@ -341,101 +431,20 @@ export function SettingsView({
           hint="Games already in the library, or ones added while offline, are looked up quietly, a few at a time."
         />
 
-      </section>
-
-      <section className="space-y-3">
+      </section><section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
-          <Download className="size-4 text-accent" />
-          Steam library
+          <GripVertical className="size-4 text-accent" />
+          Tabs along the top
         </h2>
         <p className="text-sm text-muted">
-          Orbit can read the Steam library installed on this PC and bring games over. Nothing arrives without you
-          asking: open the dialog below, tick what you want, and that is what is added. It is also where games that
-          came in from Steam can be taken back out again.
+          Press a tab and move it to put the pages you use most first. Settings is always last, wherever it would have
+          been.
         </p>
-        <Checkbox
-          checked={settings.steamOnLaunch}
-          onChange={(v) => setSettings({ steamOnLaunch: v })}
-          label="Check Steam for new games when Orbit starts"
-          hint="Adds anything installed on Steam that is not in the library yet. It never removes or changes a game, and a game you removed by hand comes back the next time you launch. Off by default."
+        <TabOrder
+          order={orderedTabs(settings.tabOrder).map((t) => t.id)}
+          onChange={(next) => setSettings({ tabOrder: next })}
         />
-        <button
-          onClick={onImportSteam}
-          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent"
-        >
-          <Download className="size-4" />
-          Import from Steam…
-        </button>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <HardDrive className="size-4 text-accent" />
-          Library folders
-        </h2>
-        <p className="text-sm text-muted">
-          Games inside these folders are yours as far as Orbit is concerned: it can report what they take and move them
-          between the folders you list. Anything added from elsewhere is listed but never touched.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {settings.libraryFolders.map((f) => (
-            <span key={f} className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-1.5 font-mono text-sm">
-              {f}
-              <button
-                onClick={() => setSettings({ libraryFolders: settings.libraryFolders.filter((x) => x !== f) })}
-                className="text-muted hover:text-rose-400"
-                aria-label={`Remove ${f}`}
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
-          {settings.libraryFolders.length === 0 && <span className="text-sm text-muted">None yet, add one below.</span>}
-        </div>
-        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addFolder(folder); }}>
-          <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="D:\Games" className={`${inputCls} flex-1 font-mono`} />
-          {isNative() && (
-            <button type="button" className={`${btnBrowse} flex items-center gap-2`} onClick={() => void pickFolder('Choose a library folder', folder || undefined).then((p) => p && addFolder(p))}>
-              <FolderOpen className="size-4" />
-              Browse…
-            </button>
-          )}
-          <button className={cn(btnAccent, 'rounded-lg px-4 py-2 text-sm')}>Add folder</button>
-        </form>
-        {drives.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {drives.map((d) => (
-              <button
-                key={d.drive}
-                onClick={() => addFolder(`${driveLabel(d.drive)}Games`)}
-                className="rounded-lg border border-line bg-panel2 px-3 py-1.5 text-xs hover:border-accent"
-              >
-                Use {driveLabel(d.drive)}Games · {fmtBytes(d.free)} free
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <Wand2 className="size-4 text-accent" />
-          Other tools
-        </h2>
-        <p className="text-sm text-muted">Programs made alongside Orbit.</p>
-        <button
-          onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
-          className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
-        >
-          <Ghost className="mt-0.5 size-5 shrink-0 text-accent" />
-          <span>
-            <span className="block text-sm font-semibold">Ghost Hunter Pro</span>
-            <span className="block text-xs text-muted">Find and clean out game save files and leftover data.</span>
-          </span>
-        </button>
-      </section>
-
-      <section className="space-y-3">
+      </section><section className="space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
           <Piano className="size-4 text-accent" />
           Sound
@@ -488,18 +497,50 @@ export function SettingsView({
             label="Keep playing while Orbit is not the window in front"
             hint="Off: the music steps aside when you click away, and comes back when you do. On: it carries on, which is what a second monitor wants."
           />
-        </div>
-      </section>
+          
+        <h3 className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">In the top bar</h3>
 
-      {/* Updates, just above About: it is something to act on rather than
-          something to read, and About has the last word on the page. The id
-          is what the toast scrolls to when it says one is waiting. */}
-      <section id="orbit-updates" className="scroll-mt-8 space-y-3">
+          <Checkbox
+            checked={settings.topbarMusic !== false}
+            onChange={(v) => setSettings({ topbarMusic: v })}
+            label="Put the music controls in the top bar"
+            hint="A music button beside Settings, for hushing it without coming back here."
+          />
+          <Checkbox
+            checked={settings.musicBars !== false}
+            onChange={(v) => setSettings({ musicBars: v })}
+            label="Dance a little while it plays"
+            hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
+          />
+        </div>
+      </section><section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Wand2 className="size-4 text-accent" />
+          Other tools
+        </h2>
+        <p className="text-sm text-muted">Programs made alongside Orbit.</p>
+        <button
+          onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
+          className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
+        >
+          <Ghost className="mt-0.5 size-5 shrink-0 text-accent" />
+          <span>
+            <span className="block text-sm font-semibold">Ghost Hunter Pro</span>
+            <span className="block text-xs text-muted">Find and clean out game save files and leftover data.</span>
+          </span>
+        </button>
+      </section><section id="orbit-updates" className="scroll-mt-8 space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
           <Download className="size-4 text-accent" />
           Updates
         </h2>
         <div className="space-y-3 rounded-xl border border-line bg-panel/60 p-4 text-sm">
+          <Checkbox
+            checked={settings.updatePrerelease === true}
+            onChange={(v) => setSettings({ updatePrerelease: v })}
+            label="Include pre-releases"
+            hint="A build published as a pre-release is skipped by default, which keeps a test build out of everybody's way. Turn this on to be offered one."
+          />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-medium text-fg">Orbit {APP_VERSION}</p>
@@ -551,9 +592,7 @@ export function SettingsView({
             hint="One request to GitHub's public releases API. No account, no identifier, and nothing about your library is sent."
           />
         </div>
-      </section>
-
-      <section className="space-y-2">
+      </section><section className="space-y-2">
         <h2 className="flex items-center gap-2 font-semibold">
           <Database className="size-4 text-accent" />
           About
@@ -592,9 +631,7 @@ export function SettingsView({
             Delete games only
           </button>
         </div>
-      </section>
-
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-muted">
+      </section><footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-muted">
         <p className="flex items-center gap-1.5">
           Made with <Heart className="size-3.5 text-rose-400" fill="currentColor" strokeWidth={0} /> by TheMarch88
         </p>

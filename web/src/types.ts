@@ -85,6 +85,15 @@ export interface Game {
    * so with `planned`.
    */
   inLibrary?: boolean;
+  /**
+   * Kept out of the library without being taken out of it.
+   *
+   * A hidden game is still in Orbit: its sessions, its notes and its playtime
+   * are all there, and it can be started again the moment it is unhidden. It is
+   * only out of the way, which is what a finished game or one somebody does not
+   * want to see every day needs.
+   */
+  hidden?: boolean;
   /** Achievements as last read, with the player's own ticks. */
   achievements?: Achievement[];
   /** What Orbit starts. Always present, defaulting to time-only. */
@@ -331,6 +340,29 @@ export interface Settings {
     /** Keep playing while another window has the focus. */
     unfocused: boolean;
   };
+  /**
+   * Whether the library's own "Jump back in" panel is drawn.
+   *
+   * On by default, and it can also be turned off from the panel itself, which
+   * is where somebody who does not want it will notice it.
+   */
+  showHero?: boolean;
+  /**
+   * Whether the music controls sit in the top bar, beside Settings.
+   *
+   * On by default: a switch for something you can hear belongs where the sound
+   * is, not two clicks away.
+   */
+  topbarMusic?: boolean;
+  /** Whether the top bar's controls dance while the music plays. */
+  musicBars?: boolean;
+  /**
+   * Whether the update check also considers pre-releases.
+   *
+   * Off by default. A pre-release is published by hand and is often there for a
+   * reason, but somebody testing one needs the app to be able to see it.
+   */
+  updatePrerelease?: boolean;
   /**
    * Whether Orbit asks GitHub for a newer release when it opens.
    *

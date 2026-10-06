@@ -23,16 +23,20 @@ interface Chord {
 /**
  * Four chords that belong together in A minor, which is the key most ambient
  * music is written in because nothing in it ever sounds wrong.
+ *
+ * They sit high: the roots are around A3 rather than A2, and the notes stack up
+ * from there. Low chords are what make a pad sound heavy, and this one is meant
+ * to sit behind somebody reading, not under them.
  */
 const PROGRESSION: Chord[] = [
-  { root: 110.0, notes: [0, 7, 12, 15, 19] }, // A minor 7
-  { root: 87.31, notes: [0, 7, 12, 16, 19] }, // F major 7
-  { root: 130.81, notes: [0, 7, 12, 16, 19] }, // C major 7
-  { root: 98.0, notes: [0, 7, 12, 14, 19] }, // G major
+  { root: 220.0, notes: [0, 7, 12, 14, 19] }, // A minor 9
+  { root: 174.61, notes: [0, 7, 12, 16, 19] }, // F major 9
+  { root: 261.63, notes: [0, 7, 12, 16, 19] }, // C major 9
+  { root: 196.0, notes: [0, 7, 12, 14, 19] }, // G major 9
 ];
 
 /** How long one chord is held before the next one drifts in. */
-const CHORD_SECONDS = 24;
+const CHORD_SECONDS = 32;
 
 /** The note a semitone offset makes, from a root frequency. */
 function note(root: number, semitones: number): number {
@@ -179,9 +183,18 @@ export class Ambient {
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 900;
-    filter.Q.value = 0.6;
+    filter.frequency.value = 1600;
+    filter.Q.value = 0.5;
     filter.connect(this.master);
+
+    // The deep end is taken out before anything reaches the pad. This is the
+    // difference between a chord that floats and one that sits on your chest,
+    // and no amount of turning it down makes the second one pleasant.
+    const rumbleCut = ctx.createBiquadFilter();
+    rumbleCut.type = 'highpass';
+    rumbleCut.frequency.value = 130;
+    rumbleCut.Q.value = 0.6;
+    rumbleCut.connect(filter);
 
     // Air: a very quiet, very slow noise bed, so the pad has something behind it
     // rather than starting from digital silence. Filtered to the point where it
@@ -195,17 +208,17 @@ export class Ambient {
       // Brown-ish noise: smoother than white, and it sits under a chord without
       // hissing.
       last = (last + Math.random() * 2 - 1) * 0.5;
-      data[i] = last * 0.06;
+      data[i] = last * 0.035;
     }
     noise.buffer = buffer;
     noise.loop = true;
     const airGain = ctx.createGain();
-    airGain.gain.value = 0.5;
+    airGain.gain.value = 0.35;
     const airFilter = ctx.createBiquadFilter();
     airFilter.type = 'bandpass';
-    airFilter.frequency.value = 420;
-    airFilter.Q.value = 0.4;
-    noise.connect(airFilter).connect(airGain).connect(filter);
+    airFilter.frequency.value = 780;
+    airFilter.Q.value = 0.3;
+    noise.connect(airFilter).connect(airGain).connect(rumbleCut);
     noise.start();
 
     this.pad = filter;
@@ -215,11 +228,11 @@ export class Ambient {
   private beginProgression(): void {
     if (!this.wanted || !this.context || this.timer !== null) return;
     this.clearTimer();
-    this.voice(PROGRESSION[this.step % PROGRESSION.length], 2.5);
+    this.voice(PROGRESSION[this.step % PROGRESSION.length], 4);
     this.step += 1;
     this.timer = window.setInterval(() => {
       if (!this.wanted) return;
-      this.voice(PROGRESSION[this.step % PROGRESSION.length], 6);
+      this.voice(PROGRESSION[this.step % PROGRESSION.length], 8);
       this.step += 1;
     }, CHORD_SECONDS * 1000);
 
@@ -228,9 +241,9 @@ export class Ambient {
       try {
         const now = this.context.currentTime;
         this.pad.frequency.cancelScheduledValues(now);
-        this.pad.frequency.setValueAtTime(760, now);
-        this.pad.frequency.linearRampToValueAtTime(1150, now + CHORD_SECONDS * 0.6);
-        this.pad.frequency.linearRampToValueAtTime(820, now + CHORD_SECONDS * 1.2);
+        this.pad.frequency.setValueAtTime(1100, now);
+        this.pad.frequency.linearRampToValueAtTime(2100, now + CHORD_SECONDS * 0.6);
+        this.pad.frequency.linearRampToValueAtTime(1300, now + CHORD_SECONDS * 1.2);
       } catch {
         // Left where it is.
       }
@@ -264,21 +277,21 @@ export class Ambient {
       gain.connect(pad);
 
       const osc = ctx.createOscillator();
-      osc.type = i === 0 ? 'triangle' : 'sine';
+      osc.type = 'sine';
       // A few cents apart from the note it is meant to be, so two notes in the
       // same chord beat very slowly against each other instead of sounding
       // exactly the same.
-      osc.frequency.value = frequency * (1 + (Math.random() - 0.5) * 0.002);
-      osc.detune.value = (Math.random() - 0.5) * 6;
+      osc.frequency.value = frequency * (1 + (Math.random() - 0.5) * 0.0015);
+      osc.detune.value = (Math.random() - 0.5) * 4;
       osc.connect(gain);
 
-      const level = 0.16 / (1 + i * 0.35);
-      const arrives = now + i * 0.7;
+      const level = 0.12 / (1 + i * 0.4);
+      const arrives = now + i * 0.9;
       gain.gain.setValueAtTime(0, now);
       gain.gain.linearRampToValueAtTime(level, arrives + fadeIn);
       // A long fall, so the chords overlap and the change is never heard as a
       // change.
-      gain.gain.setTargetAtTime(0, arrives + fadeIn + CHORD_SECONDS * 0.55, CHORD_SECONDS * 0.2);
+      gain.gain.setTargetAtTime(0, arrives + fadeIn + CHORD_SECONDS * 0.6, CHORD_SECONDS * 0.25);
 
       osc.start(now);
       osc.stop(now + CHORD_SECONDS * 1.6);

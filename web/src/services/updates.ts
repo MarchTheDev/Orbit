@@ -4,10 +4,16 @@
  * Orbit is a desktop app that cannot patch itself without being signed for it,
  * so the honest thing is to notice a release, say so, and hand the player the
  * installer. The check asks GitHub for the repository's newest published
- * release, which is one unauthenticated request to a public API and nothing
+ * releases, which is one unauthenticated request to a public API and nothing
  * else: no identifier, no telemetry, no account. A release only becomes visible
  * here once it is published, so a draft sitting on GitHub is invisible until
  * its author decides otherwise.
+ *
+ * The newest is taken from the list rather than from `/releases/latest`, which
+ * is the one GitHub calls latest and which skips pre-releases entirely. A
+ * pre-release is how a build is tested before it is announced, so an app that
+ * cannot see one can never be used to test the thing that updates it. They are
+ * still ignored unless the setting asks for them.
  */
 import { APP_VERSION } from '../version';
 import { httpJson, downloadUpdate, runUpdate, isNative } from './native';
@@ -16,7 +22,7 @@ import { openExternal } from './desktop';
 /** The repository the app looks at. Both the releases and the update check. */
 export const REPO = 'MarchTheDev/Orbit';
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
-export const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+export const RELEASES_API = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 
 export interface ReleaseAsset {
   name: string;
@@ -43,18 +49,34 @@ interface GitHubRelease {
 /**
  * The newest published release, if it is newer than what is running.
  *
- * Anything unreadable answers `null` rather than throwing: a check that runs by
- * itself when the app opens must never be able to interrupt opening the app,
- * and being offline is not an error worth a message.
+ * `includePrereleases` is off unless Settings has asked for it, which is what
+ * somebody testing a build before it is announced turns on. Anything unreadable
+ * answers `null` rather than throwing: a check that runs by itself when the app
+ * opens must never be able to interrupt opening the app, and being offline is
+ * not an error worth a message.
  */
-export async function checkForUpdate(current: string = APP_VERSION): Promise<ReleaseInfo | null> {
+export async function checkForUpdate(
+  current: string = APP_VERSION,
+  includePrereleases = false,
+): Promise<ReleaseInfo | null> {
   try {
-    const release = await httpJson<GitHubRelease>(RELEASES_API, {
+    const answer = await httpJson<GitHubRelease[] | GitHubRelease>(RELEASES_API, {
       headers: { Accept: 'application/vnd.github+json' },
     });
-    if (!release || release.draft || release.prerelease) return null;
-    const version = (release.tag_name ?? release.name ?? '').replace(/^v/i, '').trim();
-    if (!version || !isNewer(version, current)) return null;
+    const releases = (Array.isArray(answer) ? answer : [answer]).filter(
+      (r): r is GitHubRelease => !!r && !r.draft && (includePrereleases || !r.prerelease),
+    );
+
+    let best: { version: string; release: GitHubRelease } | null = null;
+    for (const release of releases) {
+      const version = versionOf(release);
+      if (!version || !isNewer(version, current)) continue;
+      // The list arrives newest first, but "newest" there is when it was
+      // published, which is not the same as which version is highest.
+      if (!best || compare(version, best.version) > 0) best = { version, release };
+    }
+    if (!best) return null;
+    const { version, release } = best;
     return {
       version,
       url: release.html_url ?? `${RELEASES_URL}/tag/v${version}`,
@@ -63,6 +85,14 @@ export async function checkForUpdate(current: string = APP_VERSION): Promise<Rel
   } catch {
     return null;
   }
+}
+
+/** The version a release carries, from its tag or, failing that, its title. */
+function versionOf(release: GitHubRelease): string {
+  const tag = (release.tag_name ?? '').replace(/^v/i, '').trim();
+  if (tag) return tag;
+  // A title like "Orbit v0.1.3" is the other place the number is written.
+  return (release.name ?? '').replace(/^[^0-9]*v?/i, '').trim();
 }
 
 /**

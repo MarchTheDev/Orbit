@@ -12,9 +12,18 @@ import { SearchField } from './ui/SearchField';
 /**
  * Bring games over from the Steam library installed on this PC.
  *
- * Nothing here is automatic. The library is only read when this dialog is
- * opened, and a game is only added once it has been ticked, so a Steam account
- * with two hundred games never lands in the library by surprise.
+ * Nothing here is automatic. The library is only read when this page is opened,
+ * and a game is only added once it has been ticked, so a Steam account with two
+ * hundred games never lands in the library by surprise.
+ *
+ * It is a page rather than a card: a list of games wants the whole window, with
+ * the list itself taking the room and scrolling inside it, and the controls for
+ * it staying where they are. It also means a filter or a scroll position is
+ * still there after ticking something eight rows down.
+ *
+ * Opening it from Add game files a game in the library the same way, since that
+ * is where it was opened from. Opening it from Settings is about the Steam
+ * library itself, so what comes in is written down as waiting on the Backlog.
  */
 export function SteamImportModal({
   existing,
@@ -23,6 +32,7 @@ export function SteamImportModal({
   onUpdate,
   onRemoveSteam,
   onClose,
+  from = 'library',
 }: {
   existing: Game[];
   /** Whether the player wants details and artwork fetched as games come in. */
@@ -32,6 +42,14 @@ export function SteamImportModal({
   /** Removes every game that came in from Steam. Confirmed by the caller. */
   onRemoveSteam: () => void;
   onClose: () => void;
+  /**
+   * Which door this was opened from, which decides how games are filed.
+   *
+   * From the library's own Add game dialog they land in the library, with
+   * nothing in the Backlog said about them. From the Backlog they are written
+   * down as planned, which is what a list of games to play next is for.
+   */
+  from?: 'library' | 'backlog';
 }) {
   const [rows, setRows] = useState<(SteamGame & { include: boolean })[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,6 +71,9 @@ export function SteamImportModal({
       // Steam hands the library over in no particular order; most recently
       // played first is the order that makes this dialog useful.
       found.sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));
+      // Every row is ticked unless it is already in the library. Opening this
+      // page is the answer to "would you like your Steam games?", so making
+      // somebody press two hundred checkboxes is not a question, it is a chore.
       setRows(
         found.map((g) => ({
           ...g,
@@ -109,7 +130,9 @@ export function SteamImportModal({
     if (chosen.length === 0) return;
     setSaving(true);
     try {
-      const games = chosen.map(gameFromSteam);
+      // The arrow matters: `map` hands the index as the second argument, and
+      // the second argument here is what decides whether a game is a plan.
+      const games = chosen.map((r) => gameFromSteam(r, from === 'backlog'));
       onAdd(games);
       await enrich(games);
       onClose();
@@ -149,9 +172,9 @@ export function SteamImportModal({
 
   return (
     <Modal
-      title="Import from Steam"
-      subtitle="Orbit reads the Steam library on this PC. Nothing is added until you pick it."
-      size="xl"
+      title="From your Steam library"
+      subtitle="Orbit reads the Steam library installed on this PC. Nothing is added until you say so."
+      bare
       onClose={onClose}
       footer={
         <div className="flex items-center justify-between gap-3">
@@ -200,7 +223,7 @@ export function SteamImportModal({
         {error && <p className="rounded-lg border border-line bg-panel2/50 px-3 py-2 text-xs text-muted">{error}</p>}
 
         {(rows?.length ?? 0) > 0 && (
-          <ul className="max-h-[20rem] space-y-1 overflow-y-auto pr-1">
+          <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
             {visible.map((r) => {
               const known = byId.includes(r.appId) || byTitle.includes(r.name.trim().toLowerCase());
               return (
@@ -295,7 +318,7 @@ export function SteamImportModal({
  * brought in this way has to go through Steam to start, so Orbit hands it over
  * rather than guessing at an .exe inside the install folder.
  */
-export function gameFromSteam(r: SteamGame): Game {
+export function gameFromSteam(r: SteamGame, planned = false): Game {
   const sizeBytes = r.sizeBytes || 0;
   return {
     id: uid(),
@@ -307,6 +330,9 @@ export function gameFromSteam(r: SteamGame): Game {
     sizeBytes,
     sizeGb: Math.round((sizeBytes / 1e9) * 10) / 10,
     status: 'backlog',
+    // A game page opened from the Backlog is a plan: it says "I mean to play
+    // this" without pretending the game is on a shelf it has never been on.
+    ...(planned ? { planned: true } : {}),
     favorite: false,
     manualPlaySecs: 0,
     playSecs: 0,
