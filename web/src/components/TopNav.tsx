@@ -51,9 +51,17 @@ export function TopNav({
   setSound,
   showMusic,
   showBars,
+  onOpenSettings,
 }: {
   page: Page;
   setPage: (p: Page) => void;
+  /**
+   * Opens Settings, optionally at one of its cards.
+   *
+   * Settings is a long page, and somebody pressing a button about the music
+   * wants to arrive at the music rather than at the top of everything.
+   */
+  onOpenSettings: (at?: string) => void;
   /** The player's own tab order from Settings; the default when absent. */
   order?: Page[];
   /** The background music, so the bar can play it, hush it and set its level. */
@@ -100,7 +108,7 @@ export function TopNav({
 
         <div className="flex-1" />
         {showMusic && (
-          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => setPage('settings')} />
+          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
         )}
         <button
           onClick={() => setPage('settings')}

@@ -84,6 +84,24 @@ body::before {
  * is really bold with the asterisks gone and the caret still lands where the
  * letters are.
  */
+/* A card that was jumped to from somewhere else says so for a moment, so a
+ * press on "All sound settings" lands somewhere that is clearly the place. */
+.settings-spot {
+  animation: settings-spot 2.4s ease-out;
+}
+
+@keyframes settings-spot {
+  0%,
+  35% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--c-accent) 55%, transparent),
+      0 0 40px -8px color-mix(in srgb, var(--c-accent) 40%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
 .md-editor:focus {
   outline: none;
 }
@@ -121,19 +139,19 @@ body::before {
  * which is the whole point of doing this as it is written. The line height stays
  * where it is, so the text under it does not jump around as the level changes. */
 .md-editor [data-md='h1'] {
-  font-size: 17px;
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 24px;
+  letter-spacing: -0.015em;
+  line-height: 28px;
 }
 .md-editor [data-md='h2'] {
-  font-size: 15.5px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  line-height: 24px;
+  line-height: 26px;
 }
 .md-editor [data-md='h3'] {
-  font-size: 14px;
+  font-size: 15.5px;
   font-weight: 700;
   line-height: 24px;
 }
