@@ -52,7 +52,7 @@ aside, with the waiting list ordered by how long a game takes to beat. A game
 written down here is a plan: it waits here until it has a program to start, and
 it stays out of the library until then. A game added from the library with
 nothing to point at yet is the other way round, and only turns up here as well
-if Settings says the two pages should be kept in step.
+if Settings says to add new games to the Backlog too.
 
 **Logs** — every game's log in one place: pick a game on the left, read and
 write its notes on the right. A log is the player's own record, not the
@@ -64,11 +64,20 @@ itself is the "Started playing" note, once, the first time a game is launched.
 each one, and how much room every library folder takes. Games are only ever
 moved between folders you list here.
 
+**Hidden games** — a game can be put out of the way from its own drawer or from
+the right-click menu without leaving the library: its sessions, notes and
+playtime all stay, and the Hidden chip on the library page brings it back.
+
+**Music** — a slow pad Orbit makes itself, so nothing is downloaded and nothing
+is licensed. Off until it is turned on, with a volume, a choice about whether it
+carries on when Orbit is not the window in front, and controls in the top bar
+beside Settings with four bars that move while it plays.
+
 **Settings** — the theme, the size of the covers, and how notes, dates and drive
-letters are shown. Three things there are off unless asked for: a slow pad Orbit
-makes itself rather than shipping as a file (with a volume, and a choice about
-whether it steps aside when Orbit is not the window in front), keeping the
-library and the Backlog in step, and a half-second fade when the app opens.
+letters are shown, grouped into Appearance, Library and Backlog, Playing,
+Artwork and details, Tabs along the top, Sound, Other tools, Updates and About.
+The opening animation, the Jump back in panel and the Hidden chip's games are
+all managed from there.
 
 ## Starting a game, and what comes with it
 
@@ -85,6 +94,13 @@ started with the game and never watched, so closing one cannot end the session.
 Dropping a program — or a folder holding one — anywhere on the window adds it
 straight away. Only a drop Orbit cannot make a game out of opens the Add dialog,
 which is the case that needs a decision rather than a keystroke.
+
+**Steam** — bringing games over from the Steam library installed on this PC
+lives in Add game, next to everything else that adds a game, and what it adds
+goes wherever it was opened from: the library's own door files a game on the
+shelf, the Backlog's door writes it down as planned. Settings keeps the option to
+check the library at launch and the rescan, and it is where Steam games are taken
+back out of the library from.
 
 ## Steam
 
