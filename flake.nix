@@ -18,6 +18,10 @@
           pname = "orbit-web";
           inherit version;
           src = ./web;
+          # The interface reads its version from VERSION at the top of the
+          # repository, and this derivation is only handed web/, so the number
+          # is passed in rather than read from a file that is not here.
+          ORBIT_VERSION = version;
           # Nix will tell you the real hash the first time it builds, and the
           # release workflow fills this in automatically. To do it by hand:
           #   nix build .# 2>&1 | grep 'got:'

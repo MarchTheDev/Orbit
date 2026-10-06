@@ -36,8 +36,10 @@ on:
       - 'VERSION'
       # Changing what builds the releases is a good moment to build them, and
       # it is also how this file is worked on before it has reached master,
-      # where the Run workflow button lives.
+      # where the Run workflow button lives. The flake is in here for the same
+      # reason: it is what the Nix package is made of, and it ships in a release.
       - '.github/workflows/release.yml'
+      - 'flake.nix'
   workflow_dispatch:
     inputs:
       version:

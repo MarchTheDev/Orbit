@@ -15,8 +15,13 @@ const __dirname = path.dirname(__filename);
  * The same file feeds the release workflow, so what the app says it is, what
  * the bundles are named, and what the GitHub release is called all come from
  * one line in one place.
+ *
+ * A build that is only handed this folder, as the Nix package is, has no
+ * repository above it to read from, so it passes the number in instead.
  */
-const VERSION = readFileSync(path.resolve(__dirname, "..", "VERSION"), "utf8").trim();
+const VERSION =
+  process.env.ORBIT_VERSION?.trim() ||
+  readFileSync(path.resolve(__dirname, "..", "VERSION"), "utf8").trim();
 
 // https://vite.dev/config/
 /**
