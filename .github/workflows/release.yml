@@ -560,7 +560,7 @@ jobs:
             --jq '.draft' 2>/dev/null || echo missing)
           echo "state=$state" >> "$GITHUB_OUTPUT"
           if [ "$state" = "false" ]; then
-            echo "v$ORBIT_VERSION is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
+            echo "v${ORBIT_VERSION#v} is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # A draft on purpose: the files are there to be looked at, and publishing
