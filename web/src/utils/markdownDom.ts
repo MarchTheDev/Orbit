@@ -24,6 +24,39 @@ import { parseBlocks, type Block, type Inline } from './markdown';
 /** What a line is, kept on the line itself. */
 export const MARK = 'data-md';
 
+/**
+ * The invisible character that gives the caret somewhere to stand.
+ *
+ * A line that ends in something styled, `` `code` `` or **bold**, has no text
+ * after it, and a caret between two elements is a caret the browser is free to
+ * ignore: pressing Right does nothing, and the next character typed goes back
+ * inside the styling. One zero-width space after the element is a real text
+ * node, so the caret can stand there, the arrow keys move through it, and a
+ * space typed there lands outside the code rather than inside it.
+ *
+ * It is not part of the note. `plain()` takes it out of every text node on the
+ * way to markdown, so a holder can never end up saved.
+ */
+export const HOLDER = '\u200b';
+
+/**
+ * Give a line somewhere for the caret to stand after its last styled run.
+ *
+ * Called everywhere a line is finished with, so the state the browser edits is
+ * always one where the caret can move out of what it is in.
+ */
+export function padLine(line: HTMLElement): boolean {
+  const last = line.lastChild;
+  if (!last || !isElement(last) || last.tagName === 'BR') return false;
+  line.appendChild(line.ownerDocument.createTextNode(HOLDER));
+  return true;
+}
+
+/** Is this an element the caret would otherwise be trapped inside of? */
+function isInline(el: Element): boolean {
+  return ['STRONG', 'B', 'EM', 'I', 'CODE', 'A'].includes(el.tagName);
+}
+
 /** How many a numbered line is, so the numbers survive editing. */
 export const COUNT = 'data-n';
 
@@ -195,7 +228,7 @@ export function atStartOf(line: HTMLElement, range: Range): boolean {
   } catch {
     return false;
   }
-  return upTo.toString() === '';
+  return upTo.toString().split(HOLDER).join('') === '';
 }
 
 /**
@@ -253,8 +286,18 @@ export function caretTo(selection: Selection, line: HTMLElement, offset: number)
  * the line anybody was looking at.
  */
 export function caretInto(selection: Selection, line: HTMLElement): void {
+  // A line that ends in something styled needs a place for the caret before it
+  // can be put anywhere useful.
+  const holder = padLine(line);
   const range = line.ownerDocument.createRange();
   const last = line.lastChild;
+  if (holder && isText(last)) {
+    range.setStart(last, 0);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return;
+  }
   if (isText(last)) {
     range.setStart(last, last.textContent?.length ?? 0);
   } else if (isElement(last) && last.tagName === 'BR') {
@@ -406,6 +449,10 @@ export function applyTyping(root: HTMLElement, selection: Selection): TypingResu
       target.setStart(node, range.startOffset - edit.length);
       target.setEnd(node, range.startOffset);
       replaceRange(target, edit.html, selection);
+      // The caret is standing after the new element; a holder makes that a
+      // place it can type a space into without going back inside.
+      const after = lineOf(root, selection.getRangeAt(0).startContainer);
+      if (after) padLine(after);
       return TYPING.changed;
     }
   }
@@ -528,8 +575,16 @@ export function tidy(root: HTMLElement): boolean {
   }
 
   for (const node of Array.from(root.childNodes)) {
-    if (isElement(node) && node.tagName !== 'BR' && node.childNodes.length === 0) {
+    if (!isElement(node) || node.tagName === 'BR') continue;
+    if (node.childNodes.length === 0) {
       node.appendChild(doc.createElement('br'));
+      changed = true;
+      continue;
+    }
+    // Something styled at the end of a line: the caret gets a text node to
+    // stand in, so it can be typed out of rather than being stuck inside.
+    if (isInline(node.lastElementChild ?? ({} as Element)) && isElement(node.lastChild)) {
+      padLine(node);
       changed = true;
     }
   }
@@ -548,7 +603,7 @@ function isElement(node: Node | null | undefined): node is HTMLElement {
 
 /** What a text node really says, with the browser's own padding taken out. */
 function plain(text: string): string {
-  return text.replace(/\u00a0/g, ' ');
+  return text.split(HOLDER).join('').replace(/\u00a0/g, ' ');
 }
 
 export function escape(text: string, attribute = false): string {

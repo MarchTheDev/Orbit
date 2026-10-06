@@ -48,10 +48,13 @@ function BlockView({ block }: { block: Block }) {
       return (
         <p
           className={cn(
+            // Three sizes that can be told apart, matching what the editor
+            // draws as the markers disappear: a heading is a heading at a
+            // glance, not a slightly larger paragraph.
             'font-bold tracking-tight text-fg',
-            block.level === 1 && 'mt-1 text-lg',
-            block.level === 2 && 'mt-1 text-base',
-            block.level === 3 && 'text-[15px]',
+            block.level === 1 && 'mt-1 text-xl',
+            block.level === 2 && 'mt-1 text-[17px]',
+            block.level === 3 && 'text-[15.5px]',
           )}
         >
           <Run inlines={block.inlines} />

@@ -44,7 +44,7 @@ const note = [
 const html = renderToStaticMarkup(createElement(Markdown, { text: note }));
 
 console.log('the reading');
-check('a heading, and a big one', html.includes('text-lg'), html.slice(0, 120));
+check('a heading, and a big one', html.includes('text-xl'), html.slice(0, 120));
 check('bold', html.includes('<strong'));
 check('italic', html.includes('<em>'));
 check('an unordered list', html.includes('<ul'));

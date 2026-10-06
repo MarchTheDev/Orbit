@@ -15,8 +15,10 @@ import {
   applyBackspace,
   applyReturn,
   applyTyping,
+  atStartOf,
   htmlToMarkdown,
   markdownToHtml,
+  padLine,
   tidy,
 } from '../src/utils/markdownDom.ts';
 
@@ -256,3 +258,47 @@ console.log('\nan empty line is always somewhere to type');
 }
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;
+
+/*
+ * Getting out of something styled.
+ *
+ * A line that ends in `code` or **bold** has nothing after it, and a caret
+ * placed between two elements is one the browser is free to ignore: the arrow
+ * keys do not move it and the next character typed goes back inside. Every line
+ * the editor finishes with gets one invisible character after its last styled
+ * run, which the caret can stand in and which never reaches the note.
+ */
+console.log('the caret can leave what it is in, and never takes the holder with it');
+
+{
+  const el = box('a `code` here');
+  el.innerHTML = markdownToHtml('`code`');
+  tidy(el);
+  const line = el.firstElementChild;
+  const code = line.querySelector('code');
+  check('a line ending in code gets a place for the caret', code?.nextSibling?.nodeType === 3);
+
+  // Standing just after the code element is standing in the holder, so a space
+  // typed there lands outside the run rather than inside it.
+  const selection = select(line, line.childNodes.length);
+  const space = document.createTextNode(' ');
+  selection.getRangeAt(0).insertNode(space);
+  check('a space typed after the code stays out of it', !code?.textContent?.includes(' '), code?.textContent ?? '');
+  check('and the note reads as code followed by a space', htmlToMarkdown(el) === '`code` ');
+}
+
+{
+  // The holder is invisible to the note: it comes out on the way to markdown,
+  // so opening and closing a note never adds a character to it.
+  const el = box('');
+  const line = el.firstElementChild;
+  line.innerHTML = '<strong>bold</strong>';
+  padLine(line);
+  check('a holder does not reach the markdown', htmlToMarkdown(el) === '**bold**');
+  check('and it is not counted as text somebody typed', atStartOf(line, (() => {
+    const r = document.createRange();
+    r.setStart(line, 0);
+    r.collapse(true);
+    return r;
+  })()));
+}
