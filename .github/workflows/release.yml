@@ -4,9 +4,10 @@ name: Release
 #
 # How to start it:
 #   * Actions -> Release -> Run workflow (needs this file on the default branch)
-#   * or push a change to the VERSION file, on any branch. GitHub reads the
-#     workflow out of the commit that was pushed, so that works even before this
-#     file has reached master, which is what makes the first run possible.
+#   * or push a change to the VERSION file, or to this file, on any branch.
+#     GitHub reads the workflow out of the commit that was pushed, so that works
+#     even before this file has reached master, which is what makes the first
+#     run possible.
 #
 # What it does: builds every platform, gathers the files, and creates a *draft*
 # release tagged v<version>. Nothing is visible to anybody until it is published
@@ -33,6 +34,10 @@ on:
     # file keeps a build of six platforms off every ordinary commit.
     paths:
       - 'VERSION'
+      # Changing what builds the releases is a good moment to build them, and
+      # it is also how this file is worked on before it has reached master,
+      # where the Run workflow button lives.
+      - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -410,18 +415,49 @@ jobs:
       # A fresh flake cannot know the hash of the front end's dependencies, and
       # nix reports it in the error. This takes it from there and puts it in,
       # which is the same thing `nix build` would tell a person to do by hand.
+      #
+      # Whatever nix says is written into the job's summary as well. When the
+      # build fails, the summary is the part of the log that GitHub will hand
+      # back through its API, so the reason for a failure is readable without
+      # opening the run page.
       - name: Fill in the npm dependencies hash
         run: |
-          set +e
-          message=$(nix build .# --no-link 2>&1)
+          message=$(nix build .# --no-link 2>&1) || true
+          printf '%s\n' "$message" | tail -20
           hash=$(printf '%s' "$message" | grep -oP 'got:\s+\K\S+' | head -1)
           if [ -n "$hash" ]; then
             sed -i "s|npmDepsHash = .*|npmDepsHash = \"$hash\";|" flake.nix
+            echo "npmDepsHash filled in: $hash" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### nix did not get as far as asking for a hash"
+              echo '```'
+              printf '%s\n' "$message" | tail -40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "$message" | tail -20
 
       - name: Build
-        run: nix build .# --print-build-logs
+        run: |
+          set +e
+          nix build .# --print-build-logs 2>&1 | tee /tmp/nix-build.log | tail -60
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -40 /tmp/nix-build.log)
+            {
+              echo "### nix build failed"
+              echo '```'
+              printf '%s\n' "$message"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            # The summary is for a person; this is for anything reading the
+            # run back through the API.
+            message=${message//'%'/'%25'}
+            message=${message//$'\n'/'%0A'}
+            echo "::error title=Nix build failed::${message}"
+            exit 1
+          fi
 
       - name: Collect it
         run: |
