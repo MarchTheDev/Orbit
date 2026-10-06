@@ -584,21 +584,21 @@ mod tests {
         let cache = SizeCache::default();
         let path = dir.to_string_lossy().to_string();
         let first = cache.measure(&[path.clone()]);
-        assert_eq!(first.get(&path), Some(&2048));
+        assert_eq!(first.get(&path), Some(2048));
         // Both the exact spelling and the normalized one are looked up fine.
         assert_eq!(cache.get(&path), Some(2048));
-        assert_eq!(cache.get(&path.to_uppercase()), Some(&2048));
+        assert_eq!(cache.get(&path.to_uppercase()), Some(2048));
 
         // A second file appears, but the answer is remembered rather than
         // re-walked, which is the whole point of the cache.
         std::fs::write(dir.join("b.bin"), vec![0u8; 2048]).unwrap();
         let second = cache.measure(&[path.clone()]);
-        assert_eq!(second.get(&path), Some(&2048));
+        assert_eq!(second.get(&path), Some(2048));
 
         // Clearing makes the next ask see both files.
         cache.clear();
         let third = cache.measure(&[path.clone()]);
-        assert_eq!(third.get(&path), Some(&4096));
+        assert_eq!(third.get(&path), Some(4096));
 
         // A trailing slash is the same folder as far as Windows cares, so it
         // must be the same key here: two ways of writing one path should not
