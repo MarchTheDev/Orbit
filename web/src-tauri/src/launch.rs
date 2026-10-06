@@ -787,11 +787,14 @@ mod tests {
         let mut sessions = Sessions::default();
         let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let launched = sessions
-            .launch_target(&LaunchTarget::Executable {
-                path: PathBuf::from(&shell),
-                args: "/c exit".to_string(),
-                working_dir: None,
-            })
+            .launch_target(
+                &LaunchTarget::Executable {
+                    path: PathBuf::from(&shell),
+                    args: "/c exit".to_string(),
+                    working_dir: None,
+                },
+                None,
+            )
             .expect("cmd should start");
         assert!(!launched.manual, "there is a process to watch");
 
@@ -799,22 +802,22 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // It died inside the hand-off window, so the session keeps running...
-        assert_eq!(sessions.status(launched.pid), Some(true));
+        assert!(matches!(sessions.check(launched.pid), Some(Verdict::Running)));
         // ...and keeps running on the next tick too. This is the bug that used
         // to close the session about five seconds after a launcher exited.
-        assert_eq!(sessions.status(launched.pid), Some(true));
-        assert_eq!(sessions.status(launched.pid), Some(true));
+        assert!(matches!(sessions.check(launched.pid), Some(Verdict::Running)));
+        assert!(matches!(sessions.check(launched.pid), Some(Verdict::Running)));
         sessions.forget(launched.pid);
     }
 
     #[test]
     fn a_game_that_is_only_timed_reports_that_it_is_manual() {
         let mut sessions = Sessions::default();
-        let launched = sessions.launch_target(&LaunchTarget::None).unwrap();
+        let launched = sessions.launch_target(&LaunchTarget::None, None).unwrap();
         assert!(launched.manual);
         assert_eq!(launched.pid, 0);
         // Nothing was started, so there is nothing to ask about.
-        assert_eq!(sessions.status(0), None);
+        assert_eq!(sessions.check(0), None);
     }
 
     /// A real long-lived process, because killing one is the whole point.
@@ -823,23 +826,29 @@ mod tests {
         let mut sessions = Sessions::default();
         let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let launched = sessions
-            .launch_target(&LaunchTarget::Executable {
-                path: PathBuf::from(&shell),
-                // Outlives the test by a wide margin, so it can only be gone
-                // because something killed it.
-                args: "/c ping -n 60 127.0.0.1 > nul".to_string(),
-                working_dir: None,
-            })
+            .launch_target(
+                &LaunchTarget::Executable {
+                    path: PathBuf::from(&shell),
+                    // Outlives the test by a wide margin, so it can only be
+                    // gone because something killed it.
+                    args: "/c ping -n 60 127.0.0.1 > nul".to_string(),
+                    working_dir: None,
+                },
+                None,
+            )
             .expect("cmd should start");
         assert!(!launched.manual);
         std::thread::sleep(std::time::Duration::from_millis(500));
-        assert_eq!(sessions.status(launched.pid), Some(true), "still running");
+        assert!(
+            matches!(sessions.check(launched.pid), Some(Verdict::Running)),
+            "still running"
+        );
 
         sessions.kill(launched.pid).expect("kill should succeed");
 
         // No longer tracked, and the process really is gone rather than merely
         // forgotten: `kill` only returns once it has seen the exit.
-        assert_eq!(sessions.status(launched.pid), None);
+        assert_eq!(sessions.check(launched.pid), None);
     }
 
     #[test]

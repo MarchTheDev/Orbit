@@ -450,7 +450,8 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            message=$(tail -40 /tmp/nix-build.log)
+            # The compiler's own account of what is wrong, not a summary of it.
+            message=$(tail -300 /tmp/nix-build.log)
             {
               echo "### nix build failed"
               echo '```'

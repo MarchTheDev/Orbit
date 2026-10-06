@@ -586,7 +586,7 @@ mod tests {
         let first = cache.measure(&[path.clone()]);
         assert_eq!(first.get(&path), Some(&2048));
         // Both the exact spelling and the normalized one are looked up fine.
-        assert_eq!(cache.get(&path), Some(&2048));
+        assert_eq!(cache.get(&path), Some(2048));
         assert_eq!(cache.get(&path.to_uppercase()), Some(&2048));
 
         // A second file appears, but the answer is remembered rather than
@@ -603,8 +603,8 @@ mod tests {
         // A trailing slash is the same folder as far as Windows cares, so it
         // must be the same key here: two ways of writing one path should not
         // each cost their own walk of the disk.
-        assert_eq!(cache.get(&format!("{path}\\")), Some(&4096));
-        assert_eq!(cache.get(&path.to_uppercase()), Some(&4096));
+        assert_eq!(cache.get(&format!("{path}\\")), Some(4096));
+        assert_eq!(cache.get(&path.to_uppercase()), Some(4096));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
