@@ -53,11 +53,33 @@ const LINE = 24;
 
 export function MarkdownEditor({ value, onChange, rows = 6, placeholder, className }: Props) {
   const box = useRef<HTMLDivElement | null>(null);
+  /** The last height this set itself, so a resize by hand can be told apart. */
+  const auto = useRef(0);
+  const resized = useRef(false);
   /** The markdown this editor last produced, so its own echo is not re-rendered. */
   const emitted = useRef<string | null>(null);
   const composing = useRef(false);
   const change = useRef(onChange);
   change.current = onChange;
+
+  /**
+   * Grow with what is written, up to most of the window.
+   *
+   * A note box with a fixed height is a box somebody has to scroll inside to
+   * read what they just wrote, which makes a short note feel cramped and a long
+   * one feel broken. It starts at the size it was asked for and gets taller as
+   * the note does; dragging its own corner is respected, and then it leaves the
+   * height alone.
+   */
+  const grow = useCallback(() => {
+    const el = box.current;
+    if (!el || resized.current) return;
+    el.style.height = 'auto';
+    const ceiling = Math.max(rows * LINE, Math.round(window.innerHeight * 0.6));
+    const wanted = Math.min(Math.max(el.scrollHeight, rows * LINE), ceiling);
+    el.style.height = `${wanted}px`;
+    auto.current = wanted;
+  }, [rows]);
 
   const syncEmpty = useCallback(() => {
     const el = box.current;
@@ -71,10 +93,11 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
     if (!el) return;
     const markdown = htmlToMarkdown(el);
     syncEmpty();
+    grow();
     if (markdown === emitted.current) return;
     emitted.current = markdown;
     change.current(markdown);
-  }, [syncEmpty]);
+  }, [grow, syncEmpty]);
 
   /**
    * Whatever is in the note when it opens, and anything changed from outside.
@@ -98,7 +121,8 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
     tidy(el);
     emitted.current = value;
     syncEmpty();
-  }, [value, syncEmpty]);
+    grow();
+  }, [grow, value, syncEmpty]);
 
   /** Where the caret is, in the box, or null if it is not in the box at all. */
   const here = useCallback((): { el: HTMLDivElement; selection: Selection } | null => {
@@ -215,6 +239,12 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
       onKeyDown={onKeyDown}
       onPaste={onPaste}
       onBlur={emit}
+      // A drag of the box's own corner is the player saying how tall they want
+      // it, so the growing stops for as long as that lasts.
+      onMouseUp={() => {
+        const el = box.current;
+        if (el && Math.abs(el.offsetHeight - auto.current) > 8) resized.current = true;
+      }}
       onCompositionStart={() => {
         composing.current = true;
       }}
@@ -222,7 +252,7 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
         composing.current = false;
         afterEdit();
       }}
-      style={{ minHeight: rows * LINE }}
+      style={{ height: rows * LINE, maxHeight: '60vh' }}
       className={cn(
         'md-editor w-full resize-y overflow-auto rounded-lg border border-line bg-bg/60 px-3 py-2 text-sm leading-6 text-fg outline-none focus:border-accent/60',
         className,

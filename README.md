@@ -198,12 +198,17 @@ files in the release and the number in the release's name are the same number.
 | Debian | `_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
 | Fedora | a native `.rpm`, built in a Fedora container |
 | Arch | `.pkg.tar.zst`, installed with `pacman -U` |
-| NixOS | a tarball, or `nix build github:MarchTheDev/Orbit` |
 
-The Debian, Fedora, Arch and NixOS builds are marked as best effort in the
-workflow: they run in each distribution's own container, and a package name that
-has moved between releases shows up as a failed job rather than as a wrong
-package. The Windows and Linux files are what the release itself depends on.
+The Debian, Fedora and Arch builds are marked as best effort in the workflow:
+they run in each distribution's own container, and a package name that has moved
+between releases shows up as a failed job rather than as a wrong package. The
+Windows and Linux files are what the release itself depends on.
+
+NixOS used to be a fourth job, and the flake is still in the repository:
+`nix build` from the root gives the same program. It is not a job any more,
+because running the Rust tests on a machine with no drive letters kept failing
+over assumptions that were about Windows rather than about the code, and a
+release should not wait on that.
 
 ### Updates
 
@@ -265,6 +270,6 @@ Every one of these stamps the version from [`VERSION`](VERSION) into the app,
 so bump that file first if the build needs to say something other than what is
 there.
 
-**NixOS.** `nix build` from the repository root. The first run stops with the
-hash of the front end's dependencies in the error; put that in `npmDepsHash` in
-[`flake.nix`](flake.nix) and build again, or let the workflow do it.
+**NixOS.** `nix build` from the repository root, which is what
+[`flake.nix`](flake.nix) is for. The first run stops with the hash of the front
+end's dependencies in the error; put that in `npmDepsHash` and build again.
