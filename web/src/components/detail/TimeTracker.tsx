@@ -130,7 +130,7 @@ export function TimeTracker({ game, startedAt, now, onSetTotal, error }: Props) 
 
       {startedAt !== null && (
         <p className="mt-2 flex items-center gap-2 text-xs text-emerald-400">
-          <span className="size-2 animate-pulse rounded-full bg-emerald-400" />
+          <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
           Session running · {fmtClock(live)}
         </p>
       )}

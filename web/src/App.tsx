@@ -18,6 +18,7 @@ import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { clearLibrary, isNative, setPlaytime, steamLibrary } from './services/native';
 import { onFileDrop } from './services/desktop';
+import { ambient } from './services/ambient';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
@@ -163,6 +164,41 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [settings?.updateCheck]);
+
+  /**
+   * The background sound, which is off until somebody asks for it.
+   *
+   * Starting it is all this does. A webview that has not been touched yet
+   * refuses to play audio, so `start` quietly waits for the first click and
+   * begins then, and nothing here has to know about that.
+   */
+  useEffect(() => {
+    const sound = settings?.sound;
+    if (sound?.enabled !== true) {
+      ambient.stop();
+      return;
+    }
+    ambient.start(sound.volume);
+    ambient.setFocused(document.hasFocus(), sound.unfocused === true);
+  }, [settings?.sound?.enabled, settings?.sound?.volume, settings?.sound?.unfocused]);
+
+  /**
+   * Whether the window is being looked at, so the music can step aside.
+   *
+   * The listener is what makes the setting mean something while the app is
+   * open: click away to a game and the pad sinks under it, click back and it
+   * returns.
+   */
+  useEffect(() => {
+    if (settings?.sound?.enabled !== true) return;
+    const look = () => ambient.setFocused(document.hasFocus(), settings?.sound?.unfocused === true);
+    window.addEventListener('focus', look);
+    window.addEventListener('blur', look);
+    return () => {
+      window.removeEventListener('focus', look);
+      window.removeEventListener('blur', look);
+    };
+  }, [settings?.sound?.enabled, settings?.sound?.unfocused]);
 
   /**
    * Games whose details have already been asked for.
@@ -353,7 +389,11 @@ export default function App() {
       // look installed. The same goes for a game that is owned but not installed
       // anywhere yet: marking one as owned in the Backlog keeps it a plan until
       // it has a folder.
-      if (g.planned || !onDisk(g)) return false;
+      //
+      // A game added through the add dialog is not a plan, though: it is in the
+      // library from the moment it is added, whether or not there is a program
+      // to point at yet.
+      if (g.planned || (!onDisk(g) && !g.inLibrary)) return false;
       if (q && !g.title.toLowerCase().includes(q)) return false;
       if (filter === 'favorites') return g.favorite;
       if (filter === 'unplayed') return g.sessionCount === 0;
@@ -563,7 +603,16 @@ export default function App() {
   if (!settings) return <div className="h-full bg-bg" />;
 
   return (
-    <div className="relative h-full overflow-y-auto text-fg">
+    <div
+      className={
+        // The little entrance, which is on unless it has been turned off. It
+        // plays once, when the shell appears: the settings have arrived by now,
+        // so the choice is known before anything moves.
+        settings.startupAnimation === false
+          ? 'relative h-full overflow-y-auto text-fg'
+          : 'orbit-enter relative h-full overflow-y-auto text-fg'
+      }
+    >
       <TopNav page={page} setPage={setPage} order={settings?.tabOrder} />
 
       {dragOver && !showAdd && (
@@ -600,6 +649,9 @@ export default function App() {
             onUpdate={(id, patch) => updateGame(id, patch)}
             onRemove={(id) => removeGame(id)}
             fetchMetadata={settings.fetchMetadata}
+            // Off by default: a game the player added to the library by hand
+            // stays there, and only crosses over to this page when asked for.
+            syncLibrary={settings.syncBacklog === true}
             myOrder={settings.backlogOrder}
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
@@ -688,7 +740,7 @@ export default function App() {
 
       {session && runningGame && (
         <div className="glass fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-5 pr-2 text-sm shadow-2xl">
-          <span className="size-2 animate-pulse rounded-full bg-emerald-400" />
+          <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
           <span>
             Playing <b>{runningGame.title}</b>
           </span>

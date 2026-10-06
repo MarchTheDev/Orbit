@@ -76,6 +76,15 @@ export interface Game {
   title: string;
   /** True for a game the player means to play but does not have here. */
   planned?: boolean;
+  /**
+   * On the library's shelf with nothing to start yet.
+   *
+   * A game added by title alone is in the library from the moment it is added:
+   * the program can be pointed at later, and until then it is a game timed by
+   * hand. A game written down on the Backlog is the other way round, and says
+   * so with `planned`.
+   */
+  inLibrary?: boolean;
   /** Achievements as last read, with the player's own ticks. */
   achievements?: Achievement[];
   /** What Orbit starts. Always present, defaulting to time-only. */
@@ -295,6 +304,33 @@ export interface Settings {
    * the library is a shelf, the backlog is a plan.
    */
   backlogOrder: string[];
+  /**
+   * Whether a game added with nothing but a title also waits in the Backlog.
+   *
+   * Off by default, and the difference matters: with it off, a title with no
+   * program is a library game Orbit keeps time for, which is what somebody
+   * adding a game they own on a console or in another launcher is after. There
+   * is no software to point Orbit at, and the Backlog is a list of things to
+   * buy, not a list of things to play.
+   */
+  syncBacklog?: boolean;
+  /**
+   * Whether the interface fades in when the app opens. On by default: it is
+   * forty-five hundredths of a second, and it covers the moment the library is
+   * still arriving. Off for anybody who would rather it simply be there.
+   */
+  startupAnimation?: boolean;
+  /**
+   * Music to play behind everything else, made by the app rather than shipped
+   * with it. Silent until it is turned on.
+   */
+  sound?: {
+    enabled: boolean;
+    /** 0 to 1. */
+    volume: number;
+    /** Keep playing while another window has the focus. */
+    unfocused: boolean;
+  };
   /**
    * Whether Orbit asks GitHub for a newer release when it opens.
    *

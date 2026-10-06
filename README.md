@@ -48,7 +48,11 @@ correct one that went wrong: both the moment it started and how long it ran are
 editable, and the game's total follows.
 
 **Backlog** — what is waiting, what is part-way through and what has been set
-aside, with the waiting list ordered by how long a game takes to beat.
+aside, with the waiting list ordered by how long a game takes to beat. A game
+written down here is a plan: it waits here until it has a program to start, and
+it stays out of the library until then. A game added from the library with
+nothing to point at yet is the other way round, and only turns up here as well
+if Settings says the two pages should be kept in step.
 
 **Logs** — every game's log in one place: pick a game on the left, read and
 write its notes on the right. A log is the player's own record, not the
@@ -59,6 +63,12 @@ itself is the "Started playing" note, once, the first time a game is launched.
 **Storage** — the games in your library grouped by drive, with a Move button on
 each one, and how much room every library folder takes. Games are only ever
 moved between folders you list here.
+
+**Settings** — the theme, the size of the covers, and how notes, dates and drive
+letters are shown. Three things there are off unless asked for: a slow pad Orbit
+makes itself rather than shipping as a file (with a volume, and a choice about
+whether it steps aside when Orbit is not the window in front), keeping the
+library and the Backlog in step, and a half-second fade when the app opens.
 
 ## Starting a game, and what comes with it
 

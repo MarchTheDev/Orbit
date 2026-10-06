@@ -7,16 +7,6 @@ use std::time::Instant;
 
 use crate::launch_target::LaunchTarget;
 
-/// How long a process may live before it stops looking like a launcher handing
-/// off to the real game.
-///
-/// Plenty of titles start a small bootstrapper that exits within a second or
-/// two while the game itself runs as a grandchild. Ending the session there
-/// would log two minutes of playtime for a four hour evening, so a process that
-/// dies this quickly is treated as a hand-off and the session keeps running
-/// until the player stops it.
-const HANDOFF_WINDOW: std::time::Duration = std::time::Duration::from_secs(90);
-
 /// How often the game is looked for once the process Orbit started has gone.
 ///
 /// The real game is usually a grandchild Orbit has no handle for, so the only
@@ -76,7 +66,7 @@ struct Tracked {
 /// The games currently running, so time can stop by itself when they exit.
 #[derive(Default)]
 pub struct Sessions {
-    running: std::collections::HashMap<u32, Tracked>,
+    running: HashMap<u32, Tracked>,
 }
 
 /// What `launch_game` hands back to the UI.
@@ -199,11 +189,15 @@ impl Sessions {
             tracked.died_at = Some(tracked.started);
         }
 
-        // A quick death is a launcher handing the game on rather than the game
-        // itself ending, so the session carries on and the folder takes over.
+        // The process Orbit started has gone, and it may have been a launcher
+        // handing the game on rather than the game itself ending: plenty of
+        // titles start a small bootstrapper that exits in a second or two while
+        // the game runs on as a grandchild. The session carries on and the
+        // folder takes over the watching.
         if tracked.child.is_some() && !tracked.handed_off {
             tracked.handed_off = true;
-            log::info!("pid {pid} exited; watching the game's folder from here");
+            let program = tracked.image.as_deref().unwrap_or("the program");
+            log::info!("{program} (pid {pid}) exited; watching the game's folder from here");
         }
 
         if !cfg!(windows) || tracked.names.is_empty() {

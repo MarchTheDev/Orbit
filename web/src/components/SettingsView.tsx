@@ -10,9 +10,11 @@ import {
   Heart,
   Monitor,
   Palette,
+  Piano,
   RefreshCw,
   Sparkles,
   Trash2,
+  Volume2,
   Wand2,
   X,
 } from 'lucide-react';
@@ -233,6 +235,20 @@ export function SettingsView({
             hint="On: the glow behind the Play button is taken from the artwork, so each tile matches the game. Off: it uses Orbit's theme colours instead, so every tile matches the app."
           />
         </div>
+
+        <Checkbox
+          checked={settings.startupAnimation !== false}
+          onChange={(v) => setSettings({ startupAnimation: v })}
+          label="Fade the app in when it opens"
+          hint="Under half a second, and it covers the moment the library is still arriving. Off: Orbit is simply there."
+        />
+
+        <Checkbox
+          checked={settings.syncBacklog === true}
+          onChange={(v) => setSettings({ syncBacklog: v })}
+          label="Keep the library and the Backlog in step"
+          hint="Off: a title you add without pointing Orbit at anything becomes a library game you can time, which is what somebody playing it elsewhere wants. On: it waits on the Backlog as well, so one list of what to play next covers both."
+        />
       </section>
 
       <section className="space-y-3">
@@ -417,6 +433,62 @@ export function SettingsView({
             <span className="block text-xs text-muted">Find and clean out game save files and leftover data.</span>
           </span>
         </button>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Piano className="size-4 text-accent" />
+          Sound
+        </h2>
+        <div className="space-y-3 rounded-xl border border-line bg-panel/60 p-4 text-sm">
+          <Checkbox
+            checked={settings.sound?.enabled === true}
+            onChange={(v) =>
+              setSettings({ sound: { enabled: v, volume: settings.sound?.volume ?? 0.35, unfocused: settings.sound?.unfocused === true } })
+            }
+            label="Play something quiet in the background"
+            hint="A slow pad Orbit makes itself, so nothing is downloaded and nothing is licensed. Four chords that never quite repeat."
+          />
+
+          <label className={cn('block space-y-1', settings.sound?.enabled !== true && 'opacity-50')}>
+            <span className="flex items-center gap-2 text-xs text-muted">
+              <Volume2 className="size-3.5" />
+              Volume
+            </span>
+            <span className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((settings.sound?.volume ?? 0.35) * 100)}
+                disabled={settings.sound?.enabled !== true}
+                onChange={(e) =>
+                  setSettings({
+                    sound: {
+                      enabled: true,
+                      volume: Number(e.target.value) / 100,
+                      unfocused: settings.sound?.unfocused === true,
+                    },
+                  })
+                }
+                className="orbit-range flex-1"
+                aria-label="Volume"
+              />
+              <span className="w-10 shrink-0 text-right font-mono text-xs text-muted">
+                {Math.round((settings.sound?.volume ?? 0.35) * 100)}%
+              </span>
+            </span>
+          </label>
+
+          <Checkbox
+            checked={settings.sound?.unfocused === true}
+            onChange={(v) =>
+              setSettings({ sound: { enabled: settings.sound?.enabled === true, volume: settings.sound?.volume ?? 0.35, unfocused: v } })
+            }
+            label="Keep playing while Orbit is not the window in front"
+            hint="Off: the music steps aside when you click away, and comes back when you do. On: it carries on, which is what a second monitor wants."
+          />
+        </div>
       </section>
 
       {/* Updates, just above About: it is something to act on rather than

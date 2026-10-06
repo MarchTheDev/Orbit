@@ -182,6 +182,105 @@ body::before {
   border-top: 1px solid color-mix(in srgb, var(--c-text) 25%, transparent);
 }
 
+/* ------------------------------------------------------------ the calendar */
+
+/*
+ * A date field is drawn by Windows, not by Orbit, and it arrives in a system
+ * theme of its own: a light popup over a dark app, a blue highlight, a different
+ * font. `color-scheme: dark` is what tells the engine to draw its own picker in
+ * dark colours, and `accent-color` is what makes the chosen day the theme's
+ * accent rather than the operating system's blue. The field itself is then given
+ * the same panel the rest of the app uses, so it stops looking pasted in.
+ */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'] {
+  color-scheme: dark;
+  accent-color: var(--c-accent);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator,
+input[type='month']::-webkit-calendar-picker-indicator,
+input[type='week']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator:hover,
+input[type='time']::-webkit-calendar-picker-indicator:hover,
+input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+input[type='month']::-webkit-calendar-picker-indicator:hover,
+input[type='week']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--c-accent) 22%, transparent);
+}
+
+/* Firefox, and anything else that draws its own: the same idea, one rule. */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'] {
+  background-color: color-mix(in srgb, var(--c-panel) 92%, transparent);
+}
+
+/* ------------------------------------------------------------ the entrance */
+
+/*
+ * Orbit opening: a moment of arrival rather than a window appearing. Short on
+ * purpose, and off in one switch for anybody who would rather it simply be
+ * there, including anybody whose system asks for less movement.
+ */
+@keyframes orbit-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.99) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.orbit-enter {
+  animation: orbit-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-enter {
+    animation: none;
+  }
+}
+
+/* A slow pulse for the now-playing dot, so a running game is visible at a
+ * glance without anything moving that does not have to. */
+@keyframes orbit-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.orbit-pulse {
+  animation: orbit-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-pulse {
+    animation: none;
+  }
+}
+
 /* The one style every button that does something wears.
  *
  * A fine line rather than a block of colour: the accent as a border and as the
@@ -252,4 +351,26 @@ body::before {
   0% { transform: scale(0.5); opacity: 0; }
   60% { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(1); }
+}
+
+/* The volume slider: the engine's own range input is a system widget, and this
+ * brings it into the app the same way the date fields were. */
+.orbit-range {
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 18%, transparent);
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+.orbit-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  border: 2px solid color-mix(in srgb, var(--c-bg) 70%, transparent);
+}
+.orbit-range:disabled {
+  cursor: not-allowed;
 }

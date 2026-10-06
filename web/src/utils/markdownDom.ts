@@ -1,21 +1,23 @@
 /**
- * The two directions between a note and the box it is typed in.
+ * The two directions between a note and the box it is typed in, and every
+ * editing decision that happens in between.
  *
  * The editor is a `contenteditable` element, because that is the only thing in a
- * browser where the text *is* the styling: the markers can disappear as a note
- * is written, the way they do in Discord, and the caret is placed by the browser
+ * browser where the text *is* the styling: the markers disappear as a note is
+ * written, the way they do in Discord, and the caret is placed by the browser
  * inside the very text it will end up in, so it can never drift away from where
  * the letters are.
  *
  * Markdown stays the thing that is stored. This module turns markdown into the
- * HTML the editor holds, and turns what the editor holds back into markdown, so
- * the database keeps plain text that can be read, searched and exported, and the
- * editor can do whatever it likes with the picture.
+ * HTML the editor holds, turns what the editor holds back into markdown, and
+ * decides what a keystroke means. All of it is plain DOM work with no React in
+ * it, which is on purpose: `web/tests` drives it in jsdom and checks the typing
+ * rules, Return, Backspace and the round trip without a browser anywhere.
  *
- * Blocks are one line each, marked with `data-md`. A real `<ul>` would fight with
- * the browser's own editing: pressing Enter inside one produces whatever the
- * engine feels like, and half the work is undoing that. A styled line cannot
- * fight back, and the markdown it produces is the same either way.
+ * Blocks are one line each, marked with `data-md`. A real `<ul>` would fight
+ * with the browser's own editing: pressing Return inside one produces whatever
+ * the engine feels like, and half the work would be undoing that. A styled line
+ * cannot fight back, and the markdown it produces is the same either way.
  */
 import { parseBlocks, type Block, type Inline } from './markdown';
 
@@ -34,8 +36,8 @@ export function markdownToHtml(markdown: string): string {
 
 function blockToHtml(block: Block): string {
   switch (block.kind) {
-    // A blank line is a line with an empty box on it, which is exactly what the
-    // editor shows: one line, nothing on it.
+    // A blank line is a line with an empty box on it, which is what the editor
+    // shows: one line, nothing on it.
     case 'blank':
       return '<div><br></div>';
     case 'p':
@@ -87,8 +89,8 @@ function inlineToHtml(inline: Inline): string {
  * What the editor is holding, written back as markdown.
  *
  * Everything the browser can leave behind is handled: the `&nbsp;` it puts in a
- * line somebody emptied, the `<br>` it keeps at the end of a line as a place for
- * the caret, and the `<span>` it wraps around something for no reason at all.
+ * line somebody emptied, the `<br>` it keeps as a place for the caret, and the
+ * `<span>` it wraps around something for no reason at all.
  */
 export function htmlToMarkdown(root: HTMLElement): string {
   const lines: string[] = [];
@@ -174,19 +176,25 @@ function elementToMarkdown(el: HTMLElement): string {
   return out;
 }
 
+/* ------------------------------------------------------- finding your place */
+
 /** The element a caret is in: the line it belongs to, one level under the box. */
 export function lineOf(root: HTMLElement, node: Node | null): HTMLElement | null {
   let el: Node | null = node;
-  if (el && el.nodeType === 3) el = el.parentElement;
+  if (isText(el)) el = el.parentElement;
   while (el && isElement(el) && el.parentElement && el.parentElement !== root) el = el.parentElement;
   return isElement(el) && el.parentElement === root ? el : null;
 }
 
 /** Is the caret at the very beginning of this line? */
 export function atStartOf(line: HTMLElement, range: Range): boolean {
-  const upTo = range.cloneRange();
+  const upTo = line.ownerDocument.createRange();
   upTo.selectNodeContents(line);
-  upTo.setEnd(range.startContainer, range.startOffset);
+  try {
+    upTo.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    return false;
+  }
   return upTo.toString() === '';
 }
 
@@ -206,25 +214,22 @@ export function splitLine(root: HTMLElement, line: HTMLElement, range: Range, se
   else tail.setEnd(line, 0);
   if (!tail.collapsed) next.appendChild(tail.extractContents());
   line.after(next);
-  caretTo(selection, next, 0);
+  caretInto(selection, next);
   return next;
 }
 
 /** Replace a range with the HTML for one inline token, and stand after it. */
-export function replaceRange(
-  range: Range,
-  html: string,
-  selection: Selection,
-): void {
-  const holder = range.startContainer.ownerDocument!.createElement('div');
+export function replaceRange(range: Range, html: string, selection: Selection): void {
+  const doc = range.startContainer.ownerDocument!;
+  const holder = doc.createElement('div');
   holder.innerHTML = html;
   const nodes = Array.from(holder.childNodes);
   if (nodes.length === 0) return;
-  const fragment = range.startContainer.ownerDocument!.createDocumentFragment();
+  const fragment = doc.createDocumentFragment();
   for (const node of nodes) fragment.appendChild(node);
   range.deleteContents();
   range.insertNode(fragment);
-  const after = range.startContainer.ownerDocument!.createRange();
+  const after = doc.createRange();
   after.setStartAfter(nodes[nodes.length - 1]);
   after.collapse(true);
   selection.removeAllRanges();
@@ -240,27 +245,28 @@ export function caretTo(selection: Selection, line: HTMLElement, offset: number)
   selection.addRange(range);
 }
 
-// ------------------------------------------------------------------- the text
-
-function isText(node: Node | null | undefined): node is Text {
-  return !!node && node.nodeType === 3;
-}
-
-function isElement(node: Node | null | undefined): node is HTMLElement {
-  return !!node && node.nodeType === 1;
-}
-
-/** What a text node really says, with the browser's own padding taken out. */
-function plain(text: string): string {
-  return text.replace(/\u00a0/g, ' ');
-}
-
-export function escape(text: string, attribute = false): string {
-  const out = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  return attribute ? out.replace(/"/g, '&quot;') : out;
+/**
+ * Stand at the end of a line, in the text rather than between the elements.
+ *
+ * Placing a caret "at index N" of an element is legal and useless: the next
+ * keystroke then goes wherever the browser decides, which is often not inside
+ * the line anybody was looking at.
+ */
+export function caretInto(selection: Selection, line: HTMLElement): void {
+  const range = line.ownerDocument.createRange();
+  const last = line.lastChild;
+  if (isText(last)) {
+    range.setStart(last, last.textContent?.length ?? 0);
+  } else if (isElement(last) && last.tagName === 'BR') {
+    // Just before the filler, so the next thing typed lands in the line rather
+    // than after it.
+    range.setStart(line, line.childNodes.length - 1);
+  } else {
+    range.setStart(line, line.childNodes.length);
+  }
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 /* --------------------------------------------------------- what typing means */
@@ -327,4 +333,228 @@ export function lineEdit(text: string): LineEdit | null {
     return { mark: 'ol', number: Number.parseInt(mark[1], 10) || 1, rest: mark[2] };
   }
   return { mark: 'ul', number: null, rest: mark[2] };
+}
+
+/* ------------------------------------------------ the moves the editor makes */
+
+/** What a piece of editing did. */
+export const TYPING = {
+  /** Nothing to do: the text stays exactly as it was typed. */
+  none: 'none',
+  /** The DOM changed and the note should be written out again. */
+  changed: 'changed',
+} as const;
+
+export type TypingResult = (typeof TYPING)[keyof typeof TYPING];
+
+/**
+ * The line the caret is in, creating one if the caret is loose in the box.
+ *
+ * A `contenteditable` can hold text directly, with no line around it: that is
+ * what happens after the box is emptied, and after a paste the browser did not
+ * wrap. Everything below works on a line, so one is made rather than each of
+ * them having to cope. Getting this wrong is what made Return look like it did
+ * nothing at all: the new line went *beside* the box instead of inside it, and
+ * typing then went somewhere nobody could see.
+ */
+export function lineAt(root: HTMLElement, selection: Selection): HTMLElement {
+  const range = selection.getRangeAt(0);
+  const existing = lineOf(root, range.startContainer);
+  if (existing) return existing;
+
+  const doc = root.ownerDocument;
+  const line = doc.createElement('div');
+
+  if (range.startContainer === root && root.childNodes.length > 0) {
+    // Between two lines: the new line takes the caret's place among its
+    // siblings, and nothing else moves.
+    const at = Math.min(range.startOffset, root.childNodes.length);
+    const after = root.childNodes[at] ?? null;
+    if (after) root.insertBefore(line, after);
+    else root.appendChild(line);
+  } else {
+    // Loose text, or an empty box: everything in the box is one line, which is
+    // what the box meant anyway.
+    Array.from(root.childNodes).forEach((node) => line.appendChild(node));
+    root.appendChild(line);
+  }
+
+  caretInto(selection, line);
+  return line;
+}
+
+/**
+ * The formatting that happens while typing: `**bold**` becoming bold, `# `
+ * becoming a heading, and so on.
+ *
+ * Runs on every keystroke and answers whether anything changed. Nothing here
+ * throws on anything unexpected: a note somebody is in the middle of typing is
+ * worth more than a marker getting styled, so anything that does not look
+ * exactly like a finished marker is left alone.
+ */
+export function applyTyping(root: HTMLElement, selection: Selection): TypingResult {
+  if (selection.rangeCount === 0) return TYPING.none;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !root.contains(range.startContainer)) return TYPING.none;
+
+  // Inline markers first: they are the ones that replace text inside a line.
+  const node = range.startContainer;
+  if (isText(node)) {
+    const edit = inlineEdit(node.textContent ?? '', range.startOffset);
+    if (edit) {
+      const target = root.ownerDocument.createRange();
+      target.setStart(node, range.startOffset - edit.length);
+      target.setEnd(node, range.startOffset);
+      replaceRange(target, edit.html, selection);
+      return TYPING.changed;
+    }
+  }
+
+  const line = lineOf(root, range.startContainer);
+  if (!line || line.getAttribute(MARK) === 'rule') return TYPING.none;
+  // Only when the marker was just finished: converting a line the caret is
+  // sitting in the middle of would move the text out from under it.
+  const toEnd = root.ownerDocument.createRange();
+  toEnd.selectNodeContents(line);
+  try {
+    toEnd.setStart(range.endContainer, range.endOffset);
+  } catch {
+    return TYPING.none;
+  }
+  if (toEnd.toString() !== '') return TYPING.none;
+
+  const edit = lineEdit(line.textContent ?? '');
+  if (!edit) return TYPING.none;
+
+  line.textContent = edit.rest;
+  line.setAttribute(MARK, edit.mark);
+  if (edit.number === null) line.removeAttribute(COUNT);
+  else line.setAttribute(COUNT, String(edit.number));
+  caretInto(selection, line);
+  return TYPING.changed;
+}
+
+/**
+ * Return, which is the key that has to keep working whatever else is going on.
+ *
+ * On an empty bullet it leaves the list, because another empty bullet is what
+ * traps people in one. Everywhere else it splits the line at the caret and
+ * stands at the front of the new line, keeping whatever the line was: Return in
+ * a list should give the next item, not a plain paragraph.
+ */
+export function applyReturn(root: HTMLElement, selection: Selection): TypingResult {
+  if (selection.rangeCount === 0) return TYPING.none;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer)) return TYPING.none;
+
+  // `lineAt` can make a line and move the caret into it, so the range is read
+  // again afterwards: a range that still points at the box rather than at a line
+  // splits the box itself, which puts the new line outside it.
+  const line = lineAt(root, selection);
+  const at = selection.getRangeAt(0);
+  const mark = line.getAttribute(MARK);
+  const empty = (line.textContent ?? '').trim() === '';
+
+  if (mark && empty) {
+    line.removeAttribute(MARK);
+    line.removeAttribute(COUNT);
+    caretInto(selection, line);
+    return TYPING.changed;
+  }
+
+  // An empty box is already one empty line: Return there has nothing to make.
+  if (!mark && empty && root.childNodes.length === 1) return TYPING.none;
+
+  const wasNumber = Number(line.getAttribute(COUNT) ?? '1') || 1;
+  const next = splitLine(root, line, at, selection);
+  if (mark) next.setAttribute(MARK, mark);
+  if (mark === 'ol') next.setAttribute(COUNT, String(empty ? wasNumber : wasNumber + 1));
+  caretInto(selection, next);
+  return TYPING.changed;
+}
+
+/**
+ * Backspace at the front of a styled line: the shape goes first, the text
+ * second. One press takes the bullet away, the next joins the lines like any
+ * other backspace, which is what people expect from an editor that hides its
+ * markers.
+ */
+export function applyBackspace(root: HTMLElement, selection: Selection): TypingResult {
+  if (selection.rangeCount === 0 || !selection.isCollapsed) return TYPING.none;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer)) return TYPING.none;
+  const line = lineOf(root, range.startContainer);
+  if (!line) return TYPING.none;
+  const mark = line.getAttribute(MARK);
+  if (!mark || !atStartOf(line, range)) return TYPING.none;
+  line.removeAttribute(MARK);
+  line.removeAttribute(COUNT);
+  return TYPING.changed;
+}
+
+/**
+ * Put back the filler an empty line needs.
+ *
+ * A line with nothing in it has no place for a caret, so the browser gives up on
+ * it: pressing Return and getting nowhere, or typing into a line that never
+ * appears, is what that looks like from the outside. A `<br>` gives the line
+ * something to be, and still comes out as an empty line in markdown.
+ */
+export function tidy(root: HTMLElement): boolean {
+  let changed = false;
+  const doc = root.ownerDocument;
+
+  // Text loose in the box would never come back out as markdown, so it is given
+  // a line of its own.
+  for (const node of Array.from(root.childNodes)) {
+    if (isText(node)) {
+      if ((node.textContent ?? '').trim() === '') {
+        node.remove();
+      } else {
+        const line = doc.createElement('div');
+        root.insertBefore(line, node);
+        line.appendChild(node);
+      }
+      changed = true;
+    } else if (isElement(node) && node.tagName === 'BR') {
+      node.remove();
+      changed = true;
+    }
+  }
+
+  if (root.childNodes.length === 0) {
+    root.appendChild(doc.createElement('div'));
+    changed = true;
+  }
+
+  for (const node of Array.from(root.childNodes)) {
+    if (isElement(node) && node.tagName !== 'BR' && node.childNodes.length === 0) {
+      node.appendChild(doc.createElement('br'));
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/* ------------------------------------------------------------------- helpers */
+
+function isText(node: Node | null | undefined): node is Text {
+  return !!node && node.nodeType === 3;
+}
+
+function isElement(node: Node | null | undefined): node is HTMLElement {
+  return !!node && node.nodeType === 1;
+}
+
+/** What a text node really says, with the browser's own padding taken out. */
+function plain(text: string): string {
+  return text.replace(/\u00a0/g, ' ');
+}
+
+export function escape(text: string, attribute = false): string {
+  const out = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return attribute ? out.replace(/"/g, '&quot;') : out;
 }

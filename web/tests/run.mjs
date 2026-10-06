@@ -14,7 +14,7 @@ import { build } from 'esbuild';
 // copy that is installed here rather than looking next to a temporary folder.
 const dir = path.join('.test-build');
 mkdirSync(dir, { recursive: true });
-const checks = ['tests/markdown.test.mjs', 'tests/reader.test.mjs'];
+const checks = ['tests/markdown.test.mjs', 'tests/typing.test.mjs', 'tests/reader.test.mjs'];
 
 try {
   for (const file of checks) {

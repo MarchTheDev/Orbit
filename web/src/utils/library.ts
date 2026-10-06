@@ -13,6 +13,10 @@ import type { Game } from '../types';
  * Playtime counts as somewhere to point at, deliberately: a game with sessions
  * behind it is a game that has been played, whatever has happened to its folder
  * since, and hiding it would hide the time with it.
+ *
+ * A game added by title alone is the exception, and says so with `inLibrary`:
+ * the player put it on the shelf, so it stays on the shelf, waiting for a
+ * program or kept as something to time by hand.
  */
 export function onDisk(game: Game): boolean {
   return Boolean(

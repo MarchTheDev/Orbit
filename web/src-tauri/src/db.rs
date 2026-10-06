@@ -16,7 +16,8 @@ use serde_json::Value;
 /// 2, the metadata column is called `meta` rather than `igdb`, since Orbit no
 ///     longer talks to IGDB at all, and a game can list the programs it wants
 ///     started alongside it.
-const SCHEMA_VERSION: i64 = 4;
+/// 5, a game can be on the library's shelf before it has a program to start.
+const SCHEMA_VERSION: i64 = 5;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -78,6 +79,9 @@ pub struct GameRow {
     pub companions: Vec<Companion>,
     /// Something the player means to play, which is not on this machine yet.
     pub planned: bool,
+    /// On the library's shelf with nothing to start yet: added by title alone,
+    /// waiting for its program or kept as a game timed by hand.
+    pub in_library: bool,
     /// Achievements, as last read, with the ones the player has ticked.
     pub achievements: Vec<serde_json::Value>,
     pub notes: String,
@@ -263,6 +267,7 @@ impl Db {
                 hltb             TEXT,
                 companions       TEXT    NOT NULL DEFAULT '[]',
                 planned          INTEGER NOT NULL DEFAULT 0,
+                in_library       INTEGER NOT NULL DEFAULT 0,
                 achievements     TEXT    NOT NULL DEFAULT '[]',
                 notes            TEXT    NOT NULL DEFAULT '',
                 logs             TEXT    NOT NULL DEFAULT '[]',
@@ -317,6 +322,10 @@ impl Db {
         // Version 4 adds the heartbeat, so a session left open by a crash has
         // an end that is known rather than guessed.
         Self::upgrade_to_4(conn)?;
+
+        // Version 5 adds the shelf flag: a game put in the library by hand,
+        // which has nothing to start yet but is not a plan either.
+        Self::upgrade_to_5(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -435,6 +444,33 @@ impl Db {
         Ok(())
     }
 
+    /// Bring a version 4 library up to date.
+    ///
+    /// One column: whether a game belongs to the library before it has a
+    /// program. Everything already in the library has one, so they read as
+    /// `false` and behave exactly as they did.
+    fn upgrade_to_5(conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(games)")
+            .map_err(|e| format!("Could not read the library layout: {e}"))?;
+        let columns = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| format!("Could not read the library layout: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read the library layout: {e}"))?;
+        drop(stmt);
+
+        if !columns.iter().any(|c| c == "in_library") {
+            conn.execute(
+                "ALTER TABLE games ADD COLUMN in_library INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Could not add the library shelf column: {e}"))?;
+            log::info!("added games.in_library");
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
         self.conn
             .lock()
@@ -458,7 +494,7 @@ impl Db {
                        MIN(s.started_at)                              AS first_play,
                        MAX(COALESCE(s.ended_at, s.started_at))        AS last_end,
                        COALESCE(SUM(CASE WHEN s.ended_at IS NULL THEN 1 ELSE 0 END), 0) AS open_count,
-                       g.planned, g.achievements
+                       g.planned, g.achievements, g.in_library
                   FROM games g
                   LEFT JOIN sessions s ON s.game_id = g.id
                  GROUP BY g.id
@@ -483,6 +519,7 @@ impl Db {
                 let size_bytes: i64 = r.get(5)?;
                 let install_dir: Option<String> = r.get(4)?;
                 let achievements: Option<String> = r.get(23)?;
+                let in_library: i64 = r.get(24)?;
 
                 // The typed-in time is time played away from Orbit, so it adds to
                 // what the sessions recorded rather than standing in for it.
@@ -514,6 +551,7 @@ impl Db {
                     notes: r.get(12)?,
                     companions: parse_vec(companions.as_deref()),
                     planned: r.get::<_, i64>(22)? != 0,
+                    in_library: in_library != 0,
                     achievements: achievements
                         .as_deref()
                         .and_then(|v| serde_json::from_str::<Vec<Value>>(v).ok())
@@ -556,8 +594,8 @@ impl Db {
             INSERT INTO games (id, title, launch, exe_path, install_dir, size_bytes,
                                status, favorite, manual_play_secs, cover_path, meta,
                                hltb, notes, companions, hue, planned, achievements,
-                               created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?17, ?18, ?16, ?16)
+                               in_library, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?17, ?18, ?19, ?16, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 title            = excluded.title,
                 launch           = excluded.launch,
@@ -575,6 +613,7 @@ impl Db {
                 hue              = excluded.hue,
                 planned          = excluded.planned,
                 achievements     = excluded.achievements,
+                in_library       = excluded.in_library,
                 updated_at       = excluded.updated_at
             "#,
             params![
@@ -601,6 +640,7 @@ impl Db {
                 now(),
                 i64::from(game.planned),
                 serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".into()),
+                i64::from(game.in_library),
             ],
         )
         .map_err(|e| format!("Could not save {}: {e}", game.title))?;
@@ -1148,6 +1188,9 @@ pub struct GameWrite {
     /// Meant to be played rather than installed here.
     #[serde(default)]
     pub planned: bool,
+    /// Added to the library by hand, with nothing to point at yet.
+    #[serde(default)]
+    pub in_library: bool,
     /// Read from Steam, with the ones the player has ticked kept as they are.
     #[serde(default)]
     pub achievements: Vec<Value>,

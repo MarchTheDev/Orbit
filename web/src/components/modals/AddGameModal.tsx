@@ -422,6 +422,10 @@ export function buildGame(d: Draft): Game {
   return {
     id: uid(),
     title: d.title.trim(),
+    // The add dialog is the library's own door, so what comes through it is in
+    // the library even when there is no program to start yet. A game written
+    // down on the Backlog is planned instead, and the two are not the same.
+    inLibrary: true,
     launch,
     exePath: d.exePath || null,
     installDir: d.installDir || null,

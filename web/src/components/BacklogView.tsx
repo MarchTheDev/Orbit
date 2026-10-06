@@ -23,7 +23,8 @@ import { onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
-import { btnGhost, inputCls } from './ui/Modal';
+import { cn } from '../utils/cn';
+import { inputCls } from './ui/Modal';
 import { btnAccent } from './ui/buttons';
 
 /**
@@ -70,6 +71,7 @@ export function BacklogView({
   onUpdate,
   onRemove,
   fetchMetadata: fetchMeta,
+  syncLibrary,
   myOrder,
   setMyOrder,
 }: {
@@ -83,6 +85,14 @@ export function BacklogView({
   onRemove: (id: string) => void;
   /** Whether titles should be looked up as they are planned. */
   fetchMetadata: boolean;
+  /**
+   * Whether the library and this page are kept in step.
+   *
+   * A game added to the library with nothing to start yet belongs to the
+   * library. With this on it is written down here as well, so a plan of what to
+   * play does not have to be kept in two places by hand.
+   */
+  syncLibrary: boolean;
   /** The player's own order for this page, as ids. */
   myOrder: string[];
   setMyOrder: (ids: string[]) => void;
@@ -107,7 +117,18 @@ export function BacklogView({
    * Orbit can start.
    */
   const planned = games.filter((g) => g.planned && match(g));
-  const owned = games.filter((g) => !g.planned);
+
+  /**
+   * Games with something behind them.
+   *
+   * A library entry that has no program yet is left out unless the two pages
+   * are being kept in step: it lives on the shelf, and its card here would say
+   * nothing the library does not already say. A game marked owned from this
+   * page has no shelf of its own and stays here until it has a program.
+   */
+  const owned = games.filter(
+    (g) => !g.planned && (onDisk(g) || !g.inLibrary || syncLibrary),
+  );
 
   /**
    * Suggestions with their covers, while a title is being typed.
@@ -257,47 +278,58 @@ export function BacklogView({
             {planned.length > 0 && <span>· {planned.length} not owned yet</span>}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setPlanning(planning === null ? '' : null)}
-            className={`${btnGhost} flex items-center gap-2`}
-            title="Add something you plan to play, even if you do not own it yet"
-          >
-            <Plus className="size-4" />
-            Plan a game
-          </button>
-          {/* Comparing how long things take is the one question this page
-              exists to answer, so it is one click away rather than hidden in
-              each game's own page. */}
-          <button
-            onClick={() => setShowTimes((v) => !v)}
-            title="Show how long each game takes, to compare them"
-            aria-pressed={showTimes}
-            className={`glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ${
-              showTimes ? 'text-accent' : 'text-muted hover:text-fg'
-            }`}
-          >
-            <Timer className="size-3.5" />
-            Times
-          </button>
-          <div className="glass flex rounded-full p-1">
-            {ORDERS.map((o) => (
-              <button
-                key={o.id}
-                onClick={() => setOrder(o.id)}
-                title={o.label}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${
-                  order === o.id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
-                }`}
-              >
-                <o.icon className="size-3.5" />
-                {o.label}
-              </button>
-            ))}
-          </div>
-          <SearchField value={query} onChange={setQuery} />
-        </div>
       </header>
+
+      {/* The shelf's own toolbar, laid out like the library's rather than as a
+          row of whatever fitted: the search takes the room it needs, the
+          switches sit together on the right, and planning a game is the one
+          accent button here, because it is the one thing that adds. */}
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          placeholder="Search the backlog"
+          className="mr-auto min-w-0"
+          inputClassName="!w-64 sm:!w-80"
+        />
+
+        <button
+          onClick={() => setShowTimes((v) => !v)}
+          title="Show how long each game takes, to compare them"
+          aria-pressed={showTimes}
+          className={`glass flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${
+            showTimes ? 'text-accent' : 'text-muted hover:text-fg'
+          }`}
+        >
+          <Timer className="size-3.5" />
+          Times
+        </button>
+
+        <div className="glass flex rounded-full p-1">
+          {ORDERS.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setOrder(o.id)}
+              title={o.label}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${
+                order === o.id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
+              }`}
+            >
+              <o.icon className="size-3.5" />
+              {o.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={() => setPlanning(planning === null ? '' : null)}
+          className={cn(btnAccent, 'flex items-center gap-2 rounded-full py-2 pl-3 pr-4 text-sm')}
+          title="Add something you plan to play, even if you do not own it yet"
+        >
+          <Plus className="size-4" />
+          Plan a game
+        </button>
+      </div>
 
       {/* The waiting list at a glance, to answer "what can I finish this
           weekend" without opening anything: the shortest, the longest, and how
