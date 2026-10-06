@@ -70,3 +70,33 @@ export function compare(a: string, b: string): number {
   if (lb.pre === '') return -1;
   return la.pre > lb.pre ? 1 : -1;
 }
+
+export interface UpdateDownloadAsset {
+  name?: string;
+  browser_download_url?: string;
+}
+
+/** The asset Orbit offers for the current platform, in preference order. */
+export function pickReleaseAsset(
+  assets: UpdateDownloadAsset[],
+  userAgent: string,
+): { name: string; url: string } | null {
+  const wanted = /Windows/i.test(userAgent)
+    ? ['-setup.exe', '.msi', '-standalone.exe', 'orbit.exe']
+    : /Linux/i.test(userAgent)
+      ? ['_amd64.deb', '.AppImage', '.x86_64.rpm', '.tar.gz']
+      : ['-windows-setup.exe', '_amd64.deb', '.AppImage'];
+
+  for (const ending of wanted) {
+    const match = assets.find(
+      (asset) =>
+        asset.name &&
+        asset.browser_download_url &&
+        asset.name.toLowerCase().endsWith(ending.toLowerCase()),
+    );
+    if (match?.name && match.browser_download_url) {
+      return { name: match.name, url: match.browser_download_url };
+    }
+  }
+  return null;
+}

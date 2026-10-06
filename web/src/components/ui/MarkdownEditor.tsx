@@ -19,7 +19,7 @@ type Mode = 'write' | 'preview';
 /**
  * Keep the Markdown visible while writing it, and let the browser handle text
  * editing. A native textarea gives the caret, arrow keys, selection, undo,
- * spaces and IME input their normal behaviour; Preview shows the actual heading,
+ * spaces and IME input their normal behaviour; View shows the actual heading,
  * list, quote and inline-code sizes without trying to move the caret around a
  * contenteditable DOM.
  */
@@ -158,7 +158,7 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
             )}
           >
             <Eye className="size-3.5" />
-            Preview
+            View
           </button>
         </div>
         <span className="rounded-full border border-line/80 px-2 py-0.5 text-[10px] font-medium tracking-wide text-muted">
@@ -181,7 +181,7 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
             {toolbarButton('Numbered list', ListOrdered, () => prefixLine('1. '))}
             {toolbarButton('Quote', Quote, () => prefixLine('> '))}
             {toolbarButton('Link', Link2, () => wrapSelection('[', '](https://)'))}
-            <span className="ml-auto hidden text-[10px] text-muted sm:block">Formatting stays as text here; Preview shows the finished note.</span>
+            <span className="ml-auto hidden text-[10px] text-muted sm:block">Formatting stays as text here; View shows the finished note.</span>
           </div>
           <textarea
             ref={box}
@@ -211,7 +211,7 @@ export function MarkdownEditor({ value, onChange, rows = 6, placeholder, classNa
           {value.trim() ? (
             <Markdown text={value} />
           ) : (
-            <p className="text-sm text-muted">Nothing to preview yet. Switch to Write to add a note.</p>
+            <p className="text-sm text-muted">Nothing to view yet. Switch to Write to add a note.</p>
           )}
         </div>
       )}

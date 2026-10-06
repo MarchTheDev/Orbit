@@ -106,7 +106,7 @@ function Section({
   return (
     <section
       id={id}
-      className="scroll-mt-28 rounded-3xl border border-line/90 bg-gradient-to-br from-panel/95 via-panel/85 to-panel2/65 p-5 shadow-[0_18px_42px_-30px_rgba(0,0,0,0.9)] transition-shadow sm:p-6"
+      className="scroll-mt-28 rounded-3xl border border-line/65 bg-panel/25 p-5 transition-colors sm:p-6"
     >
       <div className="flex items-start gap-3.5">
         <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-gradient-to-br from-accent/20 to-accent2/10 text-accent shadow-inner">
@@ -134,7 +134,7 @@ function SubHead({ children }: { children: ReactNode }) {
 
 /** A box inside a card, for the settings that belong closer together. */
 function Group({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('space-y-3 rounded-2xl border border-line/75 bg-bg/45 p-4 shadow-inner', className)}>{children}</div>;
+  return <div className={cn('space-y-3 rounded-2xl border border-line/50 bg-bg/20 p-4', className)}>{children}</div>;
 }
 
 /**
@@ -261,11 +261,14 @@ export function SettingsView({
   const lookForUpdate = async () => {
     setChecking(true);
     setUpdateNote('');
-    const found = await checkForUpdate();
-    onFoundUpdate(found);
-    setCheckedAt(Date.now());
-    setChecking(false);
-    if (!found) setUpdateNote(`Orbit is up to date. This is ${APP_VERSION}.`);
+    try {
+      const found = await checkForUpdate(undefined, settings.updatePrerelease === true);
+      onFoundUpdate(found);
+      setCheckedAt(Date.now());
+      if (!found) setUpdateNote(`No newer release was found. This is Orbit ${APP_VERSION}.`);
+    } finally {
+      setChecking(false);
+    }
   };
 
   const install = async () => {
@@ -327,7 +330,7 @@ export function SettingsView({
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">Your Orbit</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight">Settings</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
-              Make Orbit feel right for you. Changes save as you make them—there is no Save button to hunt for.
+              Make Orbit feel right for you. Changes save as you make them - there is no Save button to hunt for.
             </p>
           </div>
         </div>
@@ -633,7 +636,7 @@ export function SettingsView({
         id="orbit-sound"
         icon={Piano}
         title="Sound"
-        lead="A composed, gentle background phrase—made locally, with no audio downloads."
+        lead="A composed, gentle background phrase - made locally, with no audio downloads."
       >
         <Group>
           <Checkbox

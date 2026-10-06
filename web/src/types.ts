@@ -222,6 +222,8 @@ export interface GameLog {
   /** How much playtime the note is about, in seconds. */
   secs: number;
   note: string;
+  /** Longer free text about this entry, separate from what happened. */
+  details: string;
   createdAt: number;
 }
 

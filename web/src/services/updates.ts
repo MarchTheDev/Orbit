@@ -16,7 +16,7 @@
  * still ignored unless the setting asks for them.
  */
 import { APP_VERSION } from '../version';
-import { newestIn, type GitHubRelease } from './updates.logic';
+import { newestIn, pickReleaseAsset, type GitHubRelease } from './updates.logic';
 import { httpJson, downloadUpdate, runUpdate, isNative } from './native';
 import { openExternal } from './desktop';
 
@@ -65,38 +65,13 @@ export async function checkForUpdate(
     return {
       version,
       url: release.html_url ?? `${RELEASES_URL}/tag/v${version}`,
-      asset: pickAsset(release.assets ?? []),
+      asset: pickReleaseAsset(release.assets ?? [], typeof navigator === 'undefined' ? '' : navigator.userAgent),
     };
   } catch {
     return null;
   }
 }
 
-/**
- * Which file to fetch on this machine.
- *
- * Ordered by what installs with the least fuss on each system. The names come
- * from the release workflow, so they end in things like `-windows-setup.exe`
- * and `_amd64.deb`.
- */
-function pickAsset(assets: { name?: string; browser_download_url?: string }[]): ReleaseAsset | null {
-  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  const wanted = /Windows/i.test(ua)
-    ? ['-setup.exe', '.msi', '-standalone.exe']
-    : /Linux/i.test(ua)
-      ? ['_amd64.deb', '.AppImage', '.x86_64.rpm', '.tar.gz']
-      : ['-windows-setup.exe', '_amd64.deb', '.AppImage'];
-
-  for (const ending of wanted) {
-    const match = assets.find(
-      (a) => a.name && a.browser_download_url && a.name.toLowerCase().endsWith(ending.toLowerCase()),
-    );
-    if (match?.name && match.browser_download_url) {
-      return { name: match.name, url: match.browser_download_url };
-    }
-  }
-  return null;
-}
 
 export { isNewer, versionOfRelease } from './updates.logic';
 
@@ -118,6 +93,10 @@ export async function installUpdate(
   if (!info.asset) {
     await openExternal(info.url);
     return 'That release has no file for this machine, so its page has been opened instead.';
+  }
+  if (/^(?:Orbit\.exe|.*-standalone\.exe)$/i.test(info.asset.name)) {
+    await openExternal(info.url);
+    return 'That release only includes the standalone Orbit.exe. Its page is open; close Orbit before replacing your current copy.';
   }
   if (!isNative()) {
     await openExternal(`${RELEASES_URL}/tag/v${info.version}`);

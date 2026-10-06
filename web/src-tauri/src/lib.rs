@@ -323,8 +323,9 @@ fn add_game_log(
     at: i64,
     secs: i64,
     note: String,
+    details: String,
 ) -> Result<GameLogRow, String> {
-    orbit.db.add_game_log(&game_id, at, secs, &note)
+    orbit.db.add_game_log(&game_id, at, secs, &note, &details)
 }
 
 /// Correct a note that is already written.
@@ -335,8 +336,9 @@ fn update_game_log(
     at: i64,
     secs: i64,
     note: String,
+    details: String,
 ) -> Result<(), String> {
-    orbit.db.update_game_log(id, at, secs, &note)
+    orbit.db.update_game_log(id, at, secs, &note, &details)
 }
 
 /// Remove a note.

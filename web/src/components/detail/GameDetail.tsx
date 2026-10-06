@@ -236,7 +236,7 @@ export function GameDetail({
             [
               ['overview', 'Overview', Info],
               ['achievements', 'Achievements', Trophy],
-              ['log', 'Log', NotebookPen],
+              ['log', 'Logs', NotebookPen],
               ['sessions', 'Sessions', History],
               ['edit', 'Edit', Pencil],
             ] as const

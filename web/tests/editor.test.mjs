@@ -26,7 +26,7 @@ const html = renderToStaticMarkup(
 console.log('the note editor');
 check('uses a native multiline textarea', html.includes('<textarea') && html.includes('rows="6"'), html.slice(0, 250));
 check('keeps the Markdown source in the writing field', html.includes('# Run') && html.includes('`F5`'), html);
-check('offers Write and Preview views', html.includes('>Write</button>') && html.includes('>Preview</button>'), html);
+check('offers Write and View views', html.includes('>Write</button>') && html.includes('>View</button>'), html);
 check('does not use contenteditable', !html.includes('contenteditable'));
 check('labels the writing field for assistive technology', html.includes('aria-label="Game note in Markdown"'));
 

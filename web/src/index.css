@@ -136,29 +136,19 @@ body::before {
 /* ------------------------------------------------------------ the calendar */
 
 /*
- * A date field is drawn by Windows, not by Orbit, and it arrives in a system
- * theme of its own: a light popup over a dark app, a blue highlight, a different
- * font. `color-scheme: dark` is what tells the engine to draw its own picker in
- * dark colours, and `accent-color` is what makes the chosen day the theme's
- * accent rather than the operating system's blue. The field itself is then given
- * the same panel the rest of the app uses, so it stops looking pasted in.
+ * Dates use Orbit's own month grid so the popup follows the current theme on
+ * every platform. The clock is still a native time field, drawn in dark mode
+ * and given the same accent as the rest of the controls.
  */
-input[type='date'],
-input[type='time'],
-input[type='datetime-local'],
-input[type='month'],
-input[type='week'] {
+input[type='time'] {
   color-scheme: dark;
   accent-color: var(--c-accent);
   font-family: inherit;
   font-variant-numeric: tabular-nums;
+  background-color: transparent;
 }
 
-input[type='date']::-webkit-calendar-picker-indicator,
-input[type='time']::-webkit-calendar-picker-indicator,
-input[type='datetime-local']::-webkit-calendar-picker-indicator,
-input[type='month']::-webkit-calendar-picker-indicator,
-input[type='week']::-webkit-calendar-picker-indicator {
+input[type='time']::-webkit-calendar-picker-indicator {
   cursor: pointer;
   border-radius: 6px;
   padding: 2px;
@@ -166,20 +156,9 @@ input[type='week']::-webkit-calendar-picker-indicator {
   transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 
-input[type='date']::-webkit-calendar-picker-indicator:hover,
-input[type='time']::-webkit-calendar-picker-indicator:hover,
-input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
-input[type='month']::-webkit-calendar-picker-indicator:hover,
-input[type='week']::-webkit-calendar-picker-indicator:hover {
+input[type='time']::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
   background-color: color-mix(in srgb, var(--c-accent) 22%, transparent);
-}
-
-/* Firefox, and anything else that draws its own: the same idea, one rule. */
-input[type='date'],
-input[type='time'],
-input[type='datetime-local'] {
-  background-color: color-mix(in srgb, var(--c-panel) 92%, transparent);
 }
 
 /* ------------------------------------------------------------ the entrance */
@@ -415,6 +394,10 @@ input[type='datetime-local'] {
   transform-origin: bottom;
   animation: orbit-bar 1.1s ease-in-out infinite;
 }
+.orbit-bars-paused i {
+  animation-play-state: paused;
+}
+
 .orbit-bars i:nth-child(2) {
   animation-duration: 0.85s;
   animation-delay: 0.12s;

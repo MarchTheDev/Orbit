@@ -13,6 +13,7 @@ import {
 import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, parseDuration, toLocalInput } from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { Select } from './ui/Select';
+import { DateTimePicker } from './ui/DateTimePicker';
 
 const PAGE = 25;
 
@@ -271,7 +272,7 @@ export function EditSession({ row, onClose, onSaved }: { row: Session; onClose: 
         <p className="text-sm text-muted">{row.gameTitle}</p>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">When it started</span>
-          <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} className={inputCls} />
+          <DateTimePicker value={at} onChange={setAt} />
         </label>
         <div className="flex gap-3">
           <label className="block flex-1 text-sm">
@@ -367,12 +368,7 @@ export function LogSession({
         <div className="flex gap-3">
           <label className="block flex-1 text-sm">
             <span className="mb-1 block text-muted">When</span>
-            <input
-              type="datetime-local"
-              value={at}
-              onChange={(e) => setAt(e.target.value)}
-              className={inputCls}
-            />
+            <DateTimePicker value={at} onChange={setAt} />
           </label>
           <label className="block flex-1 text-sm">
             <span className="mb-1 block text-muted">How long</span>

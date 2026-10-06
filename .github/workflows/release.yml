@@ -16,7 +16,7 @@ name: Release
 #
 # What comes out:
 #   Windows  Orbit-<version>-windows-setup.exe      the installer
-#            Orbit-<version>-windows-standalone.exe the program on its own
+#            Orbit.exe                            the standalone program
 #            Orbit-<version>-windows.msi            the same installer, msi
 #            Orbit-<version>-windows-portable.zip   the program in a folder
 #   Linux    Orbit-<version>-linux-x86_64.AppImage  one file, any distribution
@@ -30,7 +30,7 @@ name: Release
 on:
   push:
     # A push that changes the version is a release. Restricting it to that one
-    # file keeps a build of six platforms off every ordinary commit.
+    # file keeps a build of the packaging targets off every ordinary commit.
     paths:
       - 'VERSION'
       # Changing what builds the releases is a good moment to build them, and
@@ -145,7 +145,7 @@ jobs:
 
           # The standalone program: one exe, the interface already inside it.
           $exe = Get-ChildItem "$release/*.exe" | Select-Object -First 1
-          Copy-Item $exe.FullName "$out/Orbit-$version-windows-standalone.exe"
+          Copy-Item $exe.FullName "$out/Orbit.exe"
 
           # The portable folder: the same program, with a line saying so.
           $portable = "artifacts/portable"
@@ -193,7 +193,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
-            patchelf libfuse2
+            patchelf libfuse2 rpm
 
       - uses: actions/setup-node@v4
         with:
@@ -317,13 +317,26 @@ jobs:
       - name: Install what the build needs
         run: |
           dnf install -y \
-            @development-tools nodejs npm rust cargo \
+            @development-tools nodejs npm \
             webkit2gtk4.1-devel openssl-devel curl wget file \
             libappindicator-gtk3-devel librsvg2-devel rpm-build \
             gtk3-devel libsoup3-devel patchelf
           # Named differently across Fedora releases, and not needed for the
           # package itself.
           dnf install -y libxdo-devel || dnf install -y xdotool-devel || true
+
+      # Use the same current Rust as the main build. Fedora's package version
+      # can lag behind the minimum required by the Tauri crates in Cargo.lock.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
 
       - uses: actions/checkout@v4
 
@@ -366,9 +379,22 @@ jobs:
       - name: Install what the build needs
         run: |
           pacman -Syu --noconfirm --needed \
-            base-devel git nodejs npm rust sudo \
+            base-devel git nodejs npm sudo curl ca-certificates \
             webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg openssl \
             libsoup3 xdotool
+
+      # Keep the Rust compiler in step with the toolchain used by the other
+      # release jobs rather than relying on when Arch refreshed its package.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
 
       - uses: actions/checkout@v4
 
@@ -438,14 +464,17 @@ jobs:
           cat > notes.md <<EOF
           Orbit ${version}.
 
-          **Windows** - \`Orbit-${version}-windows-setup.exe\` installs it.
-          \`Orbit-${version}-windows-standalone.exe\` is the program on its own,
-          and \`Orbit-${version}-windows-portable.zip\` is the same thing in a
-          folder you can delete when you are done with it.
+          **Windows** - \`Orbit-${version}-windows-setup.exe\` installs it;
+          \`Orbit-${version}-windows.msi\` is the MSI installer; \`Orbit.exe\`
+          is the standalone program; and \`Orbit-${version}-windows-portable.zip\`
+          contains Orbit.exe and a short readme.
 
-          **Linux** - \`.AppImage\` runs on any distribution (chmod +x it first),
-          \`.deb\` is for Debian, Ubuntu and Mint, and the \`.rpm\` is for Fedora,
-          RHEL and openSUSE.
+          **Linux** - \`Orbit-${version}-linux-x86_64.AppImage\` is the one-file
+          build (chmod +x it first), \`orbit_${version}_amd64.deb\` is for Debian,
+          Ubuntu and Mint, \`orbit-${version}-1.x86_64.rpm\` is the RPM build, and
+          \`Orbit-${version}-linux-portable.tar.gz\` is the binary and desktop file.
+          Debian and Fedora also have native packages when their best-effort jobs
+          succeed.
 
           **Arch** - \`pacman -U orbit-${version}-1-x86_64.pkg.tar.zst\`.
 
@@ -464,17 +493,39 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v${ORBIT_VERSION#v}" \
-            --jq '.draft' 2>/dev/null || echo missing)
+          tag="v${ORBIT_VERSION#v}"
+          record=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")
+          record="${record%%$'\n'*}"
+          if [ -n "$record" ]; then
+            IFS=$'\t' read -r release_id state <<< "$record"
+          else
+            release_id=
+            state=missing
+          fi
           echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
           if [ "$state" = "false" ]; then
-            echo "v${ORBIT_VERSION#v} is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
+            echo "$tag is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # A draft on purpose: the files are there to be looked at, and publishing
       # is what creates the tag, puts the release on the releases page, and lets
-      # the app's own update check see it. Overwriting means running this twice
-      # replaces the files instead of failing on them.
+      # the app's own update check see it. Old files are cleared first so a
+      # failed job cannot leave yesterday's package attached to today's draft.
+      - name: Clear assets from an older draft build
+        if: steps.published.outputs.state == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.published.outputs.release_id }}
+        run: |
+          asset_ids=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].id')
+          while read -r asset_id; do
+            [ -z "$asset_id" ] && continue
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" >/dev/null
+          done <<< "$asset_ids"
+
+      # Overwriting means running this twice replaces files instead of failing.
       - uses: softprops/action-gh-release@v2
         if: steps.published.outputs.state != 'false'
         with:

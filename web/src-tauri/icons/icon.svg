@@ -6,7 +6,7 @@
     The drawing is the mark from src/assets/orbit-mark.svg, dressed in Orbit's
     own colours and sitting on its own background. The same paths appear in
     src/components/ui/Logo.tsx, which is where the in-app version and its
-    animation live — change one, change the other.
+    animation live - change one, change the other.
   -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">

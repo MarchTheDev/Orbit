@@ -202,7 +202,7 @@ export function AddGameModal({
   }, []);
 
   /**
-   * Read a program's path, but use its game folder—not its .exe filename—as the
+   * Read a program's path, but use its game folder - not its .exe filename - as the
    * title guess. A previous store match is discarded when a different program
    * is chosen, so its cover or app id cannot leak into the next game.
    */

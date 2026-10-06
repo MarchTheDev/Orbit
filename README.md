@@ -15,7 +15,7 @@ that SVG with `npx tauri icon src-tauri/icons/icon.svg`.
 
 ## Running it
 
-From the repository root — `npm install` here knows to install the app's own
+From the repository root - `npm install` here knows to install the app's own
 dependencies too:
 
 ```sh
@@ -26,7 +26,7 @@ npm run tauri build  # installers in web/src-tauri/target/release/bundle
 
 `npm run dev` alone opens a browser preview of the interface. That is useful for
 working on the design, but it cannot see your files, start a game or write a
-session — those need the desktop shell.
+session - those need the desktop shell.
 
 Running the app needs the [Rust toolchain](https://rustup.rs) and, on Windows,
 the WebView2 runtime that ships with Windows 11 and recent 10.
@@ -37,43 +37,43 @@ looked at. `npm test` in `web/` runs those checks.
 
 ## What it does
 
-**Library** — every game, grouped and filtered, with cover art taken from the
+**Library** - every game, grouped and filtered, with cover art taken from the
 folder it is in or from the store. Press Play and Orbit starts it and opens a
 session. Close the game and the session closes with it, so the clock cannot run
 forever.
 
-**Sessions** — every play session, newest first, with its length and what you
+**Sessions** - every play session, newest first, with its length and what you
 were doing. Add a session by hand for time played on a console or handheld, or
 correct one that went wrong: both the moment it started and how long it ran are
 editable, and the game's total follows.
 
-**Backlog** — what is waiting, what is part-way through and what has been set
+**Backlog** - what is waiting, what is part-way through and what has been set
 aside, with the waiting list ordered by how long a game takes to beat. A game
 written down here is a plan: it waits here until it has a program to start, and
 it stays out of the library until then. A game added from the library with
 nothing to point at yet is the other way round, and only turns up here as well
 if Settings says to add new games to the Backlog too.
 
-**Logs** — every game's log in one place: pick a game on the left, read and
+**Logs** - every game's log in one place: pick a game on the left, read and
 write its notes on the right. A log is the player's own record, not the
 tracker's: `10h · 08-12-26 · finished main story`, typed in by hand with the date
 and the length chosen, and editable afterwards. The one thing Orbit writes
 itself is the "Started playing" note, once, the first time a game is launched.
 
-**Storage** — the games in your library grouped by drive, with a Move button on
+**Storage** - the games in your library grouped by drive, with a Move button on
 each one, and how much room every library folder takes. Games are only ever
 moved between folders you list here.
 
-**Hidden games** — a game can be put out of the way from its own drawer or from
+**Hidden games** - a game can be put out of the way from its own drawer or from
 the right-click menu without leaving the library: its sessions, notes and
 playtime all stay, and the Hidden chip on the library page brings it back.
 
-**Music** — a slow pad Orbit makes itself, so nothing is downloaded and nothing
+**Music** - a slow pad Orbit makes itself, so nothing is downloaded and nothing
 is licensed. Off until it is turned on, with a volume, a choice about whether it
 carries on when Orbit is not the window in front, and controls in the top bar
 beside Settings with four bars that move while it plays.
 
-**Settings** — the theme, the size of the covers, and how notes, dates and drive
+**Settings** - the theme, the size of the covers, and how notes, dates and drive
 letters are shown, grouped into Appearance, Library and Backlog, Playing,
 Artwork and details, Tabs along the top, Sound, Other tools, Updates and About.
 The opening animation, the Jump back in panel and the Hidden chip's games are
@@ -87,15 +87,15 @@ all managed from there.
 | Program | Runs the `.exe`, with optional arguments and working folder. |
 | Through Steam | Only on games imported from a Steam library, which have to go through Steam to start. |
 
-A game can also list programs to start **alongside** it — a frame-rate tool, a
-mod controller — such as Lossless Scaling next to Assetto Corsa. Those are
+A game can also list programs to start **alongside** it - a frame-rate tool, a
+mod controller - such as Lossless Scaling next to Assetto Corsa. Those are
 started with the game and never watched, so closing one cannot end the session.
 
-Dropping a program — or a folder holding one — anywhere on the window adds it
+Dropping a program - or a folder holding one - anywhere on the window adds it
 straight away. Only a drop Orbit cannot make a game out of opens the Add dialog,
 which is the case that needs a decision rather than a keystroke.
 
-**Steam** — bringing games over from the Steam library installed on this PC
+**Steam** - bringing games over from the Steam library installed on this PC
 lives in Add game, next to everything else that adds a game, and what it adds
 goes wherever it was opened from: the library's own door files a game on the
 shelf, the Backlog's door writes it down as planned. Settings keeps the option to
@@ -114,22 +114,22 @@ through Steam and shows an "Open in Steam" button on its page.
 ## Artwork and details
 
 Nothing to set up. Details come from the Steam catalogue, which needs no key:
-summary, genres, developer, release year and artwork — the portrait capsule the
+summary, genres, developer, release year and artwork - the portrait capsule the
 client itself uses, with the wide header as a fallback that is fitted rather than
 cropped. Completion estimates come from HowLongToBeat, which has no official API,
 so that one can be slow or unavailable at times; the lookup handles the site's
 session handshake and follows its endpoint when it is renamed.
 
 There is no second provider and no API key to paste. Games added while offline,
-or ones that arrived before, are filled in quietly in the background — a few at a
+or ones that arrived before, are filled in quietly in the background - a few at a
 time, because HowLongToBeat rate-limits a burst.
 
 ## Where things are kept
 
 In `%APPDATA%\com.orbit.launcher`:
 
-- `orbit.db` — the library, every session and every log note, in SQLite
-- `settings.json` — theme, library folders, and whether to look games up
+- `orbit.db` - the library, every session and every log note, in SQLite
+- `settings.json` - theme, library folders, and whether to look games up
 
 Both are plain files you can back up or delete. Deleting `orbit.db` empties the
 library; nothing else on the machine is touched.
@@ -182,7 +182,7 @@ workflow change it may not be there yet; a push to `VERSION` always works. From
 a command line:
 
 ```sh
-gh workflow run release.yml --ref arena/01a10cff-orbit
+gh workflow run release.yml --ref master
 ```
 
 `packaging/version.mjs` is what keeps the number in one place: the workflow runs
@@ -193,11 +193,11 @@ files in the release and the number in the release's name are the same number.
 
 | Platform | Files |
 | --- | --- |
-| Windows | `-windows-setup.exe` (the installer), `-windows-standalone.exe` (the program on its own), `-windows.msi`, `-windows-portable.zip` (the program in a folder) |
-| Linux | `.AppImage` (one file, any distribution), `.deb` (Debian, Ubuntu, Mint), `.rpm` (Fedora, RHEL, openSUSE), `-linux-portable.tar.gz` |
-| Debian | `_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
-| Fedora | a native `.rpm`, built in a Fedora container |
-| Arch | `.pkg.tar.zst`, installed with `pacman -U` |
+| Windows | `Orbit-<version>-windows-setup.exe` (installer), `Orbit.exe` (standalone program), `Orbit-<version>-windows.msi`, `Orbit-<version>-windows-portable.zip` (program and readme) |
+| Linux | `Orbit-<version>-linux-x86_64.AppImage`, `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
+| Debian | `orbit_<version>_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
+| Fedora | `orbit-<version>-1.fc.x86_64.rpm`, built in a Fedora container |
+| Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, installed with `pacman -U` |
 
 The Debian, Fedora and Arch builds are marked as best effort in the workflow:
 they run in each distribution's own container, and a package name that has moved
@@ -214,9 +214,11 @@ about your library, and a switch in Settings to turn it off.
 
 If there is something newer, a toast appears that stays until it is answered:
 **Go to settings**, **Release notes**, or **Later**. In Settings → Updates the
-install button downloads that release's own installer into a temporary folder
-and hands it to the system, which is exactly what would have happened if the file
-had been downloaded by hand. Or take the release page and pick a file yourself.
+install button downloads that release's installer into a temporary folder and
+hands it to the system, which is exactly what would have happened if the file had
+been downloaded by hand. When a release only has the standalone `Orbit.exe`, its
+page opens instead so you can replace the file yourself. Or open the release page
+to pick a file yourself.
 Draft releases are invisible to the check, so nothing is offered before it is
 published. The version Orbit compares against is the one written into the build
 from [`VERSION`](VERSION) at packaging time.
@@ -241,24 +243,29 @@ That leaves three things behind:
 | An msi, for anyone who wants one | `web/src-tauri/target/release/bundle/msi/` |
 | The program on its own | `web/src-tauri/target/release/orbit.exe` |
 
-The standalone and portable builds are that last file: the interface is inlined
-into it, so copying it somewhere as `Orbit.exe` is a working portable install,
-and zipping that folder is the portable download. Nothing is written next to it;
-the library and the settings live in `%APPDATA%\Orbit`.
+The workflow renames that standalone file `Orbit.exe` and also includes it in the
+portable zip with a short readme. The interface is inlined into it, so it works
+without an installer. Nothing is written next to it; the library and settings
+live in `%APPDATA%\Orbit`.
 
 **Linux.** What is needed once, on Debian or Ubuntu:
 
 ```sh
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 rpm
 cd web && npm ci && npx tauri build --bundles deb,appimage,rpm
 ```
 
-**Arch.** `sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3
-libappindicator-gtk3 librsvg openssl nodejs npm rust`, then
-`npx tauri build --no-bundle` in `web/`, copy the binary next to
+**Arch.** Install the dependencies and build the binary, then copy it next to
 [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) with `orbit.desktop` and
-`orbit.png`, and run `makepkg -f`.
+`orbit.png` before running `makepkg -f`:
+
+```sh
+sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 libappindicator-gtk3 \
+  librsvg openssl nodejs npm rustup
+rustup default stable
+cd web && npm ci && npx tauri build --no-bundle
+```
 
 Every one of these stamps the version from [`VERSION`](VERSION) into the app,
 so bump that file first if the build needs to say something other than what is

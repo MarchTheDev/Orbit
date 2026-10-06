@@ -31,10 +31,26 @@ export function MusicButton({
   onOpenSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(() => typeof document === 'undefined' || document.hasFocus());
   const box = useRef<HTMLDivElement | null>(null);
   const playing = sound?.enabled === true;
   const volume = sound?.volume ?? 0.35;
   const unfocused = sound?.unfocused === true;
+  const pauseBars = volume <= 0 || (!focused && !unfocused);
+
+  /** Keep the bars still when Orbit is out of focus, along with its sound. */
+  useEffect(() => {
+    const syncFocus = () => setFocused(document.hasFocus() && !document.hidden);
+    window.addEventListener('focus', syncFocus);
+    window.addEventListener('blur', syncFocus);
+    document.addEventListener('visibilitychange', syncFocus);
+    syncFocus();
+    return () => {
+      window.removeEventListener('focus', syncFocus);
+      window.removeEventListener('blur', syncFocus);
+      document.removeEventListener('visibilitychange', syncFocus);
+    };
+  }, []);
 
   /** Anything pressed outside the panel closes it. */
   useEffect(() => {
@@ -60,7 +76,7 @@ export function MusicButton({
       >
         {playing ? <Piano className="size-5" strokeWidth={1.8} /> : <VolumeX className="size-5" strokeWidth={1.8} />}
         {playing && showBars && (
-          <span className="orbit-bars" aria-hidden>
+          <span className={cn('orbit-bars', pauseBars && 'orbit-bars-paused')} aria-hidden>
             <i />
             <i />
             <i />

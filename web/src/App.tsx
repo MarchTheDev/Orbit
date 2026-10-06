@@ -164,7 +164,7 @@ export default function App() {
    * offline is not news) should never be the reason the app feels slow.
    */
   useEffect(() => {
-    if (settings?.updateCheck === false) return;
+    if (!ready || settings?.updateCheck === false) return;
     let alive = true;
     const timer = setTimeout(() => {
       void checkForUpdate(undefined, settings?.updatePrerelease === true).then((found) => {
@@ -190,7 +190,7 @@ export default function App() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [settings?.updateCheck, settings?.updatePrerelease]);
+  }, [ready, settings?.updateCheck, settings?.updatePrerelease]);
 
   /**
    * The background sound, which is off until somebody asks for it.
@@ -248,7 +248,10 @@ export default function App() {
    * other: details and times are both optional.
    */
   useEffect(() => {
-    if (!ready || !settings || !settings.fetchMetadata || !settings.autoFetchMetadata) return;
+    if (!ready || !settings || !settings.fetchMetadata || !settings.autoFetchMetadata) {
+      setEnriching(0);
+      return;
+    }
     const missing = games
       .filter(
         (g) =>
@@ -260,7 +263,10 @@ export default function App() {
           (!g.meta || !g.hltb || artIsWide(g)),
       )
       .slice(0, 6);
-    if (missing.length === 0) return;
+    if (missing.length === 0) {
+      setEnriching(0);
+      return;
+    }
 
     let alive = true;
     void (async () => {
@@ -288,6 +294,9 @@ export default function App() {
 
     return () => {
       alive = false;
+      // A changed or removed game invalidates this batch. Its requests may still
+      // finish, but they no longer own the progress indicator.
+      setEnriching(0);
     };
   }, [ready, settings, games, updateGame]);
 
@@ -793,12 +802,6 @@ export default function App() {
                 running={runningGame?.id === heroGame.id}
                 onPlay={() => void startGame(heroGame)}
                 onDetails={() => setSelectedId(heroGame.id)}
-                onHide={() => {
-                  setSettings({ showHero: false });
-                  announce({
-                    text: 'Jump back in is off. Settings has the switch that brings it back.',
-                  });
-                }}
               />
             )}
             {showHome && <ContinueRow games={continueGames} onSelect={setSelectedId} />}

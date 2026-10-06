@@ -18,7 +18,8 @@ use serde_json::Value;
 ///     started alongside it.
 /// 5, a game can be on the library's shelf before it has a program to start.
 /// 6, a game can be hidden from the library without being removed from it.
-const SCHEMA_VERSION: i64 = 6;
+/// 7, a log entry can keep extra details apart from its short summary.
+const SCHEMA_VERSION: i64 = 7;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -149,6 +150,8 @@ pub struct GameLogRow {
     /// How much time the note is about, in seconds.
     pub secs: i64,
     pub note: String,
+    /// A longer free-text note about this entry, apart from what happened.
+    pub details: String,
     pub created_at: i64,
 }
 
@@ -307,6 +310,7 @@ impl Db {
                 at         INTEGER NOT NULL,
                 secs       INTEGER NOT NULL DEFAULT 0,
                 note       TEXT    NOT NULL DEFAULT '',
+                details    TEXT    NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 -- Where the player put it in their own order. Everything starts
                 -- at zero, which falls back to newest first.
@@ -334,6 +338,10 @@ impl Db {
         // Version 6 adds hiding: a game that is still in the library, with its
         // sessions and its notes, and simply out of the way.
         Self::upgrade_to_6(conn)?;
+
+        // Version 7 separates the short event label from the player's longer
+        // free-text note about that log entry.
+        Self::upgrade_to_7(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -501,6 +509,32 @@ impl Db {
             )
             .map_err(|e| format!("Could not add the hidden column: {e}"))?;
             log::info!("added games.hidden");
+        }
+        Ok(())
+    }
+
+    /// Bring a version 6 library up to date.
+    ///
+    /// Extra detail belongs to the log row itself, not to the game's general
+    /// notes, so it remains with that moment when the entry is edited or moved.
+    fn upgrade_to_7(conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(game_logs)")
+            .map_err(|e| format!("Could not read the log layout: {e}"))?;
+        let columns = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| format!("Could not read the log layout: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read the log layout: {e}"))?;
+        drop(stmt);
+
+        if !columns.iter().any(|column| column == "details") {
+            conn.execute(
+                "ALTER TABLE game_logs ADD COLUMN details TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .map_err(|e| format!("Could not add details to game logs: {e}"))?;
+            log::info!("added game_logs.details");
         }
         Ok(())
     }
@@ -958,7 +992,7 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.created_at, COALESCE(g.title, '')
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, '')
                    FROM game_logs l
                    LEFT JOIN games g ON g.id = l.game_id
                   WHERE l.game_id = ?1
@@ -970,11 +1004,12 @@ impl Db {
                 Ok(GameLogRow {
                     id: r.get(0)?,
                     game_id: r.get(1)?,
-                    game_title: r.get(6)?,
+                    game_title: r.get(7)?,
                     at: r.get(2)?,
                     secs: r.get(3)?,
                     note: r.get(4)?,
-                    created_at: r.get(5)?,
+                    details: r.get(5)?,
+                    created_at: r.get(6)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -988,6 +1023,7 @@ impl Db {
         at: i64,
         secs: i64,
         note: &str,
+        details: &str,
     ) -> Result<GameLogRow, String> {
         // Checked before the lock is taken: `game` needs the same mutex, and a
         // guard cannot be taken twice.
@@ -996,10 +1032,10 @@ impl Db {
         }
         let conn = self.lock()?;
         conn.execute(
-            "INSERT INTO game_logs (game_id, at, secs, note, created_at, position) \
-             VALUES (?1, ?2, ?3, ?4, ?5, \
+            "INSERT INTO game_logs (game_id, at, secs, note, details, created_at, position) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, \
                      (SELECT COALESCE(MIN(position), 0) - 1 FROM game_logs WHERE game_id = ?1))",
-            params![game_id, at, secs.max(0), note.trim(), now()],
+            params![game_id, at, secs.max(0), note.trim(), details.trim(), now()],
         )
         .map_err(|e| format!("Could not save that note: {e}"))?;
         let id = conn.last_insert_rowid();
@@ -1011,6 +1047,7 @@ impl Db {
             at,
             secs: secs.max(0),
             note: note.trim().to_string(),
+            details: details.trim().to_string(),
             created_at: now(),
         })
     }
@@ -1023,7 +1060,7 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.created_at, COALESCE(g.title, '')
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, '')
                    FROM game_logs l
                    LEFT JOIN games g ON g.id = l.game_id
                   ORDER BY l.at DESC, l.id DESC
@@ -1035,11 +1072,12 @@ impl Db {
                 Ok(GameLogRow {
                     id: r.get(0)?,
                     game_id: r.get(1)?,
-                    game_title: r.get(6)?,
+                    game_title: r.get(7)?,
                     at: r.get(2)?,
                     secs: r.get(3)?,
                     note: r.get(4)?,
-                    created_at: r.get(5)?,
+                    details: r.get(5)?,
+                    created_at: r.get(6)?,
                 })
             })
             .map_err(|e| format!("Could not read the logs: {e}"))?;
@@ -1075,12 +1113,19 @@ impl Db {
     }
 
     /// Edit a note in place, so a date or a time can be corrected later.
-    pub fn update_game_log(&self, id: i64, at: i64, secs: i64, note: &str) -> Result<(), String> {
+    pub fn update_game_log(
+        &self,
+        id: i64,
+        at: i64,
+        secs: i64,
+        note: &str,
+        details: &str,
+    ) -> Result<(), String> {
         let conn = self.lock()?;
         let changed = conn
             .execute(
-                "UPDATE game_logs SET at = ?1, secs = ?2, note = ?3 WHERE id = ?4",
-                params![at, secs.max(0), note.trim(), id],
+                "UPDATE game_logs SET at = ?1, secs = ?2, note = ?3, details = ?4 WHERE id = ?5",
+                params![at, secs.max(0), note.trim(), details.trim(), id],
             )
             .map_err(|e| format!("Could not edit that note: {e}"))?;
         if changed == 0 {
@@ -1311,6 +1356,34 @@ mod tests {
     }
 
     #[test]
+    fn schema_six_log_rows_migrate_with_empty_details() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE game_logs (
+                id INTEGER PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                secs INTEGER NOT NULL DEFAULT 0,
+                note TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO game_logs (id, game_id, at, secs, note, created_at, position)
+            VALUES (1, 'g1', 100, 60, 'finished the story', 101, 0);",
+        )
+        .unwrap();
+
+        Db::upgrade_to_7(&conn).unwrap();
+        let (note, details): (String, String) = conn
+            .query_row("SELECT note, details FROM game_logs WHERE id = 1", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(note, "finished the story");
+        assert!(details.is_empty());
+    }
+
+    #[test]
     fn timestamps_come_back_as_iso() {
         assert_eq!(iso8601(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso8601(1_700_000_000), "2023-11-14T22:13:20.000Z");
@@ -1439,10 +1512,10 @@ mod tests {
 
         // "10h 08-12-26 finished main story" and "2h 10-12-26 DLC completed".
         let a = db
-            .add_game_log("g1", 1_700_000_000, 36_000, "finished main story")
+            .add_game_log("g1", 1_700_000_000, 36_000, "finished main story", "Final route after the credits.")
             .unwrap();
         let b = db
-            .add_game_log("g1", 1_700_086_400, 7_200, "DLC completed")
+            .add_game_log("g1", 1_700_086_400, 7_200, "DLC completed", "Found every hidden shrine.")
             .unwrap();
         assert_ne!(a.id, b.id);
 
@@ -1451,16 +1524,24 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].note, "DLC completed");
         assert_eq!(logs[0].secs, 7_200);
+        assert_eq!(logs[0].details, "Found every hidden shrine.");
         assert_eq!(logs.iter().map(|l| l.secs).sum::<i64>(), 43_200);
 
         // A date or a time can be corrected afterwards.
-        db.update_game_log(a.id, 1_700_100_000, 39_600, "finished main story (real)")
-            .unwrap();
+        db.update_game_log(
+            a.id,
+            1_700_100_000,
+            39_600,
+            "finished main story (real)",
+            "Got the true ending after the optional area.",
+        )
+        .unwrap();
         let logs = db.list_game_logs("g1").unwrap();
         let edited = logs.iter().find(|l| l.id == a.id).unwrap();
         assert_eq!(edited.at, 1_700_100_000);
         assert_eq!(edited.secs, 39_600);
         assert_eq!(edited.note, "finished main story (real)");
+        assert_eq!(edited.details, "Got the true ending after the optional area.");
         assert_eq!(
             db.list_game_logs("g1")
                 .unwrap()
@@ -1472,17 +1553,17 @@ mod tests {
 
         db.delete_game_log(b.id).unwrap();
         assert_eq!(db.list_game_logs("g1").unwrap().len(), 1);
-        assert!(db.update_game_log(9_999, 1, 1, "gone").is_err());
+        assert!(db.update_game_log(9_999, 1, 1, "gone", "").is_err());
     }
 
     #[test]
     fn notes_go_when_the_game_does() {
         let db = Db::open_memory().unwrap();
         db.upsert_game(&game("g1", "Hollow Knight")).unwrap();
-        db.add_game_log("g1", 1_700_000_000, 60, "kept").unwrap();
+        db.add_game_log("g1", 1_700_000_000, 60, "kept", "").unwrap();
         db.delete_game("g1").unwrap();
         assert!(db.list_game_logs("g1").unwrap().is_empty());
-        assert!(db.add_game_log("g1", 1_700_000_000, 60, "orphan").is_err());
+        assert!(db.add_game_log("g1", 1_700_000_000, 60, "orphan", "").is_err());
     }
 
     #[test]
@@ -1546,9 +1627,9 @@ mod tests {
     fn logs_keep_the_order_they_were_arranged_into() {
         let db = Db::open_memory().unwrap();
         db.upsert_game(&game("g1", "Hades")).unwrap();
-        let a = db.add_game_log("g1", 1_000, 60, "started").unwrap().id;
-        let b = db.add_game_log("g1", 2_000, 60, "beat the boss").unwrap().id;
-        let c = db.add_game_log("g1", 3_000, 60, "finished").unwrap().id;
+        let a = db.add_game_log("g1", 1_000, 60, "started", "").unwrap().id;
+        let b = db.add_game_log("g1", 2_000, 60, "beat the boss", "").unwrap().id;
+        let c = db.add_game_log("g1", 3_000, 60, "finished", "").unwrap().id;
 
         // The latest one written is read first.
         let rows = db.list_game_logs("g1").unwrap();

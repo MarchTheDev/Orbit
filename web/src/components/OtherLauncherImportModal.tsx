@@ -71,7 +71,27 @@ export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
     const term = filter.trim().toLocaleLowerCase();
     return !term || `${game.name} ${game.launcher} ${game.installDir}`.toLocaleLowerCase().includes(term);
   });
+  const groups = [...visible.reduce((byLauncher, game) => {
+    const group = byLauncher.get(game.launcher) ?? [];
+    group.push(game);
+    byLauncher.set(game.launcher, group);
+    return byLauncher;
+  }, new Map<string, Row[]>())].sort(([a], [b]) => a.localeCompare(b));
   const selected = (rows ?? []).filter((game) => game.include);
+
+  const toggleLauncher = (launcher: string, group: Row[]) => {
+    const importable = group.filter((game) =>
+      !knownPaths.has(normalizedPath(game.installDir)) &&
+      !knownTitles.has(game.name.trim().toLocaleLowerCase()),
+    );
+    const allSelected = importable.length > 0 && importable.every((game) => game.include);
+    const paths = new Set(importable.map((game) => normalizedPath(game.installDir)));
+    setRows((current) => (current ?? []).map((game) =>
+      game.launcher === launcher && paths.has(normalizedPath(game.installDir))
+        ? { ...game, include: !allSelected }
+        : game,
+    ));
+  };
 
   const toggle = (installDir: string) => {
     setRows((current) => (current ?? []).map((game) => (
@@ -170,27 +190,57 @@ export function OtherLauncherImportModal({ existing, onAdd, onClose }: {
         )}
 
         {(rows?.length ?? 0) > 0 && (
-          <ul className="max-h-[28rem] space-y-1 overflow-y-auto pr-1">
-            {visible.map((game) => {
-              const known = knownPaths.has(normalizedPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
+          <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+            {groups.map(([launcher, games]) => {
+              const importable = games.filter((game) =>
+                !knownPaths.has(normalizedPath(game.installDir)) &&
+                !knownTitles.has(game.name.trim().toLocaleLowerCase()),
+              );
+              const selectedInGroup = importable.filter((game) => game.include).length;
+              const allSelected = importable.length > 0 && selectedInGroup === importable.length;
               return (
-                <li key={`${game.launcher}:${normalizedPath(game.installDir)}`}>
-                  <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/50'}`}>
-                    <CheckboxBox
-                      checked={game.include}
-                      onChange={() => toggle(game.installDir)}
-                      disabled={known}
-                      title={known ? 'Already in the library' : `Add ${game.name}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-fg">{game.name}</p>
-                      <p className="mt-0.5 truncate text-[11px] text-muted">
-                        <span className="text-accent">{game.launcher}</span>
-                        {known ? ' · already in the library' : ` · ${game.installDir}`}
+                <li key={launcher} className="rounded-2xl border border-line/70 bg-bg/25 p-2.5">
+                  <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-xs font-semibold uppercase tracking-widest text-fg">{launcher}</h3>
+                      <p className="mt-0.5 text-[10px] text-muted">
+                        {games.length} {games.length === 1 ? 'install' : 'installs'}
+                        {importable.length > 0 && ` · ${selectedInGroup} selected`}
                       </p>
                     </div>
-                    {game.sizeBytes > 0 && <span className="shrink-0 text-xs text-muted">{fmtBytes(game.sizeBytes)}</span>}
+                    <button
+                      type="button"
+                      onClick={() => toggleLauncher(launcher, games)}
+                      disabled={importable.length === 0}
+                      className="shrink-0 rounded-lg border border-line px-2.5 py-1 text-[10px] font-medium text-muted transition hover:border-accent hover:text-fg disabled:opacity-40"
+                    >
+                      {allSelected ? 'Clear selection' : 'Select all'}
+                    </button>
                   </div>
+                  <ul className="space-y-1">
+                    {games.map((game) => {
+                      const known = knownPaths.has(normalizedPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
+                      return (
+                        <li key={`${game.launcher}:${normalizedPath(game.installDir)}`}>
+                          <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/50'}`}>
+                            <CheckboxBox
+                              checked={game.include}
+                              onChange={() => toggle(game.installDir)}
+                              disabled={known}
+                              title={known ? 'Already in the library' : `Add ${game.name}`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-fg">{game.name}</p>
+                              <p className="mt-0.5 truncate text-[11px] text-muted">
+                                {known ? 'Already in the library' : game.installDir}
+                              </p>
+                            </div>
+                            {game.sizeBytes > 0 && <span className="shrink-0 text-xs text-muted">{fmtBytes(game.sizeBytes)}</span>}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </li>
               );
             })}

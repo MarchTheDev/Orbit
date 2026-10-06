@@ -151,13 +151,13 @@ export function listGameLogs(gameId: string): Promise<GameLog[]> {
 }
 
 /** Write a note against a game. */
-export function addGameLog(gameId: string, at: number, secs: number, note: string): Promise<GameLog | null> {
-  return call('add_game_log', { gameId, at, secs, note }, () => null);
+export function addGameLog(gameId: string, at: number, secs: number, note: string, details: string): Promise<GameLog | null> {
+  return call('add_game_log', { gameId, at, secs, note, details }, () => null);
 }
 
 /** Correct a note already written. */
-export function updateGameLog(id: number, at: number, secs: number, note: string): Promise<void> {
-  return call('update_game_log', { id, at, secs, note }, () => undefined);
+export function updateGameLog(id: number, at: number, secs: number, note: string, details: string): Promise<void> {
+  return call('update_game_log', { id, at, secs, note, details }, () => undefined);
 }
 
 /** Remove a note. */

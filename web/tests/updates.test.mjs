@@ -11,7 +11,7 @@
  * was: the version a release carries, whether it is newer, and whether a
  * pre-release counts.
  */
-import { isNewer, versionOfRelease, newestIn } from '../src/services/updates.logic.ts';
+import { isNewer, versionOfRelease, newestIn, pickReleaseAsset } from '../src/services/updates.logic.ts';
 
 let failures = 0;
 /** Plain JavaScript on purpose: esbuild reads a `.mjs` file as JavaScript. */
@@ -55,6 +55,27 @@ ok(
 ok(
   'something already installed is not offered again',
   newestIn(published, '0.2.0', true) === null,
+);
+
+const windowsAssets = [
+  { name: 'Orbit.exe', browser_download_url: 'https://example.com/Orbit.exe' },
+  { name: 'Orbit-0.2.0-windows-setup.exe', browser_download_url: 'https://example.com/setup.exe' },
+  { name: 'Orbit-0.2.0-windows-portable.zip', browser_download_url: 'https://example.com/portable.zip' },
+];
+ok(
+  'Windows prefers the installer when a release has one',
+  pickReleaseAsset(windowsAssets, 'Windows NT 10.0')?.name === 'Orbit-0.2.0-windows-setup.exe',
+);
+ok(
+  'Windows can download the standalone Orbit.exe when there is no installer',
+  pickReleaseAsset([windowsAssets[0]], 'Windows NT 10.0')?.name === 'Orbit.exe',
+);
+ok(
+  'Linux prefers its Debian package',
+  pickReleaseAsset([
+    { name: 'Orbit-0.2.0-linux-x86_64.AppImage', browser_download_url: 'https://example.com/orbit.AppImage' },
+    { name: 'orbit_0.2.0_amd64.deb', browser_download_url: 'https://example.com/orbit.deb' },
+  ], 'Linux x86_64')?.name === 'orbit_0.2.0_amd64.deb',
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

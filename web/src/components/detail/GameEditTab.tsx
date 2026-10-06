@@ -3,7 +3,7 @@ import { FolderOpen, Image, LoaderCircle, Pencil, RotateCcw, Sparkles, Trash2 } 
 import type { Game, HltbData, MetaData } from '../../types';
 import { findArtwork, isNative, type ArtworkPick } from '../../services/native';
 import { say } from '../../utils/toast';
-import { pickAnyFile } from '../../services/desktop';
+import { fileSrc, pickAnyFile } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
 import { Cover } from '../ui/Cover';
@@ -165,24 +165,45 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Cover game={game} className="h-24 w-16 shrink-0 rounded-lg [&_span]:text-lg" />
-        <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Pencil className="size-4 text-accent" />
-            Edit this game
-          </h3>
-          <p className="text-xs text-muted">
-            Anything a store got wrong, or that Orbit guessed from a file name, can be fixed here.
-          </p>
+      <div className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+        <div className="flex items-start gap-3">
+          <div className="h-24 w-[4.5rem] shrink-0 overflow-hidden rounded-xl border border-line bg-panel shadow-lg">
+            {coverPath.trim() ? (
+              <img src={fileSrc(coverPath.trim())} alt="" className="size-full object-cover" />
+            ) : coverUrl.trim() ? (
+              <img src={coverUrl.trim()} alt="" className="size-full object-cover" />
+            ) : (
+              <Cover game={game} className="size-full [&_span]:text-sm" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+              <Pencil className="size-3.5" />
+              Review details
+            </span>
+            <label className="block">
+              <span className="sr-only">Title</span>
+              <input
+                className="w-full bg-transparent text-base font-semibold text-fg outline-none placeholder:text-muted focus-visible:ring-1 focus-visible:ring-accent/50"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                spellCheck={false}
+                aria-label="Game title"
+              />
+            </label>
+            <p className="text-xs leading-relaxed text-muted">
+              {developer || releaseYear || genres
+                ? [developer, releaseYear, genres].filter(Boolean).join(' · ')
+                : 'Anything the store got wrong, or Orbit guessed from a file name, can be fixed below.'}
+            </p>
+          </div>
         </div>
+        <p className="border-t border-line/70 pt-3 text-[11px] text-muted">
+          Changes stay here until you save.
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block sm:col-span-2">
-          <span className={labelCls}>Title</span>
-          <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} spellCheck={false} />
-        </label>
 
         <label className="block">
           <span className={labelCls}>Author / developer</span>
@@ -453,7 +474,7 @@ export function GameEditTab({ game, onUpdate }: { game: Game; onUpdate: (patch: 
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
-            Markdown source, with a rendered Preview when you need it
+            Markdown source, with a rendered View when you need it
           </span>
         </span>
         <MarkdownEditor
