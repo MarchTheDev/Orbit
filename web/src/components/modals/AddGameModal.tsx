@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, MetaData } from '../../types';
-import { exeInfo, folderPrograms, isNative, scanFolder } from '../../services/native';
+import { exeInfo, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
@@ -70,6 +70,9 @@ export function AddGameModal({
   const [dropped, setDropped] = useState<string[]>([]);
   const [programs, setPrograms] = useState<FolderProgram[]>([]);
   const [d, setD] = useState<Draft>(() => blank());
+  /** The draft as it stands right now, for a handler that finishes later. */
+  const draft = useRef(d);
+  draft.current = d;
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setD((current) => ({ ...current, [key]: value }));
@@ -116,21 +119,21 @@ export function AddGameModal({
     }
   }, []);
 
-  /** A program tells us the title, where it lives and how big it is. */
-  const takeExe = useCallback(
-    async (exe: string, guessTitle?: string): Promise<boolean> => {
-      const info = await describeExe(exe);
-      setD((current) => ({
-        ...current,
-        ...info,
-        // A title already typed or picked from a store match wins over the file
-        // name, which is the whole reason the store is asked in the first place.
-        title: current.title || guessTitle || info.title || '',
-      }));
-      return true;
-    },
-    [],
-  );
+  /**
+   * A program tells us where it lives, how big it is, and a guess at the title.
+   *
+   * The guess is the file's own name, which is exactly what a store lookup is
+   * for: `Hades.exe` in a folder called `Hades v1.382-win` is Hades. It returns
+   * the title to look up, so the caller can ask the store about it.
+   */
+  const takeExe = useCallback(async (exe: string, guessTitle?: string): Promise<string> => {
+    const info = await describeExe(exe);
+    // A title already typed, or one picked from a store match, wins over the
+    // file name.
+    const wanted = draft.current.title.trim() || guessTitle || info.title || '';
+    setD((current) => ({ ...current, ...info, title: current.title || wanted }));
+    return wanted;
+  }, []);
 
   /**
    * Fill the form from what was dropped.
@@ -146,7 +149,10 @@ export function AddGameModal({
       const exe = paths.find((p) => /\.(exe|bat|cmd)$/i.test(p));
       if (exe) {
         setPrograms([]);
-        return takeExe(exe);
+        // Asked about straight away, because the title is a file name and the
+        // store is what turns it into the game's name.
+        void lookUp(await takeExe(exe));
+        return true;
       }
       const folder = paths.find((p) => !/\.[a-z0-9]{1,4}$/i.test(p));
       if (!folder) return false;
@@ -160,7 +166,8 @@ export function AddGameModal({
         return true;
       }
       setPrograms(found.slice(0, 8));
-      return takeExe(best.exePath);
+      void lookUp(await takeExe(best.exePath));
+      return true;
     },
     [lookUp, takeExe],
   );
@@ -172,8 +179,8 @@ export function AddGameModal({
     if (!initialPaths || initialPaths.length === 0) return;
     setDropped(initialPaths);
     void takePaths(initialPaths).then((took) => {
-      // Nothing to read in the drop: the store is still worth asking about the
-      // folder's name, because that is what the player dropped it for.
+      // Nothing in the drop to read at all: the store is still worth asking
+      // about the name, because that is what the player dropped it for.
       if (!took) void lookUp(titleFromPath(initialPaths[0] ?? ''));
     });
   }, [initialPaths, lookUp, takePaths]);
@@ -185,11 +192,7 @@ export function AddGameModal({
 
   const browseExe = async () => {
     const picked = await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
-    if (picked) {
-      setPrograms([]);
-      await takePaths([picked]);
-      await lookUp(title || baseName(d.installDir) || '');
-    }
+    if (picked) await takePaths([picked]);
   };
 
   const browseCover = async () => {
@@ -567,38 +570,6 @@ async function describeExe(exe: string): Promise<Partial<Draft>> {
     // A path that cannot be measured is still worth adding.
   }
   return out;
-}
-
-/**
- * The program a drop refers to.
- *
- * A dropped program is taken as it is. A dropped folder is searched, because a
- * folder is the more natural thing to drag in and the program inside it is the
- * one the player means. When a folder holds several, the largest wins: game
- * folders keep the real program and leave small helpers behind. The dialog
- * offers the rest, so the guess can be corrected before anything is saved.
- */
-export async function findDroppedExe(paths: string[]): Promise<string | null> {
-  const exe = paths.find((p) => /\.(exe|bat|cmd)$/i.test(p));
-  if (exe) return exe;
-
-  const folder = paths.find((p) => !/\.[a-z0-9]{1,4}$/i.test(p));
-  if (!folder) return null;
-  const found = await scanFolder(folder, 1).catch(() => []);
-  const best = [...found].sort((a, b) => b.sizeBytes - a.sizeBytes)[0];
-  return best?.exePath ?? null;
-}
-
-/**
- * A finished game built straight from dropped paths.
- *
- * Nothing in the app adds a game without showing it first any more, so this is
- * used by callers that have already asked.
- */
-export async function gameFromDropped(paths: string[]): Promise<Game | null> {
-  const exe = await findDroppedExe(paths);
-  if (!exe) return null;
-  return buildGame({ ...blank(), ...(await describeExe(exe)) }, null, null);
 }
 
 /**

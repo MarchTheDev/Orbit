@@ -43,6 +43,10 @@ on:
       # number on it: these change what ends up inside the installers.
       - 'web/src-tauri/Cargo.toml'
       - 'web/src-tauri/Cargo.lock'
+      # The window configuration and the permissions the front end is granted:
+      # both change what ends up inside the installers.
+      - 'web/src-tauri/tauri.conf.json'
+      - 'web/src-tauri/capabilities/**'
       # The app itself. A change to what it does is a change to what is inside
       # the installers, and this is the only way to get those built: the manual
       # button needs this file on the default branch. It costs a few minutes of
