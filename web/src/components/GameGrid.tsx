@@ -6,6 +6,7 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { useHoverTint } from '../utils/palette';
 import { cn } from '../utils/cn';
+import { driveLabel } from '../utils/drive';
 
 /** What `useDragReorder`'s `bind` hands a tile. */
 type DragBinding = {
@@ -152,7 +153,7 @@ function Tile({
       </p>
       <p className="text-xs text-muted">
         {fmtMinutes(game.playSecs / 60)}
-        {game.drive && ` · ${game.drive}`}
+        {game.drive && ` · ${driveLabel(game.drive)}`}
       </p>
     </div>
   );

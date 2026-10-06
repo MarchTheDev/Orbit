@@ -7,3 +7,5 @@ web/dist
 /result
 /result-*
 
+# The built copy of the checks, written and removed by `npm test`.
+web/.test-build/

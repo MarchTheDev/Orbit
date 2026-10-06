@@ -170,6 +170,11 @@ impl Runner {
         // player asked for.
         self.nudge_window(true);
 
+        // The heartbeat runs for every session, including the ones Orbit only
+        // times: a game played elsewhere can still be running when the app is
+        // closed, and the row should say so honestly either way.
+        self.heartbeat(session_id);
+
         // Watching the folder is what lets a session end by itself, however the
         // game was started. A game with no folder to watch, and no process of
         // Orbit's, is stopped by hand.
@@ -259,6 +264,38 @@ impl Runner {
         self.inner
             .lock()
             .map_err(|_| "The session list is not usable.".to_string())
+    }
+
+    /// Keep saying that a session is still going, until it is not.
+    ///
+    /// One row, updated every few seconds. It costs nothing and it is the only
+    /// thing that tells a later run of the app where a session that was never
+    /// closed actually ended: without it, Orbit either counts the time a game
+    /// spent switched off or throws away the time it spent switched on.
+    ///
+    /// The task stops by itself the moment the row is closed, so nothing has to
+    /// remember to cancel it, and a session that outlives the app simply leaves
+    /// the last heartbeat behind as its end.
+    fn heartbeat(&self, session_id: i64) {
+        let db = Arc::clone(&self.db);
+        tauri::async_runtime::spawn(async move {
+            // Slower than the process poll: this is about the app being killed,
+            // not about the game ending, and a few seconds of slack does not
+            // matter to either.
+            let mut ticker = tokio::time::interval(POLL * 5);
+            loop {
+                ticker.tick().await;
+                match db.touch_session(session_id, now()) {
+                    Ok(true) => {}
+                    // Closed, or gone: nothing left to keep alive.
+                    Ok(false) => return,
+                    Err(e) => {
+                        log::warn!("could not write the session heartbeat: {e}");
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// Watch a process and close its session when it goes.

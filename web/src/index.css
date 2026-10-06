@@ -77,6 +77,111 @@ body::before {
   .fade-in { animation: none !important; }
 }
 
+/* The note editor: one pane, and the markdown turns into itself as it is typed.
+ *
+ * The whole reason this is a `contenteditable` rather than a textarea is here:
+ * the styles below are drawn *in* the text that holds the caret, so `**bold**`
+ * is really bold with the asterisks gone and the caret still lands where the
+ * letters are.
+ */
+.md-editor:focus {
+  outline: none;
+}
+
+/* Nothing written yet: say what the box is for, without it being text. */
+.md-editor[data-empty='true']::before {
+  content: attr(data-placeholder);
+  color: var(--c-muted);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.md-editor strong {
+  font-weight: 700;
+  color: var(--c-text);
+}
+.md-editor em {
+  font-style: italic;
+}
+.md-editor code {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--c-accent) 18%, transparent);
+  padding: 0 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  color: var(--c-text);
+}
+.md-editor a {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* A heading has to look like a heading the moment the space after `#` is typed,
+ * which is the whole point of doing this as it is written. The line height stays
+ * where it is, so the text under it does not jump around as the level changes. */
+.md-editor [data-md='h1'] {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 24px;
+}
+.md-editor [data-md='h2'] {
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 24px;
+}
+.md-editor [data-md='h3'] {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+}
+
+.md-editor [data-md='ul']::before,
+.md-editor [data-md='ol']::before {
+  color: var(--c-muted);
+}
+.md-editor [data-md='ul']::before {
+  content: '\2022\00a0\00a0';
+}
+.md-editor [data-md='ol']::before {
+  content: attr(data-n) '.\00a0\00a0';
+}
+.md-editor [data-md='task']::before,
+.md-editor [data-md='task-done']::before {
+  color: var(--c-accent);
+}
+.md-editor [data-md='task']::before {
+  content: '\2610\00a0\00a0';
+}
+.md-editor [data-md='task-done']::before {
+  content: '\2611\00a0\00a0';
+}
+.md-editor [data-md='task-done'] {
+  color: var(--c-muted);
+  text-decoration: line-through;
+}
+.md-editor [data-md='quote'] {
+  border-left: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+  padding-left: 10px;
+  font-style: italic;
+  color: var(--c-muted);
+}
+/* A horizontal rule drawn where the line is, with the line itself invisible. */
+.md-editor [data-md='rule'] {
+  position: relative;
+  color: transparent;
+}
+.md-editor [data-md='rule']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 25%, transparent);
+}
+
 /* The one style every button that does something wears.
  *
  * A fine line rather than a block of colour: the accent as a border and as the

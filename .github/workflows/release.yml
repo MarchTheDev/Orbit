@@ -237,7 +237,22 @@ jobs:
             build-essential curl wget file git ca-certificates \
             libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
             librsvg2-dev patchelf libxdo-dev \
-            nodejs npm rustc cargo
+            nodejs npm
+
+      # Debian 13's own rustc is 1.85, and Tauri 2.12 asks for 1.90, so the
+      # toolchain comes from rustup instead of from the distribution. The
+      # package itself is still built with Debian's libraries and Debian's
+      # dpkg, which is the part a Debian package has to get right.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
 
       - uses: actions/checkout@v4
 

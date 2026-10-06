@@ -22,6 +22,7 @@ import { openExternal } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { listGameLogs } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
+import { driveLabel } from '../../utils/drive';
 import { Cover } from '../ui/Cover';
 import { HltbCard } from './HltbCard';
 import { Select } from '../ui/Select';
@@ -321,12 +322,25 @@ export function GameDetail({
             )}
             <button
               onClick={() => onUpdate({ favorite: !game.favorite })}
-              className="rounded-lg border border-line bg-panel2 px-3"
+              // A forty-four pixel square, which is the size a target wants to
+              // be, and it shows what it does while the pointer is over it. The
+              // star used to be a thin line in the frame: the only thing that
+              // said it could be pressed was pressing it.
+              className={`group grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border transition ${
+                game.favorite
+                  ? 'border-yellow-300/50 bg-yellow-300/10'
+                  : 'border-line bg-panel2 hover:border-yellow-300/60 hover:bg-yellow-300/10'
+              }`}
               title={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
               aria-label={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
               aria-pressed={game.favorite}
             >
-              <Star className={`size-5 ${game.favorite ? 'text-yellow-300' : 'text-muted'}`} fill={game.favorite ? 'currentColor' : 'none'} />
+              <Star
+                className={`size-5 transition-transform duration-150 group-hover:scale-125 group-active:scale-95 ${
+                  game.favorite ? 'text-yellow-300' : 'text-muted group-hover:text-yellow-300'
+                }`}
+                fill={game.favorite ? 'currentColor' : 'none'}
+              />
             </button>
           </div>
           )}
@@ -486,7 +500,7 @@ export function GameDetail({
               {game.drive && (
                 <>
                   <span className="text-muted"> on </span>
-                  <b className="font-mono text-fg">{game.drive}</b>
+                  <b className="font-mono text-fg">{driveLabel(game.drive)}</b>
                 </>
               )}
             </p>

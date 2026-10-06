@@ -6,6 +6,7 @@ import { fmtBytes } from '../../utils/format';
 import { driveOf, isInside } from '../../utils/paths';
 import { Modal, btnGhost, btnPrimary } from '../ui/Modal';
 import { cn } from '../../utils/cn';
+import { driveLabel } from '../../utils/drive';
 
 interface Props {
   game: Game;
@@ -120,7 +121,7 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
       ) : (
         <>
           <p className="mb-1 text-sm text-muted">
-            Currently on <b className="text-fg">{game.drive || '-'}</b>
+            Currently on <b className="text-fg">{driveLabel(game.drive) || '-'}</b>
             {game.sizeBytes > 0 && ` · ${fmtBytes(game.sizeBytes)}`}
           </p>
           <p className="mb-3 break-all font-mono text-xs text-muted">{game.installDir}</p>

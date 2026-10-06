@@ -5,6 +5,7 @@ import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { cn } from '../utils/cn';
 import { StatusBadge } from './StatusBadge';
+import { driveLabel } from '../utils/drive';
 
 interface Props {
   games: Game[];
@@ -63,7 +64,7 @@ export function GameList({ games, selectedId, onSelect, onPlay, scale, onReorder
             <StatusBadge status={g.status} />
             <span className="text-muted">{fmtMinutes(g.playSecs / 60)}</span>
             <span className="text-muted">{fmtDate(g.lastPlayed)}</span>
-            <span className="text-muted">{g.drive || '-'}</span>
+            <span className="text-muted">{driveLabel(g.drive) || '-'}</span>
             <button
               onClick={(e) => {
                 e.stopPropagation();

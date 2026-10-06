@@ -962,8 +962,25 @@ pub fn run() {
             data_dir_size,
             reveal_in_explorer,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while building Orbit");
+        .build(tauri::generate_context!())
+        .expect("error while building Orbit")
+        // The clock has to stop when the app does, however the app is closed.
+        //
+        // Only the tray's own Quit used to write down a running session, so
+        // closing the window with the X left the row open: on the next start it
+        // looked like a game still being played, with a clock counting up from
+        // whenever it had begun. This is the one place every exit goes through,
+        // so every exit stops the clock.
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                if let Some(orbit) = app.try_state::<Orbit>() {
+                    orbit.runner.close_for_app_exit();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

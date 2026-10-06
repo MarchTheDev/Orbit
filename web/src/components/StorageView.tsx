@@ -5,6 +5,7 @@ import { cachedSizes, diskSpace, listDrives, refreshSizes, revealInExplorer, typ
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { folderOf } from '../utils/paths';
+import { driveLabel } from '../utils/drive';
 import { btnGhost } from './ui/Modal';
 import { Cover } from './ui/Cover';
 
@@ -152,7 +153,7 @@ export function StorageView({
           {drives.map((d) => (
             <div key={d.drive} className="glass rounded-2xl px-4 py-3">
               <p className="text-[10px] uppercase tracking-widest text-muted">
-                {d.drive} {d.label && d.label !== '' ? d.label : ''}
+                {driveLabel(d.drive)} {d.label && d.label !== '' ? d.label : ''}
               </p>
               <p className="mt-0.5 text-xl font-bold">{fmtBytes(d.free)}</p>
               <p className="mb-2 text-[11px] text-muted">free of {fmtBytes(d.total)}</p>
@@ -184,7 +185,7 @@ export function StorageView({
               return (
                 <div key={drive}>
                   <div className="mb-1.5 flex items-baseline gap-2">
-                    <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-accent">{drive}</h3>
+                    <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-accent">{driveLabel(drive)}</h3>
                     <span className="text-[11px] text-muted">
                       {fmtBytes(list.reduce((s, g) => s + (g.sizeBytes || 0), 0))}
                       {info ? ` · ${fmtBytes(info.free)} free` : ''}

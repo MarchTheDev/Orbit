@@ -52,7 +52,9 @@
             pkgs.openssl
             pkgs.libayatana-appindicator
             pkgs.librsvg
-            pkgs.libxdo
+            # The xdo library is inside `xdotool`; there is no `libxdo`
+            # attribute, which is what the first build of this flake found out.
+            pkgs.xdotool
           ];
 
           # Tauri's build script reads `frontendDist`, which is `web/dist`, so
@@ -102,7 +104,9 @@
             pkgs.openssl
             pkgs.libayatana-appindicator
             pkgs.librsvg
-            pkgs.libxdo
+            # The xdo library is inside `xdotool`; there is no `libxdo`
+            # attribute, which is what the first build of this flake found out.
+            pkgs.xdotool
           ];
           shellHook = ''
             echo "Orbit: npm install in web/, then npm run tauri dev."

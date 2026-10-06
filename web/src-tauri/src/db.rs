@@ -16,7 +16,7 @@ use serde_json::Value;
 /// 2, the metadata column is called `meta` rather than `igdb`, since Orbit no
 ///     longer talks to IGDB at all, and a game can list the programs it wants
 ///     started alongside it.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -199,33 +199,36 @@ impl Db {
         })
     }
 
-    /// Close anything a crash left open, so the next session can start.
+    /// Close whatever a closed app left open, so nothing pretends to be running.
     ///
-    /// Done on every open rather than only when migrating: an app that is
-    /// killed mid-session comes back to a schema that is already current, and
-    /// that session still needs closing.
-    /// Deal with sessions left open by a crash or a kill.
+    /// Done on every open rather than only when migrating: an app that is killed
+    /// mid-session comes back to a schema that is already current, and that
+    /// session still needs closing.
     ///
-    /// A recent one is left alone on purpose: the game may well still be
-    /// running, and closing it here would throw away everything that has been
-    /// played since it started. It is shown as a session the player can stop,
-    /// which is where the time gets counted. Anything older than a day is
-    /// closed at its own start with no time at all, because crediting a whole
-    /// day of playtime for a game nobody was watching would be a lie.
+    /// Every open session is closed here, at its heartbeat. Orbit starting up is
+    /// proof that nothing it was watching is still being watched, and a session
+    /// left open is a game the interface would show as running with a clock
+    /// ticking on it. The time up to the last heartbeat is the player's and is
+    /// kept; the time between the app dying and this moment is not counted,
+    /// because nobody knows whether the game was still open for any of it.
+    ///
+    /// A session from before this column existed has no heartbeat, so it ends
+    /// where it started. That loses the time of one session in a library that
+    /// predates the fix, which is better than counting a night of playtime for a
+    /// game that may have been closed after five minutes.
     fn close_orphans(conn: &Connection) -> Result<(), String> {
-        let cut_off = now() - 24 * 60 * 60;
         let closed = conn
             .execute(
                 "UPDATE sessions
-                    SET ended_at = started_at,
-                        duration_secs = 0,
-                        ended_by = ?1
-                  WHERE ended_at IS NULL AND started_at < ?2",
-                params![ENDED_RECOVERED, cut_off],
+                    SET ended_at      = COALESCE(last_seen, started_at),
+                        duration_secs = MAX(0, COALESCE(last_seen, started_at) - started_at),
+                        ended_by      = ?1
+                  WHERE ended_at IS NULL",
+                params![ENDED_RECOVERED],
             )
             .map_err(|e| format!("Could not tidy up open sessions: {e}"))?;
         if closed > 0 {
-            log::info!("closed {closed} stale session(s) with no time to add");
+            log::info!("closed {closed} session(s) left open by a previous run");
         }
         Ok(())
     }
@@ -273,6 +276,10 @@ impl Db {
                 game_id       TEXT    NOT NULL REFERENCES games(id) ON DELETE CASCADE,
                 started_at    INTEGER NOT NULL,
                 ended_at      INTEGER,
+                -- The last time the app was sure the game was still going. A
+                -- session that is still open when Orbit starts was left behind
+                -- by something, and this is where its time is cut off.
+                last_seen     INTEGER,
                 duration_secs INTEGER NOT NULL DEFAULT 0,
                 category      TEXT    NOT NULL DEFAULT 'Main story',
                 note          TEXT    NOT NULL DEFAULT '',
@@ -307,6 +314,9 @@ impl Db {
         // Version 3 adds what a game planned rather than installed needs, plus
         // the player's own order for each game's log.
         Self::upgrade_to_3(conn)?;
+        // Version 4 adds the heartbeat, so a session left open by a crash has
+        // an end that is known rather than guessed.
+        Self::upgrade_to_4(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -395,6 +405,32 @@ impl Db {
             )
             .map_err(|e| format!("Could not add the log order column: {e}"))?;
             log::info!("added game_logs.position");
+        }
+        Ok(())
+    }
+
+    /// Bring a version 3 library up to date.
+    ///
+    /// One column: the last moment a session was seen to be alive. Sessions that
+    /// were already open when this arrived have no heartbeat to show, so they
+    /// are treated as having ended where they started: Orbit does not know how
+    /// long they were played, and inventing a number would put time in the
+    /// library that nobody spent.
+    fn upgrade_to_4(conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .map_err(|e| format!("Could not read the session layout: {e}"))?;
+        let columns = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| format!("Could not read the session layout: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read the session layout: {e}"))?;
+        drop(stmt);
+
+        if !columns.iter().any(|c| c == "last_seen") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_seen INTEGER", [])
+                .map_err(|e| format!("Could not add the session heartbeat: {e}"))?;
+            log::info!("added sessions.last_seen");
         }
         Ok(())
     }
@@ -693,11 +729,27 @@ impl Db {
             category.trim()
         };
         conn.execute(
-            "INSERT INTO sessions (game_id, started_at, category) VALUES (?1, ?2, ?3)",
+            "INSERT INTO sessions (game_id, started_at, last_seen, category)
+             VALUES (?1, ?2, ?2, ?3)",
             params![game_id, started_at, category],
         )
         .map_err(|e| format!("Could not start the session: {e}"))?;
         Ok(conn.last_insert_rowid())
+    }
+
+    /// Say that a session is still going, right now.
+    ///
+    /// Answers whether it is still open: once the row has been closed there is
+    /// nothing left to keep alive, and whoever is calling this can stop.
+    pub fn touch_session(&self, id: i64, at: i64) -> Result<bool, String> {
+        let conn = self.lock()?;
+        let changed = conn
+            .execute(
+                "UPDATE sessions SET last_seen = ?2 WHERE id = ?1 AND ended_at IS NULL",
+                params![id, at],
+            )
+            .map_err(|e| format!("Could not record the heartbeat: {e}"))?;
+        Ok(changed > 0)
     }
 
     /// Close a session and record why.

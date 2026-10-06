@@ -447,7 +447,10 @@ export default function App() {
         { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
         { label: 'Edit details', icon: Pencil, onSelect: () => openDetail(menuGame.id, 'edit') },
         { kind: 'sep' },
-        menuGame.running || session?.gameId === menuGame.id
+        // Only the session Orbit is actually tracking. The database can hold a
+        // row left open by a run of the app that was killed, and reading that
+        // as "running" made this menu offer to stop a game nobody had started.
+        session?.gameId === menuGame.id
           ? {
               label: 'Stop session',
               icon: Square,

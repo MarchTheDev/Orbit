@@ -23,6 +23,7 @@ import { openExternal } from '../services/desktop';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
+import { driveLabel } from '../utils/drive';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox } from './ui/Checkbox';
 import { Select } from './ui/Select';
@@ -390,10 +391,10 @@ export function SettingsView({
             {drives.map((d) => (
               <button
                 key={d.drive}
-                onClick={() => addFolder(`${d.drive}\\Games`)}
+                onClick={() => addFolder(`${driveLabel(d.drive)}Games`)}
                 className="rounded-lg border border-line bg-panel2 px-3 py-1.5 text-xs hover:border-accent"
               >
-                Use {d.drive}\Games · {fmtBytes(d.free)} free
+                Use {driveLabel(d.drive)}Games · {fmtBytes(d.free)} free
               </button>
             ))}
           </div>
@@ -418,49 +419,9 @@ export function SettingsView({
         </button>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <Database className="size-4 text-accent" />
-          About
-        </h2>
-        <p className="text-sm text-muted">Orbit v0.1.0 · running in {isNative() ? 'desktop (Tauri)' : 'browser preview'} mode</p>
-        {where && (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <span className="break-all font-mono text-xs">{where.path}</span>
-            <span className="shrink-0">{fmtBytes(where.size)}</span>
-            <button
-              onClick={() => void revealInExplorer(where.path)}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-xs hover:border-accent"
-            >
-              <FolderOpen className="size-3" />
-              Open
-            </button>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => {
-              if (confirm('Delete every game, session and note, and put the settings back to how they were on first run?')) onReset();
-            }}
-            className="flex items-center gap-2 rounded-lg border border-rose-400/50 px-4 py-2 text-sm text-rose-400"
-          >
-            <RefreshCw className="size-4" />
-            Reset everything
-          </button>
-          <button
-            onClick={() => {
-              if (confirm('Delete every game and session from Orbit? Your settings are kept.')) onClearLibrary();
-            }}
-            className="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm text-muted hover:border-rose-400/50 hover:text-rose-400"
-          >
-            <Trash2 className="size-4" />
-            Delete games only
-          </button>
-        </div>
-      </section>
-
-      {/* Updates, at the bottom of the page but reachable straight from the
-          toast that says one is waiting: the id is what that scrolls to. */}
+      {/* Updates, just above About: it is something to act on rather than
+          something to read, and About has the last word on the page. The id
+          is what the toast scrolls to when it says one is waiting. */}
       <section id="orbit-updates" className="scroll-mt-8 space-y-3">
         <h2 className="flex items-center gap-2 font-semibold">
           <Download className="size-4 text-accent" />
@@ -517,6 +478,47 @@ export function SettingsView({
             label="Look for a new version when Orbit opens"
             hint="One request to GitHub's public releases API. No account, no identifier, and nothing about your library is sent."
           />
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Database className="size-4 text-accent" />
+          About
+        </h2>
+        <p className="text-sm text-muted">Orbit {APP_VERSION} · running in {isNative() ? 'desktop (Tauri)' : 'browser preview'} mode</p>
+        {where && (
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <span className="break-all font-mono text-xs">{where.path}</span>
+            <span className="shrink-0">{fmtBytes(where.size)}</span>
+            <button
+              onClick={() => void revealInExplorer(where.path)}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-xs hover:border-accent"
+            >
+              <FolderOpen className="size-3" />
+              Open
+            </button>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              if (confirm('Delete every game, session and note, and put the settings back to how they were on first run?')) onReset();
+            }}
+            className="flex items-center gap-2 rounded-lg border border-rose-400/50 px-4 py-2 text-sm text-rose-400"
+          >
+            <RefreshCw className="size-4" />
+            Reset everything
+          </button>
+          <button
+            onClick={() => {
+              if (confirm('Delete every game and session from Orbit? Your settings are kept.')) onClearLibrary();
+            }}
+            className="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm text-muted hover:border-rose-400/50 hover:text-rose-400"
+          >
+            <Trash2 className="size-4" />
+            Delete games only
+          </button>
         </div>
       </section>
 
