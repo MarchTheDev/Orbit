@@ -16,6 +16,7 @@
  * still ignored unless the setting asks for them.
  */
 import { APP_VERSION } from '../version';
+import { newestIn, type GitHubRelease } from './updates.logic';
 import { httpJson, downloadUpdate, runUpdate, isNative } from './native';
 import { openExternal } from './desktop';
 
@@ -37,15 +38,6 @@ export interface ReleaseInfo {
   asset: ReleaseAsset | null;
 }
 
-interface GitHubRelease {
-  tag_name?: string;
-  name?: string;
-  html_url?: string;
-  draft?: boolean;
-  prerelease?: boolean;
-  assets?: { name?: string; browser_download_url?: string }[];
-}
-
 /**
  * The newest published release, if it is newer than what is running.
  *
@@ -63,18 +55,11 @@ export async function checkForUpdate(
     const answer = await httpJson<GitHubRelease[] | GitHubRelease>(RELEASES_API, {
       headers: { Accept: 'application/vnd.github+json' },
     });
-    const releases = (Array.isArray(answer) ? answer : [answer]).filter(
-      (r): r is GitHubRelease => !!r && !r.draft && (includePrereleases || !r.prerelease),
-    );
-
-    let best: { version: string; release: GitHubRelease } | null = null;
-    for (const release of releases) {
-      const version = versionOf(release);
-      if (!version || !isNewer(version, current)) continue;
-      // The list arrives newest first, but "newest" there is when it was
-      // published, which is not the same as which version is highest.
-      if (!best || compare(version, best.version) > 0) best = { version, release };
-    }
+    // Which release to believe is decided in `updates.logic`, where it can be
+    // checked without a network: that is the part that was wrong. The list
+    // arrives in the order things were published, and a hotfix for an older
+    // version published today is still older than what is installed.
+    const best = newestIn(Array.isArray(answer) ? answer : [answer], current, includePrereleases);
     if (!best) return null;
     const { version, release } = best;
     return {
@@ -85,14 +70,6 @@ export async function checkForUpdate(
   } catch {
     return null;
   }
-}
-
-/** The version a release carries, from its tag or, failing that, its title. */
-function versionOf(release: GitHubRelease): string {
-  const tag = (release.tag_name ?? '').replace(/^v/i, '').trim();
-  if (tag) return tag;
-  // A title like "Orbit v0.1.3" is the other place the number is written.
-  return (release.name ?? '').replace(/^[^0-9]*v?/i, '').trim();
 }
 
 /**
@@ -121,28 +98,7 @@ function pickAsset(assets: { name?: string; browser_download_url?: string }[]): 
   return null;
 }
 
-/** Is this version newer than the one running? */
-export function isNewer(candidate: string, current: string): boolean {
-  return compare(candidate, current) > 0;
-}
-
-/** Numeric dotted version compare, with anything after a dash counting as older. */
-function compare(a: string, b: string): number {
-  const parse = (v: string) => {
-    const [main, pre = ''] = v.replace(/^v/i, '').trim().split('-');
-    return { parts: main.split('.').map((n) => Number.parseInt(n, 10) || 0), pre };
-  };
-  const la = parse(a);
-  const lb = parse(b);
-  for (let i = 0; i < Math.max(la.parts.length, lb.parts.length); i += 1) {
-    const diff = (la.parts[i] ?? 0) - (lb.parts[i] ?? 0);
-    if (diff !== 0) return diff > 0 ? 1 : -1;
-  }
-  if (la.pre === lb.pre) return 0;
-  if (la.pre === '') return 1; // 0.2.0 beats 0.2.0-beta
-  if (lb.pre === '') return -1;
-  return la.pre > lb.pre ? 1 : -1;
-}
+export { isNewer, versionOfRelease } from './updates.logic';
 
 export type InstallStep = 'downloading' | 'opening';
 

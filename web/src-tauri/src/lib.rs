@@ -996,6 +996,13 @@ mod tests {
     #[test]
     fn drives_come_back_with_a_readable_size() {
         let drives = storage::list_drives();
+        // Drive letters are how Windows names a disk. Anywhere else there are
+        // no letters to list, and the library keeps its folders by path
+        // instead, so an empty answer is the right one rather than a fault.
+        if !cfg!(windows) {
+            assert!(drives.is_empty(), "there are no drive letters here");
+            return;
+        }
         assert!(!drives.is_empty(), "this machine has at least one drive");
         assert!(drives.iter().all(|d| d.drive.ends_with(':')));
         assert!(

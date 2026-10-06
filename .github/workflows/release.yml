@@ -471,7 +471,10 @@ jobs:
             # log GitHub hands over that way and has a size limit of its own. A
             # compiler prints a lot of "Compiling ..." in between the things
             # that went wrong, so only those are taken.
-            message=$(grep -nE -B 2 -A 8 "error(\[|:)" /tmp/nix-build.log | tail -80)
+            # Errors and failing tests both: a test result line is preceded by
+            # the names of the tests that produced it and by their panic
+            # messages, which is the whole of what a person needs to see.
+            message=$(grep -nE -B 45 "test result:|error(\[|:)" /tmp/nix-build.log | tail -110)
             message=${message//'%'/'%25'}
             message=${message//$'\n'/'%0A'}
             echo "::error title=Nix build failed::${message}"

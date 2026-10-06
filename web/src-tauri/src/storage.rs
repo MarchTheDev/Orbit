@@ -528,6 +528,9 @@ mod tests {
         assert!(err.contains("not one of your library folders"), "{err}");
     }
 
+    /// Windows only: `D:\Games\Hades` is a path with a drive in it, and
+    /// anywhere else it is a single file name that happens to contain colons.
+    #[cfg(windows)]
     #[test]
     fn a_move_keeps_the_path_below_the_game_folder() {
         let from = PathBuf::from(r"D:\Games\Hades");

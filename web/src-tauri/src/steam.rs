@@ -328,7 +328,14 @@ mod tests {
         assert_eq!(game.name, "Portal 2");
         assert_eq!(game.size_bytes, 12_345_678_901);
         assert_eq!(game.last_played, Some(1_700_000_000));
-        assert!(game.install_dir.ends_with(r"steamapps\common\Portal 2"));
+        // Joined rather than written with backslashes: the path a manifest
+        // makes belongs to the machine reading it.
+        let expected = Path::new("steamapps")
+            .join("common")
+            .join("Portal 2")
+            .to_string_lossy()
+            .to_string();
+        assert!(game.install_dir.ends_with(&expected), "{}", game.install_dir);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

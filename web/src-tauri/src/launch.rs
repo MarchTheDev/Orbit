@@ -786,6 +786,11 @@ mod tests {
     }
 
     /// A real process, because the hand-off logic is about real process exits.
+    ///
+    /// Windows only, because the hand-off is: the process Orbit started is gone
+    /// and the game is looked for by name in the folder, which is the watching
+    /// that only exists there. On Linux a program that ran and died is over.
+    #[cfg(windows)]
     #[test]
     fn a_process_that_dies_quickly_is_treated_as_a_launcher() {
         let mut sessions = Sessions::default();
@@ -825,22 +830,25 @@ mod tests {
     }
 
     /// A real long-lived process, because killing one is the whole point.
+    ///
+    /// The program it starts is whatever this machine has: `cmd` and a ping on
+    /// Windows, a shell and a sleep anywhere else. Either way it outlives the
+    /// test by a wide margin, so the only thing that can have ended it is the
+    /// kill being tested.
     #[test]
     fn stopping_a_session_closes_the_game_it_started() {
         let mut sessions = Sessions::default();
-        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        let (program, args) = long_running_program();
         let launched = sessions
             .launch_target(
                 &LaunchTarget::Executable {
-                    path: PathBuf::from(&shell),
-                    // Outlives the test by a wide margin, so it can only be
-                    // gone because something killed it.
-                    args: "/c ping -n 60 127.0.0.1 > nul".to_string(),
+                    path: PathBuf::from(&program),
+                    args,
                     working_dir: None,
                 },
                 None,
             )
-            .expect("cmd should start");
+            .unwrap_or_else(|e| panic!("{program} should start: {e}"));
         assert!(!launched.manual);
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(
@@ -859,5 +867,16 @@ mod tests {
     fn stopping_a_game_orbit_never_started_says_so() {
         let mut sessions = Sessions::default();
         assert!(sessions.kill(4321).is_err());
+    }
+
+    /// A program that stays up for a minute, and the arguments to make it do so.
+    fn long_running_program() -> (String, String) {
+        if cfg!(windows) {
+            let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+            // Pings itself, because that is a sleep that ships with Windows.
+            (shell, "/c ping -n 60 127.0.0.1 > nul".to_string())
+        } else {
+            ("/bin/sh".to_string(), r#"-c "sleep 60""#.to_string())
+        }
     }
 }
