@@ -222,7 +222,7 @@ That leaves three things behind:
 
 | What | Where |
 | --- | --- |
-| The setup exe | `web/src-tauri/target/release/bundle/nsis/Orbit_0.1.0_x64-setup.exe` |
+| The setup exe | `web/src-tauri/target/release/bundle/nsis/Orbit_<version>_x64-setup.exe` |
 | An msi, for anyone who wants one | `web/src-tauri/target/release/bundle/msi/` |
 | The program on its own | `web/src-tauri/target/release/orbit.exe` |
 
