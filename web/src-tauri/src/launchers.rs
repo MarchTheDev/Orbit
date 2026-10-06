@@ -32,7 +32,9 @@ pub struct LauncherGame {
 /// All discovery is local and read-only. Callers decide when to run it; it is
 /// deliberately not used during startup.
 pub fn installed_games() -> Result<Vec<LauncherGame>, String> {
-    let mut games = Vec::new();
+    // The platform scanners are compiled only on Windows, so type the empty
+    // non-Windows result explicitly for the sort below.
+    let mut games: Vec<LauncherGame> = Vec::new();
 
     #[cfg(windows)]
     {
