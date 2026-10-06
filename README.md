@@ -31,6 +31,10 @@ session — those need the desktop shell.
 Running the app needs the [Rust toolchain](https://rustup.rs) and, on Windows,
 the WebView2 runtime that ships with Windows 11 and recent 10.
 
+The note editor's markdown is checked without a browser: a note goes into the
+editor and has to come back out as the same note, and the reading is rendered and
+looked at. `npm test` in `web/` runs those checks.
+
 ## What it does
 
 **Library** — every game, grouped and filtered, with cover art taken from the
@@ -189,7 +193,8 @@ install button downloads that release's own installer into a temporary folder
 and hands it to the system, which is exactly what would have happened if the file
 had been downloaded by hand. Or take the release page and pick a file yourself.
 Draft releases are invisible to the check, so nothing is offered before it is
-published.
+published. The version Orbit compares against is the one written into the build
+from [`VERSION`](VERSION) at packaging time.
 
 ### Building the installers yourself
 
