@@ -545,11 +545,30 @@ jobs:
           ask it to; nothing is read or launched until you do.
           EOF
 
+      # Whether this version is already out there.
+      #
+      # Publishing is the player's decision, made by hand, and a build that ran
+      # afterwards must not quietly take that decision back: drafting a release
+      # that has been published would remove it from the releases page and from
+      # every installed copy's update check.
+      - name: Is this version already published?
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v${ORBIT_VERSION#v}" \
+            --jq '.draft' 2>/dev/null || echo missing)
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          if [ "$state" = "false" ]; then
+            echo "v$ORBIT_VERSION is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # A draft on purpose: the files are there to be looked at, and publishing
       # is what creates the tag, puts the release on the releases page, and lets
       # the app's own update check see it. Overwriting means running this twice
       # replaces the files instead of failing on them.
       - uses: softprops/action-gh-release@v2
+        if: steps.published.outputs.state != 'false'
         with:
           tag_name: v${{ env.ORBIT_VERSION }}
           name: Orbit v${{ env.ORBIT_VERSION }}

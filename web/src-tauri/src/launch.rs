@@ -719,11 +719,19 @@ fn is_junk_dir(path: &Path) -> bool {
 mod tests {
     use super::*;
 
+    /// A path as it would be written on Windows, built for whichever machine is
+    /// running the test. `C:\Games\Hades` typed literally is one long file
+    /// name anywhere else, and tests about file names then measure the wrong
+    /// thing.
+    fn win(parts: &[&str]) -> PathBuf {
+        parts.iter().collect()
+    }
+
     #[test]
     fn a_redistributable_folder_is_not_walked_into() {
-        assert!(is_junk_dir(Path::new(r"C:\Games\Hades\_CommonRedist")));
-        assert!(is_junk_dir(Path::new(r"C:\Games\Hades\DirectX")));
-        assert!(!is_junk_dir(Path::new(r"C:\Games\Hades\bin")));
+        assert!(is_junk_dir(&win(&["C:", "Games", "Hades", "_CommonRedist"])));
+        assert!(is_junk_dir(&win(&["C:", "Games", "Hades", "DirectX"])));
+        assert!(!is_junk_dir(&win(&["C:", "Games", "Hades", "bin"])));
     }
 
     #[test]
@@ -732,18 +740,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("bin").join("x64")).unwrap();
         std::fs::create_dir_all(dir.join("_CommonRedist")).unwrap();
-        std::fs::write(dir.join("launcher.exe"), b"xx").unwrap();
+        // A real game program, not a stub: a `launcher.exe` is deliberately not
+        // offered, so the folder's own program has to be the game.
+        std::fs::write(dir.join("Hades.exe"), b"xx").unwrap();
         std::fs::write(dir.join("bin").join("x64").join("game.exe"), b"xxxxxxxx").unwrap();
         std::fs::write(dir.join("_CommonRedist").join("dxsetup.exe"), b"xxxxxxxxxxxx").unwrap();
 
         let found = folder_programs(&dir, 2);
         let names: Vec<String> = found.iter().map(|f| f.title.clone()).collect();
-        assert!(names.contains(&"orbit-tauri-programs".to_string()));
+        assert!(names.contains(&"orbit-tauri-programs".to_string()), "{names:?}");
         assert!(names.contains(&"x64".to_string()));
         assert!(!names.contains(&"_CommonRedist".to_string()));
         // The folder's own programs come before the ones buried deeper.
         let first = found.first().expect("at least one");
-        assert_eq!(first.exe_path, dir.join("launcher.exe").to_string_lossy().to_string());
+        assert_eq!(first.exe_path, dir.join("Hades.exe").to_string_lossy().to_string());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -758,11 +768,11 @@ mod tests {
 
     #[test]
     fn launchers_and_installers_are_not_games() {
-        assert!(is_executable(Path::new(r"C:\Games\Hades\Hades.exe")));
-        assert!(!is_executable(Path::new(r"C:\Games\Hades\readme.txt")));
-        assert!(is_boring(Path::new(r"C:\Games\Hades\unins000.exe")));
-        assert!(is_boring(Path::new(r"C:\Games\Hades\vcredist_x64.exe")));
-        assert!(!is_boring(Path::new(r"C:\Games\Hades\Hades.exe")));
+        assert!(is_executable(&win(&["C:", "Games", "Hades", "Hades.exe"])));
+        assert!(!is_executable(&win(&["C:", "Games", "Hades", "readme.txt"])));
+        assert!(is_boring(&win(&["C:", "Games", "Hades", "unins000.exe"])));
+        assert!(is_boring(&win(&["C:", "Games", "Hades", "vcredist_x64.exe"])));
+        assert!(!is_boring(&win(&["C:", "Games", "Hades", "Hades.exe"])));
     }
 
     #[test]

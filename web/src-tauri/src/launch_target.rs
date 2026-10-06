@@ -204,7 +204,10 @@ mod tests {
         assert_eq!(LaunchTarget::Steam { app_id: 620 }.label(), "Steam · 620");
         assert_eq!(
             LaunchTarget::Executable {
-                path: PathBuf::from(r"C:\Games\Hades\Hades.exe"),
+                // Joined rather than written with backslashes: the label is the
+                // program's own name, and a path typed with the wrong separator
+                // is a single file name that happens to contain colons.
+                path: ["C:", "Games", "Hades", "Hades.exe"].iter().collect(),
                 args: String::new(),
                 working_dir: None,
             }

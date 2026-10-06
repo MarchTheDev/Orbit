@@ -1505,24 +1505,26 @@ mod tests {
     }
 
     #[test]
-    fn a_recent_open_session_survives_a_restart() {
+    fn a_session_left_open_keeps_the_time_it_was_last_seen() {
         let dir = std::env::temp_dir().join("orbit-tauri-resume");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("orbit.db");
         {
             let db = Db::open(&path).unwrap();
             db.upsert_game(&game("g1", "Hades")).unwrap();
-            db.open_session("g1", now() - 600, "Main story").unwrap();
+            let id = db.open_session("g1", now() - 600, "Main story").unwrap();
+            // The app was alive for five minutes of it, and said so.
+            db.touch_session(id, now() - 300).unwrap();
             // No close: the app was killed, or a launcher handed the game off.
         }
         let db = Db::open(&path).unwrap();
-        // Ten minutes of play is still there to be stopped by hand, rather than
-        // tidied away into nothing.
-        let open = db.current_session().unwrap().unwrap();
-        assert_eq!(open.game_title, "Hades");
-        db.close_session(open.id, now(), ENDED_MANUAL).unwrap();
+        // Nothing is presented as still running, and the five minutes between
+        // the start and the last heartbeat are the player's rather than lost.
+        assert!(db.current_session().unwrap().is_none());
         let rows = db.list_sessions(10, 0, None).unwrap();
-        assert!(rows[0].duration_secs >= 600);
+        assert_eq!(rows[0].game_title, "Hades");
+        assert_eq!(rows[0].ended_by.as_deref(), Some(ENDED_RECOVERED));
+        assert_eq!(rows[0].duration_secs, 300);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
