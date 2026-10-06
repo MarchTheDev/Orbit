@@ -35,7 +35,12 @@ const GROUPS = [
   { kind: 'logo', title: 'Logo', where: 'the name on its own, over the backdrop', shape: 'wide' },
 ] as const;
 
-export function GameEditTab({ game, onUpdate, onSaved }: { game: Game; onUpdate: (patch: Partial<Game>) => void; onSaved?: () => void }) {
+export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = false }: {
+  game: Game;
+  onUpdate: (patch: Partial<Game>) => void;
+  onSaved?: () => void;
+  hideLaunchSettings?: boolean;
+}) {
   const meta = game.meta;
   const hltb = game.hltb;
 
@@ -473,7 +478,7 @@ export function GameEditTab({ game, onUpdate, onSaved }: { game: Game; onUpdate:
         </div>
       </section>
 
-      <LaunchEditor game={game} onSave={(launch, companions) => onUpdate({ launch, companions })} />
+      {!hideLaunchSettings && <LaunchEditor game={game} onSave={(launch, companions) => onUpdate({ launch, companions })} />}
 
       <div className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
         <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">

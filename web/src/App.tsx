@@ -16,10 +16,10 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, OtherLauncher, Page, SortKey, ViewMode } from './types';
+import type { Game, LauncherGame, OtherLauncher, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
-import { clearLibrary, isNative, setPlaytime, steamLibrary, windowReady } from './services/native';
+import { clearLibrary, isNative, launcherGames, setPlaytime, steamLibrary, windowReady } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { revealInExplorer } from './services/native';
@@ -50,6 +50,7 @@ import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { onDisk } from './utils/library';
+import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
@@ -58,6 +59,10 @@ import { openExternal } from './services/desktop';
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast extends ToastMessage {
   id: number;
+}
+
+function FilledStar({ className }: { className?: string }) {
+  return <Star className={className} fill="currentColor" strokeWidth={0} />;
 }
 
 export default function App() {
@@ -81,6 +86,7 @@ export default function App() {
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
+  const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -373,6 +379,29 @@ export default function App() {
     })();
   }, [ready, settings?.steamOnLaunch, games, addGames, updateGame, toast]);
 
+  /** Rescan only the non-Steam libraries the player enabled, once per launch. */
+  const otherLaunchersChecked = useRef(false);
+  useEffect(() => {
+    if (!ready || !settings || otherLaunchersChecked.current) return;
+    otherLaunchersChecked.current = true;
+    const enabled = settings.launcherScanOnLaunch ?? [];
+    if (!isNative() || enabled.length === 0) return;
+
+    void (async () => {
+      const found: LauncherGame[] = [];
+      // Keep the local checks sequential: launchers are just read-only records,
+      // and there is no need to start several scans at once.
+      for (const launcher of enabled) {
+        found.push(...(await launcherGames(launcher).catch(() => [])));
+      }
+      const fresh = newLauncherGames(found, games);
+      if (fresh.length === 0) return;
+      const added = fresh.map(gameFromLauncher);
+      addGames(added);
+      toast({ text: `${added.length} ${added.length === 1 ? 'game' : 'games'} added from your launcher libraries` });
+    })().catch(() => undefined);
+  }, [ready]);
+
   /** A finished session changes one game's numbers, so re-read that game. */
   const onSessionEnded = useCallback(() => {
     void reload();
@@ -431,8 +460,6 @@ export default function App() {
       if (activeFilter === 'hidden') return !!g.hidden;
       if (activeFilter === 'favorites') return g.favorite;
       if (activeFilter === 'unplayed') return g.sessionCount === 0;
-      // Backlog is a status shelf, not a synonym for games with no sessions.
-      if (activeFilter === 'backlog') return g.status === 'backlog';
       if (activeFilter !== 'all') return g.status === activeFilter;
       return true;
     });
@@ -513,6 +540,7 @@ export default function App() {
   useEffect(() => {
     setShowAdd(false);
     setEditingGameId(null);
+    setEditingHideLaunchSettings(false);
     setShowImport(false);
     setShowSteam(false);
     setShowOtherLaunchers(null);
@@ -529,9 +557,15 @@ export default function App() {
   };
 
   /** The pencil opens the full, centered editor rather than an Edit drawer tab. */
-  const openGameEditor = (id: string) => {
+  const openGameEditor = (id: string, hideLaunchSettings = false) => {
     setSelectedId(null);
+    setEditingHideLaunchSettings(hideLaunchSettings);
     setEditingGameId(id);
+  };
+
+  const toggleFavorite = (id: string) => {
+    const game = games.find((candidate) => candidate.id === id);
+    if (game) updateGame(id, { favorite: !game.favorite });
   };
 
   /**
@@ -547,7 +581,7 @@ export default function App() {
       ? [
           { kind: 'label', label: menuGame.title },
           { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
-          { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id) },
+          { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
           { kind: 'sep' },
           ...(
             [
@@ -564,16 +598,10 @@ export default function App() {
             })),
           ...(menuGame.planned
             ? [{ label: 'Mark as owned', icon: Check, onSelect: () => updateGame(menuGame.id, { planned: false, status: 'backlog' }) }]
-            : []),
-          {
-            label: 'Move to another folder…',
-            icon: MoveRight,
-            disabled: !menuGame.installDir,
-            onSelect: () => setMoveId(menuGame.id),
-          },
+            : [{ label: 'Mark as not owned', icon: X, onSelect: () => updateGame(menuGame.id, { planned: true, status: 'backlog' }) }]),
           {
             label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
-            icon: Star,
+            icon: menuGame.favorite ? FilledStar : Star,
             onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
           },
           { kind: 'sep' },
@@ -597,7 +625,7 @@ export default function App() {
             : { label: 'Start game', icon: Play, onSelect: () => void startGame(menuGame) },
           {
             label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
-            icon: Star,
+            icon: menuGame.favorite ? FilledStar : Star,
             onSelect: () => updateGame(menuGame.id, { favorite: !menuGame.favorite }),
           },
           {
@@ -795,8 +823,10 @@ export default function App() {
             <SettingsView
               settings={settings}
               setSettings={setSettings}
-              onImportSteam={() => setShowSteam(true)}
-              onImportLaunchers={(launcher) => setShowOtherLaunchers(launcher)}
+              onImportLauncher={(launcher) => {
+                if (launcher === 'Steam') setShowSteam(true);
+                else setShowOtherLaunchers(launcher);
+              }}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}
@@ -809,7 +839,7 @@ export default function App() {
           <BacklogView
             games={played}
             onSelect={openDetail}
-            onEdit={openGameEditor}
+            onEdit={(id) => openGameEditor(id, true)}
             onStatus={(id, status) => updateGame(id, { status })}
             onAdd={(game) => addGames([game])}
             onUpdate={(id, patch) => updateGame(id, patch)}
@@ -826,7 +856,6 @@ export default function App() {
             games={games}
             onChanged={() => void reload()}
             onOpenGame={openDetail}
-            onEditGame={openGameEditor}
           />
         ) : page === 'logs' ? (
           <LogsView
@@ -895,6 +924,7 @@ export default function App() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onEdit={openGameEditor}
+                  onToggleFavorite={toggleFavorite}
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
@@ -906,6 +936,7 @@ export default function App() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onEdit={openGameEditor}
+                  onToggleFavorite={toggleFavorite}
                   onPlay={(g) => void startGame(g)}
                   scale={scale}
                   onReorder={sort === 'manual' ? reorder : undefined}
@@ -1058,17 +1089,22 @@ export default function App() {
         <GameEditDialog
           game={editingGame}
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
-          onClose={() => setEditingGameId(null)}
+          hideLaunchSettings={editingHideLaunchSettings}
+          onClose={() => {
+            setEditingGameId(null);
+            setEditingHideLaunchSettings(false);
+          }}
         />
       )}
 
       {showAdd && (
         <AddGameModal
           initialPaths={droppedPaths}
-          // The Steam library opens over this dialog rather than instead of it,
-          // so closing it comes back to the form rather than to the library.
-          onImportSteam={() => setShowSteam(true)}
-          onImportLauncher={(launcher) => setShowOtherLaunchers(launcher)}
+          // The selected library opens over this form; closing it returns here.
+          onImportLauncher={(launcher) => {
+            if (launcher === 'Steam') setShowSteam(true);
+            else setShowOtherLaunchers(launcher);
+          }}
           onClose={() => {
             setShowAdd(false);
             setDroppedPaths(null);

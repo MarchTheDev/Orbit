@@ -366,7 +366,7 @@ export function GameDetail({
                 menuClassName="w-48"
                 ariaLabel="Where this game sits"
                 options={[
-                  { value: 'backlog', label: 'Waiting to play' },
+                  { value: 'backlog', label: 'Backlog' },
                   { value: 'playing', label: 'Playing now' },
                   { value: 'completed', label: 'Completed' },
                   { value: 'dropped', label: 'Dropped' },
@@ -400,7 +400,7 @@ export function GameDetail({
               {(
                 [
                   ['playing', 'Move to playing now'],
-                  ['backlog', 'Move to waiting'],
+                  ['backlog', 'Move to Backlog'],
                   ['completed', 'Move to completed'],
                   ['dropped', 'Move to dropped'],
                 ] as const

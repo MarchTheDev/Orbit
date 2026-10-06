@@ -832,15 +832,15 @@ async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
         .map_err(|e| format!("Could not read the Steam library: {e}"))?
 }
 
-/// Installed games described by other launcher manifests or Windows records.
+/// Installed games described by one launcher's local manifests or Windows records.
 ///
-/// This read-only scan is called only when the player opens the import dialog;
-/// it is never part of startup and does not contact any launcher service.
+/// This read-only scan runs only after a player selects a launcher, or when that
+/// specific library is enabled for startup. It never contacts a launcher service.
 #[tauri::command]
-async fn launcher_games() -> Result<Vec<launchers::LauncherGame>, String> {
-    tokio::task::spawn_blocking(launchers::installed_games)
+async fn launcher_games(launcher: Option<String>) -> Result<Vec<launchers::LauncherGame>, String> {
+    tokio::task::spawn_blocking(move || launchers::installed_games(launcher.as_deref()))
         .await
-        .map_err(|e| format!("Could not scan other game launchers: {e}"))?
+        .map_err(|e| format!("Could not scan game launchers: {e}"))?
 }
 
 /// Titles the store suggests for a partial name, for the Add dialog.
@@ -907,6 +907,7 @@ pub fn run() {
         // The folder and file pickers behind every Browse button.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::Builder::new().app_name("Orbit").build())
         .setup(|app| {
             let root = app
                 .path()

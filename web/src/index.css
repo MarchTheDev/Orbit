@@ -26,12 +26,12 @@ body { background: var(--c-bg); color: var(--c-text); overflow: hidden; font-fam
 
 body {
   background:
-    radial-gradient(ellipse 60% 50% at 85% -10%, color-mix(in srgb, var(--c-accent) 28%, transparent), transparent),
-    radial-gradient(ellipse 50% 40% at -5% 100%, color-mix(in srgb, var(--c-accent2) 20%, transparent), transparent),
+    radial-gradient(ellipse 60% 50% at 85% -10%, color-mix(in srgb, var(--c-accent) 9%, transparent), transparent),
+    radial-gradient(ellipse 50% 40% at -5% 100%, color-mix(in srgb, var(--c-accent2) 6%, transparent), transparent),
     var(--c-bg);
 }
 body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .35;
+  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .18;
   background-image:
     radial-gradient(1px 1px at 20% 30%, var(--c-text), transparent),
     radial-gradient(1px 1px at 70% 60%, var(--c-text), transparent),
@@ -41,9 +41,9 @@ body::before {
   background-size: 400px 400px;
 }
 .glass {
-  background: color-mix(in srgb, var(--c-panel) 65%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c-border) 80%, transparent);
-  backdrop-filter: blur(18px) saturate(1.3);
+  background: color-mix(in srgb, var(--c-panel) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-border) 88%, transparent);
+  backdrop-filter: blur(12px) saturate(1.05);
 }
 .drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1); }
 @keyframes drawer { from { transform: translateX(100%); opacity: 0; } }

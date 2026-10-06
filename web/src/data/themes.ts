@@ -10,11 +10,9 @@ export interface Theme {
   accent: string;
   accent2: string;
   /**
-   * What reads on top of the accent colour.
-   *
-   * White on Aurora's cyan or Emerald's mint is barely legible, so a theme that
-   * is light behind the accent says so here and the buttons use it. Everything
-   * else keeps white.
+   * White on a light accent is hard to read, so a theme that is light behind
+   * the accent says so here and buttons use a dark foreground. Everything else
+   * keeps white.
    */
   onAccent?: string;
 }
@@ -23,7 +21,8 @@ export interface Theme {
 export const THEMES: Theme[] = [
   { id: 'nebula', name: 'Nebula', bg: '#0b0a16', panel: '#14122a', panel2: '#1d1a3a', border: '#2c2852', text: '#ecebff', muted: '#9a96c4', accent: '#8b5cf6', accent2: '#ec4899' },
   { id: 'eclipse', name: 'Eclipse', bg: '#09090b', panel: '#131316', panel2: '#1c1c21', border: '#2a2a31', text: '#f4f4f5', muted: '#a1a1aa', accent: '#f59e0b', accent2: '#ef4444' },
-  { id: 'aurora', name: 'Aurora', bg: '#06121a', panel: '#0c1d29', panel2: '#132a3a', border: '#1f3d52', text: '#e6fbff', muted: '#8fb6c6', accent: '#22d3ee', accent2: '#34d399', onAccent: '#04222b' },
+  // Rubellite follows Eclipse's dark, restrained surfaces with a ruby-pink accent.
+  { id: 'rubellite', name: 'Rubellite', bg: '#100a11', panel: '#191019', panel2: '#241722', border: '#3c2938', text: '#f8edf5', muted: '#ad93a7', accent: '#d85b83', accent2: '#9f5baf' },
   { id: 'mars', name: 'Mars', bg: '#140a08', panel: '#22110d', panel2: '#2f1913', border: '#4a2a20', text: '#fff1ec', muted: '#c9a092', accent: '#f97316', accent2: '#e11d48' },
   { id: 'emerald', name: 'Emerald', bg: '#03130f', panel: '#082019', panel2: '#0d2f24', border: '#154536', text: '#e7fff7', muted: '#87b8a7', accent: '#10b981', accent2: '#34d399', onAccent: '#03231a' },
   { id: 'lunar', name: 'Lunar (Light)', bg: '#eef0f6', panel: '#ffffff', panel2: '#f4f5fa', border: '#dcdfea', text: '#151827', muted: '#636a85', accent: '#4f46e5', accent2: '#0ea5e9' },
@@ -35,9 +34,11 @@ export const THEMES: Theme[] = [
 /** Fonts are local system stacks: no downloads, network requests, or setup. */
 export const FONTS = [
   { id: 'system', name: 'Orbit Sans', stack: 'Inter, ui-sans-serif, system-ui, sans-serif', sample: 'Clean and familiar' },
-  { id: 'rounded', name: 'Rounded', stack: '\"Trebuchet MS\", \"Segoe UI\", sans-serif', sample: 'Soft and friendly' },
-  { id: 'serif', name: 'Editorial', stack: 'Georgia, Cambria, \"Times New Roman\", serif', sample: 'A book-like feel' },
-  { id: 'mono', name: 'Terminal', stack: '\"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace', sample: 'Compact and technical' },
+  { id: 'rounded', name: 'Rounded', stack: '"Trebuchet MS", "Segoe UI", sans-serif', sample: 'Soft and friendly' },
+  { id: 'serif', name: 'Editorial', stack: 'Georgia, Cambria, "Times New Roman", serif', sample: 'A book-like feel' },
+  { id: 'mono', name: 'Terminal', stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace', sample: 'Compact and technical' },
+  { id: 'humanist', name: 'Humanist', stack: '"Segoe UI", Roboto, "Helvetica Neue", sans-serif', sample: 'Open, easy-to-read shapes' },
+  { id: 'book', name: 'Book', stack: '"Palatino Linotype", "Book Antiqua", Palatino, serif', sample: 'A little more character' },
 ] as const;
 
 export function applyTheme(id: string) {

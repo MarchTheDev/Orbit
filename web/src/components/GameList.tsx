@@ -12,6 +12,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
   onPlay: (g: Game) => void;
   /** Drawn at this percentage of the base row, from the toolbar's slider. */
   scale: number;
@@ -19,7 +20,7 @@ interface Props {
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
-export function GameList({ games, selectedId, onSelect, onEdit, onPlay, scale, onReorder }: Props) {
+export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite, onPlay, scale, onReorder }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
@@ -50,15 +51,30 @@ export function GameList({ games, selectedId, onSelect, onEdit, onPlay, scale, o
             )}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <Cover
-                game={g}
-                className="shrink-0 rounded-lg [&_span]:text-xs"
-                style={{ width: `${art}px`, height: `${Math.round(art * 1.33)}px` }}
-              />
+              <span className="relative shrink-0">
+                <Cover
+                  game={g}
+                  className="rounded-lg [&_span]:text-xs"
+                  style={{ width: `${art}px`, height: `${Math.round(art * 1.33)}px` }}
+                />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleFavorite(g.id);
+                  }}
+                  aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
+                  aria-pressed={g.favorite}
+                  title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
+                  className={cn(
+                    'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition focus:opacity-100',
+                    g.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+                  )}
+                >
+                  <Star className="size-3.5" fill={g.favorite ? 'currentColor' : 'none'} />
+                </button>
+              </span>
               <span className="truncate font-medium" style={{ fontSize: `${text}px` }}>
-                {g.favorite && (
-                  <Star className="mr-1 inline size-3 text-yellow-300 align-middle" fill="currentColor" strokeWidth={0} />
-                )}
                 {g.title}
               </span>
             </div>

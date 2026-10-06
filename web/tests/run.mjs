@@ -20,6 +20,7 @@ const checks = [
   'tests/reader.test.mjs',
   'tests/editor.test.mjs',
   'tests/gameTitle.test.mjs',
+  'tests/launcherGame.test.mjs',
   'tests/steam.test.mjs',
   'tests/updates.test.mjs',
 ];

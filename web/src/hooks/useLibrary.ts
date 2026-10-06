@@ -50,8 +50,12 @@ export function useLibrary() {
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [loaded, loadedSettings] = await Promise.all([listGames(), loadSettings()]);
+      const [loaded, savedSettings] = await Promise.all([listGames(), loadSettings()]);
       if (!alive) return;
+      const loadedSettings = savedSettings.theme === 'aurora'
+        ? { ...savedSettings, theme: 'rubellite' }
+        : savedSettings;
+      if (loadedSettings !== savedSettings) void saveSettings(loadedSettings);
       gamesRef.current = loaded;
       setGames(loaded);
       setSettingsState(loadedSettings);

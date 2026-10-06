@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Clock, Info, ListOrdered, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, Clock, Info, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { Game, Session, Stats } from '../types';
 import { DEFAULT_CATEGORY } from '../data/categories';
 import {
@@ -35,12 +35,10 @@ export function SessionsView({
   games,
   onChanged,
   onOpenGame,
-  onEditGame,
 }: {
   games: Game[];
   onChanged: () => void;
   onOpenGame: (id: string) => void;
-  onEditGame: (id: string) => void;
 }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -142,7 +140,6 @@ export function SessionsView({
       : [
           { kind: 'label', label: context.game.title },
           { label: 'Open game details', icon: Info, onSelect: () => onOpenGame(context.game.id) },
-          { label: 'Edit game…', icon: Pencil, onSelect: () => onEditGame(context.game.id) },
           { label: 'Edit total playtime…', icon: Clock, onSelect: () => beginPlaytimeEdit(context.game) },
           { kind: 'sep' },
           {
@@ -158,18 +155,13 @@ export function SessionsView({
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5 px-6 py-6">
-      <header className="relative flex flex-wrap items-center gap-4 overflow-hidden rounded-3xl border border-accent/20 bg-gradient-to-br from-accent/10 via-panel/75 to-accent2/5 p-5 shadow-lg sm:p-6">
-        <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
-        <span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
-          <ListOrdered className="size-6" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">Your play history</p>
-          <h1 className="mt-0.5 text-2xl font-bold tracking-tight">Sessions</h1>
-          <p className="mt-1 text-sm text-muted">Every tracked and hand-logged session, with its game and time in view.</p>
+      <header className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold tracking-tight">Sessions</h1>
+          <p className="mt-0.5 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
         </div>
         <button
-          className={`${btnGhost} flex shrink-0 items-center gap-2`}
+          className={`${btnGhost} ml-auto flex shrink-0 items-center gap-2`}
           onClick={() => {
             setLoggingGameId(null);
             setLogging(true);

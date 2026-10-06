@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, Search, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import type { Game, LauncherGame, OtherLauncher } from '../types';
 import { isNative, launcherGames } from '../services/native';
-import { fmtBytes, hashHue, uid } from '../utils/format';
+import { fmtBytes } from '../utils/format';
+import { gameFromLauncher, normalizeInstallPath } from '../utils/launcherGame';
 import { Modal, btnGhost, btnPrimary } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
@@ -32,7 +33,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
   const [filter, setFilter] = useState('');
 
   const knownPaths = useMemo(
-    () => new Set(existing.map((game) => normalizedPath(game.installDir)).filter(Boolean)),
+    () => new Set(existing.map((game) => normalizeInstallPath(game.installDir)).filter(Boolean)),
     [existing],
   );
   const knownTitles = useMemo(
@@ -44,11 +45,11 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
     setBusy(true);
     setError(null);
     try {
-      const found = (await launcherGames()).filter((game) => !launcher || game.launcher === launcher);
+      const found = await launcherGames(launcher);
       found.sort((a, b) => a.launcher.localeCompare(b.launcher) || a.name.localeCompare(b.name));
       setRows(found.map((game) => ({
         ...game,
-        include: !knownPaths.has(normalizedPath(game.installDir)) && !knownTitles.has(game.name.trim().toLocaleLowerCase()),
+        include: !knownPaths.has(normalizeInstallPath(game.installDir)) && !knownTitles.has(game.name.trim().toLocaleLowerCase()),
       })));
       if (found.length === 0) {
         setError(launcher
@@ -84,13 +85,13 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
 
   const toggleLauncher = (launcher: string, group: Row[]) => {
     const importable = group.filter((game) =>
-      !knownPaths.has(normalizedPath(game.installDir)) &&
+      !knownPaths.has(normalizeInstallPath(game.installDir)) &&
       !knownTitles.has(game.name.trim().toLocaleLowerCase()),
     );
     const allSelected = importable.length > 0 && importable.every((game) => game.include);
-    const paths = new Set(importable.map((game) => normalizedPath(game.installDir)));
+    const paths = new Set(importable.map((game) => normalizeInstallPath(game.installDir)));
     setRows((current) => (current ?? []).map((game) =>
-      game.launcher === launcher && paths.has(normalizedPath(game.installDir))
+      game.launcher === launcher && paths.has(normalizeInstallPath(game.installDir))
         ? { ...game, include: !allSelected }
         : game,
     ));
@@ -98,7 +99,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
 
   const toggle = (installDir: string) => {
     setRows((current) => (current ?? []).map((game) => (
-      normalizedPath(game.installDir) === normalizedPath(installDir)
+      normalizeInstallPath(game.installDir) === normalizeInstallPath(installDir)
         ? { ...game, include: !game.include }
         : game
     )));
@@ -108,33 +109,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
     if (selected.length === 0) return;
     setSaving(true);
     try {
-      const games: Game[] = selected.map((row) => {
-        const drive = /^[a-z]:/i.test(row.installDir) ? row.installDir.slice(0, 2).toUpperCase() : '';
-        return {
-          id: uid(),
-          title: row.name,
-          inLibrary: true,
-          launch: { kind: 'none' },
-          exePath: null,
-          installDir: row.installDir,
-          drive,
-          sizeBytes: row.sizeBytes,
-          sizeGb: Math.round((row.sizeBytes / 1e9) * 10) / 10,
-          status: 'backlog',
-          favorite: false,
-          manualPlaySecs: 0,
-          playSecs: 0,
-          lastPlayed: null,
-          addedAt: new Date().toISOString(),
-          notes: '',
-          hue: hashHue(row.name),
-          coverPath: null,
-          sessionCount: 0,
-          longestSecs: 0,
-          running: false,
-          companions: [],
-        };
-      });
+      const games: Game[] = selected.map(gameFromLauncher);
       onAdd(games);
       onClose();
     } finally {
@@ -198,7 +173,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
           <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
             {groups.map(([launcher, games]) => {
               const importable = games.filter((game) =>
-                !knownPaths.has(normalizedPath(game.installDir)) &&
+                !knownPaths.has(normalizeInstallPath(game.installDir)) &&
                 !knownTitles.has(game.name.trim().toLocaleLowerCase()),
               );
               const selectedInGroup = importable.filter((game) => game.include).length;
@@ -224,9 +199,9 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
                   </div>
                   <ul className="space-y-1">
                     {games.map((game) => {
-                      const known = knownPaths.has(normalizedPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
+                      const known = knownPaths.has(normalizeInstallPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
                       return (
-                        <li key={`${game.launcher}:${normalizedPath(game.installDir)}`}>
+                        <li key={`${game.launcher}:${normalizeInstallPath(game.installDir)}`}>
                           <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/50'}`}>
                             <CheckboxBox
                               checked={game.include}
@@ -253,17 +228,8 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
           </ul>
         )}
 
-        <div className="flex items-start gap-2 rounded-xl border border-line/70 bg-bg/40 px-3 py-2.5 text-xs leading-relaxed text-muted">
-          <Search className="mt-0.5 size-3.5 shrink-0 text-accent" />
-          <p>
-            Orbit reads Epic manifests and Windows install records for Ubisoft Connect, GOG Galaxy, and EA. It does not sign in, scan game files, modify launcher data, or start games. Imported games are time-only until you choose a launch target in their details.
-          </p>
-        </div>
+
       </div>
     </Modal>
   );
-}
-
-function normalizedPath(path: string | null | undefined) {
-  return path?.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLocaleLowerCase() ?? '';
 }

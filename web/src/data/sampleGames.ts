@@ -64,10 +64,12 @@ export const SAMPLE_GAMES: Game[] = [
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
   fontFamily: 'system',
-  libraryFilterOrder: ['all', 'playing', 'backlog', 'completed', 'dropped', 'favorites', 'unplayed', 'hidden'],
+  libraryFilterOrder: ['all', 'playing', 'completed', 'dropped', 'favorites', 'unplayed', 'hidden'],
   hiddenLibraryFilters: [],
   libraryFolders: [],
   steamOnLaunch: false,
+  launcherScanOnLaunch: [],
+  launchOnStartup: false,
   sortOrder: [],
   coverScale: 100,
   coverTint: true,

@@ -5,6 +5,7 @@
  * browser (`npm run dev`, no Tauri) the same calls fall back to a preview, so
  * the UI can be worked on in a normal tab without the desktop shell.
  */
+import { disable, enable } from '@tauri-apps/plugin-autostart';
 import type {
   ActiveSession,
   Game,
@@ -18,6 +19,7 @@ import type {
   Achievement,
   GameSuggestion,
   LauncherGame,
+  OtherLauncher,
 } from '../types';
 import { SAMPLE_GAMES } from '../data/sampleGames';
 
@@ -516,9 +518,16 @@ export function steamLibrary(): Promise<SteamGame[]> {
   return call('steam_library', {}, async () => []);
 }
 
-/** Installed games from other launchers, read only when the import page is opened. */
-export function launcherGames(): Promise<LauncherGame[]> {
-  return call('launcher_games', {}, async () => []);
+/** Installed games from one other launcher, read only when its picker is opened. */
+export function launcherGames(launcher?: OtherLauncher): Promise<LauncherGame[]> {
+  return call('launcher_games', launcher ? { launcher } : {}, async () => []);
+}
+
+/** Register or remove Orbit from the operating system's sign-in startup list. */
+export async function setLaunchOnStartup(enabled: boolean): Promise<void> {
+  if (!isNative()) throw new Error('Startup settings are only available in the desktop app.');
+  if (enabled) await enable();
+  else await disable();
 }
 
 /** Completion-time estimates from HowLongToBeat. */

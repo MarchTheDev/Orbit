@@ -1,7 +1,9 @@
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
-export type LibraryFilter = 'all' | 'favorites' | GameStatus | 'unplayed' | 'hidden';
+/** The Library has an Unplayed filter; Backlog is its own page. */
+export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
 export type OtherLauncher = 'Epic Games' | 'Ubisoft Connect' | 'GOG Galaxy' | 'EA app';
-export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono';
+export type LauncherId = 'Steam' | OtherLauncher;
+export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
 export interface HltbData {
   main: number; // hours
@@ -287,6 +289,10 @@ export interface Settings {
    * player asking for it.
    */
   steamOnLaunch: boolean;
+  /** Other launcher libraries to rescan on Orbit launch. Off for every launcher by default. */
+  launcherScanOnLaunch?: OtherLauncher[];
+  /** Whether Orbit should be registered to start when the user signs in. Off by default. */
+  launchOnStartup?: boolean;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

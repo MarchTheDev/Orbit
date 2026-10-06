@@ -5,7 +5,7 @@ description = "Orbit - a modern game launcher and playtime tracker"
 authors = ["you"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.90"
 
 [lib]
 name = "orbit_lib"
@@ -22,6 +22,7 @@ tauri = { version = "2.12.1", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2.7.0"
 # `rt` supports spawn/spawn_blocking and `time` drives the session watcher.
 # The macros feature is not used, so it is deliberately left out.
 tokio = { version = "1.53.1", features = ["rt", "time"] }

@@ -12,12 +12,14 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.1",
+    "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-opener": "^2.7.0",
     "clsx": "2.1.1",
     "lucide-react": "^1.52.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
+    "simple-icons": "^16.34.0",
     "tailwind-merge": "3.4.0"
   },
   "devDependencies": {

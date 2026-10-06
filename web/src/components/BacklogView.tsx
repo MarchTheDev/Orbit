@@ -10,6 +10,7 @@ import {
   Play,
   Plus,
   Pencil,
+  Star,
   SquareArrowRight,
   Timer,
   Undo2,
@@ -109,8 +110,11 @@ export function BacklogView({
   const [looking, setLooking] = useState(false);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
-  const match = (g: Game) => !query || g.title.toLowerCase().includes(query.toLowerCase());
+  const match = (g: Game) =>
+    (!query.trim() || g.title.toLowerCase().includes(query.trim().toLowerCase())) &&
+    (!favoritesOnly || g.favorite);
 
   /**
    * Games that are only written down.
@@ -270,7 +274,7 @@ export function BacklogView({
         <div>
           <h1 className="text-2xl font-bold">Backlog</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
-            <span>{backlog.length} waiting</span>
+            <span>{backlog.length} on the Backlog</span>
             {backlogHours > 0 && (
               <span className="flex items-center gap-1">
                 <Hourglass className="size-3.5" />
@@ -295,6 +299,26 @@ export function BacklogView({
           className="mr-auto min-w-0"
           inputClassName="!w-64 sm:!w-80"
         />
+
+        <div className="flex items-center gap-1 rounded-full border border-line bg-panel/50 p-1">
+          <button
+            type="button"
+            onClick={() => setFavoritesOnly(false)}
+            aria-pressed={!favoritesOnly}
+            className={`rounded-full px-3 py-1.5 text-xs transition ${!favoritesOnly ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'}`}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setFavoritesOnly(true)}
+            aria-pressed={favoritesOnly}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition ${favoritesOnly ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'}`}
+          >
+            <Star className="size-3.5" fill={favoritesOnly ? 'currentColor' : 'none'} />
+            Favorites
+          </button>
+        </div>
 
         <button
           onClick={() => setShowTimes((v) => !v)}
@@ -438,10 +462,10 @@ export function BacklogView({
       />
 
       <Section
-        title="Waiting to play"
+        title="Backlog"
         icon={CircleDashed}
         games={backlog}
-        empty="Nothing waiting. Write one down above, or add a game from the Library."
+        empty="Nothing on the Backlog. Write one down above, or add a game from the Library."
         onSelect={onSelect}
         onEdit={onEdit}
         onStatus={onStatus}
@@ -461,9 +485,9 @@ export function BacklogView({
           onStatus={onStatus}
           movable={false}
           notOwned
-          // Owning it moves it to the waiting list rather than straight to
-          // playing: wanting a game and being in the middle of it are not the
-          // same thing.
+          showTimes={showTimes}
+          // Owning it moves it to the Backlog rather than straight to playing:
+          // wanting a game and being in the middle of it are not the same thing.
           onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
           onRemove={(id) => {
             const game = games.find((g) => g.id === id);
@@ -504,7 +528,7 @@ export function BacklogView({
 /** What a game's status can be moved to from here, without opening it. */
 const MOVES: { status: GameStatus; label: string; icon: typeof Play }[] = [
   { status: 'playing', label: 'Playing', icon: Play },
-  { status: 'backlog', label: 'Waiting to play', icon: Undo2 },
+  { status: 'backlog', label: 'Backlog', icon: Undo2 },
   { status: 'completed', label: 'Completed', icon: CircleCheck },
   { status: 'dropped', label: 'Dropped', icon: SquareArrowRight },
 ];
@@ -550,12 +574,6 @@ function Section({
       <h2 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.25em] text-muted">
         <Icon className="size-3.5" />
         {title} · {games.length}
-        {movable && games.length > 1 && (
-          <span className="normal-case tracking-normal">press on a card and move it to place it</span>
-        )}
-        {!notOwned && games.length > 0 && !movable && (
-          <span className="normal-case tracking-normal opacity-60">open a card to move it or to write about it</span>
-        )}
       </h2>
       {games.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{empty}</p>
@@ -660,8 +678,8 @@ function Section({
                     <div className="flex gap-1">
                       <button
                         onClick={() => onOwned?.(g.id)}
-                        title="I own this now, move it to the waiting list"
-                        aria-label={`Move ${g.title} to the waiting list`}
+                        title="Mark as owned and add it to the Backlog"
+                        aria-label={`Mark ${g.title} as owned and add it to the Backlog`}
                         className="rounded-md border border-line bg-panel p-1 text-muted hover:border-accent hover:text-accent"
                       >
                         <Check className="size-3" />

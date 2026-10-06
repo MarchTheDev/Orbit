@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
-import type { Game, GameSuggestion, LaunchTarget, MetaData, OtherLauncher } from '../../types';
-import { OTHER_LAUNCHERS } from '../../data/launchers';
+import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
+import { LAUNCHERS } from '../../data/launchers';
 import { exeInfo, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
@@ -11,6 +11,7 @@ import type { FolderProgram } from '../../types';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
 import { CheckboxInline } from '../ui/Checkbox';
 import { Select } from '../ui/Select';
+import { LauncherIcon } from '../ui/LauncherIcon';
 
 /** What the player has told us so far. */
 interface Draft {
@@ -72,28 +73,19 @@ function detailsFromMeta(meta: MetaData | null): DetailsDraft {
  * `Hades.exe` inside a folder called `Hades v1.382` becomes Hades, and the
  * player can see that happen rather than find out afterwards.
  *
- * Steam games are not typed in by hand. The door to the Steam library is at the
- * bottom of this form, under everything that is filled in here.
+ * Games already in a launcher live in the same picker at the bottom of this
+ * form, with one scan and selection flow for each library.
  */
 export function AddGameModal({
   onClose,
   onAdd,
-  onImportSteam,
   onImportLauncher,
   initialPaths,
 }: {
   onClose: () => void;
   onAdd: (g: Game, fetchMeta: boolean) => void;
-  /**
-   * Opens the Steam library picker, over this dialog.
-   *
-   * Steam games are not typed in by hand, so the door to them is here rather
-   * than a second form. The library opens on top of this one and closing it
-   * comes back to the form that was already open.
-   */
-  onImportSteam: () => void;
   /** Opens one named launcher library over this Add Game form. */
-  onImportLauncher: (launcher: OtherLauncher) => void;
+  onImportLauncher: (launcher: LauncherId) => void;
   /** Programs dropped on the window before the dialog was opened. */
   initialPaths?: string[] | null;
 }) {
@@ -631,7 +623,7 @@ export function AddGameModal({
               onChange={(v) => set('status', v)}
               ariaLabel="Where this game starts out"
               options={[
-                { value: 'backlog', label: 'Waiting to play' },
+                { value: 'backlog', label: 'Backlog' },
                 { value: 'playing', label: 'Playing now' },
                 { value: 'completed', label: 'Completed' },
                 { value: 'dropped', label: 'Dropped' },
@@ -656,51 +648,30 @@ export function AddGameModal({
 
         <button type="submit" className="hidden" />
 
-        {/* Library import is deliberately separate from the manual form. Each
-            button names the launcher so a scan never feels like one opaque
-            "other" integration. */}
+        {/* Every local game library lives in the same picker, including Steam. */}
         <section className="space-y-3 border-t border-line pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent/20 bg-gradient-to-r from-accent/10 via-panel2/50 to-panel2/30 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-fg">Already installed through Steam?</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                Import from your Steam library instead of filling in the details by hand.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onImportSteam}
-              className="flex shrink-0 items-center gap-2 rounded-lg border border-accent/35 bg-panel px-3 py-2 text-xs font-semibold text-accent transition hover:border-accent hover:bg-accent/10"
-            >
-              <Download className="size-3.5" />
-              Import from Steam
-            </button>
+          <div>
+            <p className="text-sm font-semibold text-fg">Scan a game library</p>
+            <p className="mt-0.5 text-xs text-muted">Choose a launcher, then select which games to add.</p>
           </div>
-
-          <div className="rounded-2xl border border-line/70 bg-panel2/25 p-3">
-            <div className="mb-2">
-              <p className="text-sm font-semibold text-fg">Other game libraries</p>
-              <p className="mt-0.5 text-xs text-muted">Choose one launcher to scan its local install list.</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {OTHER_LAUNCHERS.map((launcher) => (
-                <button
-                  key={launcher.id}
-                  type="button"
-                  onClick={() => onImportLauncher(launcher.id)}
-                  className="group flex min-w-0 items-center gap-2.5 rounded-xl border border-line bg-panel/80 px-3 py-2.5 text-left transition hover:border-accent/60 hover:bg-accent/5"
+          <div className="grid gap-2 sm:grid-cols-2">
+            {LAUNCHERS.map((launcher) => (
+              <button
+                key={launcher.id}
+                type="button"
+                onClick={() => onImportLauncher(launcher.id)}
+                className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
+              >
+                <span
+                  className="grid size-9 shrink-0 place-items-center rounded-xl border bg-panel"
+                  style={{ color: launcher.color, borderColor: `${launcher.color}55` }}
                 >
-                  <span
-                    className="grid size-8 shrink-0 place-items-center rounded-lg border text-[11px] font-black"
-                    style={{ color: launcher.color, borderColor: `${launcher.color}55`, background: `${launcher.color}14` }}
-                  >
-                    {launcher.badge}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-semibold">{launcher.id}</span>
-                  <Download className="size-3.5 shrink-0 text-muted transition group-hover:text-accent" />
-                </button>
-              ))}
-            </div>
+                  <LauncherIcon launcher={launcher.id} className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{launcher.id}</span>
+                <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+              </button>
+            ))}
           </div>
         </section>
       </form>

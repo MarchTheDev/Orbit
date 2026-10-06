@@ -1,14 +1,10 @@
-import type { OtherLauncher } from '../types';
+import type { LauncherId } from '../types';
 
-/** Choices shown anywhere Orbit offers a local launcher import. */
-export const OTHER_LAUNCHERS: {
-  id: OtherLauncher;
-  description: string;
-  badge: string;
-  color: string;
-}[] = [
-  { id: 'Epic Games', description: 'Epic library manifests', badge: 'E', color: '#a78bfa' },
-  { id: 'Ubisoft Connect', description: 'Ubisoft install records', badge: 'U', color: '#60a5fa' },
-  { id: 'GOG Galaxy', description: 'GOG Galaxy installs', badge: 'G', color: '#fb923c' },
-  { id: 'EA app', description: 'EA app install records', badge: 'EA', color: '#fb7185' },
+/** One place for every launcher that can be selected for a library scan. */
+export const LAUNCHERS: { id: LauncherId; color: string }[] = [
+  { id: 'Steam', color: '#9bc6e8' },
+  { id: 'Epic Games', color: '#f1f5f9' },
+  { id: 'Ubisoft Connect', color: '#77b7ff' },
+  { id: 'GOG Galaxy', color: '#d8a1ff' },
+  { id: 'EA app', color: '#ff747d' },
 ];

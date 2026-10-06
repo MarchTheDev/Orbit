@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "core:webview:allow-internal-toggle-devtools",
+    "autostart:default",
     "dialog:allow-open",
     "dialog:allow-message",
     "dialog:allow-ask",

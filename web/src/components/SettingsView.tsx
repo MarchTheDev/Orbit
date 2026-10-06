@@ -24,19 +24,20 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { FontChoice, OtherLauncher, Page, Settings } from '../types';
+import type { FontChoice, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
-import { OTHER_LAUNCHERS } from '../data/launchers';
-import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, type DriveInfo } from '../services/native';
+import { LAUNCHERS } from '../data/launchers';
+import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, setLaunchOnStartup, type DriveInfo } from '../services/native';
 import { openExternal } from '../services/desktop';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
 import { btnBrowse, inputCls } from './ui/Modal';
-import { Checkbox } from './ui/Checkbox';
+import { Checkbox, CheckboxInline } from './ui/Checkbox';
 import { Select } from './ui/Select';
 import { btnAccent } from './ui/buttons';
+import { LauncherIcon } from './ui/LauncherIcon';
 import { APP_VERSION } from '../version';
 import {
   RELEASES_URL,
@@ -275,17 +276,14 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
-  { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing backlog completed dropped favorites unplayed hidden reorder show hide' },
+  { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing completed dropped favorites unplayed hidden reorder show hide' },
   { label: 'Library folders and drives', section: 'orbit-library', keywords: 'where installed paths storage folders drives move' },
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
-  { label: 'Steam library scan', section: 'orbit-libraries', keywords: 'steam import installed games scan' },
-  { label: 'Steam startup check', section: 'orbit-libraries', keywords: 'steam import automatic launch startup new games' },
-  { label: 'Import Epic Games', section: 'orbit-libraries', keywords: 'epic launcher library import installed' },
-  { label: 'Import Ubisoft Connect', section: 'orbit-libraries', keywords: 'ubisoft launcher library import installed' },
-  { label: 'Import GOG Galaxy', section: 'orbit-libraries', keywords: 'gog launcher library import installed' },
-  { label: 'Import EA app', section: 'orbit-libraries', keywords: 'ea launcher library import installed' },
+  { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
+  { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
+  { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
@@ -300,8 +298,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
 export function SettingsView({
   settings,
   setSettings,
-  onImportSteam,
-  onImportLaunchers,
+  onImportLauncher,
   onClearLibrary,
   onReset,
   update,
@@ -310,10 +307,8 @@ export function SettingsView({
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings>) => void;
-  /** Opens the Steam import dialog. */
-  onImportSteam: () => void;
   /** Opens a read-only scan for one specific launcher. */
-  onImportLaunchers: (launcher: OtherLauncher) => void;
+  onImportLauncher: (launcher: LauncherId) => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -330,6 +325,34 @@ export function SettingsView({
   const [installStep, setInstallStep] = useState<InstallStep | null>(null);
   const [updateNote, setUpdateNote] = useState('');
   const [settingsQuery, setSettingsQuery] = useState('');
+  const [startupBusy, setStartupBusy] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const native = isNative();
+
+  const setLaunchAtSignIn = async (enabled: boolean) => {
+    setStartupBusy(true);
+    setStartupError(null);
+    try {
+      await setLaunchOnStartup(enabled);
+      setSettings({ launchOnStartup: enabled });
+    } catch (reason) {
+      setStartupError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStartupBusy(false);
+    }
+  };
+
+  const setLauncherScanOnLaunch = (launcher: LauncherId, enabled: boolean) => {
+    if (launcher === 'Steam') {
+      setSettings({ steamOnLaunch: enabled });
+      return;
+    }
+    const current = settings.launcherScanOnLaunch ?? [];
+    const next = enabled
+      ? [...new Set([...current, launcher])]
+      : current.filter((item) => item !== launcher);
+    setSettings({ launcherScanOnLaunch: next });
+  };
 
   const lookForUpdate = async () => {
     setChecking(true);
@@ -393,7 +416,7 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
-      <header className="relative overflow-hidden rounded-3xl border border-accent/25 bg-gradient-to-br from-accent/15 via-panel/90 to-panel2/65 p-5 shadow-xl sm:p-6">
+      <header className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-panel via-panel/95 to-panel2/75 p-5 shadow-lg sm:p-6">
         <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
         <div className="relative flex items-start gap-4">
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
@@ -449,7 +472,7 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-accent/20 bg-gradient-to-r from-accent/10 via-panel/95 to-accent2/10 p-2 shadow-lg backdrop-blur-xl">
+      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel/95 p-2 shadow-lg backdrop-blur-xl">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -528,6 +551,19 @@ export function SettingsView({
           label="Play the opening when Orbit starts"
           hint="Show Orbit's short animated opening. Turn this off to go straight to the library."
         />
+        <div className="space-y-1.5 rounded-xl border border-line bg-panel2/40 p-3">
+          <CheckboxInline
+            checked={settings.launchOnStartup === true}
+            onChange={(value) => void setLaunchAtSignIn(value)}
+            disabled={!native || startupBusy}
+            label="Launch Orbit when this PC starts"
+          />
+          <p className="pl-6 text-[11px] text-muted">
+            Off by default. When enabled, Orbit starts when you sign in to this computer.
+          </p>
+          {!native && <p className="pl-6 text-[11px] text-muted">Available in the desktop app.</p>}
+          {startupError && <p role="alert" className="pl-6 text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
+        </div>
       </Section>
 
       <Section
@@ -683,48 +719,44 @@ export function SettingsView({
         id="orbit-libraries"
         icon={LibraryIcon}
         title="Libraries"
-        lead="Orbit only reads local launcher records when you ask it to. It never signs in, changes launcher settings, or adds games automatically from these scans."
+        lead="Scan one launcher and choose games to add. Rescans on Orbit launch are off by default."
       >
-        <SubHead>Steam</SubHead>
-        <Checkbox
-          checked={settings.steamOnLaunch}
-          onChange={(v) => setSettings({ steamOnLaunch: v })}
-          label="Check Steam for new games when Orbit starts"
-          hint="When enabled, Orbit reads the installed Steam manifests at startup and adds games missing from your library. It never changes files in Steam."
-        />
-        <button
-          onClick={onImportSteam}
-          className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-4 py-2 text-sm transition hover:border-accent"
-        >
-          <Download className="size-4" />
-          Scan the Steam library…
-        </button>
-
-        <SubHead>Other libraries</SubHead>
-        <p className="text-xs leading-relaxed text-muted">
-          Pick a launcher to scan its local install records. Each scan is read-only and nothing is imported until you select it.
-        </p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {OTHER_LAUNCHERS.map((launcher) => (
-            <button
-              key={launcher.id}
-              type="button"
-              onClick={() => onImportLaunchers(launcher.id)}
-              className="group flex items-center gap-3 rounded-xl border border-line bg-panel2/45 p-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
-            >
-              <span
-                className="grid size-9 shrink-0 place-items-center rounded-xl border text-xs font-black"
-                style={{ color: launcher.color, borderColor: `${launcher.color}55`, background: `${launcher.color}14` }}
-              >
-                {launcher.badge}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-fg">{launcher.id}</span>
-                <span className="block text-[11px] text-muted">{launcher.description}</span>
-              </span>
-              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
-            </button>
-          ))}
+        {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {LAUNCHERS.map((launcher) => {
+            const rescan = launcher.id === 'Steam'
+              ? settings.steamOnLaunch
+              : (settings.launcherScanOnLaunch ?? []).includes(launcher.id);
+            return (
+              <div key={launcher.id} className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+                <button
+                  type="button"
+                  onClick={() => onImportLauncher(launcher.id)}
+                  className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5"
+                >
+                  <span
+                    className="grid size-10 shrink-0 place-items-center rounded-xl border bg-panel"
+                    style={{ color: launcher.color, borderColor: `${launcher.color}55` }}
+                  >
+                    <LauncherIcon launcher={launcher.id} className="size-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-fg">{launcher.id}</span>
+                    <span className="block text-[11px] text-muted">Scan library</span>
+                  </span>
+                  <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                </button>
+                <div className="border-t border-line/70 px-3 py-2.5">
+                  <CheckboxInline
+                    checked={rescan}
+                    disabled={!native}
+                    onChange={(value) => setLauncherScanOnLaunch(launcher.id, value)}
+                    label="Rescan on Orbit launch"
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Section>
 

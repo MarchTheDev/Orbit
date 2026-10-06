@@ -19,6 +19,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
   onPlay: (g: Game) => void;
   /** Drawn at this percentage of the base tile, from the toolbar's slider. */
   scale: number;
@@ -38,6 +39,7 @@ export function GameGrid({
   selectedId,
   onSelect,
   onEdit,
+  onToggleFavorite,
   onPlay,
   scale,
   onReorder,
@@ -57,6 +59,7 @@ export function GameGrid({
           selected={selectedId === g.id}
           onSelect={onSelect}
           onEdit={onEdit}
+          onToggleFavorite={onToggleFavorite}
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
@@ -83,6 +86,7 @@ function Tile({
   selected,
   onSelect,
   onEdit,
+  onToggleFavorite,
   onPlay,
   scale,
   coverTint,
@@ -94,6 +98,7 @@ function Tile({
   selected: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
@@ -148,11 +153,22 @@ function Tile({
         >
           <Pencil className="size-4" />
         </button>
-        {game.favorite && (
-          <span className="absolute left-3 top-3 grid size-7 place-items-center rounded-full bg-black/40 text-yellow-300 backdrop-blur">
-            <Star className="size-3.5" fill="currentColor" strokeWidth={0} />
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(game.id);
+          }}
+          aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
+          aria-pressed={game.favorite}
+          title={game.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          className={cn(
+            'absolute left-3 top-3 z-10 grid size-8 place-items-center rounded-full border border-white/20 bg-black/60 text-yellow-300 shadow-lg backdrop-blur transition hover:bg-black/80 focus:opacity-100',
+            game.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+          )}
+        >
+          <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();

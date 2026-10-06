@@ -27,21 +27,28 @@ pub struct LauncherGame {
     pub size_bytes: u64,
 }
 
-/// Find installed games on Windows, or return an empty list elsewhere.
+/// Find installations for one launcher on Windows, or return an empty list elsewhere.
 ///
 /// All discovery is local and read-only. Callers decide when to run it; it is
-/// deliberately not used during startup.
-pub fn installed_games() -> Result<Vec<LauncherGame>, String> {
+/// deliberately not used during startup unless the player enables that launcher.
+pub fn installed_games(only: Option<&str>) -> Result<Vec<LauncherGame>, String> {
     // The platform scanners are compiled only on Windows, so type the empty
     // non-Windows result explicitly for the sort below.
     let mut games: Vec<LauncherGame> = Vec::new();
 
     #[cfg(windows)]
     {
-        scan_epic(&mut games);
-        scan_windows_registry(&mut games);
+        if only.is_none() || only == Some("Epic Games") {
+            scan_epic(&mut games);
+        }
+        if only.is_none() || matches!(only, Some("Ubisoft Connect" | "GOG Galaxy" | "EA app")) {
+            scan_windows_registry(&mut games, only);
+        }
     }
 
+    if let Some(launcher) = only {
+        games.retain(|game| game.launcher == launcher);
+    }
     games.sort_by(|a, b| {
         a.launcher
             .cmp(&b.launcher)
@@ -207,7 +214,9 @@ fn query_registry(key: &str) -> Vec<RegistryEntry> {
 }
 
 #[cfg(windows)]
-fn scan_windows_registry(games: &mut Vec<LauncherGame>) {
+fn scan_windows_registry(games: &mut Vec<LauncherGame>, only: Option<&str>) {
+    let wants_ubisoft = only.is_none() || only == Some("Ubisoft Connect");
+    let wants_uninstall = only.is_none() || matches!(only, Some("Ubisoft Connect" | "GOG Galaxy" | "EA app"));
     let uninstall_keys = [
         r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
         r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -215,17 +224,21 @@ fn scan_windows_registry(games: &mut Vec<LauncherGame>) {
         r"HKCU\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
     ];
     let mut uninstall = Vec::new();
-    for key in uninstall_keys {
-        uninstall.extend(query_registry(key));
+    if wants_uninstall {
+        for key in uninstall_keys {
+            uninstall.extend(query_registry(key));
+        }
     }
 
     let mut ubisoft_installs = Vec::new();
-    for key in [
-        r"HKLM\SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs",
-        r"HKLM\SOFTWARE\Ubisoft\Launcher\Installs",
-        r"HKCU\SOFTWARE\Ubisoft\Launcher\Installs",
-    ] {
-        ubisoft_installs.extend(query_registry(key));
+    if wants_ubisoft {
+        for key in [
+            r"HKLM\SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs",
+            r"HKLM\SOFTWARE\Ubisoft\Launcher\Installs",
+            r"HKCU\SOFTWARE\Ubisoft\Launcher\Installs",
+        ] {
+            ubisoft_installs.extend(query_registry(key));
+        }
     }
 
     for install in ubisoft_installs {

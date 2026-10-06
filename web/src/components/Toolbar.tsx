@@ -32,7 +32,6 @@ interface Props {
 export const LIBRARY_FILTERS: FilterDefinition[] = [
   { id: 'all', label: 'All' },
   { id: 'playing', label: 'Playing' },
-  { id: 'backlog', label: 'Backlog' },
   { id: 'completed', label: 'Completed' },
   { id: 'dropped', label: 'Dropped' },
   { id: 'favorites', label: 'Favorites' },
@@ -166,7 +165,7 @@ export function Toolbar({
         </button>
       </div>
 
-      <div className="glass flex flex-wrap items-center gap-1.5 rounded-2xl p-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         {categories.map((f) => (
           <button
             key={f.id}
