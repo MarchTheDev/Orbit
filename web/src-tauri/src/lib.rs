@@ -874,16 +874,8 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
     // there is not: the store's own art is free and needs no account, so it
     // stays the default rather than the fallback. A failure here must not lose
     // the store's pictures, which is why it is a log line and not an error.
-    let sgdb_key = orbit
-        .store
-        .load_settings()
-        .and_then(|settings| {
-            settings
-                .get("sgdbApiKey")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        })
-        .filter(|key| !key.trim().is_empty());
+    let settings = orbit.store.load_settings();
+    let sgdb_key = setting_text(&settings, "sgdbApiKey");
     if let Some(key) = sgdb_key {
         match sgdb::art(app_id, &key).await {
             Ok(mut found) => {
@@ -929,10 +921,80 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         .filter(|a| a.get("unlocked").and_then(|v| v.as_bool()).unwrap_or(false))
         .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(str::to_string))
         .collect();
+    let when: std::collections::HashMap<String, u64> = game
+        .achievements
+        .iter()
+        .filter_map(|a| {
+            let id = a.get("id")?.as_str()?;
+            let at = a.get("unlockedAt")?.as_u64()?;
+            (at > 0).then_some((id.to_string(), at))
+        })
+        .collect();
+
+    // Steam's own record, when it can be asked. It needs a key and the player's
+    // id, and both are optional, so most libraries never make this call. When
+    // it does answer it is taken both ways: it knows what is unlocked *and*
+    // what is not, which is more than a hand-ticked list can say.
+    //
+    // A refusal is a log line and not an error, because the list itself is worth
+    // showing even when Steam will not say who unlocked what.
+    let settings = orbit.store.load_settings();
+    let steam_record: Option<std::collections::HashMap<String, u64>> = match (
+        setting_text(&settings, "steamApiKey"),
+        setting_text(&settings, "steamId"),
+    ) {
+        (Some(key), Some(who)) => {
+            match achievements::resolve_steam_id(&who, &key).await {
+                Ok(steam_id) => match achievements::unlocks(app_id, &steam_id, &key).await {
+                    Ok(found) => Some(
+                        found
+                            .into_iter()
+                            .map(|u| (u.id, u.at))
+                            .collect::<std::collections::HashMap<String, u64>>(),
+                    ),
+                    Err(e) => {
+                        log::warn!("Steam would not say what was unlocked: {e}");
+                        None
+                    }
+                },
+                Err(e) => {
+                    log::warn!("Steam did not recognise that account: {e}");
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
     for row in &mut fetched {
-        row.unlocked = ticked.contains(&row.id);
+        match &steam_record {
+            Some(found) => {
+                row.unlocked = found.contains_key(&row.id);
+                row.unlocked_at = found.get(&row.id).copied().unwrap_or(0);
+            }
+            None => {
+                row.unlocked = ticked.contains(&row.id);
+                // A time Steam gave earlier is worth keeping, even though a tick
+                // done by hand has none.
+                row.unlocked_at = when.get(&row.id).copied().unwrap_or(0);
+            }
+        }
     }
     Ok(fetched)
+}
+
+/// A non-blank string setting, read from the settings file.
+///
+/// Settings is a bag of JSON rather than a struct, so every optional field is
+/// picked out the same way: present, a string, and not just spaces.
+fn setting_text(settings: &Option<Settings>, key: &str) -> Option<String> {
+    settings
+        .as_ref()?
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// Put one game's notes in the order they were dragged into.

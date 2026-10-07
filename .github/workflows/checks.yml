@@ -1,0 +1,92 @@
+name: Checks
+
+# Runs the tests on every push, so a change is checked before it is ever put
+# into an installer.
+#
+# release.yml only builds. Building proves the program compiles, which is worth
+# knowing, but it says nothing about whether the achievements page is still
+# parsed the same way, whether the version maths still rounds the way the
+# updater expects, or whether a move still cleans up after itself. Those have
+# tests, and until now nothing ran them: a mistake was only found by reading a
+# failed build's annotations after the fact.
+#
+# This is separate from release.yml on purpose. The releases are slow because
+# they build five platforms; these are quick, and running them on every branch
+# push is the only way a Rust change gets an answer before it ships.
+
+on:
+  push:
+    # Every branch, but not tags: a release tag is already covered by the
+    # release build, and running these again on it would say nothing new.
+    branches:
+      - '**'
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the system libraries Tauri needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libfuse2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Tauri's build script checks that the front end has been built before it
+      # will compile at all, so this comes before the tests rather than in the
+      # other job.
+      - name: Build the front end
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: cargo test
+        working-directory: web/src-tauri
+        run: cargo test --locked -- --nocapture
+
+  web:
+    name: Front end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Types
+        working-directory: web
+        run: ./node_modules/.bin/tsc --noEmit
+
+      - name: Tests
+        working-directory: web
+        run: npm test
