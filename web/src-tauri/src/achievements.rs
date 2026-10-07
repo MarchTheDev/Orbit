@@ -355,7 +355,7 @@ fn vanity_name(who: &str) -> Option<String> {
 }
 
 /// The text after the last `/<segment>/` in a path, if there is one.
-fn after_segment(path: &str, segment: &str) -> Option<&str> {
+fn after_segment<'a>(path: &'a str, segment: &str) -> Option<&'a str> {
     let needle = format!("/{segment}/");
     path.rfind(&needle).map(|at| &path[at + needle.len()..])
 }
