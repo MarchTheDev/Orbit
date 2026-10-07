@@ -48,6 +48,7 @@ export function Checkbox({
   onChange,
   label,
   hint,
+  disabled,
   className,
 }: {
   checked: boolean;
@@ -55,17 +56,21 @@ export function Checkbox({
   label: ReactNode;
   /** A second line under the label, for explaining the consequence. */
   hint?: ReactNode;
+  disabled?: boolean;
   className?: string;
 }) {
   return (
     <label
       className={cn(
-        'group flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-panel2/50 p-2.5 text-[13px] transition hover:border-accent/50',
+        'group flex items-start gap-2.5 rounded-xl border border-line bg-panel2/50 p-2.5 text-[13px] transition',
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'cursor-pointer hover:border-accent/50 hover:bg-accent/5',
         className,
       )}
     >
       <span className="mt-0.5 flex">
-        <CheckboxBox checked={checked} onChange={onChange} />
+        <CheckboxBox checked={checked} onChange={onChange} disabled={disabled} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block">{label}</span>

@@ -1,7 +1,6 @@
 import {
   Check,
   Clock,
-  ExternalLink,
   Eye,
   EyeOff,
   HardDrive,
@@ -45,6 +44,8 @@ interface Props {
    * somebody is deciding to play, so nothing about launching belongs in it.
    */
   context?: 'library' | 'backlog';
+  /** A duplicate Favorites shelf: show details, but do not offer status moves. */
+  readOnlyMoves?: boolean;
   /** The running session, if it is for this game. */
   session: ActiveSession | null;
   now: number;
@@ -60,6 +61,7 @@ interface Props {
 export function GameDetail({
   game,
   context = 'library',
+  readOnlyMoves = false,
   session,
   now,
   onUpdate,
@@ -395,7 +397,7 @@ export function GameDetail({
             </p>
           )}
 
-          {backlog && (
+          {backlog && !readOnlyMoves && (
             <div className="flex flex-wrap gap-1.5 rounded-xl border border-line bg-panel2/40 p-2">
               {(
                 [
@@ -436,18 +438,6 @@ export function GameDetail({
               onSave={(t: LaunchTarget, companions: Companion[]) => onUpdate({ launch: t, companions })}
             />
           )}
-          {!backlog && (
-          <div className="space-y-1.5">
-            <button
-              onClick={() => void openExternal(`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.title)}`)}
-              title="Fixes, save file locations and configuration on PCGamingWiki"
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel2 py-2 text-xs hover:border-accent"
-            >
-              <ExternalLink className="size-3.5" />
-              Open in PCGamingWiki
-            </button>
-          </div>
-          )}
           <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} error={hltbError} />
 
           <section className="rounded-xl border border-line bg-panel2 p-4">
@@ -471,6 +461,13 @@ export function GameDetail({
                     SteamDB
                   </button>
                 )}
+                <button
+                  onClick={() => void openExternal(`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.title)}`)}
+                  title="Search PCGamingWiki for fixes, save locations, and configuration guides"
+                  className="text-xs text-muted hover:text-accent hover:underline"
+                >
+                  PCGW
+                </button>
                 <button
                   onClick={getDetails}
                   disabled={loadingDetails}

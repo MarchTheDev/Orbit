@@ -37,7 +37,7 @@ export const FONTS = [
   { id: 'rounded', name: 'Rounded', stack: '"Trebuchet MS", "Segoe UI", sans-serif', sample: 'Soft and friendly' },
   { id: 'serif', name: 'Editorial', stack: 'Georgia, Cambria, "Times New Roman", serif', sample: 'A book-like feel' },
   { id: 'mono', name: 'Terminal', stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace', sample: 'Compact and technical' },
-  { id: 'humanist', name: 'Humanist', stack: '"Segoe UI", Roboto, "Helvetica Neue", sans-serif', sample: 'Open, easy-to-read shapes' },
+  { id: 'humanist', name: 'Humanist', stack: 'Verdana, Geneva, sans-serif', sample: 'Roomy, screen-friendly letterforms' },
   { id: 'book', name: 'Book', stack: '"Palatino Linotype", "Book Antiqua", Palatino, serif', sample: 'A little more character' },
 ] as const;
 

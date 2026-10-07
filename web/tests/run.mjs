@@ -15,8 +15,10 @@ import { build } from 'esbuild';
 const dir = path.join('.test-build');
 mkdirSync(dir, { recursive: true });
 const checks = [
+  'tests/appearance.test.mjs',
   'tests/markdown.test.mjs',
   'tests/markdownInput.test.mjs',
+  'tests/playtime.test.mjs',
   'tests/reader.test.mjs',
   'tests/editor.test.mjs',
   'tests/gameTitle.test.mjs',

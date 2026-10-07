@@ -551,19 +551,16 @@ export function SettingsView({
           label="Play the opening when Orbit starts"
           hint="Show Orbit's short animated opening. Turn this off to go straight to the library."
         />
-        <div className="space-y-1.5 rounded-xl border border-line bg-panel2/40 p-3">
-          <CheckboxInline
-            checked={settings.launchOnStartup === true}
-            onChange={(value) => void setLaunchAtSignIn(value)}
-            disabled={!native || startupBusy}
-            label="Launch Orbit when this PC starts"
-          />
-          <p className="pl-6 text-[11px] text-muted">
-            Off by default. When enabled, Orbit starts when you sign in to this computer.
-          </p>
-          {!native && <p className="pl-6 text-[11px] text-muted">Available in the desktop app.</p>}
-          {startupError && <p role="alert" className="pl-6 text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
-        </div>
+        <Checkbox
+          checked={settings.launchOnStartup === true}
+          onChange={(value) => void setLaunchAtSignIn(value)}
+          disabled={!native || startupBusy}
+          label="Launch Orbit when this PC starts"
+          hint={native
+            ? 'Off by default. When enabled, Orbit starts when you sign in to this computer.'
+            : 'Available in the desktop app. Off by default; when enabled, Orbit starts when you sign in.'}
+        />
+        {startupError && <p role="alert" className="text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
       </Section>
 
       <Section

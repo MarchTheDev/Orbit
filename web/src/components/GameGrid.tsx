@@ -108,6 +108,7 @@ function Tile({
   over: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [dismissedUnfilledStar, setDismissedUnfilledStar] = useState(false);
   const tint = useHoverTint(game, coverTint, hovered);
 
   return (
@@ -118,7 +119,10 @@ function Tile({
       // from anywhere on the tile, including the artwork and the title.
       data-orbit-game={game.id}
       onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      onPointerLeave={() => {
+        setHovered(false);
+        setDismissedUnfilledStar(false);
+      }}
       {...bound}
       className={cn(
         'group',
@@ -157,14 +161,20 @@ function Tile({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            if (game.favorite && e.detail > 0) setDismissedUnfilledStar(true);
+            else if (!game.favorite) setDismissedUnfilledStar(false);
             onToggleFavorite(game.id);
           }}
           aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
           aria-pressed={game.favorite}
           title={game.favorite ? 'Remove from favorites' : 'Add to favorites'}
           className={cn(
-            'absolute left-3 top-3 z-10 grid size-8 place-items-center rounded-full border border-white/20 bg-black/60 text-yellow-300 shadow-lg backdrop-blur transition hover:bg-black/80 focus:opacity-100',
-            game.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+            'absolute left-3 top-3 z-10 grid size-8 place-items-center rounded-full border border-white/20 bg-black/60 text-yellow-300 shadow-lg backdrop-blur transition hover:bg-black/80',
+            game.favorite
+              ? 'opacity-100'
+              : dismissedUnfilledStar
+                ? 'pointer-events-none opacity-0'
+                : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
           )}
         >
           <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />

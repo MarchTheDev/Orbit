@@ -11,7 +11,17 @@ import {
   setPlaytime,
   updateSession,
 } from '../services/native';
-import { fmtClock, fmtDate, fmtDateTime, fmtEndedBy, fromLocalInput, parseDuration, toLocalInput } from '../utils/format';
+import {
+  fmtClock,
+  fmtDate,
+  fmtDateTime,
+  fmtEndedBy,
+  fromLocalInput,
+  parseDuration,
+  playtimeToSeconds,
+  splitPlaytime,
+  toLocalInput,
+} from '../utils/format';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { Cover } from './ui/Cover';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
@@ -56,6 +66,8 @@ export function SessionsView({
   const [removing, setRemoving] = useState<Session | null>(null);
   const [playtimeGame, setPlaytimeGame] = useState<Game | null>(null);
   const [playtimeHours, setPlaytimeHours] = useState('');
+  const [playtimeMinutes, setPlaytimeMinutes] = useState('');
+  const [playtimeSeconds, setPlaytimeSeconds] = useState('');
   const [playtimeError, setPlaytimeError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -105,21 +117,30 @@ export function SessionsView({
 
   const beginPlaytimeEdit = (game: Game) => {
     setPlaytimeGame(game);
-    setPlaytimeHours(String(Math.round((game.playSecs / 3600) * 10) / 10));
+    const parts = splitPlaytime(game.playSecs);
+    setPlaytimeHours(String(parts.hours));
+    setPlaytimeMinutes(String(parts.minutes));
+    setPlaytimeSeconds(String(parts.seconds));
     setPlaytimeError(null);
   };
 
   const savePlaytime = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!playtimeGame) return;
-    const hours = Number(playtimeHours.replace(',', '.'));
-    if (!playtimeHours.trim() || !Number.isFinite(hours) || hours < 0) {
-      setPlaytimeError('Enter a non-negative number of hours.');
+    const raw = [playtimeHours, playtimeMinutes, playtimeSeconds];
+    const values = raw.map((value) => value.trim() && /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN);
+    if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+      setPlaytimeError('Enter whole, non-negative hours, minutes, and seconds.');
+      return;
+    }
+    const totalSecs = playtimeToSeconds({ hours: values[0], minutes: values[1], seconds: values[2] });
+    if (totalSecs === null) {
+      setPlaytimeError('Minutes and seconds must each be between 0 and 59.');
       return;
     }
     setPlaytimeError(null);
     try {
-      await setPlaytime(playtimeGame.id, Math.round(hours * 3600));
+      await setPlaytime(playtimeGame.id, totalSecs);
       onChanged();
       await load();
       setPlaytimeGame(null);
@@ -364,10 +385,47 @@ export function SessionsView({
       {playtimeGame && (
         <Modal title={`Edit ${playtimeGame.title} playtime`} subtitle={`Current total: ${fmtClock(playtimeGame.playSecs)}.`} onClose={() => setPlaytimeGame(null)}>
           <form onSubmit={savePlaytime} className="space-y-4">
-            <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Total hours</span>
-              <input type="number" min={0} step={0.1} value={playtimeHours} onChange={(event) => setPlaytimeHours(event.target.value)} className={inputCls} autoFocus />
-            </label>
+            <div className="grid grid-cols-3 gap-2.5">
+              <label className="block min-w-0">
+                <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Hours</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={playtimeHours}
+                  onChange={(event) => setPlaytimeHours(event.target.value)}
+                  className={inputCls}
+                  autoFocus
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Minutes</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  step={1}
+                  inputMode="numeric"
+                  value={playtimeMinutes}
+                  onChange={(event) => setPlaytimeMinutes(event.target.value)}
+                  className={inputCls}
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Seconds</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  step={1}
+                  inputMode="numeric"
+                  value={playtimeSeconds}
+                  onChange={(event) => setPlaytimeSeconds(event.target.value)}
+                  className={inputCls}
+                />
+              </label>
+            </div>
             <p className="text-xs leading-relaxed text-muted">This changes the displayed total without rewriting session history. You can edit or remove individual sessions from their own right-click menu.</p>
             {playtimeError && <p role="alert" className="text-xs text-rose-400">{playtimeError}</p>}
             <div className="flex justify-end gap-2">

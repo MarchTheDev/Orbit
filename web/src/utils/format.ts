@@ -15,6 +15,34 @@ export function fmtClock(secs: number): string {
   return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
+export interface PlaytimeParts {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+/** Split a stored total into the editable hours, minutes, and seconds fields. */
+export function splitPlaytime(totalSecs: number): PlaytimeParts {
+  const total = Number.isFinite(totalSecs) ? Math.max(0, Math.floor(totalSecs)) : 0;
+  return {
+    hours: Math.floor(total / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  };
+}
+
+/** Combine the editable fields, or reject invalid minute/second ranges. */
+export function playtimeToSeconds(parts: PlaytimeParts): number | null {
+  const { hours, minutes, seconds } = parts;
+  if (
+    !Number.isSafeInteger(hours) || hours < 0 ||
+    !Number.isSafeInteger(minutes) || minutes < 0 || minutes > 59 ||
+    !Number.isSafeInteger(seconds) || seconds < 0 || seconds > 59
+  ) return null;
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
 /**
  * Read a duration someone typed, in seconds, or null when it makes no sense.
  *

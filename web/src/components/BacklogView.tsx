@@ -79,7 +79,7 @@ export function BacklogView({
   setMyOrder,
 }: {
   games: Game[];
-  onSelect: (id: string) => void;
+  onSelect: (id: string, readOnlyMoves?: boolean) => void;
   onEdit: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
   /** Saves a game that is only planned, so it can be added without a program. */
@@ -110,11 +110,9 @@ export function BacklogView({
   const [looking, setLooking] = useState(false);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
   const match = (g: Game) =>
-    (!query.trim() || g.title.toLowerCase().includes(query.trim().toLowerCase())) &&
-    (!favoritesOnly || g.favorite);
+    !query.trim() || g.title.toLowerCase().includes(query.trim().toLowerCase());
 
   /**
    * Games that are only written down.
@@ -264,6 +262,9 @@ export function BacklogView({
   const playing = owned.filter((g) => g.status === 'playing' && match(g));
   const completed = owned.filter((g) => g.status === 'completed' && match(g));
   const dropped = owned.filter((g) => g.status === 'dropped' && match(g));
+  // A read-only duplicate shelf: favorites remain in their normal status lanes
+  // above, and are gathered here without offering another way to move them.
+  const favorites = [...owned.filter((g) => g.favorite && match(g)), ...planned.filter((g) => g.favorite)];
 
   const backlogHours = backlog.reduce((s, g) => s + (g.hltb?.main ?? 0), 0);
   const unknown = backlog.filter((g) => !g.hltb?.main).length;
@@ -287,10 +288,8 @@ export function BacklogView({
         </div>
       </header>
 
-      {/* The shelf's own toolbar, laid out like the library's rather than as a
-          row of whatever fitted: the search takes the room it needs, the
-          switches sit together on the right, and planning a game is the one
-          accent button here, because it is the one thing that adds. */}
+      {/* The shelf's own toolbar: the search takes the room it needs, while the
+          reading controls and the action for planning a new game sit together. */}
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <SearchField
           value={query}
@@ -299,26 +298,6 @@ export function BacklogView({
           className="mr-auto min-w-0"
           inputClassName="!w-64 sm:!w-80"
         />
-
-        <div className="flex items-center gap-1 rounded-full border border-line bg-panel/50 p-1">
-          <button
-            type="button"
-            onClick={() => setFavoritesOnly(false)}
-            aria-pressed={!favoritesOnly}
-            className={`rounded-full px-3 py-1.5 text-xs transition ${!favoritesOnly ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'}`}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            onClick={() => setFavoritesOnly(true)}
-            aria-pressed={favoritesOnly}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition ${favoritesOnly ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'}`}
-          >
-            <Star className="size-3.5" fill={favoritesOnly ? 'currentColor' : 'none'} />
-            Favorites
-          </button>
-        </div>
 
         <button
           onClick={() => setShowTimes((v) => !v)}
@@ -521,6 +500,19 @@ export function BacklogView({
           showTimes={showTimes}
         />
       )}
+
+      <Section
+        title="Favorites"
+        icon={Star}
+        games={favorites}
+        empty="No favorites in your Backlog yet."
+        onSelect={onSelect}
+        onEdit={onEdit}
+        onStatus={onStatus}
+        movable={false}
+        readOnlyMoves
+        showTimes={showTimes}
+      />
     </div>
   );
 }
@@ -546,13 +538,14 @@ function Section({
   onRemove,
   onOwned,
   notOwned,
+  readOnlyMoves,
   showTimes,
 }: {
   title: string;
   icon: typeof Play;
   games: Game[];
   empty: string;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, readOnlyMoves?: boolean) => void;
   onEdit: (id: string) => void;
   onStatus: (id: string, status: GameStatus) => void;
   /** True when this lane is being read in the player's own order. */
@@ -562,6 +555,8 @@ function Section({
   /** The player now owns something that was only written down. */
   onOwned?: (id: string) => void;
   notOwned?: boolean;
+  /** A duplicate shelf that can be opened and edited, but not moved from. */
+  readOnlyMoves?: boolean;
   /** Comparing times: each card says how long it takes, three ways. */
   showTimes?: boolean;
 }) {
@@ -582,28 +577,30 @@ function Section({
           {games.map((g) => {
             const main = g.hltb?.main ?? 0;
             const left = Math.max(0, main - g.playSecs / 3600);
+            const isNotOwned = notOwned || g.planned === true;
             return (
               <li
                 key={g.id}
                 data-orbit-game={g.id}
+                data-orbit-no-move={readOnlyMoves ? '' : undefined}
                 {...bind(g.id)}
                 className={`glass group flex items-center gap-3 rounded-2xl p-3 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
                 {movable && <GripVertical className="size-4 shrink-0 text-muted" />}
-                <button onClick={() => onSelect(g.id)} className="shrink-0" title={`Open ${g.title}`}>
+                <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0" title={`Open ${g.title}`}>
                   <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button
-                    onClick={() => onSelect(g.id)}
+                    onClick={() => onSelect(g.id, readOnlyMoves === true)}
                     className="block max-w-full truncate text-left text-sm font-semibold hover:text-accent"
                   >
                     {g.title}
                   </button>
-                  {notOwned ? (
-                    <p className="mt-0.5 text-xs text-muted">not installed here</p>
+                  {isNotOwned ? (
+                    <p className="mt-0.5 text-xs text-muted">{g.planned ? 'not owned yet' : 'not installed here'}</p>
                   ) : (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
                       <span>{fmtMinutes(g.playSecs / 60)} played</span>
@@ -623,7 +620,7 @@ function Section({
                       )}
                     </p>
                   )}
-                  {main > 0 && !notOwned && (
+                  {main > 0 && !isNotOwned && (
                     <div
                       className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
                       title={`${Math.round((g.playSecs / 3600 / main) * 100)}% of the main story`}
@@ -663,18 +660,20 @@ function Section({
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onEdit(g.id);
-                    }}
-                    title={`Edit ${g.title}`}
-                    aria-label={`Edit ${g.title}`}
-                    className="grid size-7 place-items-center rounded-md border border-line bg-panel text-muted opacity-100 transition hover:border-accent hover:text-accent sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                  {notOwned ? (
+                  {!readOnlyMoves && (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onEdit(g.id);
+                      }}
+                      title={`Edit ${g.title}`}
+                      aria-label={`Edit ${g.title}`}
+                      className="grid size-7 place-items-center rounded-md border border-line bg-panel text-muted opacity-100 transition hover:border-accent hover:text-accent sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                  )}
+                  {readOnlyMoves ? null : isNotOwned ? (
                     <div className="flex gap-1">
                       <button
                         onClick={() => onOwned?.(g.id)}

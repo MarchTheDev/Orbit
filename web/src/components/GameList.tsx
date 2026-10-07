@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pencil, Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
@@ -22,6 +23,7 @@ interface Props {
 
 export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite, onPlay, scale, onReorder }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
+  const [dismissedFavoriteId, setDismissedFavoriteId] = useState<string | null>(null);
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
   // and the text step together rather than the picture alone getting bigger.
@@ -38,6 +40,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
           <div
             key={g.id}
             onClick={() => onSelect(g.id)}
+            onPointerLeave={() => setDismissedFavoriteId((id) => id === g.id ? null : id)}
             onDoubleClick={() => onPlay(g)}
             // What the app's one right-click handler looks for.
             data-orbit-game={g.id}
@@ -61,14 +64,20 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (g.favorite && event.detail > 0) setDismissedFavoriteId(g.id);
+                    else if (!g.favorite) setDismissedFavoriteId(null);
                     onToggleFavorite(g.id);
                   }}
                   aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
                   aria-pressed={g.favorite}
                   title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
                   className={cn(
-                    'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition focus:opacity-100',
-                    g.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+                    'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition',
+                    g.favorite
+                      ? 'opacity-100'
+                      : dismissedFavoriteId === g.id
+                        ? 'pointer-events-none opacity-0'
+                        : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
                   )}
                 >
                   <Star className="size-3.5" fill={g.favorite ? 'currentColor' : 'none'} />

@@ -102,8 +102,9 @@ export default function App() {
   const [showOtherLaunchers, setShowOtherLaunchers] = useState<OtherLauncher | null>(null);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
-  /** Where the right-click menu is, and which game it is about. */
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
+  const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
   /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -524,7 +525,12 @@ export default function App() {
       const id = el.getAttribute('data-orbit-game');
       if (!id) return;
       e.preventDefault();
-      setMenu({ x: e.clientX, y: e.clientY, id });
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        id,
+        readOnlyMoves: el.hasAttribute('data-orbit-no-move'),
+      });
     };
     window.addEventListener('contextmenu', onContextMenu);
     return () => window.removeEventListener('contextmenu', onContextMenu);
@@ -545,13 +551,15 @@ export default function App() {
     setShowSteam(false);
     setShowOtherLaunchers(null);
     setMenu(null);
+    setDetailReadOnlyMoves(false);
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
-  const openDetail = (id: string) => {
+  const openDetail = (id: string, readOnlyMoves = false) => {
+    setDetailReadOnlyMoves(readOnlyMoves);
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
   };
@@ -575,30 +583,34 @@ export default function App() {
    * own actions: the two views only know how to report a right click.
    */
   const menuGame = menu ? (games.find((g) => g.id === menu.id) ?? null) : null;
+  const menuReadOnlyMoves = menu?.readOnlyMoves === true;
   const menuItems: MenuItem[] = !menuGame
     ? []
     : page === 'backlog'
       ? [
           { kind: 'label', label: menuGame.title },
-          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
-          { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id, menuReadOnlyMoves) },
+          ...(menuReadOnlyMoves ? [] : [
+            { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
+            { kind: 'sep' as const },
+            ...(
+              [
+                ['playing', 'Move to Playing'],
+                ['backlog', 'Move to Backlog'],
+                ['completed', 'Mark Completed'],
+                ['dropped', 'Mark Dropped'],
+              ] as const
+            )
+              .filter(([status]) => status !== menuGame.status)
+              .map(([status, label]) => ({
+                label,
+                onSelect: () => updateGame(menuGame.id, { status }),
+              })),
+            ...(menuGame.planned
+              ? [{ label: 'Mark as owned', icon: Check, onSelect: () => updateGame(menuGame.id, { planned: false, status: 'backlog' }) }]
+              : [{ label: 'Mark as not owned', icon: X, onSelect: () => updateGame(menuGame.id, { planned: true, status: 'backlog' }) }]),
+          ]),
           { kind: 'sep' },
-          ...(
-            [
-              ['playing', 'Move to Playing'],
-              ['backlog', 'Move to Backlog'],
-              ['completed', 'Mark Completed'],
-              ['dropped', 'Mark Dropped'],
-            ] as const
-          )
-            .filter(([status]) => status !== menuGame.status)
-            .map(([status, label]) => ({
-              label,
-              onSelect: () => updateGame(menuGame.id, { status }),
-            })),
-          ...(menuGame.planned
-            ? [{ label: 'Mark as owned', icon: Check, onSelect: () => updateGame(menuGame.id, { planned: false, status: 'backlog' }) }]
-            : [{ label: 'Mark as not owned', icon: X, onSelect: () => updateGame(menuGame.id, { planned: true, status: 'backlog' }) }]),
           {
             label: menuGame.favorite ? 'Remove from favorites' : 'Add to favorites',
             icon: menuGame.favorite ? FilledStar : Star,
@@ -1071,6 +1083,7 @@ export default function App() {
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
           context={page === 'backlog' ? 'backlog' : 'library'}
+          readOnlyMoves={detailReadOnlyMoves}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
