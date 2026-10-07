@@ -1,0 +1,598 @@
+name: Release
+
+# Builds everything Orbit ships as, and puts it on a draft release for review.
+#
+# How to start it:
+#   * Actions -> Release -> Run workflow (needs this file on the default branch)
+#   * or push a change to the VERSION file, or to this file, on any branch.
+#     GitHub reads the workflow out of the commit that was pushed, so that works
+#     even before this file has reached master, which is what makes the first
+#     run possible.
+#
+# What it does: builds every platform, gathers the files, and creates a *draft*
+# release tagged v<version>. Nothing is visible to anybody until it is published
+# from the Releases page, which is also the moment the tag appears and the
+# moment the app's own update check starts seeing it.
+#
+# What comes out:
+#   Windows  Orbit-<version>-windows-setup.exe      the installer
+#            Orbit.exe                            the standalone program
+#            Orbit-<version>-windows.msi            the same installer, msi
+#            Orbit-<version>-windows-portable.zip   the program in a folder
+#   Linux    Orbit-<version>-linux-x86_64.AppImage  one file, any distribution
+#            orbit_<version>_amd64.deb              Debian, Ubuntu, Mint
+#            orbit-<version>-1.x86_64.rpm           Fedora, RHEL, openSUSE
+#            Orbit-<version>-linux-portable.tar.gz  the binary and a .desktop
+#   Debian   orbit_<version>_debian_amd64.deb       built against Debian's libs
+#   Fedora   orbit-<version>-1.fc.x86_64.rpm        built against Fedora's libs
+#   Arch     orbit-<version>-1-x86_64.pkg.tar.zst   pacman -U
+
+on:
+  push:
+    # A push that changes the version is a release. Restricting it to that one
+    # file keeps a build of the packaging targets off every ordinary commit.
+    paths:
+      - 'VERSION'
+      # Changing what builds the releases is a good moment to build them, and
+      # it is also how this file is worked on before it has reached master,
+      # where the Run workflow button lives.
+      - '.github/workflows/release.yml'
+      # What the program is built out of is as much a part of a release as the
+      # number on it: these change what ends up inside the installers.
+      - 'web/src-tauri/Cargo.toml'
+      - 'web/src-tauri/Cargo.lock'
+      # The window configuration and the permissions the front end is granted:
+      # both change what ends up inside the installers.
+      - 'web/src-tauri/tauri.conf.json'
+      - 'web/src-tauri/capabilities/**'
+      # The app itself. A change to what it does is a change to what is inside
+      # the installers, and this is the only way to get those built: the manual
+      # button needs this file on the default branch. It costs a few minutes of
+      # runners per push, which is the price of an installer that is never
+      # older than the code it came from.
+      - 'web/src/**'
+      - 'web/src-tauri/src/**'
+      - 'web/index.html'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'packaging/tauri-build.sh'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (leave empty to use the VERSION file)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  # ----------------------------------------------------------------- the number
+  version:
+    name: Work out the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag push, then whatever was typed by hand, then the VERSION file: the
+      # file is the normal way in, the other two are for one-off runs.
+      - id: read
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          TYPED: ${{ inputs.version }}
+        run: |
+          raw="${TAG:-${TYPED:-$(cat VERSION)}}"
+          raw="${raw#v}"
+          if [ -z "$raw" ]; then
+            echo "No version: put one in VERSION, or type one when running this." >&2
+            exit 1
+          fi
+          echo "version=$raw" >> "$GITHUB_OUTPUT"
+          echo "Building Orbit $raw"
+
+  # ---------------------------------------------------------------- Windows
+  windows:
+    name: Windows (setup, standalone, portable)
+    runs-on: windows-latest
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set the version
+        run: node packaging/version.mjs "$env:ORBIT_VERSION"
+        shell: pwsh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      # nsis makes the setup exe, msi makes an installer for anyone who prefers
+      # that. Both are built from the same binary, which is also left behind:
+      # that is the standalone exe.
+      - name: Build
+        working-directory: web
+        run: npx tauri build --bundles nsis,msi
+
+      - name: Collect the installers
+        shell: pwsh
+        run: |
+          $version = "$env:ORBIT_VERSION" -replace '^v', ''
+          $out = "artifacts"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $release = "web/src-tauri/target/release"
+          Get-ChildItem "$release/bundle/nsis/*.exe" | ForEach-Object {
+            Copy-Item $_.FullName "$out/Orbit-$version-windows-setup.exe"
+          }
+          Get-ChildItem "$release/bundle/msi/*.msi" | ForEach-Object {
+            Copy-Item $_.FullName "$out/Orbit-$version-windows.msi"
+          }
+
+          # The standalone program: one exe, the interface already inside it.
+          $exe = Get-ChildItem "$release/*.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "$out/Orbit.exe"
+
+          # The portable folder: the same program, with a line saying so.
+          $portable = "artifacts/portable"
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item $exe.FullName "$portable/Orbit.exe"
+          $readme = @(
+            "Orbit $version, portable",
+            "",
+            "Run Orbit.exe. Nothing is installed and nothing is written next to",
+            "it: your library and settings live in %APPDATA%\Orbit, and removing",
+            "this folder removes the program.",
+            "",
+            "Windows 10 and 11 already have the WebView2 runtime that Orbit draws",
+            "its interface with. On an older or stripped-down Windows, install it",
+            "once from https://developer.microsoft.com/microsoft-edge/webview2/"
+          ) -join "`r`n"
+          Set-Content -Path "$portable/Read me.txt" -Value $readme -Encoding utf8
+          Compress-Archive -Path "$portable/*" -DestinationPath "$out/Orbit-$version-windows-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ Linux
+  linux:
+    name: Linux (deb, rpm, AppImage)
+    # 22.04 on purpose: what is built on it runs on anything newer, and glibc
+    # only moves forward. A newer runner would produce a binary that refuses to
+    # start on Debian 12 or Ubuntu 22.04.
+    runs-on: ubuntu-22.04
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
+
+      - name: Install the system libraries Tauri needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libfuse2 rpm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        run: bash ../packaging/tauri-build.sh --bundles deb,rpm,appimage
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-linux
+          path: tauri-build.log
+          if-no-files-found: error
+
+      - name: Collect the packages
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_amd64.deb"
+          cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.x86_64.rpm"
+          cp web/src-tauri/target/release/bundle/appimage/*.AppImage "artifacts/Orbit-${version}-linux-x86_64.AppImage"
+          chmod +x artifacts/*.AppImage
+
+          # A plain tarball as well, for anyone who would rather not have a
+          # package manager involved, and for Arch to unpack by hand.
+          portable="Orbit-${version}-linux-portable"
+          mkdir -p "$portable"
+          cp web/src-tauri/target/release/orbit "$portable/orbit"
+          cp packaging/linux/orbit.desktop "$portable/orbit.desktop"
+          cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
+          tar -czf "artifacts/$portable.tar.gz" "$portable"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------- Debian
+  debian:
+    name: Debian (native deb)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    # Debian's own libraries and Debian's own dpkg, so the package is built
+    # against the system it is meant for rather than against Ubuntu's. Best
+    # effort: if a package name has moved, the Linux job's deb still works.
+    container: debian:13
+    steps:
+      - name: Install what the build needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential curl wget file git ca-certificates \
+            libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libxdo-dev \
+            nodejs npm
+
+      # Debian 13's own rustc is 1.85, and Tauri 2.12 asks for 1.90, so the
+      # toolchain comes from rustup instead of from the distribution. The
+      # package itself is still built with Debian's libraries and Debian's
+      # dpkg, which is the part a Debian package has to get right.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build the deb
+        working-directory: web
+        run: bash ../packaging/tauri-build.sh --bundles deb
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-debian
+          path: tauri-build.log
+          if-no-files-found: error
+
+      - name: Collect it
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_debian_amd64.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------- Fedora
+  fedora:
+    name: Fedora (native rpm)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    container: fedora:latest
+    steps:
+      - name: Install what the build needs
+        run: |
+          dnf install -y \
+            @development-tools nodejs npm \
+            webkit2gtk4.1-devel openssl-devel curl wget file \
+            libappindicator-gtk3-devel librsvg2-devel rpm-build \
+            gtk3-devel libsoup3-devel patchelf
+          # Named differently across Fedora releases, and not needed for the
+          # package itself.
+          dnf install -y libxdo-devel || dnf install -y xdotool-devel || true
+
+      # Use the same current Rust as the main build. Fedora's package version
+      # can lag behind the minimum required by the Tauri crates in Cargo.lock.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build the rpm
+        working-directory: web
+        run: bash ../packaging/tauri-build.sh --bundles rpm
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-fedora
+          path: tauri-build.log
+          if-no-files-found: error
+
+      - name: Collect it
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.fc.x86_64.rpm"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora
+          path: artifacts/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------- Arch
+  arch:
+    name: Arch (pacman package)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: version
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    container: archlinux:latest
+    steps:
+      - name: Install what the build needs
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git nodejs npm sudo curl ca-certificates \
+            webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg openssl \
+            libsoup3 xdotool
+
+      # Keep the Rust compiler in step with the toolchain used by the other
+      # release jobs rather than relying on when Arch refreshed its package.
+      - name: Install Rust with rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check the toolchain
+        run: |
+          cargo --version
+          rustc --version
+
+      - uses: actions/checkout@v4
+
+      # A container's files are not owned by the user git runs as.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set the version
+        run: node packaging/version.mjs "$ORBIT_VERSION"
+
+      - name: Install the front end's dependencies
+        working-directory: web
+        run: npm ci
+
+      # --no-bundle: Arch has no use for a .deb, and makepkg below makes the
+      # package that pacman does understand.
+      - name: Build
+        working-directory: web
+        run: bash ../packaging/tauri-build.sh --no-bundle
+
+      - name: Upload the Tauri build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-arch
+          path: tauri-build.log
+          if-no-files-found: error
+
+      - name: Package it for pacman
+        run: |
+          version="${ORBIT_VERSION#v}"
+          mkdir -p artifacts
+          work="$(mktemp -d)"
+          cp packaging/arch/PKGBUILD "$work/"
+          cp web/src-tauri/target/release/orbit "$work/orbit"
+          cp packaging/linux/orbit.desktop "$work/orbit.desktop"
+          cp web/src-tauri/icons/128x128.png "$work/orbit.png"
+          # The package installs the licence text, so it has to be beside the
+          # PKGBUILD for makepkg to find it in the sources.
+          cp LICENSE "$work/LICENSE"
+          sed -i "s/^pkgver=.*/pkgver=$version/" "$work/PKGBUILD"
+
+          # makepkg refuses to run as root, which is what a container gives you,
+          # so it runs as a user that owns the work folder.
+          useradd -m builder
+          chown -R builder "$work"
+          cd "$work"
+          sudo -u builder makepkg -f
+          cp "$work"/*.pkg.tar.zst "$GITHUB_WORKSPACE/artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: artifacts/*
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- the release
+  release:
+    name: Draft a release
+    # Everything that produces a file, including the best-effort jobs: a platform
+    # that failed to build must not stop the others from being offered.
+    needs: [version, windows, linux, debian, fedora, arch]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    env:
+      ORBIT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      # Download only installable release bundles. Debug logs are separate
+      # artifacts and must never become public release files.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: windows
+          path: files/windows
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: linux
+          path: files/linux
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: debian
+          path: files/debian
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: fedora
+          path: files/fedora
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: arch
+          path: files/arch
+
+      - name: List what was built
+        run: ls -R files || true
+
+      - name: Write the release notes
+        run: |
+          version="${ORBIT_VERSION#v}"
+          cat > notes.md <<EOF
+          Orbit ${version}.
+
+          **Windows** - \`Orbit-${version}-windows-setup.exe\` installs it;
+          \`Orbit-${version}-windows.msi\` is the MSI installer; \`Orbit.exe\`
+          is the standalone program; and \`Orbit-${version}-windows-portable.zip\`
+          contains Orbit.exe and a short readme.
+
+          **Linux** - \`Orbit-${version}-linux-x86_64.AppImage\` is the one-file
+          build (chmod +x it first), \`orbit_${version}_amd64.deb\` is for Debian,
+          Ubuntu and Mint, \`orbit-${version}-1.x86_64.rpm\` is the RPM build, and
+          \`Orbit-${version}-linux-portable.tar.gz\` is the binary and desktop file.
+          Debian and Fedora also have native packages when their best-effort jobs
+          succeed.
+
+          **Arch** - \`pacman -U orbit-${version}-1-x86_64.pkg.tar.zst\`.
+
+          Orbit looks for games in your Steam library and adds them when you
+          ask it to; nothing is read or launched until you do.
+          EOF
+
+      # Whether this version is already out there.
+      #
+      # Publishing is the player's decision, made by hand, and a build that ran
+      # afterwards must not quietly take that decision back: drafting a release
+      # that has been published would remove it from the releases page and from
+      # every installed copy's update check.
+      - name: Is this version already published?
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${ORBIT_VERSION#v}"
+          record=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")
+          record="${record%%$'\n'*}"
+          if [ -n "$record" ]; then
+            IFS=$'\t' read -r release_id state <<< "$record"
+          else
+            release_id=
+            state=missing
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          if [ "$state" = "false" ]; then
+            echo "$tag is published already, so its files are left as they are." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A draft on purpose: the files are there to be looked at, and publishing
+      # is what creates the tag, puts the release on the releases page, and lets
+      # the app's own update check see it. Old files are cleared first so a
+      # failed job cannot leave yesterday's package attached to today's draft.
+      - name: Clear assets from an older draft build
+        if: steps.published.outputs.state == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.published.outputs.release_id }}
+        run: |
+          asset_ids=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].id')
+          while read -r asset_id; do
+            [ -z "$asset_id" ] && continue
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" >/dev/null
+          done <<< "$asset_ids"
+
+      # Overwriting means running this twice replaces files instead of failing.
+      - uses: softprops/action-gh-release@v2
+        if: steps.published.outputs.state != 'false'
+        with:
+          tag_name: v${{ env.ORBIT_VERSION }}
+          name: Orbit v${{ env.ORBIT_VERSION }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          overwrite_files: true
+          files: files/*/*
+          body_path: notes.md
+          fail_on_unmatched_files: false

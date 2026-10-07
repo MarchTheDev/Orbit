@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    The Orbit mark as a plain drawing, for anywhere the animated component is not
+    available. src/components/ui/Logo.tsx is the same paths with the orbits as
+    separate groups so they can turn; change one, change the other.
+  -->
+  <defs>
+    <mask id="orbit-lit">
+      <rect width="512" height="512" fill="white"/>
+      <ellipse cx="330" cy="256" rx="62" ry="104" fill="black" fill-opacity="0.55"/>
+    </mask>
+  </defs>
+  <g fill="currentColor">
+    <g transform="translate(256 256)">
+      <circle r="206" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round"
+              stroke-dasharray="451 100 645 100" transform="rotate(276)"/>
+      <circle cx="118" cy="169" r="36"/>
+    </g>
+    <g transform="translate(256 256)" opacity="0.6">
+      <circle r="152" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"
+              stroke-dasharray="477 478" transform="rotate(69)"/>
+    </g>
+    <circle cx="256" cy="256" r="104" mask="url(#orbit-lit)"/>
+    <path d="M227 22 Q 231 48 257 52 Q 231 56 227 82 Q 223 56 197 52 Q 223 48 227 22 Z"/>
+  </g>
+</svg>

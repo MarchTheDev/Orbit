@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Orbit
+Comment=A library for the games on your PC: launches them, times them, and shows where the disk space went
+Exec=orbit
+Icon=orbit
+Terminal=false
+Categories=Game;Utility;
+Keywords=games;library;launcher;playtime;steam;
+StartupWMClass=orbit

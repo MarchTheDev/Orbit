@@ -1,0 +1,8 @@
+/target
+web/node_modules
+web/dist
+/.vs
+/node_modules
+# The built copy of the checks, written and removed by `npm test`.
+web/.test-build/
+web/test/

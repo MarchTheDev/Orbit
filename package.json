@@ -1,0 +1,11 @@
+{
+  "name": "orbit",
+  "private": true,
+  "description": "Dev entry point for Orbit. The app itself lives in web/.",
+  "scripts": {
+    "postinstall": "npm --prefix web install",
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "tauri": "npm --prefix web run tauri"
+  }
+}

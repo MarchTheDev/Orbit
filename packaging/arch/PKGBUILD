@@ -1,0 +1,36 @@
+# Maintainer: Orbit
+#
+# Packages a binary that has already been built.
+#
+# The build itself needs Node and a full Rust toolchain and takes a few minutes,
+# so this deliberately does not do it: CI builds `orbit` (see
+# .github/workflows/release.yml), drops the binary next to this file, and runs
+# `makepkg -f`. That keeps the package building in seconds, which is what
+# somebody installing it wants.
+#
+# To do it by hand:
+#   1. npm ci && npx tauri build --no-bundle      (in web/)
+#   2. copy web/src-tauri/target/release/orbit here, with orbit.desktop,
+#      orbit.png (from web/src-tauri/icons/128x128.png) and LICENSE (from the
+#      top of the repository)
+#   3. makepkg -f
+pkgname=orbit
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A library for the games on your PC: launches them, times them, and shows where the disk space went"
+arch=('x86_64')
+url="https://github.com/MarchTheDev/Orbit"
+license=('GPL-3.0-only')
+depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
+options=('!strip')
+source=('orbit' 'orbit.desktop' 'orbit.png' 'LICENSE')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 "$srcdir/orbit" "$pkgdir/usr/bin/orbit"
+  install -Dm644 "$srcdir/orbit.desktop" "$pkgdir/usr/share/applications/orbit.desktop"
+  install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/orbit.png"
+  # The licence text itself, so the package says what the program is under
+  # without this file carrying thirty-five kilobytes of it.
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
