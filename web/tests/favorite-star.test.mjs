@@ -1,5 +1,5 @@
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
 import { GameGrid } from '../src/components/GameGrid.tsx';
@@ -58,14 +58,36 @@ async function verify(component, viewName, extra) {
     }));
   });
   const after = document.querySelector(`[aria-label="Add ${game.title} to favorites"]`);
-  check(`${viewName} dismisses an empty star when a favorite prop changes to false`,
-    !!before && !!after && after.className.includes('pointer-events-none') && after.className.includes('opacity-0'),
-    after?.className ?? 'star button not found');
+  check(`${viewName} removes the empty star when a favorite prop changes to false`, !!before && !after);
+}
+
+function ClickHarness({ component: Component, extra }) {
+  const [favorite, setFavorite] = useState(true);
+  return createElement(Component, {
+    ...props,
+    games: [{ ...game, favorite }],
+    onToggleFavorite: () => setFavorite((current) => !current),
+    ...extra,
+  });
+}
+
+async function verifyClick(component, viewName, extra) {
+  await act(async () => root.render(createElement(ClickHarness, { component, extra, key: viewName })));
+  const button = document.querySelector(`[aria-label="Remove ${game.title} from favorites"]`);
+  await act(async () => {
+    button?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, detail: 1 }));
+  });
+  const remainingEmptyStar = document.querySelector(`[aria-label="Add ${game.title} to favorites"]`);
+  check(`${viewName} removes the star immediately after clicking to unfavorite`,
+    !!button && !remainingEmptyStar,
+    remainingEmptyStar?.parentElement?.parentElement?.outerHTML ?? 'star was removed');
 }
 
 console.log('quick favorite star dismissal');
 await verify(GameGrid, 'Grid', { scale: 100, coverTint: true });
 await verify(GameList, 'List', { scale: 100 });
+await verifyClick(GameGrid, 'Grid', { scale: 100, coverTint: true });
+await verifyClick(GameList, 'List', { scale: 100 });
 await act(async () => root.unmount());
 dom.window.close();
 for (const name of globalNames) {

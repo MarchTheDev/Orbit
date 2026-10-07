@@ -167,28 +167,26 @@ function Tile({
         >
           <Pencil className="size-4" />
         </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (game.favorite && e.detail > 0) setDismissedUnfilledStar(true);
-            else if (!game.favorite) setDismissedUnfilledStar(false);
-            onToggleFavorite(game.id);
-          }}
-          aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
-          aria-pressed={game.favorite}
-          title={game.favorite ? 'Remove from favorites' : 'Add to favorites'}
-          className={cn(
-            'absolute left-3 top-3 z-10 grid size-8 place-items-center rounded-full border border-white/20 bg-black/60 text-yellow-300 shadow-lg backdrop-blur transition hover:bg-black/80',
-            game.favorite
-              ? 'opacity-100'
-              : dismissedUnfilledStar
-                ? 'pointer-events-none opacity-0'
-                : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
-          )}
-        >
-          <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
-        </button>
+        {(game.favorite || !dismissedUnfilledStar) && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (game.favorite) setDismissedUnfilledStar(true);
+              else setDismissedUnfilledStar(false);
+              onToggleFavorite(game.id);
+            }}
+            aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
+            aria-pressed={game.favorite}
+            title={game.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            className={cn(
+              'absolute left-3 top-3 z-10 grid size-8 place-items-center rounded-full border border-white/20 bg-black/60 text-yellow-300 shadow-lg backdrop-blur transition hover:bg-black/80',
+              game.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
+            )}
+          >
+            <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();

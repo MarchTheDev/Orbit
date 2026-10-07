@@ -106,28 +106,26 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                   className="rounded-lg [&_span]:text-xs"
                   style={{ width: `${art}px`, height: `${Math.round(art * 1.33)}px` }}
                 />
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (g.favorite && event.detail > 0) dismissFavorite(g.id);
-                    else if (!g.favorite) restoreFavorite(g.id);
-                    onToggleFavorite(g.id);
-                  }}
-                  aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
-                  aria-pressed={g.favorite}
-                  title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
-                  className={cn(
-                    'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition',
-                    g.favorite
-                      ? 'opacity-100'
-                      : dismissedFavoriteIds.has(g.id)
-                        ? 'pointer-events-none opacity-0'
-                        : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
-                  )}
-                >
-                  <Star className="size-3.5" fill={g.favorite ? 'currentColor' : 'none'} />
-                </button>
+                {(g.favorite || !dismissedFavoriteIds.has(g.id)) && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (g.favorite) dismissFavorite(g.id);
+                      else restoreFavorite(g.id);
+                      onToggleFavorite(g.id);
+                    }}
+                    aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
+                    aria-pressed={g.favorite}
+                    title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
+                    className={cn(
+                      'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition',
+                      g.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
+                    )}
+                  >
+                    <Star className="size-3.5" fill={g.favorite ? 'currentColor' : 'none'} />
+                  </button>
+                )}
               </span>
               <span className="truncate font-medium" style={{ fontSize: `${text}px` }}>
                 {g.title}
