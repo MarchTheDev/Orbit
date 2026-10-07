@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -69,12 +69,17 @@ jobs:
 
       # `--message-format=short` puts every compile error on one line with its
       # file and position, which is what the annotations below need.
+      #
+      # No `--locked`: the committed Cargo.lock is version 3 and a current Cargo
+      # rewrites it to version 4 on sight, so insisting on the file as it stands
+      # stops the tests before they start. The release builds have never used
+      # `--locked` either, so they resolve the same way this does.
       - name: cargo test
         working-directory: web/src-tauri
         shell: bash
         run: |
           set -o pipefail
-          cargo test --locked --message-format=short 2>&1 | tee ../cargo.log
+          cargo test --message-format=short 2>&1 | tee ../cargo.log
 
       # A failed run's log cannot always be downloaded, so anything worth
       # reading is turned into an annotation, which can.
@@ -102,7 +107,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Not 20, which release.yml builds with. The app itself needs no Node
+          # at all, but these checks do: jsdom pulls in undici, which will not
+          # load before Node 22.19, and the whole run dies inside it before a
+          # single check is reached.
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
