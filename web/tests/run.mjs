@@ -16,6 +16,8 @@ const dir = path.join('.test-build');
 mkdirSync(dir, { recursive: true });
 const checks = [
   'tests/appearance.test.mjs',
+  'tests/favorite-star.test.mjs',
+  'tests/settings.test.mjs',
   'tests/markdown.test.mjs',
   'tests/markdownInput.test.mjs',
   'tests/playtime.test.mjs',

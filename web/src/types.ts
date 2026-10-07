@@ -293,6 +293,10 @@ export interface Settings {
   launcherScanOnLaunch?: OtherLauncher[];
   /** Whether Orbit should be registered to start when the user signs in. Off by default. */
   launchOnStartup?: boolean;
+  /** Keep the window hidden in the tray when Orbit is started by the sign-in entry. */
+  launchOnStartupBackground?: boolean;
+  /** Add or remove Orbit's per-user Windows Explorer action for `.exe` files. On by default. */
+  openExeInOrbit?: boolean;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

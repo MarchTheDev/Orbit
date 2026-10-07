@@ -70,6 +70,8 @@ export const DEFAULT_SETTINGS: Settings = {
   steamOnLaunch: false,
   launcherScanOnLaunch: [],
   launchOnStartup: false,
+  launchOnStartupBackground: false,
+  openExeInOrbit: true,
   sortOrder: [],
   coverScale: 100,
   coverTint: true,

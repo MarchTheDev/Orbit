@@ -6,6 +6,8 @@
 
 mod achievements;
 mod db;
+#[cfg(windows)]
+mod explorer;
 mod format;
 mod hltb;
 mod launch;
@@ -19,7 +21,8 @@ mod store;
 mod update;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
@@ -59,6 +62,19 @@ pub struct Orbit {
     /// settings file is not read while a game is starting.
     policy: Arc<std::sync::Mutex<WindowPolicy>>,
 }
+
+const OPEN_EXE_REQUESTED_EVENT: &str = "open-exe-requested";
+
+/// Startup visibility and handoff state shared with the single-instance callback.
+struct StartupVisibility {
+    start_in_background: bool,
+    frontend_ready: Arc<AtomicBool>,
+    show_requested: Arc<AtomicBool>,
+}
+
+/// Paths handed over by the Explorer action, including paths from a duplicate
+/// invocation that arrived before the webview subscribed to its event.
+struct PendingOpenExePaths(Arc<Mutex<Vec<String>>>);
 
 /// Read the window behaviour out of the settings JSON.
 fn policy_from_settings(settings: Option<&Settings>) -> WindowPolicy {
@@ -522,8 +538,65 @@ fn log_manual_session(
 /// colour between the launcher and the opening animation. The front end asks for
 /// the window as soon as it has painted; nothing is shown before that.
 #[tauri::command]
-fn window_ready(app: tauri::AppHandle) {
-    show_main_window(&app);
+fn window_ready(app: tauri::AppHandle, startup: State<'_, StartupVisibility>) {
+    startup.frontend_ready.store(true, Ordering::SeqCst);
+    if !startup.start_in_background || startup.show_requested.load(Ordering::SeqCst) {
+        show_main_window(&app);
+    }
+}
+
+/// Pull the queued paths opened through Explorer, then clear the queue.
+#[tauri::command]
+fn take_open_exe_paths(pending: State<'_, PendingOpenExePaths>) -> Vec<String> {
+    match pending.0.lock() {
+        Ok(mut paths) => std::mem::take(&mut *paths),
+        Err(error) => {
+            log::warn!("could not read queued Explorer paths: {error}");
+            Vec::new()
+        }
+    }
+}
+
+/// Whether the native app is running on Windows.
+#[tauri::command]
+fn is_windows() -> bool {
+    cfg!(windows)
+}
+
+/// Set or remove Orbit's user-level `.exe` Explorer verb.
+#[tauri::command]
+fn set_exe_context_menu(enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        explorer::set_context_menu(enabled)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Err("The Explorer context-menu integration is only available on Windows".into())
+    }
+}
+
+/// `Open in Orbit` can be an initial launch or a second invocation. The first
+/// argument is Orbit's executable; only the value following our own switch is
+/// treated as a game path.
+fn open_exe_paths_from_args(args: &[String]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--open-in-orbit" {
+            if let Some(path) = args.get(index + 1) {
+                paths.push(path.clone());
+                index += 1;
+            }
+        } else if let Some(path) = args[index].strip_prefix("--open-in-orbit=") {
+            if !path.is_empty() {
+                paths.push(path.to_string());
+            }
+        }
+        index += 1;
+    }
+    paths
 }
 
 /// Show the main window, and put it in front, if it is not already up.
@@ -544,6 +617,19 @@ fn show_main_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = window.set_focus();
+}
+
+/// Bring the window forward for a second invocation, waiting for the front end
+/// to paint if the request arrives while Orbit is still starting.
+fn request_main_window(
+    app: &tauri::AppHandle,
+    frontend_ready: &AtomicBool,
+    show_requested: &AtomicBool,
+) {
+    show_requested.store(true, Ordering::SeqCst);
+    if frontend_ready.load(Ordering::SeqCst) {
+        show_main_window(app);
+    }
 }
 
 #[tauri::command]
@@ -898,7 +984,34 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let initial_args: Vec<String> = std::env::args().collect();
+    let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
+    let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));
+    let pending_for_single_instance = Arc::clone(&pending_paths);
+    let pending_for_setup = Arc::clone(&pending_paths);
+    let frontend_ready = Arc::new(AtomicBool::new(false));
+    let show_requested = Arc::new(AtomicBool::new(false));
+    let frontend_ready_for_single_instance = Arc::clone(&frontend_ready);
+    let show_requested_for_single_instance = Arc::clone(&show_requested);
+    let frontend_ready_for_setup = Arc::clone(&frontend_ready);
+    let show_requested_for_setup = Arc::clone(&show_requested);
+
     tauri::Builder::default()
+        // Register first so Explorer launches are handed to this process before
+        // any other plugin attempts to open a second copy of Orbit.
+        .plugin(tauri_plugin_single_instance::init(move |app, args, _cwd| {
+            let paths = open_exe_paths_from_args(&args);
+            if !paths.is_empty() {
+                match pending_for_single_instance.lock() {
+                    Ok(mut pending) => pending.extend(paths),
+                    Err(error) => log::error!("could not queue Explorer paths: {error}"),
+                }
+                if let Err(error) = app.emit(OPEN_EXE_REQUESTED_EVENT, ()) {
+                    log::warn!("could not notify the webview about an Explorer request: {error}");
+                }
+            }
+            request_main_window(app, &frontend_ready_for_single_instance, &show_requested_for_single_instance);
+        }))
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -907,8 +1020,13 @@ pub fn run() {
         // The folder and file pickers behind every Browse button.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_autostart::Builder::new().app_name("Orbit").build())
-        .setup(|app| {
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name("Orbit")
+                .args(["--autostart"])
+                .build(),
+        )
+        .setup(move |app| {
             let root = app
                 .path()
                 .app_data_dir()
@@ -917,9 +1035,32 @@ pub fn run() {
             let db = Arc::new(
                 db::Db::open(&store.root().join("orbit.db")).map_err(std::io::Error::other)?,
             );
-            let policy = Arc::new(std::sync::Mutex::new(policy_from_settings(
-                store.load_settings().as_ref(),
-            )));
+            let saved_settings = store.load_settings();
+            let policy = Arc::new(Mutex::new(policy_from_settings(saved_settings.as_ref())));
+            let start_in_background = started_by_autostart
+                && saved_settings.as_ref().is_some_and(|settings| {
+                    settings.get("launchOnStartup").and_then(serde_json::Value::as_bool) == Some(true)
+                        && settings
+                            .get("launchOnStartupBackground")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                });
+
+            // Keep the Explorer action in sync with the saved preference and
+            // this install's path. Old settings did not have the field, so the
+            // first launch opts in by default as the UI does.
+            #[cfg(windows)]
+            {
+                let enabled = saved_settings
+                    .as_ref()
+                    .and_then(|settings| settings.get("openExeInOrbit"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+                if let Err(error) = explorer::set_context_menu(enabled) {
+                    log::warn!("could not update the Explorer context menu: {error}");
+                }
+            }
+
             let runner = Runner::new(Arc::clone(&db), Arc::clone(&policy));
             let sizes = SizeCache::default();
             let _ = APP.set(app.handle().clone());
@@ -951,20 +1092,40 @@ pub fn run() {
                 });
             }
 
-            // A belt for the pair of braces the front end wears: if the page
-            // never gets as far as asking for the window, this shows it anyway.
-            {
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(6));
-                    show_main_window(&handle);
-                });
+            // The tray is allowed to fail: background launch is only safe when
+            // there is a tray icon to bring the hidden window back.
+            let tray_ready = match build_tray(app.handle()) {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("no tray icon this run: {error}");
+                    false
+                }
+            };
+            let background_requested = start_in_background;
+            let start_in_background = background_requested && tray_ready;
+            if background_requested && !tray_ready {
+                log::warn!("could not start Orbit hidden because its tray icon is unavailable");
             }
 
-            // The tray is allowed to fail: the window behaviour that needs it
-            // falls back to a plain minimize, and the app is otherwise fine.
-            if let Err(e) = build_tray(app.handle()) {
-                log::warn!("no tray icon this run: {e}");
+            app.manage(StartupVisibility {
+                start_in_background,
+                frontend_ready: Arc::clone(&frontend_ready_for_setup),
+                show_requested: Arc::clone(&show_requested_for_setup),
+            });
+            app.manage(PendingOpenExePaths(Arc::clone(&pending_for_setup)));
+
+            // Normally the front end reveals itself after its first paint. If
+            // it never gets that far, keep the same visible fallback; a genuine
+            // background start stays hidden unless another instance requested it.
+            {
+                let handle = app.handle().clone();
+                let show_requested = Arc::clone(&show_requested_for_setup);
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(6));
+                    if !start_in_background || show_requested.load(Ordering::SeqCst) {
+                        show_main_window(&handle);
+                    }
+                });
             }
 
             app.manage(Orbit { db, runner, store, sizes, policy });
@@ -999,6 +1160,9 @@ pub fn run() {
             log_manual_session,
             library_stats,
             window_ready,
+            take_open_exe_paths,
+            is_windows,
+            set_exe_context_menu,
             list_drives,
             folder_size,
             cached_sizes,
@@ -1056,6 +1220,24 @@ mod tests {
     fn a_drive_is_named_the_way_a_player_would_say_it() {
         assert_eq!(storage::drive_of(Path::new(r"D:\Games\Hades")), "D:");
         assert_eq!(storage::drive_of(Path::new(r"c:\games")), "C:");
+    }
+
+    #[test]
+    fn explorer_arguments_only_capture_paths_after_our_switch() {
+        let args = vec![
+            "Orbit.exe".to_string(),
+            "--autostart".to_string(),
+            "--open-in-orbit".to_string(),
+            r"C:\Games\A game.exe".to_string(),
+            r"--open-in-orbit=D:\Games\Another.exe".to_string(),
+        ];
+        assert_eq!(
+            open_exe_paths_from_args(&args),
+            vec![
+                r"C:\Games\A game.exe".to_string(),
+                r"D:\Games\Another.exe".to_string(),
+            ]
+        );
     }
 
     #[test]

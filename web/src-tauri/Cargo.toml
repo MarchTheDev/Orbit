@@ -23,6 +23,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2.7.0"
+tauri-plugin-single-instance = "2.5.2"
 # `rt` supports spawn/spawn_blocking and `time` drives the session watcher.
 # The macros feature is not used, so it is deliberately left out.
 tokio = { version = "1.53.1", features = ["rt", "time"] }

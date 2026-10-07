@@ -19,7 +19,16 @@ import {
 import type { Game, LauncherGame, OtherLauncher, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
-import { clearLibrary, isNative, launcherGames, setPlaytime, steamLibrary, windowReady } from './services/native';
+import {
+  clearLibrary,
+  isNative,
+  launcherGames,
+  onOpenExeRequested,
+  setPlaytime,
+  steamLibrary,
+  takeOpenExePaths,
+  windowReady,
+} from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { revealInExplorer } from './services/native';
@@ -126,6 +135,45 @@ export default function App() {
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+
+  const receiveOpenExePaths = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+    setDroppedPaths(paths);
+    setShowAdd(true);
+  }, []);
+
+  // The first launch reads its command line once; later Explorer invocations
+  // are delivered by the single-instance bridge. Subscribe before draining the
+  // initial queue so a request cannot slip between the two.
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    let dispose: (() => void) | undefined;
+    const drainOpenExeQueue = () => {
+      void takeOpenExePaths().then((paths) => {
+        if (alive) receiveOpenExePaths(paths);
+      }).catch((error) => console.warn('Could not read an Explorer request', error));
+    };
+
+    void (async () => {
+      try {
+        const unlisten = await onOpenExeRequested(drainOpenExeQueue);
+        if (!alive) {
+          unlisten();
+          return;
+        }
+        dispose = unlisten;
+        receiveOpenExePaths(await takeOpenExePaths());
+      } catch (error) {
+        console.warn('Could not listen for Explorer requests', error);
+      }
+    })();
+
+    return () => {
+      alive = false;
+      dispose?.();
+    };
+  }, [receiveOpenExePaths]);
 
   // Tauri keeps the window hidden until the app has loaded its saved theme and
   // painted the opening screen. Showing it on the first React frame exposed the

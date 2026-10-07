@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Pencil, Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtMinutes } from '../utils/format';
@@ -109,7 +109,17 @@ function Tile({
 }) {
   const [hovered, setHovered] = useState(false);
   const [dismissedUnfilledStar, setDismissedUnfilledStar] = useState(false);
+  const previousFavorite = useRef(game.favorite);
   const tint = useHoverTint(game, coverTint, hovered);
+
+  // A context-menu action changes the game prop without going through the
+  // quick-star button. Keep the same hover dismissal for either route, before
+  // the browser paints the now-empty star again.
+  useLayoutEffect(() => {
+    if (previousFavorite.current && !game.favorite) setDismissedUnfilledStar(true);
+    else if (!previousFavorite.current && game.favorite) setDismissedUnfilledStar(false);
+    previousFavorite.current = game.favorite;
+  }, [game.favorite]);
 
   return (
     <div

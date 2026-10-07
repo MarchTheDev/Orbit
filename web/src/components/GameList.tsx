@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Pencil, Play, Star } from 'lucide-react';
 import type { Game } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
@@ -23,7 +23,53 @@ interface Props {
 
 export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite, onPlay, scale, onReorder }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
-  const [dismissedFavoriteId, setDismissedFavoriteId] = useState<string | null>(null);
+  const [dismissedFavoriteIds, setDismissedFavoriteIds] = useState<Set<string>>(() => new Set());
+  const previousFavorites = useRef(new Map<string, boolean>());
+
+  // A right-click menu can unfavorite a row without touching its star button.
+  // Remember the transition for every visible row and dismiss the empty star
+  // before paint, just as the quick-star route does.
+  useLayoutEffect(() => {
+    const visibleIds = new Set(games.map((game) => game.id));
+    for (const id of previousFavorites.current.keys()) {
+      if (!visibleIds.has(id)) previousFavorites.current.delete(id);
+    }
+
+    const newlyUnfavorited: string[] = [];
+    for (const game of games) {
+      if (previousFavorites.current.get(game.id) === true && !game.favorite) {
+        newlyUnfavorited.push(game.id);
+      }
+      previousFavorites.current.set(game.id, game.favorite);
+    }
+    setDismissedFavoriteIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const id of current) {
+        if (!visibleIds.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      for (const id of newlyUnfavorited) {
+        next.add(id);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [games]);
+
+  const dismissFavorite = (id: string) => {
+    setDismissedFavoriteIds((current) => new Set(current).add(id));
+  };
+  const restoreFavorite = (id: string) => {
+    setDismissedFavoriteIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  };
 
   // One slider drives both views, so a row grows with the covers: the thumbnail
   // and the text step together rather than the picture alone getting bigger.
@@ -40,7 +86,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
           <div
             key={g.id}
             onClick={() => onSelect(g.id)}
-            onPointerLeave={() => setDismissedFavoriteId((id) => id === g.id ? null : id)}
+            onPointerLeave={() => restoreFavorite(g.id)}
             onDoubleClick={() => onPlay(g)}
             // What the app's one right-click handler looks for.
             data-orbit-game={g.id}
@@ -64,8 +110,8 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    if (g.favorite && event.detail > 0) setDismissedFavoriteId(g.id);
-                    else if (!g.favorite) setDismissedFavoriteId(null);
+                    if (g.favorite && event.detail > 0) dismissFavorite(g.id);
+                    else if (!g.favorite) restoreFavorite(g.id);
                     onToggleFavorite(g.id);
                   }}
                   aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
@@ -75,7 +121,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                     'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition',
                     g.favorite
                       ? 'opacity-100'
-                      : dismissedFavoriteId === g.id
+                      : dismissedFavoriteIds.has(g.id)
                         ? 'pointer-events-none opacity-0'
                         : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
                   )}

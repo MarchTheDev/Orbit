@@ -27,7 +27,17 @@ import {
 import type { FontChoice, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS } from '../data/launchers';
-import { dataDir, dataDirSize, isNative, listDrives, revealInExplorer, setLaunchOnStartup, type DriveInfo } from '../services/native';
+import {
+  dataDir,
+  dataDirSize,
+  isNative,
+  isWindows,
+  listDrives,
+  revealInExplorer,
+  setExeContextMenu,
+  setLaunchOnStartup,
+  type DriveInfo,
+} from '../services/native';
 import { openExternal } from '../services/desktop';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
@@ -284,6 +294,8 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
+  { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
+  { label: 'Open in Orbit for .exe files', section: 'orbit-appearance', keywords: 'explorer windows context menu right click executable import' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
@@ -327,7 +339,37 @@ export function SettingsView({
   const [settingsQuery, setSettingsQuery] = useState('');
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [windows, setWindows] = useState(false);
+  const [exeContextMenuBusy, setExeContextMenuBusy] = useState(false);
+  const [exeContextMenuError, setExeContextMenuError] = useState<string | null>(null);
   const native = isNative();
+
+  useEffect(() => {
+    let alive = true;
+    if (!native) {
+      setWindows(false);
+      return () => { alive = false; };
+    }
+    void isWindows().then((supported) => {
+      if (alive) setWindows(supported);
+    }).catch(() => {
+      if (alive) setWindows(false);
+    });
+    return () => { alive = false; };
+  }, [native]);
+
+  const setOpenExeInOrbit = async (enabled: boolean) => {
+    setExeContextMenuBusy(true);
+    setExeContextMenuError(null);
+    try {
+      await setExeContextMenu(enabled);
+      setSettings({ openExeInOrbit: enabled });
+    } catch (reason) {
+      setExeContextMenuError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setExeContextMenuBusy(false);
+    }
+  };
 
   const setLaunchAtSignIn = async (enabled: boolean) => {
     setStartupBusy(true);
@@ -411,7 +453,11 @@ export function SettingsView({
   };
 
   const searchResults = settingsQuery.trim()
-    ? SETTINGS_SEARCH_ITEMS.filter((item) => `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()))
+    ? SETTINGS_SEARCH_ITEMS.filter(
+        (item) =>
+          (windows || item.label !== 'Open in Orbit for .exe files') &&
+          `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
+      )
     : [];
 
   return (
@@ -560,7 +606,32 @@ export function SettingsView({
             ? 'Off by default. When enabled, Orbit starts when you sign in to this computer.'
             : 'Available in the desktop app. Off by default; when enabled, Orbit starts when you sign in.'}
         />
+        <Checkbox
+          checked={settings.launchOnStartupBackground === true}
+          onChange={(value) => setSettings({ launchOnStartupBackground: value })}
+          disabled={!native || settings.launchOnStartup !== true || startupBusy}
+          label="Start Orbit in the background"
+          hint={settings.launchOnStartup === true
+            ? 'At sign-in, keep the window hidden and leave Orbit available from the system tray. Opening Orbit normally still shows the window.'
+            : 'Turn on “Launch Orbit when this PC starts” above to use this option.'}
+          className="ml-5"
+        />
         {startupError && <p role="alert" className="text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
+        {windows && (
+          <>
+            <SubHead>Windows Explorer</SubHead>
+            <Checkbox
+              checked={settings.openExeInOrbit !== false}
+              onChange={(enabled) => void setOpenExeInOrbit(enabled)}
+              disabled={exeContextMenuBusy}
+              label="Add “Open in Orbit” to .exe right-click menus"
+              hint="Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations."
+            />
+            {exeContextMenuError && (
+              <p role="alert" className="text-[11px] text-rose-300">Could not update the Explorer menu: {exeContextMenuError}</p>
+            )}
+          </>
+        )}
       </Section>
 
       <Section

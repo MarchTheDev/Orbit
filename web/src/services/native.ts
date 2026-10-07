@@ -103,6 +103,28 @@ export function windowReady(): Promise<void> {
   return call('window_ready', {}, () => undefined);
 }
 
+/** Whether the current desktop shell runs on Windows. */
+export function isWindows(): Promise<boolean> {
+  return call('is_windows', {}, () => false);
+}
+
+/** Add or remove Orbit's per-user `.exe` right-click action in Explorer. */
+export function setExeContextMenu(enabled: boolean): Promise<void> {
+  return call('set_exe_context_menu', { enabled }, () => undefined);
+}
+
+/** Paths queued from the Explorer action, including the app's first launch. */
+export function takeOpenExePaths(): Promise<string[]> {
+  return call('take_open_exe_paths', {}, () => []);
+}
+
+/** Listen for an Explorer request delivered by a second Orbit invocation. */
+export function onOpenExeRequested(onRequest: () => void): Promise<() => void> {
+  const t = tauri();
+  if (!t) return Promise.resolve(() => {});
+  return t.event.listen('open-exe-requested', () => onRequest());
+}
+
 export function knownExePaths(): Promise<string[]> {
   return call('db_known_exe_paths', {}, async () => []);
 }
