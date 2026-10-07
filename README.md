@@ -18,6 +18,8 @@ the disk space went.
 
 [Download the latest release](https://github.com/MarchTheDev/Orbit/releases/latest)
 
+<img width="1920" height="1009" alt="orbit_f7395uKcNX" src="https://github.com/user-attachments/assets/aede7833-efbd-4413-b616-1623777b2235" />
+
 </div>
 
 ## What it does
