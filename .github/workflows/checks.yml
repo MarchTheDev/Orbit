@@ -63,9 +63,21 @@ jobs:
         with:
           workspaces: web/src-tauri
 
+      # `--message-format=short` puts every compile error on one line with its
+      # file and line, which is what the next step needs.
       - name: cargo test
         working-directory: web/src-tauri
-        run: cargo test --locked -- --nocapture
+        run: cargo test --locked --message-format=short 2>&1 | tee ../cargo.log
+
+      # A failed run's log cannot always be downloaded, so anything worth
+      # reading is turned into an annotation, which can.
+      - name: Put the failures where they can be read
+        if: failure()
+        run: |
+          grep -E "^[^ ].*\.rs:[0-9]+:[0-9]+: error" cargo.log \
+            | head -20 | sed -E 's/^([^:]+):([0-9]+):([0-9]+): /::error file=\1,line=\2,col=\3::/' || true
+          grep -E "^(error|failures:|test .* FAILED|.*panicked at)" cargo.log \
+            | head -20 | sed -E 's/^/::error ::/' || true
 
   web:
     name: Front end
@@ -89,4 +101,10 @@ jobs:
 
       - name: Tests
         working-directory: web
-        run: npm test
+        run: npm test 2>&1 | tee ../web.log
+
+      - name: Put the failures where they can be read
+        if: failure()
+        run: |
+          grep -E "^  FAIL|check\(s\) failed" web.log | head -20 | sed -E 's/^/::error ::/' || true
+          grep -nE "Error|error:|not ok" web.log | head -20 | sed -E 's/^/::error ::/' || true
