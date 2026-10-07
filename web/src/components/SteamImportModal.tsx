@@ -34,6 +34,7 @@ export function SteamImportModal({
   onRemoveSteam,
   onClose,
   from = 'library',
+  steamPath,
 }: {
   existing: Game[];
   /** Whether the player wants details and artwork fetched as games come in. */
@@ -51,6 +52,11 @@ export function SteamImportModal({
    * down as planned, which is what a list of games to play next is for.
    */
   from?: 'library' | 'backlog';
+  /**
+   * Where the player says Steam is, from Settings. Passed down rather than read
+   * here so this page keeps working with nothing but the library it was given.
+   */
+  steamPath?: string;
 }) {
   const [rows, setRows] = useState<(SteamGame & { include: boolean })[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,7 +74,7 @@ export function SteamImportModal({
     setBusy(true);
     setError(null);
     try {
-      const found = await steamLibrary();
+      const found = await steamLibrary(steamPath ? [steamPath] : undefined);
       // Steam hands the library over in no particular order; most recently
       // played first is the order that makes this dialog useful.
       found.sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));

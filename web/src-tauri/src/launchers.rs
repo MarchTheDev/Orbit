@@ -202,9 +202,7 @@ fn parse_registry_entries(output: &str) -> Vec<RegistryEntry> {
 
 #[cfg(windows)]
 fn query_registry(key: &str) -> Vec<RegistryEntry> {
-    use std::process::Command;
-
-    Command::new("reg.exe")
+    crate::process::command("reg.exe")
         .args(["query", key, "/s"])
         .output()
         .ok()

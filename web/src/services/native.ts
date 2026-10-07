@@ -540,8 +540,15 @@ export function folderPrograms(path: string, maxDepth = 3): Promise<FolderProgra
 }
 
 /** The player's installed Steam games, for the import dialog. */
-export function steamLibrary(): Promise<SteamGame[]> {
-  return call('steam_library', {}, async () => []);
+/**
+ * The player's installed Steam games.
+ *
+ * `extraPaths` is where the player says Steam is, from Settings. Steam on Linux,
+ * and inside a sandbox, is often somewhere Orbit cannot work out from the
+ * machine, so it can be told.
+ */
+export function steamLibrary(extraPaths?: string[]): Promise<SteamGame[]> {
+  return call('steam_library', { extraPaths: extraPaths ?? null }, async () => []);
 }
 
 /** Installed games from one other launcher, read only when its picker is opened. */

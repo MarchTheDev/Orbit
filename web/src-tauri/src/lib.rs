@@ -14,6 +14,7 @@ mod launch;
 mod launch_target;
 mod launchers;
 mod metadata;
+mod process;
 mod session;
 mod steam;
 mod storage;
@@ -912,9 +913,14 @@ fn reorder_game_logs(orbit: State<'_, Orbit>, game_id: String, ids: Vec<i64>) ->
 }
 
 /// The player's installed Steam games, for the import dialog.
+///
+/// `extra_paths` is where the player says Steam is, from Settings. On Linux, and
+/// inside a sandbox, Steam is often somewhere Orbit cannot work out from the
+/// machine, and the answer to that is to be told rather than to guess harder.
 #[tauri::command]
-async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
-    tokio::task::spawn_blocking(steam::installed_games)
+async fn steam_library(extra_paths: Option<Vec<String>>) -> Result<Vec<steam::SteamGame>, String> {
+    let extra = extra_paths.unwrap_or_default();
+    tokio::task::spawn_blocking(move || steam::installed_games(&extra))
         .await
         .map_err(|e| format!("Could not read the Steam library: {e}"))?
 }
@@ -968,19 +974,45 @@ async fn data_dir_size(orbit: State<'_, Orbit>) -> Result<u64, String> {
         .map_err(|e| format!("Could not measure the data folder: {e}"))
 }
 
-/// Open a folder in Explorer, so a path in the UI is one click from the files.
+/// Open a folder with one file in it selected, so a path in the UI is one click
+/// from the files.
+///
+/// Windows and macOS both have a "show me this one file" verb. Linux has only
+/// "open this folder", so the folder is what opens; on Orbit's own data folder
+/// that is the same thing, since the folder was the path all along. This used to
+/// run `explorer` on every platform, which on Linux is a program that does not
+/// exist, and the button simply did nothing.
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if !target.exists() {
         return Err(format!("{path} is not there any more."));
     }
-    std::process::Command::new("explorer")
-        .arg("/select,")
-        .arg(&target)
-        .spawn()
+
+    #[cfg(windows)]
+    let spawned = process::command("explorer").arg("/select,").arg(&target).spawn();
+
+    #[cfg(target_os = "macos")]
+    let spawned = process::command("open").arg("-R").arg(&target).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = {
+        // No select verb to reach for. A folder opens as itself; a file opens
+        // the folder it is in, which is the closest thing to being selected.
+        let folder = if target.is_dir() {
+            target.clone()
+        } else {
+            target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| target.clone())
+        };
+        process::command("xdg-open").arg(folder).spawn()
+    };
+
+    spawned
         .map(|_| ())
-        .map_err(|e| format!("Could not open Explorer: {e}"))
+        .map_err(|e| format!("Could not open the folder: {e}"))
 }
 
 /// Open a game's install folder itself in the system file manager.
@@ -992,11 +1024,11 @@ fn open_game_folder(path: String) -> Result<(), String> {
     }
 
     #[cfg(windows)]
-    let result = std::process::Command::new("explorer").arg(&target).spawn();
+    let result = process::command("explorer").arg(&target).spawn();
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&target).spawn();
+    let result = process::command("open").arg(&target).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
-    let result = std::process::Command::new("xdg-open").arg(&target).spawn();
+    let result = process::command("xdg-open").arg(&target).spawn();
 
     result
         .map(|_| ())

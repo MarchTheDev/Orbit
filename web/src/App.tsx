@@ -408,7 +408,7 @@ export default function App() {
     if (!ready || !settings?.steamOnLaunch || steamChecked.current) return;
     steamChecked.current = true;
     void (async () => {
-      const found = await steamLibrary().catch(() => []);
+      const found = await steamLibrary(settings.steamPath ? [settings.steamPath] : undefined).catch(() => []);
       if (found.length === 0) return;
       const byId = new Set(games.filter((g) => g.meta?.steamAppId).map((g) => g.meta!.steamAppId));
       const byTitle = new Set(games.map((g) => g.title.trim().toLowerCase()));
@@ -1195,6 +1195,7 @@ export default function App() {
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
           onClose={() => setShowSteam(false)}
+          steamPath={settings.steamPath}
         />
       )}
       {menu && menuGame && (

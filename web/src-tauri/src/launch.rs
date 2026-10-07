@@ -364,12 +364,8 @@ fn any_running(names: &[String]) -> bool {
 /// language: the image name is the first field and nothing else needs reading.
 #[cfg(windows)]
 fn running_programs() -> Vec<String> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let Ok(output) = std::process::Command::new("tasklist")
+    let Ok(output) = crate::process::command("tasklist")
         .args(["/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
         return Vec::new();
@@ -416,14 +412,10 @@ const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 /// `CREATE_NO_WINDOW` keeps a console window from flashing up.
 #[cfg(windows)]
 fn kill_tree(pid: u32) {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // A non-zero status just means taskkill had nothing to do, so it is ignored:
     // the caller's `Child::kill` and wait still run.
-    let _ = std::process::Command::new("taskkill")
+    let _ = crate::process::command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();

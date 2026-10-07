@@ -3,10 +3,8 @@
 //! The verb lives only below `HKCU\Software\Classes\exefile\shell\OpenInOrbit`;
 //! it neither replaces the `.exe` association nor changes another launcher's keys.
 
-use std::os::windows::process::CommandExt;
 use std::process::{Command, Output};
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MENU_KEY: &str = r"HKCU\Software\Classes\exefile\shell\OpenInOrbit";
 const COMMAND_KEY: &str = r"HKCU\Software\Classes\exefile\shell\OpenInOrbit\command";
 
@@ -41,10 +39,9 @@ fn register() -> Result<(), String> {
 }
 
 fn registry_command() -> Command {
-    let mut command = Command::new("reg.exe");
-    // Orbit is a windowed app; do not flash a console when reconciling the key.
-    command.creation_flags(CREATE_NO_WINDOW);
-    command
+    // The shared helper is what keeps the console from flashing while this
+    // reconciles the key, and what keeps a bundled build's environment out of it.
+    crate::process::command("reg.exe")
 }
 
 fn remove() -> Result<(), String> {

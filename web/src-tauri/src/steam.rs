@@ -29,12 +29,15 @@ pub struct SteamGame {
 
 /// Every installed game across every Steam library on the machine.
 ///
+/// `extra` is where the player says Steam is, from Settings, and is looked at
+/// before anything Orbit worked out for itself.
+///
 /// An empty list is a normal answer, not an error: Steam may not be installed,
 /// or nothing may be installed through it. The caller says so in its own words,
 /// which it can do better than an error string from here.
-pub fn installed_games() -> Result<Vec<SteamGame>, String> {
+pub fn installed_games(extra: &[String]) -> Result<Vec<SteamGame>, String> {
     let mut games = Vec::new();
-    let roots = steam_roots();
+    let roots = steam_roots(extra);
 
     if roots.is_empty() {
         log::info!("no Steam installation found");
@@ -76,51 +79,141 @@ pub fn installed_games() -> Result<Vec<SteamGame>, String> {
 
 /// Where Steam lives.
 ///
-/// The registry is asked first because that is where Steam records it, in both
-/// the 64-bit and the 32-bit view of the hive. Failing that, the usual install
-/// folders are tried, and finally the path is read out of the Steam client's
-/// own config file, which is the last thing to move if a player relocated it.
-fn steam_roots() -> Vec<PathBuf> {
+/// On Windows the registry is asked first, because that is where Steam records
+/// it, in both the 64-bit and the 32-bit view of the hive; failing that, the
+/// usual install folders are tried. Elsewhere there is no registry to ask, so
+/// every folder a package or a sandbox is known to use is tried instead - the
+/// plain install, Debian's, Flatpak's and snap's. A Linux build used to reach
+/// this function and find only Windows paths in it, which is why it never saw a
+/// Steam library at all.
+///
+/// `extra` comes first. It is where the player said Steam is, from Settings, and
+/// it covers the case nobody can enumerate: a relocated install, or one inside a
+/// sandbox whose folder Orbit has never heard of.
+fn steam_roots(extra: &[String]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
-    for (hive, key) in [
-        ("HKCU", r"Software\Valve\Steam"),
-        ("HKLM", r"SOFTWARE\WOW6432Node\Valve\Steam"),
-        ("HKLM", r"SOFTWARE\Valve\Steam"),
-    ] {
-        for name in ["SteamPath", "InstallPath"] {
-            if let Some(path) = registry_path(hive, key, name) {
-                roots.push(path);
+    for path in extra {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            roots.push(expand_home(trimmed));
+        }
+    }
+
+    // An environment variable is how a relocated install announces itself, and
+    // it is worth more than a guess but less than what the player typed.
+    for var in ["STEAMPATH", "STEAM_DIR"] {
+        if let Ok(dir) = std::env::var(var) {
+            let trimmed = dir.trim();
+            if !trimmed.is_empty() {
+                roots.push(expand_home(trimmed));
             }
         }
     }
 
-    for var in ["ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"] {
-        if let Ok(dir) = std::env::var(var) {
-            roots.push(PathBuf::from(dir).join("Steam"));
+    #[cfg(windows)]
+    {
+        for (hive, key) in [
+            ("HKCU", r"Software\Valve\Steam"),
+            ("HKLM", r"SOFTWARE\WOW6432Node\Valve\Steam"),
+            ("HKLM", r"SOFTWARE\Valve\Steam"),
+        ] {
+            for name in ["SteamPath", "InstallPath"] {
+                if let Some(path) = registry_path(hive, key, name) {
+                    roots.push(path);
+                }
+            }
         }
-    }
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        roots.push(PathBuf::from(local).join("Steam"));
-    }
-    roots.push(PathBuf::from(r"C:\Steam"));
-    roots.push(PathBuf::from(r"C:\Program Files (x86)\Steam"));
 
+        for var in ["ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"] {
+            if let Ok(dir) = std::env::var(var) {
+                roots.push(PathBuf::from(dir).join("Steam"));
+            }
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            roots.push(PathBuf::from(local).join("Steam"));
+        }
+        roots.push(PathBuf::from(r"C:\Steam"));
+        roots.push(PathBuf::from(r"C:\Program Files (x86)\Steam"));
+    }
+
+    #[cfg(not(windows))]
+    if let Some(home) = home_dir() {
+        roots.extend([
+            // What Steam's own installer makes, and what Debian's package calls
+            // the same folder.
+            home.join(".steam/steam"),
+            home.join(".steam/root"),
+            home.join(".steam/debian-installation"),
+            home.join(".local/share/Steam"),
+            // Flatpak keeps the whole installation under `.var/app`, with the
+            // bundle's own identifier in the middle of the path.
+            home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
+            home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+            home.join("snap/steam/common/.steam/steam"),
+            // macOS, for a build that is not a Windows one.
+            home.join("Library/Application Support/Steam"),
+        ]);
+    }
+
+    // Only a folder that is there can hold a library, so the guesses that
+    // missed drop out here and the log reads as a list of real installations.
     let mut found: Vec<PathBuf> = Vec::new();
     for root in roots {
         if root.is_dir() && !found.contains(&root) {
             found.push(root);
         }
     }
+    if found.is_empty() && !roots.is_empty() {
+        log::info!(
+            "Steam was looked for in {} places and found in none",
+            roots.len()
+        );
+    }
     found
+}
+
+/// The player's home folder, or nothing on a system that does not say.
+///
+/// Not `std::env::home_dir`, which is deprecated for reading a variable that a
+/// login can leave unset; the same variable is read here, with the same answer.
+#[cfg(not(windows))]
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Turn a path the player typed into a real one.
+///
+/// `~` is a shell's idea rather than a filesystem's, so a path pasted from a
+/// terminal would otherwise be looked for as a folder literally called `~`.
+fn expand_home(path: &str) -> PathBuf {
+    let (tilde, rest) = match path.strip_prefix('~') {
+        Some(rest) => (true, rest.trim_start_matches('/')),
+        None => (false, path),
+    };
+    if !tilde {
+        return PathBuf::from(path);
+    }
+    #[cfg(not(windows))]
+    if let Some(home) = home_dir() {
+        return home.join(rest);
+    }
+    #[cfg(windows)]
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        return PathBuf::from(profile).join(rest.replace('/', "\\"));
+    }
+    PathBuf::from(path)
 }
 
 /// One value out of the registry, read with the `reg` command.
 ///
 /// Not the Windows API: that needs features this crate does not pull in, and a
 /// single read of one value does not justify them.
+#[cfg(windows)]
 fn registry_path(hive: &str, key: &str, name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("reg")
+    let output = crate::process::command("reg")
         .args(["query", &format!("{hive}\\{key}"), "/v", name])
         .output()
         .ok()?;

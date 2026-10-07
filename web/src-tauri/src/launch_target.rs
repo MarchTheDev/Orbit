@@ -134,12 +134,20 @@ fn quiet(cmd: &mut Command) -> std::io::Result<Child> {
 }
 
 /// Hand a URL to whatever the machine has registered for it.
+///
+/// `explorer` is what Windows itself uses, so it needs no extra plugin and works
+/// the same as pasting the link into a browser bar. The other platforms get
+/// their own opener, which this did not used to have: `steam://` links were
+/// Windows-only by accident.
 fn open_url(url: &str) -> Result<(), String> {
-    // `explorer` is what Windows itself uses to open a URL, so this needs no
-    // extra plugin and works the same as pasting the link into a browser bar.
-    Command::new("explorer")
-        .arg(url)
-        .spawn()
+    #[cfg(windows)]
+    let spawned = crate::process::command("explorer").arg(url).spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = crate::process::command("open").arg(url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = crate::process::command("xdg-open").arg(url).spawn();
+
+    spawned
         .map(|_| ())
         .map_err(|e| format!("Could not open {url}: {e}"))
 }

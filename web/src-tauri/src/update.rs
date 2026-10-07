@@ -92,13 +92,15 @@ pub fn run_update(path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    let spawned = std::process::Command::new(file).spawn();
+    let spawned = crate::process::command(file).spawn();
 
     #[cfg(target_os = "macos")]
-    let spawned = std::process::Command::new("open").arg(file).spawn();
+    let spawned = crate::process::command("open").arg(file).spawn();
 
+    // On a bundled Linux build the desktop's opener is a system program, and it
+    // has to be started without the bundle's libraries in its environment.
     #[cfg(all(unix, not(target_os = "macos")))]
-    let spawned = std::process::Command::new("xdg-open").arg(file).spawn();
+    let spawned = crate::process::command("xdg-open").arg(file).spawn();
 
     spawned
         .map(|_| ())

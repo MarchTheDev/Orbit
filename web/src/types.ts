@@ -289,6 +289,15 @@ export interface Settings {
    * player asking for it.
    */
   steamOnLaunch: boolean;
+  /**
+   * Where Steam is installed, for the installs Orbit cannot find on its own.
+   *
+   * Linux and sandboxed builds are the usual reason: Steam under Flatpak or snap
+   * sits in a folder of its own, and a player who relocated it has moved it
+   * somewhere no list of guesses covers. Empty means Orbit works it out from the
+   * machine, which is enough on Windows.
+   */
+  steamPath?: string;
   /** Other launcher libraries to rescan on Orbit launch. Off for every launcher by default. */
   launcherScanOnLaunch?: OtherLauncher[];
   /** Whether Orbit should be registered to start when the user signs in. Off by default. */
