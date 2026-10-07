@@ -306,6 +306,14 @@ export interface Settings {
   launchOnStartupBackground?: boolean;
   /** Add or remove Orbit's per-user Windows Explorer action for `.exe` files. On by default. */
   openExeInOrbit?: boolean;
+  /**
+   * A SteamGridDB API key, for the community's artwork on top of Steam's own.
+   *
+   * Empty means SteamGridDB is never asked: the store's catalogue needs no key
+   * and stays the default. A key is free but it is personal, so Orbit neither
+   * ships one nor invents one.
+   */
+  sgdbApiKey?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

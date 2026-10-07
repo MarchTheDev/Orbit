@@ -834,6 +834,45 @@ export function SettingsView({
         title="Artwork and details"
         lead="Orbit can use Steam's public catalogue for artwork and details. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
       >
+        <div className="rounded-2xl border border-line bg-panel/40 p-3">
+          <label className="block text-sm font-semibold text-fg" htmlFor="sgdb-key">
+            SteamGridDB API key
+          </label>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            Optional. Steam's own artwork needs nothing and is used either way; a key adds SteamGridDB's
+            community covers and heroes to the top of the list when you press <b>Find artwork</b> on a
+            game. Get a free key from{' '}
+            <button
+              type="button"
+              className="underline decoration-line underline-offset-2 transition hover:text-accent"
+              onClick={() => void openExternal('https://www.steamgriddb.com/profile/preferences')}
+            >
+              your SteamGridDB profile
+            </button>
+            . It stays on this machine, in your settings file.
+          </p>
+          <div className="mt-2.5 flex gap-2">
+            <input
+              id="sgdb-key"
+              type="password"
+              value={settings.sgdbApiKey ?? ''}
+              onChange={(e) => setSettings({ sgdbApiKey: e.target.value })}
+              placeholder="Leave empty to use Steam's artwork only"
+              className={`${inputCls} min-w-0 flex-1 font-mono`}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {settings.sgdbApiKey && (
+              <button
+                type="button"
+                onClick={() => setSettings({ sgdbApiKey: '' })}
+                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
         <Checkbox
           checked={settings.fetchMetadata}
           onChange={(v) => setSettings({ fetchMetadata: v })}

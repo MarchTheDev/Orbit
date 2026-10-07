@@ -19,8 +19,7 @@ name: Release
 #            Orbit.exe                            the standalone program
 #            Orbit-<version>-windows.msi            the same installer, msi
 #            Orbit-<version>-windows-portable.zip   the program in a folder
-#   Linux    Orbit-<version>-linux-x86_64.AppImage  one file, any distribution
-#            orbit_<version>_amd64.deb              Debian, Ubuntu, Mint
+#   Linux    orbit_<version>_amd64.deb              Debian, Ubuntu, Mint
 #            orbit-<version>-1.x86_64.rpm           Fedora, RHEL, openSUSE
 #            Orbit-<version>-linux-portable.tar.gz  the binary and a .desktop
 #   Debian   orbit_<version>_debian_amd64.deb       built against Debian's libs
@@ -174,7 +173,7 @@ jobs:
 
   # ------------------------------------------------------------------ Linux
   linux:
-    name: Linux (deb, rpm, AppImage)
+    name: Linux (deb, rpm)
     # 22.04 on purpose: what is built on it runs on anything newer, and glibc
     # only moves forward. A newer runner would produce a binary that refuses to
     # start on Debian 12 or Ubuntu 22.04.
@@ -214,7 +213,7 @@ jobs:
 
       - name: Build
         working-directory: web
-        run: bash ../packaging/tauri-build.sh --bundles deb,rpm,appimage
+        run: bash ../packaging/tauri-build.sh --bundles deb,rpm
 
       - name: Upload the Tauri build log
         if: failure()
@@ -230,8 +229,6 @@ jobs:
           mkdir -p artifacts
           cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_amd64.deb"
           cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.x86_64.rpm"
-          cp web/src-tauri/target/release/bundle/appimage/*.AppImage "artifacts/Orbit-${version}-linux-x86_64.AppImage"
-          chmod +x artifacts/*.AppImage
 
           # A plain tarball as well, for anyone who would rather not have a
           # package manager involved, and for Arch to unpack by hand.
@@ -528,9 +525,8 @@ jobs:
           is the standalone program; and \`Orbit-${version}-windows-portable.zip\`
           contains Orbit.exe and a short readme.
 
-          **Linux** - \`Orbit-${version}-linux-x86_64.AppImage\` is the one-file
-          build (chmod +x it first), \`orbit_${version}_amd64.deb\` is for Debian,
-          Ubuntu and Mint, \`orbit-${version}-1.x86_64.rpm\` is the RPM build, and
+          **Linux** - \`orbit_${version}_amd64.deb\` is for Debian, Ubuntu and
+          Mint, \`orbit-${version}-1.x86_64.rpm\` is the RPM build, and
           \`Orbit-${version}-linux-portable.tar.gz\` is the binary and desktop file.
           Debian and Fedora also have native packages when their best-effort jobs
           succeed.

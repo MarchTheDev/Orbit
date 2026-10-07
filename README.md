@@ -73,10 +73,10 @@ Grab the file for your system from the
 | System | File |
 | --- | --- |
 | Windows | `Orbit-<version>-windows-setup.exe` |
-| Linux (any distribution) | `Orbit-<version>-linux-x86_64.AppImage` |
 | Debian, Ubuntu, Mint | `orbit_<version>_amd64.deb` |
 | Fedora, openSUSE | `orbit-<version>-1.x86_64.rpm` |
 | Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, with `pacman -U` |
+| Anything else | `Orbit-<version>-linux-portable.tar.gz`, the program and a `.desktop` file |
 
 ## Where things are kept
 

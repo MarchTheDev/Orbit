@@ -49,7 +49,7 @@ because Cargo, npm and Tauri refuse a version without one.
 | Platform | Files |
 | --- | --- |
 | Windows | `Orbit-<version>-windows-setup.exe` (installer), `Orbit.exe` (standalone program), `Orbit-<version>-windows.msi`, `Orbit-<version>-windows-portable.zip` (program and readme) |
-| Linux | `Orbit-<version>-linux-x86_64.AppImage`, `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
+| Linux | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
 | Debian | `orbit_<version>_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
 | Fedora | `orbit-<version>-1.fc.x86_64.rpm`, built in a Fedora container |
 | Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, installed with `pacman -U` |
@@ -108,7 +108,7 @@ live in `%APPDATA%\Orbit`.
 ```sh
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 rpm
-cd web && npm ci && npx tauri build --bundles deb,appimage,rpm
+cd web && npm ci && npx tauri build --bundles deb,rpm
 ```
 
 **Arch.** Install the dependencies and build the binary, then copy it next to

@@ -333,6 +333,57 @@ pub struct Moved {
     pub message: Option<String>,
 }
 
+/// Whether a folder has nothing in it.
+///
+/// An empty folder where a game used to be is the signature of a move that
+/// copied everything and then could not take the last shell away.
+fn is_empty_dir(path: &Path) -> bool {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => entries.next().is_none(),
+        // Not a folder, or not readable: either way it is not an empty folder.
+        Err(_) => false,
+    }
+}
+
+/// Remove a file or a folder, whatever is there.
+fn remove_any(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        take_away(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+/// Take a folder away, contents and all.
+///
+/// `remove_dir_all` gives up as a whole the moment one entry will not go, and
+/// what it leaves behind is a folder - very often an empty one - sitting exactly
+/// where the game used to be. That folder is then in the way the next time the
+/// game is moved back, which reads as "already exists" for a move that in fact
+/// succeeded. So when the whole thing will not go, this empties the folder one
+/// entry at a time and then takes the shell, which is the part that actually has
+/// to be out of the way.
+fn take_away(path: &Path) -> std::io::Result<()> {
+    let Err(whole) = std::fs::remove_dir_all(path) else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut blocked = whole;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Err(e) = remove_any(&entry.path()) {
+                blocked = e;
+            }
+        }
+    }
+    match std::fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(blocked),
+    }
+}
+
 fn moved_result(install_dir: &Path, from: &Path, to: &Path, message: Option<String>) -> Moved {
     Moved {
         install_dir: install_dir.to_string_lossy().to_string(),
@@ -379,10 +430,21 @@ pub fn move_game(
         .ok_or_else(|| "That game folder has no name.".to_string())?;
     let dest = target_root.join(name);
     if dest.exists() {
-        return Err(format!(
-            "{} already exists. Rename or remove it first.",
-            dest.display()
-        ));
+        // An empty folder here is almost certainly what a previous move left
+        // behind when it could not take the last shell away. Clearing it is the
+        // end of that move rather than the start of a new decision, so it is
+        // cleared rather than refused. A folder with anything in it is somebody
+        // else's, and stays refused.
+        if dest.is_dir() && is_empty_dir(&dest) {
+            std::fs::remove_dir(&dest).map_err(|e| {
+                format!("{} is empty but could not be removed: {e}", dest.display())
+            })?;
+        } else {
+            return Err(format!(
+                "{} already exists. Rename or remove it first.",
+                dest.display()
+            ));
+        }
     }
 
     let total = dir_size(&from);
@@ -419,7 +481,7 @@ pub fn move_game(
     });
     if let Err(e) = copy {
         // Nothing was moved, so the original stays exactly as it was.
-        let _ = std::fs::remove_dir_all(&dest);
+        let _ = take_away(&dest);
         return Err(format!("Copying failed, nothing was moved: {e}"));
     }
 
@@ -430,7 +492,7 @@ pub fn move_game(
     let mut last: Option<std::io::Error> = None;
     for wait in [0u64, 1, 3, 6] {
         std::thread::sleep(std::time::Duration::from_secs(wait));
-        match std::fs::remove_dir_all(&from) {
+        match take_away(&from) {
             Ok(()) => {
                 return Ok(moved_result(&new_dir, &from, &dest, None))
             }

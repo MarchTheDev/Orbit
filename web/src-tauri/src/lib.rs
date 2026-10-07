@@ -16,6 +16,7 @@ mod launchers;
 mod metadata;
 mod process;
 mod session;
+mod sgdb;
 mod steam;
 mod storage;
 mod store;
@@ -864,7 +865,35 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
         ));
     };
 
-    let picks = metadata::artwork(app_id).await?;
+    let mut picks = metadata::artwork(app_id).await?;
+
+    // The key is read here rather than passed in, because the settings file is
+    // the one place it is written and this is the only place it is used.
+    //
+    // SteamGridDB goes in front when there is a key and is skipped entirely when
+    // there is not: the store's own art is free and needs no account, so it
+    // stays the default rather than the fallback. A failure here must not lose
+    // the store's pictures, which is why it is a log line and not an error.
+    let sgdb_key = orbit
+        .store
+        .load_settings()
+        .and_then(|settings| {
+            settings
+                .get("sgdbApiKey")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .filter(|key| !key.trim().is_empty());
+    if let Some(key) = sgdb_key {
+        match sgdb::art(app_id, &key).await {
+            Ok(mut found) => {
+                found.append(&mut picks);
+                picks = found;
+            }
+            Err(e) => log::warn!("SteamGridDB offered nothing: {e}"),
+        }
+    }
+
     Ok(Artwork {
         app_id: known.or(Some(app_id)),
         picks,
