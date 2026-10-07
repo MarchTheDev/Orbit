@@ -293,7 +293,6 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
-  { label: 'Where Steam is installed', section: 'orbit-libraries', keywords: 'steam path folder location linux flatpak snap appimage custom not found detected steamapps' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
   { label: 'Open in Orbit for .exe files', section: 'orbit-appearance', keywords: 'explorer windows context menu right click executable import' },
@@ -826,49 +825,6 @@ export function SettingsView({
               </div>
             );
           })}
-        </div>
-
-        <div className="rounded-2xl border border-line bg-panel/40 p-3">
-          <p className="text-sm font-semibold text-fg">Where Steam is installed</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            On Windows Orbit finds Steam on its own. On Linux - and in a Flatpak, a snap or an AppImage -
-            it is often somewhere no list of guesses covers, so point Orbit at the folder that holds{' '}
-            <span className="font-mono text-fg">steamapps</span>. Leaving this empty means Orbit works it
-            out from the machine, and a path with a <span className="font-mono text-fg">~</span> in it is
-            read as your home folder.
-          </p>
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            <input
-              value={settings.steamPath ?? ''}
-              onChange={(e) => setSettings({ steamPath: e.target.value })}
-              placeholder={windows ? 'C:\\Program Files (x86)\\Steam' : '~/.steam/steam'}
-              className={`${inputCls} min-w-56 flex-1 font-mono`}
-              spellCheck={false}
-            />
-            {isNative() && (
-              <button
-                type="button"
-                className={`${btnBrowse} flex items-center gap-2`}
-                onClick={() =>
-                  void pickFolder('Where is Steam installed?', settings.steamPath || undefined).then(
-                    (p) => p && setSettings({ steamPath: p }),
-                  )
-                }
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
-            {settings.steamPath && (
-              <button
-                type="button"
-                onClick={() => setSettings({ steamPath: '' })}
-                className="rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
-              >
-                Clear
-              </button>
-            )}
-          </div>
         </div>
       </Section>
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Download, LoaderCircle, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Game, SteamGame } from '../types';
 import { isNative, steamLibrary } from '../services/native';
+import { pickFolder } from '../services/desktop';
 import { fetchMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, fmtDate, hashHue, uid } from '../utils/format';
@@ -35,6 +36,7 @@ export function SteamImportModal({
   onClose,
   from = 'library',
   steamPath,
+  onSteamPath,
 }: {
   existing: Game[];
   /** Whether the player wants details and artwork fetched as games come in. */
@@ -52,11 +54,9 @@ export function SteamImportModal({
    * down as planned, which is what a list of games to play next is for.
    */
   from?: 'library' | 'backlog';
-  /**
-   * Where the player says Steam is, from Settings. Passed down rather than read
-   * here so this page keeps working with nothing but the library it was given.
-   */
+  /** Where the player says Steam is, kept in Settings and edited from here. */
   steamPath?: string;
+  onSteamPath: (path: string) => void;
 }) {
   const [rows, setRows] = useState<(SteamGame & { include: boolean })[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -213,7 +213,7 @@ export function SteamImportModal({
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           <SearchField
             value={filter}
             onChange={setFilter}
@@ -221,6 +221,32 @@ export function SteamImportModal({
             className="min-w-[12rem] flex-1"
             inputClassName="w-full"
           />
+          {/* Where Steam is, for the installs Orbit cannot find on its own. It
+              lives here rather than in Settings because this is the page that
+              needs it: a scan that came back empty is the moment to set it. */}
+          <label className="min-w-[13rem] flex-1">
+            <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Custom Steam Path</span>
+            <span className="flex gap-2">
+              <input
+                value={steamPath ?? ''}
+                onChange={(e) => onSteamPath(e.target.value)}
+                placeholder="Leave empty to find Steam automatically"
+                className={`${inputCls} min-w-0 flex-1 font-mono`}
+                spellCheck={false}
+              />
+              {isNative() && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void pickFolder('Where is Steam installed?', steamPath || undefined).then((p) => p && onSteamPath(p))
+                  }
+                  className="shrink-0 rounded-lg border border-line bg-panel px-3 text-sm text-muted transition hover:border-accent hover:text-accent"
+                >
+                  Browse
+                </button>
+              )}
+            </span>
+          </label>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Reading Steam…' : 'Scan Steam library'}

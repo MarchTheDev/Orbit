@@ -53,6 +53,8 @@ import { OtherLauncherImportModal } from './components/OtherLauncherImportModal'
 import { AddGameModal } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
+import { MoveProgressOrb } from './components/MoveProgressOrb';
+import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
@@ -110,6 +112,10 @@ export default function App() {
   const [showOtherLaunchers, setShowOtherLaunchers] = useState<OtherLauncher | null>(null);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
+  // The move lives here rather than in the dialog that starts it, so the dialog
+  // can be put away and a large game can carry on copying while the library is
+  // being used. The ring in the corner is the visible half of this.
+  const move = useGameMove((gameId, paths) => updateGame(gameId, paths));
   /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
   const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
@@ -1196,6 +1202,7 @@ export default function App() {
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
           onClose={() => setShowSteam(false)}
           steamPath={settings.steamPath}
+          onSteamPath={(steamPath) => setSettings({ steamPath })}
         />
       )}
       {menu && menuGame && (
@@ -1207,8 +1214,14 @@ export default function App() {
           game={moving}
           folders={settings.libraryFolders}
           onClose={() => setMoveId(null)}
-          onMoved={(paths) => updateGame(moving.id, paths)}
+          job={move.job}
+          onStartMove={(game, toFolder, libraryFolders) => void move.start(game, toFolder, libraryFolders)}
+          onMinimize={() => setMoveId(null)}
         />
+      )}
+
+      {move.job && moveId !== move.job.gameId && (
+        <MoveProgressOrb job={move.job} onOpen={setMoveId} onDismiss={move.dismiss} />
       )}
 
       {!isNative() && (
