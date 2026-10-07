@@ -4,6 +4,7 @@ import type { Game } from '../../types';
 import { diskSpace, moveGameToFolder } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { driveOf, isInside } from '../../utils/paths';
+import { movedGamePaths, type MovedGamePaths } from '../../utils/movedGamePaths';
 import { Modal, btnGhost, btnPrimary } from '../ui/Modal';
 import { cn } from '../../utils/cn';
 import { driveLabel } from '../../utils/drive';
@@ -12,7 +13,7 @@ interface Props {
   game: Game;
   folders: string[];
   onClose: () => void;
-  onMoved: (installDir: string, exePath: string | null, drive: string) => void;
+  onMoved: (paths: MovedGamePaths) => void;
 }
 
 function freeOn(folder: string): Promise<number | null> {
@@ -59,11 +60,7 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
     try {
       const moved = await moveGameToFolder(installDir, target, folders, setProgress);
       const newDir = moved.installDir;
-      const exePath =
-        game.exePath && installDir && isInside(game.exePath, installDir)
-          ? newDir + game.exePath.slice(installDir.length)
-          : game.exePath;
-      onMoved(newDir, exePath, newDir.slice(0, 2).toUpperCase());
+      onMoved(movedGamePaths(game, moved));
       setDone({ dir: newDir, message: moved.message });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

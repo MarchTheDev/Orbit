@@ -1211,7 +1211,7 @@ export default function App() {
           game={moving}
           folders={settings.libraryFolders}
           onClose={() => setMoveId(null)}
-          onMoved={(installDir, exePath, drive) => updateGame(moving.id, { installDir, exePath, drive })}
+          onMoved={(paths) => updateGame(moving.id, paths)}
         />
       )}
 

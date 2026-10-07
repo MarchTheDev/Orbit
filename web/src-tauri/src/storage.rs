@@ -325,16 +325,29 @@ pub fn copy_tree(from: &Path, to: &Path, progress: &mut dyn FnMut(u64)) -> std::
 pub struct Moved {
     /// The folder to store on the game, already adjusted for the new location.
     pub install_dir: String,
+    /// The root folder that was copied or renamed.
+    pub from_dir: String,
+    /// The root folder where the game now lives.
+    pub to_dir: String,
     /// Set when something still needs the player's attention.
     pub message: Option<String>,
+}
+
+fn moved_result(install_dir: &Path, from: &Path, to: &Path, message: Option<String>) -> Moved {
+    Moved {
+        install_dir: install_dir.to_string_lossy().to_string(),
+        from_dir: from.to_string_lossy().to_string(),
+        to_dir: to.to_string_lossy().to_string(),
+        message,
+    }
 }
 
 /// Move a game between library folders.
 ///
 /// On one drive this is a rename and is instant. Across drives the folder is
 /// copied and then the original removed, with `on_progress` called as bytes
-/// land. The game's launch settings and playtime are untouched: only where the
-/// files are changes.
+/// land. Launch behavior and playtime stay the same; the old and new roots are
+/// returned so the library can update paths that moved with the files.
 pub fn move_game(
     install_dir: &Path,
     folders: &[String],
@@ -396,10 +409,7 @@ pub fn move_game(
     // Same drive: a rename, done at once.
     if std::fs::rename(&from, &dest).is_ok() {
         on_progress(total, total);
-        return Ok(Moved {
-            install_dir: new_dir.to_string_lossy().to_string(),
-            message: None,
-        });
+        return Ok(moved_result(&new_dir, &from, &dest, None));
     }
 
     let mut copied = 0u64;
@@ -422,17 +432,11 @@ pub fn move_game(
         std::thread::sleep(std::time::Duration::from_secs(wait));
         match std::fs::remove_dir_all(&from) {
             Ok(()) => {
-                return Ok(Moved {
-                    install_dir: new_dir.to_string_lossy().to_string(),
-                    message: None,
-                })
+                return Ok(moved_result(&new_dir, &from, &dest, None))
             }
             // Someone else got there first, which is as good as deleting it.
             Err(_) if !from.exists() => {
-                return Ok(Moved {
-                    install_dir: new_dir.to_string_lossy().to_string(),
-                    message: None,
-                })
+                return Ok(moved_result(&new_dir, &from, &dest, None))
             }
             Err(e) => last = Some(e),
         }
@@ -442,6 +446,8 @@ pub fn move_game(
     // be worse than leaving the old folder for the player to delete.
     Ok(Moved {
         install_dir: new_dir.to_string_lossy().to_string(),
+        from_dir: from.to_string_lossy().to_string(),
+        to_dir: dest.to_string_lossy().to_string(),
         message: Some(format!(
             "Moved. The old folder {} could not be removed ({}): something still has a file \
              in it open. Delete it yourself once that is closed.",
@@ -575,6 +581,8 @@ mod tests {
             b"progress"
         );
         assert_eq!(moved.install_dir, other.to_string_lossy());
+        assert_eq!(moved.from_dir, from.to_string_lossy());
+        assert_eq!(moved.to_dir, other.to_string_lossy());
         assert!(moved.message.is_none());
     }
     #[test]

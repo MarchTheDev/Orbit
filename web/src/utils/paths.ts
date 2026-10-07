@@ -27,6 +27,25 @@ export function isInside(dir: string, root: string): boolean {
   return d.startsWith(r.endsWith('\\') ? r : `${r}\\`);
 }
 
+/**
+ * Point a stored path at the equivalent place inside a moved folder.
+ *
+ * `isInside` does the boundary check first, so a sibling such as `Games2` is
+ * never rewritten when the moved folder was `Games`. Separators and case are
+ * normalized only for that check; the suffix keeps its spelling and is joined
+ * using the destination path's separator.
+ */
+export function rebasePath(path: string, fromRoot: string, toRoot: string): string {
+  if (!isInside(path, fromRoot)) return path;
+
+  const normalizedPath = path.replace(/\//g, '\\').replace(/\\+$/, '');
+  const normalizedRoot = fromRoot.replace(/\//g, '\\').replace(/\\+$/, '');
+  const remainder = normalizedPath.slice(normalizedRoot.length).replace(/^\\+/, '');
+  const separator = toRoot.includes('\\') ? '\\' : '/';
+  const destination = toRoot.replace(/[\\/]+$/, '');
+  return remainder ? `${destination}${separator}${remainder.replace(/\\/g, separator)}` : destination;
+}
+
 /** The `D:` at the start of a path, or an empty string when there is not one. */
 export function driveOf(path: string): string {
   return /^[a-z]:/i.test(path) ? path.slice(0, 2).toUpperCase() : '';

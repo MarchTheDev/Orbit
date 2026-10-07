@@ -982,6 +982,26 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
         .map_err(|e| format!("Could not open Explorer: {e}"))
 }
 
+/// Open a game's install folder itself in the system file manager.
+#[tauri::command]
+fn open_game_folder(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.is_dir() {
+        return Err(format!("{path} is not there any more."));
+    }
+
+    #[cfg(windows)]
+    let result = std::process::Command::new("explorer").arg(&target).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&target).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(&target).spawn();
+
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Could not open the game folder: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial_args: Vec<String> = std::env::args().collect();
@@ -1190,6 +1210,7 @@ pub fn run() {
             data_dir,
             data_dir_size,
             reveal_in_explorer,
+            open_game_folder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Orbit")

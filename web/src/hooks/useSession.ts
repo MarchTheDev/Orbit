@@ -21,6 +21,16 @@ export function useSession(onEnded: (gameId: string) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const endedRef = useRef(onEnded);
+
+  // A failed launch should be readable without leaving a permanent banner on
+  // screen. A newer error gets its own full ten seconds to be read.
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => {
+      setError((current) => (current === error ? null : current));
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
   endedRef.current = onEnded;
 
   // A window reload should not lose the clock, so ask Rust what is running.

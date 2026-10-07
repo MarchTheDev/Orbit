@@ -56,6 +56,9 @@ export interface DriveInfo {
 /** What a finished move leaves behind. */
 export interface Moved {
   installDir: string;
+  /** The game's old and new root folders, used to update every saved path. */
+  fromDir: string;
+  toDir: string;
   /** Set when the old folder could not be removed and needs the player. */
   message: string | null;
 }
@@ -382,7 +385,8 @@ export async function moveGameToFolder(
       await sleep(90);
       onProgress(i / 20);
     }
-    return { installDir: installDir.replace(/^[A-Z]:/i, toFolder.slice(0, 2)), message: null };
+    const movedInstallDir = installDir.replace(/^[A-Z]:/i, toFolder.slice(0, 2));
+    return { installDir: movedInstallDir, fromDir: installDir, toDir: movedInstallDir, message: null };
   }
 
   const unlisten = await t.event.listen('move-progress', (e) => {
@@ -593,9 +597,14 @@ export function forgetUpdate(path: string): Promise<void> {
   return call('forget_update', { path }, () => undefined);
 }
 
-/** Open a folder in Explorer. */
+/** Select a file or folder in Explorer. */
 export function revealInExplorer(path: string): Promise<void> {
   return call('reveal_in_explorer', { path }, () => undefined);
+}
+
+/** Open the game's install folder in the system file manager. */
+export function openGameFolder(path: string): Promise<void> {
+  return call('open_game_folder', { path }, () => undefined);
 }
 
 // ------------------------------------------------------------------- settings

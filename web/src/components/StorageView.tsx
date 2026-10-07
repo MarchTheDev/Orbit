@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, FolderPlus, HardDrive, MoveRight, PackagePlus, RefreshCw, X } from 'lucide-react';
 import type { Game } from '../types';
-import { cachedSizes, diskSpace, listDrives, refreshSizes, revealInExplorer, type DriveInfo } from '../services/native';
+import { cachedSizes, diskSpace, listDrives, openGameFolder, refreshSizes, revealInExplorer, type DriveInfo } from '../services/native';
 import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { folderOf } from '../utils/paths';
 import { driveLabel } from '../utils/drive';
+import { say } from '../utils/toast';
 import { btnGhost } from './ui/Modal';
 import { Cover } from './ui/Cover';
 
@@ -100,6 +101,13 @@ export function StorageView({
     if (picked && !folders.some((f) => f.toLowerCase() === picked.toLowerCase())) {
       setFolders([...folders, picked]);
     }
+  };
+
+  const openGame = (game: Game) => {
+    if (!game.installDir) return;
+    void openGameFolder(game.installDir).catch((error: unknown) => {
+      say(error instanceof Error ? error.message : String(error), 'error');
+    });
   };
 
   /**
@@ -197,12 +205,28 @@ export function StorageView({
                         key={g.id}
                         className="flex items-center gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2"
                       >
-                        <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">{g.title}</p>
-                          <p className="truncate font-mono text-[11px] text-muted">
-                            {g.installDir ?? 'no folder recorded, so Orbit cannot move this one'}
-                          </p>
+                        <div
+                          role={g.installDir ? 'button' : undefined}
+                          tabIndex={g.installDir ? 0 : undefined}
+                          aria-label={g.installDir ? `Open ${g.title} folder in the file manager` : undefined}
+                          title={g.installDir ? 'Open game folder' : undefined}
+                          onClick={g.installDir ? () => openGame(g) : undefined}
+                          onKeyDown={(event) => {
+                            if (!g.installDir || (event.key !== 'Enter' && event.key !== ' ')) return;
+                            event.preventDefault();
+                            openGame(g);
+                          }}
+                          className={`flex min-w-0 flex-1 items-center gap-3 ${
+                            g.installDir ? 'cursor-pointer rounded-lg outline-none transition hover:text-accent focus-visible:ring-2 focus-visible:ring-accent' : ''
+                          }`}
+                        >
+                          <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{g.title}</span>
+                            <span className="block truncate font-mono text-[11px] text-muted">
+                              {g.installDir ?? 'no folder recorded, so Orbit cannot move this one'}
+                            </span>
+                          </span>
                         </div>
                         <span className="shrink-0 font-mono text-xs text-muted">
                           {g.sizeBytes > 0 ? fmtBytes(g.sizeBytes) : '-'}
