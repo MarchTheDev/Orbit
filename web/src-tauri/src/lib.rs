@@ -628,7 +628,7 @@ fn request_main_window(
 ) {
     show_requested.store(true, Ordering::SeqCst);
     if frontend_ready.load(Ordering::SeqCst) {
-        show_main_window(app);
+        reveal_window(app);
     }
 }
 
