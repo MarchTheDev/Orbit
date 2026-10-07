@@ -20,8 +20,6 @@ the disk space went.
 
 </div>
 
----
-
 ## What it does
 
 **Library** - every game, grouped and filtered, with cover art from the folder
@@ -53,7 +51,6 @@ Steam and other launchers, sound, and updates.
 | --- | --- |
 | Timer only | Runs the clock. You start the game yourself. |
 | Program | Runs the `.exe`, with optional arguments and working folder. |
-| Through Steam | For games imported from a Steam library, which have to go through Steam. |
 
 A game can also list programs to start **alongside** it - a frame-rate tool, a
 mod controller. Those start with the game and are never watched, so closing one
@@ -84,34 +81,6 @@ Grab the file for your system from the
 | Debian, Ubuntu, Mint | `orbit_<version>_amd64.deb` |
 | Fedora, openSUSE | `orbit-<version>-1.x86_64.rpm` |
 | Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, with `pacman -U` |
-
-On Linux, the **AppImage** is the one to take: one file, no distribution's
-packages involved, and no sandbox to grant folder permissions to. A Flatpak
-would be the better fit if Orbit were sandboxed, but it would need broad
-filesystem access to reach launcher manifests and game folders, which takes away
-the reason for the sandbox. `chmod +x` the AppImage before running it.
-
-Windows 10 and 11 already have the WebView2 runtime Orbit needs.
-
-## Building it yourself
-
-Needs the [Rust toolchain](https://rustup.rs) and Node 20 or newer.
-
-```sh
-npm install          # once; this installs web/ too
-npm run tauri dev    # the real app, with launching, files and sessions
-npm run tauri build  # installers in web/src-tauri/target/release/bundle
-```
-
-`npm run dev` alone opens a browser preview of the interface. That is useful for
-the design, but it cannot see your files, start a game or write a session.
-
-The note editor's markdown is checked without a browser: a note goes into the
-editor and has to come back out as the same note. `npm test` in `web/` runs
-those checks.
-
-How the release installers are built, and what publishing one does, is in
-[docs/RELEASING.md](docs/RELEASING.md).
 
 ## Where things are kept
 
@@ -150,5 +119,6 @@ Orbit is free software under the **GNU General Public License v3**, in
 [LICENSE](LICENSE). You can run it, read it, change it and share it; anything
 you distribute has to carry the same licence.
 
-The app icon is [`web/src-tauri/icons/icon.png`](web/src-tauri/icons/icon.png),
-drawn from [`icon.svg`](web/src-tauri/icons/icon.svg) beside it.
+## Developer
+
+[TheMarch88](https://github.com/MarchTheDev)
