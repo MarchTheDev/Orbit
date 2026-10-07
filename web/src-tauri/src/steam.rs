@@ -137,23 +137,27 @@ fn steam_roots(extra: &[String]) -> Vec<PathBuf> {
         roots.push(PathBuf::from(r"C:\Program Files (x86)\Steam"));
     }
 
+    // Braces rather than an attribute on the `if` itself: an attribute on an
+    // expression statement is still behind an unstable feature.
     #[cfg(not(windows))]
-    if let Some(home) = home_dir() {
-        roots.extend([
-            // What Steam's own installer makes, and what Debian's package calls
-            // the same folder.
-            home.join(".steam/steam"),
-            home.join(".steam/root"),
-            home.join(".steam/debian-installation"),
-            home.join(".local/share/Steam"),
-            // Flatpak keeps the whole installation under `.var/app`, with the
-            // bundle's own identifier in the middle of the path.
-            home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
-            home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
-            home.join("snap/steam/common/.steam/steam"),
-            // macOS, for a build that is not a Windows one.
-            home.join("Library/Application Support/Steam"),
-        ]);
+    {
+        if let Some(home) = home_dir() {
+            roots.extend([
+                // What Steam's own installer makes, and what Debian's package
+                // calls the same folder.
+                home.join(".steam/steam"),
+                home.join(".steam/root"),
+                home.join(".steam/debian-installation"),
+                home.join(".local/share/Steam"),
+                // Flatpak keeps the whole installation under `.var/app`, with
+                // the bundle's own identifier in the middle of the path.
+                home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
+                home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+                home.join("snap/steam/common/.steam/steam"),
+                // macOS, for a build that is not a Windows one.
+                home.join("Library/Application Support/Steam"),
+            ]);
+        }
     }
 
     // Only a folder that is there can hold a library, so the guesses that
@@ -197,12 +201,16 @@ fn expand_home(path: &str) -> PathBuf {
         return PathBuf::from(path);
     }
     #[cfg(not(windows))]
-    if let Some(home) = home_dir() {
-        return home.join(rest);
+    {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
     }
     #[cfg(windows)]
-    if let Ok(profile) = std::env::var("USERPROFILE") {
-        return PathBuf::from(profile).join(rest.replace('/', "\\"));
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(profile).join(rest.replace('/', "\\"));
+        }
     }
     PathBuf::from(path)
 }
