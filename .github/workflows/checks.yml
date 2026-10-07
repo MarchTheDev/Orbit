@@ -79,24 +79,31 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test --message-format=short 2>&1 | tee ../cargo.log
+          # --color=never because cargo colourises even into a pipe, and the
+          # escape codes sit between the file name and the word "error", which
+          # is exactly where the greps below are looking.
+          cargo test --color=never --message-format=short 2>&1 | tee ../cargo.log
 
       # A failed run's log cannot always be downloaded, so anything worth
       # reading is turned into an annotation, which can.
       - name: Put the failures where they can be read
         if: failure()
         run: |
-          grep -E "^[^ ].*\.rs:[0-9]+:[0-9]+: error" web/cargo.log \
+          sed 's/\x1b\[[0-9;]*m//g' web/cargo.log > web/plain.log
+          grep -E "^[^ ]*\.rs:[0-9]+:[0-9]+: error" web/plain.log \
             | head -25 \
             | sed -E 's/^([^:]+):([0-9]+):([0-9]+): /::error file=\1,line=\2,col=\3::/' || true
-          tail -25 web/cargo.log | sed -E 's/^/::error ::/' || true
+          grep -E "error(\[E[0-9]+\])?:|panicked at|FAILED|^failures:" web/plain.log \
+            | head -25 | sed -E 's/^/::error ::/' || true
+          tail -20 web/plain.log | sed -E 's/^/::error ::/' || true
 
       # Green is only worth something if the tests ran, and the log that says so
       # cannot be read from here. So the count goes somewhere it can be read.
       - name: Say what ran
         if: always()
         run: |
-          results="$(grep -hE '^test result:' web/cargo.log | tr -d '\r' | paste -sd' ' -)"
+          sed 's/\x1b\[[0-9;]*m//g' web/cargo.log > web/plain.log
+          results="$(grep -hE '^test result:' web/plain.log | tr -d '\r' | paste -sd' ' -)"
           echo "::notice title=Rust tests::${results:-nothing ran; no test result line was printed}"
 
   web:
