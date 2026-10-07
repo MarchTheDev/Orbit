@@ -41,12 +41,6 @@ story`, written by hand and editable afterwards.
 **Storage** - the games grouped by drive, with how much room every library
 folder takes and a Move button that keeps the library pointing at the game.
 
-**Music** - a slow pad Orbit makes itself, so nothing is downloaded and nothing
-is licensed.
-
-Settings covers the rest: the theme, cover size, how notes and dates are shown,
-Steam and other launchers, sound, and updates.
-
 ## Starting a game
 
 | Kind | What Orbit does |
