@@ -79,6 +79,14 @@ jobs:
           grep -E "^(error|failures:|test .* FAILED|.*panicked at)" cargo.log \
             | head -20 | sed -E 's/^/::error ::/' || true
 
+      # Green is only worth something if the tests ran, and the log that says so
+      # cannot be read from here. So the count is put somewhere it can be.
+      - name: Say what ran
+        if: always()
+        run: |
+          echo "::notice title=Rust tests::$(grep -hE '^test result:' web/cargo.log \
+            | tr -d '\r' | paste -sd' ' -)"
+
   web:
     name: Front end
     runs-on: ubuntu-latest
@@ -108,3 +116,7 @@ jobs:
         run: |
           grep -E "^  FAIL|check\(s\) failed" web.log | head -20 | sed -E 's/^/::error ::/' || true
           grep -nE "Error|error:|not ok" web.log | head -20 | sed -E 's/^/::error ::/' || true
+
+      - name: Say what ran
+        if: always()
+        run: echo "::notice title=Front end::$(grep -cE '^  ok ' web.log) checks passed, $(tail -1 web.log)"
