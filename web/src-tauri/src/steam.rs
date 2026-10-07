@@ -162,17 +162,16 @@ fn steam_roots(extra: &[String]) -> Vec<PathBuf> {
 
     // Only a folder that is there can hold a library, so the guesses that
     // missed drop out here and the log reads as a list of real installations.
+    // The count is taken first: the loop below takes the list by value.
+    let looked_in = roots.len();
     let mut found: Vec<PathBuf> = Vec::new();
     for root in roots {
         if root.is_dir() && !found.contains(&root) {
             found.push(root);
         }
     }
-    if found.is_empty() && !roots.is_empty() {
-        log::info!(
-            "Steam was looked for in {} places and found in none",
-            roots.len()
-        );
+    if found.is_empty() && looked_in > 0 {
+        log::info!("Steam was looked for in {looked_in} places and found in none");
     }
     found
 }
