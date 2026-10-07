@@ -13,6 +13,10 @@ name: Checks
 # This is separate from release.yml on purpose. The releases are slow because
 # they build five platforms; these are quick, and running them on every branch
 # push is the only way a Rust change gets an answer before it ships.
+#
+# Every step that pipes into `tee` says `shell: bash` on purpose. The default
+# shell here is `bash -e` without pipefail, so a failing command in a pipe is
+# reported as a success and the whole check goes green for nothing.
 
 on:
   push:
@@ -64,28 +68,31 @@ jobs:
           workspaces: web/src-tauri
 
       # `--message-format=short` puts every compile error on one line with its
-      # file and line, which is what the next step needs.
+      # file and position, which is what the annotations below need.
       - name: cargo test
         working-directory: web/src-tauri
-        run: cargo test --locked --message-format=short 2>&1 | tee ../cargo.log
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --message-format=short 2>&1 | tee ../cargo.log
 
       # A failed run's log cannot always be downloaded, so anything worth
       # reading is turned into an annotation, which can.
       - name: Put the failures where they can be read
         if: failure()
         run: |
-          grep -E "^[^ ].*\.rs:[0-9]+:[0-9]+: error" cargo.log \
-            | head -20 | sed -E 's/^([^:]+):([0-9]+):([0-9]+): /::error file=\1,line=\2,col=\3::/' || true
-          grep -E "^(error|failures:|test .* FAILED|.*panicked at)" cargo.log \
-            | head -20 | sed -E 's/^/::error ::/' || true
+          grep -E "^[^ ].*\.rs:[0-9]+:[0-9]+: error" web/cargo.log \
+            | head -25 \
+            | sed -E 's/^([^:]+):([0-9]+):([0-9]+): /::error file=\1,line=\2,col=\3::/' || true
+          tail -25 web/cargo.log | sed -E 's/^/::error ::/' || true
 
       # Green is only worth something if the tests ran, and the log that says so
-      # cannot be read from here. So the count is put somewhere it can be.
+      # cannot be read from here. So the count goes somewhere it can be read.
       - name: Say what ran
         if: always()
         run: |
-          echo "::notice title=Rust tests::$(grep -hE '^test result:' web/cargo.log \
-            | tr -d '\r' | paste -sd' ' -)"
+          results="$(grep -hE '^test result:' web/cargo.log | tr -d '\r' | paste -sd' ' -)"
+          echo "::notice title=Rust tests::${results:-nothing ran; no test result line was printed}"
 
   web:
     name: Front end
@@ -109,14 +116,17 @@ jobs:
 
       - name: Tests
         working-directory: web
-        run: npm test 2>&1 | tee ../web.log
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee ../web.log
 
       - name: Put the failures where they can be read
         if: failure()
-        run: |
-          grep -E "^  FAIL|check\(s\) failed" web.log | head -20 | sed -E 's/^/::error ::/' || true
-          grep -nE "Error|error:|not ok" web.log | head -20 | sed -E 's/^/::error ::/' || true
+        run: tail -25 web.log | sed -E 's/^/::error ::/' || true
 
       - name: Say what ran
         if: always()
-        run: echo "::notice title=Front end::$(grep -cE '^  ok ' web.log) checks passed, $(tail -1 web.log)"
+        run: |
+          passed="$(grep -cE '^  ok ' web.log || true)"
+          echo "::notice title=Front end::${passed} checks passed; last line: $(tail -1 web.log)"
