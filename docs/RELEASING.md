@@ -112,8 +112,9 @@ cd web && npm ci && npx tauri build --bundles deb,rpm
 ```
 
 **Arch.** Install the dependencies and build the binary, then copy it next to
-[packaging/arch/PKGBUILD](../packaging/arch/PKGBUILD) with `orbit.desktop` and
-`orbit.png` before running `makepkg -f`:
+[packaging/arch/PKGBUILD](../packaging/arch/PKGBUILD) with everything its
+`source` array names — `orbit.desktop`, `orbit-x11`, `orbit-x11.desktop`,
+`orbit.png` and `LICENSE` — before running `makepkg -f`:
 
 ```sh
 sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 libappindicator-gtk3 \
@@ -125,3 +126,27 @@ cd web && npm ci && npx tauri build --no-bundle
 Every one of these stamps the version from [`VERSION`](../VERSION) into the app,
 so bump that file first if the build needs to say something other than what is
 there.
+
+## The X11 entry point
+
+Every Linux package ships two ways to start the same program: `orbit`, and
+`orbit-x11`, which sets `GDK_BACKEND=x11` before GDK starts. It is not a second
+build and there is nothing to configure per target — the wrapper in
+[packaging/linux/orbit-x11](../packaging/linux/orbit-x11) is the whole thing.
+Its menu entry calls `env` directly rather than the wrapper, so it keeps working
+if a package ever loses the executable bit.
+
+Adding a file to a package is easy to get wrong quietly, because a bundler that
+copies nothing does not fail. Each Linux job therefore opens the package it
+just built, through
+[packaging/linux/check-x11.sh](../packaging/linux/check-x11.sh), and fails the
+release if either file is missing or the wrapper is not executable.
+
+The deb and rpm take their files from `bundle.linux.deb.files` and
+`bundle.linux.rpm.files` in `tauri.conf.json`. Those maps read as
+`{ path in the package: file on disk }`. Tauri's own schema example shows the
+opposite and is wrong; writing it that way fails every Linux job at bundling
+with a "does not exist" naming the target as though it were the source.
+
+Arch takes theirs from the `source` array and `package()` in the PKGBUILD, and
+`sha256sums` has to have one entry per source or `makepkg` refuses to run.
