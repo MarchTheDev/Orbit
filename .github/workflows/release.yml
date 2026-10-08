@@ -236,6 +236,8 @@ jobs:
           mkdir -p "$portable"
           cp web/src-tauri/target/release/orbit "$portable/orbit"
           cp packaging/linux/orbit.desktop "$portable/orbit.desktop"
+          cp packaging/linux/orbit-x11 "$portable/orbit-x11"
+          cp packaging/linux/orbit-x11.desktop "$portable/orbit-x11.desktop"
           cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
           tar -czf "artifacts/$portable.tar.gz" "$portable"
 
@@ -452,6 +454,8 @@ jobs:
           cp packaging/arch/PKGBUILD "$work/"
           cp web/src-tauri/target/release/orbit "$work/orbit"
           cp packaging/linux/orbit.desktop "$work/orbit.desktop"
+          cp packaging/linux/orbit-x11 "$work/orbit-x11"
+          cp packaging/linux/orbit-x11.desktop "$work/orbit-x11.desktop"
           cp web/src-tauri/icons/128x128.png "$work/orbit.png"
           # The package installs the licence text, so it has to be beside the
           # PKGBUILD for makepkg to find it in the sources.

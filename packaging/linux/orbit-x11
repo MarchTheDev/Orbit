@@ -1,0 +1,23 @@
+#!/bin/sh
+# Orbit, forced onto X11.
+#
+# For the sessions where WebKitGTK's native Wayland rendering misbehaves: a
+# window that never paints, input that lands in the wrong place, or a crash on
+# startup that does not happen under X.
+#
+# GDK_BACKEND is read by GDK as it starts, so it has to be in the environment
+# before the program runs rather than set from inside it. That is the whole
+# difference between this and `orbit`: the binary is the same one, and a
+# session that already works should keep using it.
+#
+# Worth knowing before you reach for it:
+#
+#   * On a Wayland session this draws through XWayland, which does not do
+#     fractional scaling. On a high-density screen the window can look soft.
+#   * If the only symptom is a blank or white window, often on NVIDIA, then
+#     WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit keeps the native backend and is
+#     the smaller hammer. Try that first.
+#
+# Arguments are passed through, so `orbit-x11 --whatever` behaves as `orbit
+# --whatever` would.
+exec env GDK_BACKEND=x11 orbit "$@"

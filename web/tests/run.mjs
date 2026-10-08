@@ -32,6 +32,7 @@ const checks = [
   'tests/steam.test.mjs',
   'tests/updates.test.mjs',
   'tests/version.test.mjs',
+  'tests/x11-entry.test.mjs',
 ];
 
 try {

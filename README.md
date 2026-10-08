@@ -78,6 +78,16 @@ Grab the file for your system from the
 | Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, with `pacman -U` |
 | Anything else | `Orbit-<version>-linux-portable.tar.gz`, the program and a `.desktop` file |
 
+### If the window will not draw on Wayland
+
+Every Linux package also installs **Orbit (X11)** in the menu, and `orbit-x11`
+on the command line. It is the same program with `GDK_BACKEND=x11` set, for the
+sessions where the native Wayland window misbehaves.
+
+Try `WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit` first if all you get is a blank or
+white window: that keeps the native backend, where X11 means drawing through
+XWayland and losing fractional scaling.
+
 ## Where things are kept
 
 In `%APPDATA%\com.orbit.launcher`:

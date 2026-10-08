@@ -48,6 +48,20 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "files": {
+          "../../packaging/linux/orbit-x11": "/usr/bin/orbit-x11",
+          "../../packaging/linux/orbit-x11.desktop": "/usr/share/applications/orbit-x11.desktop"
+        }
+      },
+      "rpm": {
+        "files": {
+          "../../packaging/linux/orbit-x11": "/usr/bin/orbit-x11",
+          "../../packaging/linux/orbit-x11.desktop": "/usr/share/applications/orbit-x11.desktop"
+        }
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
