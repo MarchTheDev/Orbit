@@ -375,7 +375,7 @@ fn xbox_executable(xml: &str) -> Option<String> {
 ///
 /// A name that climbs out with `..` is not a program Orbit should offer to
 /// start, whatever the file said.
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 fn xbox_exe(content: &Path, relative: &str) -> Option<String> {
     if relative.is_empty() || relative.contains("..") {
         return None;
@@ -395,34 +395,46 @@ fn xbox_exe(content: &Path, relative: &str) -> Option<String> {
 fn scan_xbox(games: &mut Vec<LauncherGame>) {
     for drive in crate::storage::list_drives() {
         let root = Path::new(&drive.root).join("XboxGames");
-        let Ok(entries) = std::fs::read_dir(&root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let folder = entry.file_name().to_string_lossy().to_string();
-            // Saves sit alongside the games and are not one.
-            if folder.eq_ignore_ascii_case("GameSave") {
-                continue;
-            }
-            let content = path.join("Content");
-            let xml = std::fs::read_to_string(content.join("MicrosoftGame.config"))
-                .unwrap_or_default();
-            let exe = xbox_exe(&content, &xbox_executable(&xml).unwrap_or_default());
-            games.push(LauncherGame {
-                launcher: "Xbox".to_string(),
-                // The folder name is what the player sees in Explorer, so it is
-                // the honest fallback when the config does not say.
-                name: xbox_display_name(&xml).unwrap_or(folder),
-                install_dir: path.to_string_lossy().to_string(),
-                exe_path: exe,
-                size_bytes: 0,
-            });
-        }
+        games.append(&mut xbox_games_in(&root));
     }
+}
+
+/// One `XboxGames` folder, read out.
+///
+/// Kept apart from the walk over the drives so that reading a single install
+/// can be checked on its own. The drive walk is Windows-only, and left on its
+/// own it would never be compiled anywhere the tests run.
+#[cfg(any(windows, test))]
+fn xbox_games_in(root: &Path) -> Vec<LauncherGame> {
+    let mut games: Vec<LauncherGame> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return games;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let folder = entry.file_name().to_string_lossy().to_string();
+        // Saves sit alongside the games and are not one.
+        if folder.eq_ignore_ascii_case("GameSave") {
+            continue;
+        }
+        let content = path.join("Content");
+        let xml = std::fs::read_to_string(content.join("MicrosoftGame.config"))
+            .unwrap_or_default();
+        let exe = xbox_exe(&content, &xbox_executable(&xml).unwrap_or_default());
+        games.push(LauncherGame {
+            launcher: "Xbox".to_string(),
+            // The folder name is what the player sees in Explorer, so it is the
+            // honest fallback when the config does not say.
+            name: xbox_display_name(&xml).unwrap_or(folder),
+            install_dir: path.to_string_lossy().to_string(),
+            exe_path: exe,
+            size_bytes: 0,
+        });
+    }
+    games
 }
 
 #[cfg(test)]
@@ -521,13 +533,60 @@ mod tests {
 
     #[test]
     fn a_program_that_climbs_out_of_the_folder_is_not_offered() {
-        // Only checked where the filesystem is, but the rule is worth stating.
-        let refused = ["", "..\\..\\Windows\\system32\\cmd.exe", "a/../../b.exe"];
-        for relative in refused {
-            assert!(
-                relative.is_empty() || relative.contains(".."),
-                "{relative} should have been refused"
-            );
-        }
+        let dir = temp("xbox-exe");
+        let content = dir.join("Content");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(content.join("game.exe"), b"").unwrap();
+
+        assert!(
+            xbox_exe(&content, "game.exe").is_some(),
+            "the program the config names is offered when it is there"
+        );
+        assert_eq!(xbox_exe(&content, ""), None);
+        assert_eq!(xbox_exe(&content, "missing.exe"), None);
+        assert_eq!(xbox_exe(&content, "../../game.exe"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_xbox_folder_is_read_as_a_game_and_its_saves_are_not() {
+        let dir = temp("xbox-root");
+        let content = dir.join("Hades II").join("Content");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(
+            content.join("MicrosoftGame.config"),
+            r#"<Game><ShellVisuals DefaultDisplayName="Hades II"/><StoreId>BQVQTL3PCH05</StoreId></Game>"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("GameSave")).unwrap();
+        // A folder with no config is still a game: the folder is its name.
+        std::fs::create_dir_all(dir.join("Bare Install").join("Content")).unwrap();
+
+        let games = xbox_games_in(&dir);
+        let names: Vec<&str> = games.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names.len(), 2, "GameSave is not a game: {names:?}");
+        assert!(names.contains(&"Hades II"), "{names:?}");
+        assert!(names.contains(&"Bare Install"), "{names:?}");
+        assert!(games.iter().all(|g| g.launcher == "Xbox"));
+        assert!(games.iter().all(|g| g.size_bytes == 0));
+        let hades = games.iter().find(|g| g.name == "Hades II").expect("Hades II");
+        assert!(
+            hades.install_dir.ends_with("Hades II"),
+            "the install is the title folder, not its Content: {}",
+            hades.install_dir
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_xbox_folder_is_an_empty_list_rather_than_an_error() {
+        let dir = temp("xbox-absent");
+        assert!(xbox_games_in(&dir).is_empty());
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("orbit-launchers-{name}"));
+        let _ = std::fs::remove_dir_all(&path);
+        path
     }
 }
