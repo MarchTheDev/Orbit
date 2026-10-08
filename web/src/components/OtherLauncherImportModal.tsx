@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, Square, SquareCheck, X } from 'lucide-react';
 import type { Game, LauncherGame, OtherLauncher } from '../types';
 import { isNative, launcherGames } from '../services/native';
 import { fmtBytes } from '../utils/format';
@@ -41,6 +41,11 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
     [existing],
   );
 
+  /** Whether an install is already in the library, and so listed but not tickable. */
+  const isKnown = (game: Row) =>
+    knownPaths.has(normalizeInstallPath(game.installDir)) ||
+    knownTitles.has(game.name.trim().toLocaleLowerCase());
+
   const scan = async () => {
     setBusy(true);
     setError(null);
@@ -49,7 +54,9 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
       found.sort((a, b) => a.launcher.localeCompare(b.launcher) || a.name.localeCompare(b.name));
       setRows(found.map((game) => ({
         ...game,
-        include: !knownPaths.has(normalizeInstallPath(game.installDir)) && !knownTitles.has(game.name.trim().toLocaleLowerCase()),
+        // Unticked, so opening the dialog never puts a whole library one click
+        // away from being added. Selecting all of it is one click too.
+        include: false,
       })));
       if (found.length === 0) {
         setError(launcher
@@ -83,11 +90,29 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
   }, new Map<string, Row[]>())].sort(([a], [b]) => a.localeCompare(b));
   const selected = (rows ?? []).filter((game) => game.include);
 
+  /** Every tickable install in the whole scan, and the ones on screen. */
+  const tickable = (rows ?? []).filter((game) => !isKnown(game));
+  const inView = visible.filter((game) => !isKnown(game));
+  const allChosen = inView.length > 0 && inView.every((game) => game.include);
+
+  /**
+   * Tick or untick everything on screen at once, across every launcher shown.
+   *
+   * It follows the filter rather than the whole scan, because selecting a
+   * hundred installs that a search was hiding is the accident to avoid. The
+   * buttons on each launcher group still work one group at a time.
+   */
+  const toggleAll = () => {
+    const paths = new Set(inView.map((game) => normalizeInstallPath(game.installDir)));
+    setRows((current) => (current ?? []).map((game) =>
+      paths.has(normalizeInstallPath(game.installDir))
+        ? { ...game, include: !allChosen }
+        : game,
+    ));
+  };
+
   const toggleLauncher = (launcher: string, group: Row[]) => {
-    const importable = group.filter((game) =>
-      !knownPaths.has(normalizeInstallPath(game.installDir)) &&
-      !knownTitles.has(game.name.trim().toLocaleLowerCase()),
-    );
+    const importable = group.filter((game) => !isKnown(game));
     const allSelected = importable.length > 0 && importable.every((game) => game.include);
     const paths = new Set(importable.map((game) => normalizeInstallPath(game.installDir)));
     setRows((current) => (current ?? []).map((game) =>
@@ -127,7 +152,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
       onClose={onClose}
       footer={(
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-muted">{selected.length} of {rows?.length ?? 0} selected</span>
+          <span className="text-xs text-muted">{selected.length} of {tickable.length} selected</span>
           <div className="flex gap-2">
             <button className={`${btnGhost} flex items-center gap-2`} onClick={onClose} disabled={saving}>
               <X className="size-4" /> Cancel
@@ -155,6 +180,21 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
             className="min-w-[14rem] flex-1"
             inputClassName="w-full"
           />
+          <button
+            className={`${btnGhost} flex items-center gap-2`}
+            onClick={toggleAll}
+            disabled={inView.length === 0}
+            title={
+              inView.length === 0
+                ? 'Nothing here to select'
+                : filter.trim()
+                  ? `Works on the ${inView.length} ${inView.length === 1 ? 'install' : 'installs'} the filter shows`
+                  : `Works on all ${inView.length} ${inView.length === 1 ? 'install' : 'installs'}`
+            }
+          >
+            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
+            {allChosen ? 'Deselect all' : 'Select all'}
+          </button>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy || !isNative()}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Scanning…' : 'Scan again'}
@@ -172,10 +212,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
         {(rows?.length ?? 0) > 0 && (
           <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
             {groups.map(([launcher, games]) => {
-              const importable = games.filter((game) =>
-                !knownPaths.has(normalizeInstallPath(game.installDir)) &&
-                !knownTitles.has(game.name.trim().toLocaleLowerCase()),
-              );
+              const importable = games.filter((game) => !isKnown(game));
               const selectedInGroup = importable.filter((game) => game.include).length;
               const allSelected = importable.length > 0 && selectedInGroup === importable.length;
               return (
@@ -199,7 +236,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
                   </div>
                   <ul className="space-y-1">
                     {games.map((game) => {
-                      const known = knownPaths.has(normalizeInstallPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
+                      const known = isKnown(game);
                       return (
                         <li key={`${game.launcher}:${normalizeInstallPath(game.installDir)}`}>
                           <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/50'}`}>

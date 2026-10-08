@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, Trash2, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, Square, SquareCheck, Trash2, X } from 'lucide-react';
 import type { Game, SteamGame } from '../types';
 import { isNative, steamLibrary } from '../services/native';
 import { pickFolder } from '../services/desktop';
@@ -15,8 +15,9 @@ import { isSteamGame } from '../utils/steam';
  * Bring games over from the Steam library installed on this PC.
  *
  * Nothing here is automatic. The library is only read when this page is opened,
- * and a game is only added once it has been ticked, so a Steam account with two
- * hundred games never lands in the library by surprise.
+ * every game arrives unticked, and a game is only added once it has been ticked,
+ * so a Steam account with two hundred games never lands in the library by
+ * surprise — not even most of it.
  *
  * It is a page rather than a card: a list of games wants the whole window, with
  * the list itself taking the room and scrolling inside it, and the controls for
@@ -84,7 +85,10 @@ export function SteamImportModal({
       setRows(
         found.map((g) => ({
           ...g,
-          include: !byId.includes(g.appId) && !byTitle.includes(g.name.trim().toLowerCase()),
+          // Unticked, including the ones that are not in the library yet:
+          // arriving already chosen is how two hundred games get added by
+          // accident. Selecting is one click away, for all of them at once.
+          include: false,
         })),
       );
       if (found.length === 0) {
@@ -177,6 +181,27 @@ export function SteamImportModal({
   const visible = (rows ?? []).filter((r) => !filter || r.name.toLowerCase().includes(filter.toLowerCase()));
   const chosen = (rows ?? []).filter((r) => r.include);
 
+  /** Whether a game is already in the library, and so listed but not tickable. */
+  const isKnown = (r: SteamGame) =>
+    byId.includes(r.appId) || byTitle.includes(r.name.trim().toLowerCase());
+
+  /** Every tickable game in the whole library, and the ones on screen. */
+  const tickable = (rows ?? []).filter((r) => !isKnown(r));
+  const inView = visible.filter((r) => !isKnown(r));
+  const allChosen = inView.length > 0 && inView.every((r) => r.include);
+
+  /**
+   * Tick or untick everything on screen at once.
+   *
+   * It follows the filter rather than the whole library, because selecting two
+   * hundred games that a search was hiding is the accident this dialog exists
+   * to avoid.
+   */
+  const toggleAll = () => {
+    const ids = new Set(inView.map((r) => r.appId));
+    setRows((list) => (list ?? []).map((r) => (ids.has(r.appId) ? { ...r, include: !allChosen } : r)));
+  };
+
   return (
     <Modal
       title="From your Steam library"
@@ -186,7 +211,7 @@ export function SteamImportModal({
       footer={
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-muted">
-            {chosen.length} of {rows?.length ?? 0} selected
+            {chosen.length} of {tickable.length} selected
             {chosen.length > 0 && ` · ${fmtBytes(chosen.reduce((s, r) => s + r.sizeBytes, 0))}`}
           </span>
           <div className="flex gap-2">
@@ -247,6 +272,21 @@ export function SteamImportModal({
               )}
             </span>
           </label>
+          <button
+            className={`${btnGhost} flex items-center gap-2`}
+            onClick={toggleAll}
+            disabled={inView.length === 0}
+            title={
+              inView.length === 0
+                ? 'Nothing here to select'
+                : filter.trim()
+                  ? `Works on the ${inView.length} ${inView.length === 1 ? 'game' : 'games'} the filter shows`
+                  : `Works on all ${inView.length} ${inView.length === 1 ? 'game' : 'games'}`
+            }
+          >
+            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
+            {allChosen ? 'Deselect all' : 'Select all'}
+          </button>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Reading Steam…' : 'Scan Steam library'}
@@ -258,7 +298,7 @@ export function SteamImportModal({
         {(rows?.length ?? 0) > 0 && (
           <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
             {visible.map((r) => {
-              const known = byId.includes(r.appId) || byTitle.includes(r.name.trim().toLowerCase());
+              const known = isKnown(r);
               return (
                 <li key={r.appId}>
                   <div
