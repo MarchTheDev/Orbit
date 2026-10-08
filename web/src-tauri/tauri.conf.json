@@ -32,7 +32,9 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["**"],
+          "allow": [
+            "**"
+          ],
           "deny": []
         }
       }
@@ -51,14 +53,14 @@
     "linux": {
       "deb": {
         "files": {
-          "../../packaging/linux/orbit-x11": "/usr/bin/orbit-x11",
-          "../../packaging/linux/orbit-x11.desktop": "/usr/share/applications/orbit-x11.desktop"
+          "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
         }
       },
       "rpm": {
         "files": {
-          "../../packaging/linux/orbit-x11": "/usr/bin/orbit-x11",
-          "../../packaging/linux/orbit-x11.desktop": "/usr/share/applications/orbit-x11.desktop"
+          "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
         }
       }
     },

@@ -24,7 +24,7 @@ license=('GPL-3.0-only')
 depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
 options=('!strip')
 source=('orbit' 'orbit.desktop' 'orbit-x11' 'orbit-x11.desktop' 'orbit.png' 'LICENSE')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 package() {
   install -Dm755 "$srcdir/orbit" "$pkgdir/usr/bin/orbit"

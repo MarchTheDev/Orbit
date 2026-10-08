@@ -7,7 +7,7 @@
  * wrapper — the menu entry just is not there. So every path that has to include
  * it is checked here: Arch, the deb, the rpm and the portable tarball.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,12 +57,31 @@ const pkgbuild = read('packaging', 'arch', 'PKGBUILD');
 check('Arch lists both in its sources', /source=\([^)]*'orbit-x11'[^)]*'orbit-x11\.desktop'[^)]*\)/.test(pkgbuild));
 check('Arch installs the wrapper executable', /install -Dm755 "\$srcdir\/orbit-x11" "\$pkgdir\/usr\/bin\/orbit-x11"/.test(pkgbuild));
 check('Arch installs the menu entry', /install -Dm644 "\$srcdir\/orbit-x11\.desktop" "\$pkgdir\/usr\/share\/applications\/orbit-x11\.desktop"/.test(pkgbuild));
+// makepkg refuses to build when these two arrays disagree, and it only finds
+// out in the release job.
+const list = (name) => (pkgbuild.match(new RegExp(`^${name}=\\((.*)\\)$`, 'm'))?.[1] ?? '')
+  .split("'").filter((part) => part.trim() && part.trim() !== ' ');
+const archSources = list('source');
+const archSums = list('sha256sums');
+check('Arch has one checksum per source', archSums.length === archSources.length && archSources.length > 0,
+  `${archSources.length} sources, ${archSums.length} checksums`);
 
+// The map is { path inside the package: file on disk }. Read from the bundler
+// this repo actually pins (@tauri-apps/cli 2.12.1): fs_utils::copy_custom_files
+// iterates (pkg_path, path) and rpm.rs iterates (rpm_path, src_path). The
+// example in Tauri's own config schema shows it the other way round and is
+// wrong — writing it that way fails every Linux job at bundling time with
+// "Failed to copy custom files: /usr/bin/orbit-x11 does not exist".
 const tauri = JSON.parse(read('web', 'src-tauri', 'tauri.conf.json'));
 for (const kind of ['deb', 'rpm']) {
   const files = tauri.bundle?.linux?.[kind]?.files ?? {};
-  check(`${kind} ships the wrapper to /usr/bin`, files['../../packaging/linux/orbit-x11'] === '/usr/bin/orbit-x11', JSON.stringify(files));
-  check(`${kind} ships the menu entry`, files['../../packaging/linux/orbit-x11.desktop'] === '/usr/share/applications/orbit-x11.desktop');
+  check(`${kind} ships the wrapper to /usr/bin`, files['/usr/bin/orbit-x11'] === '../../packaging/linux/orbit-x11', JSON.stringify(files));
+  check(`${kind} ships the menu entry`, files['/usr/share/applications/orbit-x11.desktop'] === '../../packaging/linux/orbit-x11.desktop');
+  // A source that does not exist is exactly what breaks the bundler, and it
+  // reads as a typo rather than a wiring mistake when it does.
+  for (const [target, source] of Object.entries(files)) {
+    check(`${kind}: ${target} exists in the repo`, existsSync(path.join(root, 'web', 'src-tauri', source)), source);
+  }
 }
 
 const release = read('.github', 'workflows', 'release.yml');
