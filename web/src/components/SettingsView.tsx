@@ -299,7 +299,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Open in Orbit for .exe files', section: 'orbit-appearance', keywords: 'explorer windows context menu right click executable import' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
-  { label: 'Steam achievements sync', section: 'orbit-achievements', keywords: 'achievements trophies unlock steam api key profile account steamid sync automatic' },
+  { label: 'Steam achievements sync', section: 'orbit-achievements', keywords: 'achievements trophies unlock steam api key account sync automatic offline' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
   { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
@@ -893,16 +893,16 @@ export function SettingsView({
         id="orbit-achievements"
         icon={Trophy}
         title="Achievements"
-        lead="Orbit reads your achievements from the Steam client on this machine first, which needs nothing at all. These two are only for the games it has no record of, and they are entirely optional."
+        lead="Orbit reads your achievements straight from the Steam client on this machine, with nothing to set up and no account to enter. This key is only for the games it has no record of, and is entirely optional."
       >
         <div className="rounded-2xl border border-line bg-panel/40 p-3">
           <label className="block text-sm font-semibold text-fg" htmlFor="steam-key">
             Steam Web API key
           </label>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            For games the Steam client has no local record of, and only then. Both fields are
-            needed before anything is asked. Steam only reads your unlock record out to a key that
-            your account vouched for, so a{' '}
+            For games the Steam client has no record of, and only then; leave it empty and nothing
+            is asked. Steam only reads an unlock record out to a key that the account vouched for,
+            so a{' '}
             <button
               type="button"
               className="underline decoration-line underline-offset-2 transition hover:text-accent"
@@ -936,40 +936,11 @@ export function SettingsView({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-line bg-panel/40 p-3">
-          <label className="block text-sm font-semibold text-fg" htmlFor="steam-id">
-            Your Steam profile
-          </label>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            The 17-digit id, or the whole profile link. Either works: if the link carries a custom
-            name, Steam is asked which id it belongs to.
-          </p>
-          <div className="mt-2.5 flex gap-2">
-            <input
-              id="steam-id"
-              type="text"
-              value={settings.steamId ?? ''}
-              onChange={(e) => setSettings({ steamId: e.target.value })}
-              placeholder="https://steamcommunity.com/id/yourname"
-              className={`${inputCls} min-w-0 flex-1 font-mono`}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {settings.steamId && (
-              <button
-                type="button"
-                onClick={() => setSettings({ steamId: '' })}
-                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-muted">
-            When Steam answers, it overwrites the ticks in both directions: it knows what you have
-            not unlocked too. Until then, every tick stays yours.
-          </p>
-        </div>
+        <p className="rounded-2xl border border-line bg-panel/40 p-3 text-xs leading-relaxed text-muted">
+          Which account to ask is not a setting. Steam writes down who last signed in on this
+          machine, and Orbit reads that, so there is nothing to copy in. When Steam does answer it
+          overwrites the ticks in both directions, because it knows what you have not unlocked too.
+        </p>
       </Section>
 
       <Section id="orbit-tabs" icon={GripVertical} title="Tabs along the top" lead="Put the pages you use most first. Settings is always last, wherever it would have been.">

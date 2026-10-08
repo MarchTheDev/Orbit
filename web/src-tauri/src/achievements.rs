@@ -199,22 +199,6 @@ struct ApiAchievement {
     unlocktime: u64,
 }
 
-/// The part of `ResolveVanityURL` that Orbit reads.
-#[derive(Debug, Deserialize)]
-struct Vanity {
-    response: VanityBody,
-}
-
-#[derive(Debug, Deserialize)]
-struct VanityBody {
-    #[serde(default)]
-    success: u8,
-    #[serde(default)]
-    steamid: Option<String>,
-    #[serde(default)]
-    message: Option<String>,
-}
-
 /// What this player has unlocked in this game, straight from Steam.
 ///
 /// This is the only source that knows a real answer instead of a guess, which
@@ -268,96 +252,6 @@ pub async fn unlocks(app_id: u64, steam_id: &str, api_key: &str) -> Result<Vec<U
             at: row.unlocktime,
         })
         .collect())
-}
-
-/// Turn whatever the player typed into the 17-digit id Steam's API wants.
-///
-/// The id is accepted as it is, because that is the cheapest thing to get
-/// right, but most people have a profile URL instead and no idea which number
-/// is theirs. Both forms are taken; only a custom name needs asking Steam, and
-/// that is the one call this makes.
-pub async fn resolve_steam_id(who: &str, api_key: &str) -> Result<String, String> {
-    if let Some(id) = steam_id_of(who) {
-        return Ok(id);
-    }
-    let Some(name) = vanity_name(who) else {
-        return Err("That does not look like a Steam id or a Steam profile link.".to_string());
-    };
-
-    let client = crate::metadata::client()?;
-    let response = client
-        .get("https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/")
-        .query(&[("key", api_key), ("vanityurl", name.as_str())])
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach the Steam API: {e}"))?;
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err("Steam turned that key down. Check it in Settings.".to_string());
-    }
-
-    let body: Vanity = response
-        .json()
-        .await
-        .map_err(|_| "Steam's answer was not the shape its API promises.".to_string())?;
-    if body.response.success != 1 {
-        return Err(body.response.message.unwrap_or_else(|| {
-            "Steam has no account under that name. The profile link works too.".to_string()
-        }));
-    }
-    body.response
-        .steamid
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| "Steam recognised the name but gave no id back.".to_string())
-}
-
-/// A SteamID64 in the text, when there is one.
-///
-/// Every personal account's id is 17 digits and begins `7656119`, so the prefix
-/// is what tells a real id apart from a custom name that happens to be digits.
-/// It is read out of a URL as well as out of bare text, which saves a round
-/// trip for the common case of somebody pasting their whole profile link.
-fn steam_id_of(who: &str) -> Option<String> {
-    let cleaned = who.trim().trim_end_matches('/');
-    let candidates = [
-        Some(cleaned),
-        after_segment(cleaned, "profiles")
-            .or_else(|| after_segment(cleaned, "id"))
-            // Only up to the next slash, so a link that goes on to another page
-            // ("/profiles/<id>/edit") still gives up its id.
-            .map(|tail| tail.split('/').next().unwrap_or_default()),
-    ];
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.len() == 17
-            && candidate.starts_with("7656119")
-            && candidate.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Some(candidate.to_string());
-        }
-    }
-    None
-}
-
-/// The custom name in a profile link, when the link carries one.
-///
-/// `/id/<name>` is the custom form and `/profiles/<id>` the numeric one; a bare
-/// word is taken as a name, because that is what somebody who types one means.
-fn vanity_name(who: &str) -> Option<String> {
-    let cleaned = who.trim().trim_end_matches('/');
-    if cleaned.contains("://") || cleaned.contains("steamcommunity.com") {
-        // A link only counts if it actually names somebody; the bare domain is
-        // not a name just because it is not empty.
-        let tail = after_segment(cleaned, "id").or_else(|| after_segment(cleaned, "profiles"))?;
-        let name = tail.split('/').next().unwrap_or_default();
-        return (!name.is_empty()).then(|| name.to_string());
-    }
-    (!cleaned.is_empty()).then(|| cleaned.to_string())
-}
-
-/// The text after the last `/<segment>/` in a path, if there is one.
-fn after_segment<'a>(path: &'a str, segment: &str) -> Option<&'a str> {
-    let needle = format!("/{segment}/");
-    path.rfind(&needle).map(|at| &path[at + needle.len()..])
 }
 
 #[cfg(test)]
@@ -422,57 +316,5 @@ mod tests {
     fn a_page_with_no_rows_is_empty_rather_than_a_panic() {
         assert!(parse("", 620).is_empty());
         assert!(parse("<html><body>Sign in</body></html>", 620).is_empty());
-    }
-
-    #[test]
-    fn an_id_is_read_whether_it_is_typed_or_pasted_as_a_link() {
-        assert_eq!(
-            steam_id_of("76561198012345678"),
-            Some("76561198012345678".to_string())
-        );
-        assert_eq!(
-            steam_id_of("  76561198012345678  "),
-            Some("76561198012345678".to_string())
-        );
-        assert_eq!(
-            steam_id_of("https://steamcommunity.com/profiles/76561198012345678"),
-            Some("76561198012345678".to_string())
-        );
-        assert_eq!(
-            steam_id_of("https://steamcommunity.com/profiles/76561198012345678/"),
-            Some("76561198012345678".to_string())
-        );
-        assert_eq!(
-            steam_id_of("https://steamcommunity.com/profiles/76561198012345678/edit"),
-            Some("76561198012345678".to_string()),
-            "a trailing page must not hide the id"
-        );
-    }
-
-    #[test]
-    fn a_custom_name_is_never_mistaken_for_an_id() {
-        // Right length is not enough: Steam ids all begin 7656119.
-        assert_eq!(steam_id_of("12345678901234567"), None);
-        assert_eq!(steam_id_of("gabelogannewell"), None);
-        assert_eq!(steam_id_of(""), None);
-        assert_eq!(
-            steam_id_of("https://steamcommunity.com/id/gabelogannewell"),
-            None
-        );
-    }
-
-    #[test]
-    fn a_custom_name_is_found_in_a_link_or_on_its_own() {
-        assert_eq!(
-            vanity_name("https://steamcommunity.com/id/gabelogannewell"),
-            Some("gabelogannewell".to_string())
-        );
-        assert_eq!(
-            vanity_name("https://steamcommunity.com/id/gabelogannewell/"),
-            Some("gabelogannewell".to_string())
-        );
-        assert_eq!(vanity_name("gabelogannewell"), Some("gabelogannewell".to_string()));
-        assert_eq!(vanity_name("   "), None);
-        assert_eq!(vanity_name("https://steamcommunity.com/"), None);
     }
 }

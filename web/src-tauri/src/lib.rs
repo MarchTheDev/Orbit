@@ -925,7 +925,8 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
     // The client's own files come first. They are offline, need no key and no
     // public profile, and they carry the moment each achievement happened,
     // which is more than any of the other sources can say.
-    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &extra))
+    let where_steam_is = extra.clone();
+    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &where_steam_is))
         .await
         .unwrap_or_else(|e| {
             log::warn!("reading Steam's stats files failed: {e}");
@@ -992,33 +993,36 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         })
         .collect();
 
-    // Steam's API, when the client's files had nothing and a key is there. It
-    // is taken both ways, because it knows what has *not* been unlocked too,
-    // which is more than a hand-ticked list can say. A refusal is a log line
-    // and not an error: the list is worth showing either way.
+    // Steam's API, for the games the client has no record of, and only when a
+    // key is there. The account is not asked for: `loginusers.vdf` already says
+    // who last used this machine, and that is the same file the offline path
+    // reads, so there is nothing to type.
+    //
+    // The answer is taken both ways, because it knows what has *not* been
+    // unlocked too, which is more than a hand-ticked list can say. A refusal is
+    // a log line and not an error: the list is worth showing either way.
     if known.is_none() {
-        if let (Some(key), Some(who)) = (
-            setting_text(&settings, "steamApiKey"),
-            setting_text(&settings, "steamId"),
-        ) {
-            known = match achievements::resolve_steam_id(&who, &key).await {
-                Ok(steam_id) => match achievements::unlocks(app_id, &steam_id, &key).await {
-                    Ok(found) => Some(
-                        found
-                            .into_iter()
-                            .map(|u| (u.id, u.at))
-                            .collect::<std::collections::HashMap<String, u64>>(),
-                    ),
-                    Err(e) => {
-                        log::warn!("Steam would not say what was unlocked: {e}");
-                        None
-                    }
-                },
-                Err(e) => {
-                    log::warn!("Steam did not recognise that account: {e}");
+        if let Some(key) = setting_text(&settings, "steamApiKey") {
+            let id = tokio::task::spawn_blocking(move || steam_stats::active_id64(&extra))
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("reading Steam's signed-in account failed: {e}");
                     None
-                }
-            };
+                });
+            match id {
+                Some(steam_id) => match achievements::unlocks(app_id, &steam_id, &key).await {
+                    Ok(found) => {
+                        known = Some(
+                            found
+                                .into_iter()
+                                .map(|u| (u.id, u.at))
+                                .collect::<std::collections::HashMap<String, u64>>(),
+                        );
+                    }
+                    Err(e) => log::warn!("Steam would not say what was unlocked: {e}"),
+                },
+                None => log::info!("no Steam account is signed in here, so the API was not asked"),
+            }
         }
     }
 

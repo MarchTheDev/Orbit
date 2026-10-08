@@ -322,20 +322,13 @@ export interface Settings {
    */
   sgdbApiKey?: string;
   /**
-   * A Steam Web API key, for reading back what you have actually unlocked.
+   * A Steam Web API key, for the games the Steam client has no local record of.
    *
-   * Empty means achievements stay hand-ticked, which is all Orbit can honestly
-   * do without one. With it, plus `steamId`, the list is read from your own
-   * account with the moment each one happened.
+   * Empty means those games fall back to their public achievement list with no
+   * unlock state, which is what Orbit could always do. Which account to ask
+   * about is not a setting: it is read from the client's own `loginusers.vdf`.
    */
   steamApiKey?: string;
-  /**
-   * Your Steam account, as the 17-digit id or as a profile link.
-   *
-   * A link with a custom name in it is looked up, so either works. Needed
-   * alongside `steamApiKey` and for nothing else.
-   */
-  steamId?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

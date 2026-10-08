@@ -291,14 +291,31 @@ fn unlock_times(steam: &Path, account: u64, app_id: u64) -> HashMap<String, u64>
 /// client used last. The file names want the 32-bit account number, which is
 /// the 64-bit id with Steam's constant prefix taken off.
 pub fn account_id(steam: &Path) -> Option<u64> {
+    account_id_of(&signed_in(steam)?)
+}
+
+/// The 64-bit id of whoever the client used last, as a string.
+///
+/// This is the same answer the Web API wants, read out of the same file, which
+/// is why nobody has to type their id into Settings.
+pub fn signed_in(steam: &Path) -> Option<String> {
     let text = std::fs::read_to_string(steam.join("config").join("loginusers.vdf")).ok()?;
     let users = login_users(&text);
-    let id = users
+    users
         .iter()
         .find(|(_, recent)| *recent)
         .or_else(|| users.first())
-        .map(|(id, _)| id.as_str())?;
-    account_id_of(id)
+        .map(|(id, _)| id.clone())
+}
+
+/// The signed-in player across every Steam install that can be found.
+pub fn active_id64(extra: &[String]) -> Option<String> {
+    for root in crate::steam::steam_roots(extra) {
+        if let Some(id) = signed_in(&root) {
+            return Some(id);
+        }
+    }
+    None
 }
 
 /// The 64-bit id every personal account starts with.
@@ -579,6 +596,39 @@ mod tests {
     }
 
     #[test]
+    fn the_signed_in_id_is_the_most_recent_one_as_written() {
+        let dir = temp("loginusers");
+        std::fs::create_dir_all(dir.join("config")).unwrap();
+        std::fs::write(
+            dir.join("config").join("loginusers.vdf"),
+            r#""users"
+            {
+                "76561198000000000"
+                {
+                    "PersonaName"   "Older"
+                    "MostRecent"    "0"
+                }
+                "76561199140017878"
+                {
+                    "PersonaName"   "Newer"
+                    "MostRecent"    "1"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(signed_in(&dir).as_deref(), Some("76561199140017878"));
+        assert_eq!(account_id(&dir), Some(1_179_752_150));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_install_with_no_one_signed_in_says_so() {
+        let dir = temp("nologin");
+        assert_eq!(signed_in(&dir), None);
+        assert_eq!(account_id(&dir), None);
+    }
+
+    #[test]
     fn the_account_number_is_the_id_without_steam_prefix() {
         // The number in the file name is the 64-bit id minus a fixed constant.
         assert_eq!(account_id_of("76561197960265728"), Some(0));
@@ -635,5 +685,11 @@ mod tests {
             icon_url(620, "wake.jpg"),
             "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/620/wake.jpg"
         );
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("orbit-stats-{name}"));
+        let _ = std::fs::remove_dir_all(&path);
+        path
     }
 }
