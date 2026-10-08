@@ -459,9 +459,8 @@ mod tests {
     }
 
     fn one(bit: &str, api: &str, title: &str, description: &str, icon: &str) -> Vec<u8> {
-        let display = text("name", "")
+        let display = obj("name", &text("english", title))
             .into_iter()
-            .chain(obj("name", &text("english", title)))
             .chain(obj("desc", &text("english", description)))
             .chain(text("icon", icon))
             .collect::<Vec<u8>>();
