@@ -7,7 +7,9 @@
  * wrapper — the menu entry just is not there. So every path that has to include
  * it is checked here: Arch, the deb, the rpm and the portable tarball.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -99,5 +101,55 @@ check('the ordinary entry has no GDK_BACKEND in it', !/GDK_BACKEND/.test(desktop
 check('the ordinary entry still just runs orbit', /^Exec=orbit$/m.test(desktop));
 const sources = read('web', 'src-tauri', 'src', 'lib.rs') + read('web', 'src-tauri', 'src', 'launch.rs');
 check('the program does not set the backend itself', !/GDK_BACKEND/.test(sources));
+
+console.log('the check that looks inside the finished packages');
+
+const checker = path.join(root, 'packaging', 'linux', 'check-x11.sh');
+check('it exists', existsSync(checker));
+check('it is executable', (statSync(checker).mode & 0o111) !== 0);
+
+// Run it for real rather than trusting that it looks right. Each listing is in
+// the shape one of the three tools actually prints.
+const fixture = path.join(tmpdir(), `orbit-x11-${process.pid}`);
+mkdirSync(fixture, { recursive: true });
+const listing = (perms) => `drwxr-xr-x root/root  0 2026-10-08 20:00 usr/bin/
+${perms} root/root  142 2026-10-08 20:00 usr/bin/orbit-x11
+-rw-r--r-- root/root  254 2026-10-08 20:00 usr/share/applications/orbit-x11.desktop`;
+const write = (name, text) => {
+  const at = path.join(fixture, name);
+  writeFileSync(at, text);
+  return at;
+};
+const run = (at) => {
+  try {
+    return { code: 0, out: execFileSync(checker, ['A package', at, 'cat'], { encoding: 'utf8' }) };
+  } catch (error) {
+    return { code: error.status, out: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+  }
+};
+
+const complete = run(write('complete', listing('-rwxr-xr-x')));
+check('a package with both passes', complete.code === 0, complete.out);
+check('it says so in a notice the job summary can show',
+  /::notice title=A package::/.test(complete.out), complete.out);
+
+const noWrapper = run(write('no-wrapper', listing('-rwxr-xr-x').split('\n').filter((l) => !/orbit-x11$/.test(l)).join('\n')));
+check('a package missing the wrapper fails', noWrapper.code === 1, noWrapper.out);
+check('it names what is missing', /wrapper is not in/.test(noWrapper.out), noWrapper.out);
+
+const noEntry = run(write('no-entry', listing('-rwxr-xr-x').split('\n').filter((l) => !/\.desktop$/.test(l)).join('\n')));
+check('a package missing the menu entry fails', noEntry.code === 1, noEntry.out);
+
+// The whole point of a wrapper that cannot be executed is that it does nothing.
+const unrunnable = run(write('unrunnable', listing('-rw-r--r--')));
+check('a wrapper that cannot be run fails', unrunnable.code === 1, unrunnable.out);
+check('it says why', /cannot be run/.test(unrunnable.out), unrunnable.out);
+
+for (const job of ['deb', 'rpm', 'Debian deb', 'Fedora rpm', 'Arch package']) {
+  check(`the release workflow checks ${job}`, release.includes(`check-x11.sh "The ${job}"`));
+}
+check('it checks the portable tarball too', /orbit-x11\$' \| grep -q rwx/.test(release));
+
+rmSync(fixture, { recursive: true, force: true });
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

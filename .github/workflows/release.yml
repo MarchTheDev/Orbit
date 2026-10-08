@@ -241,6 +241,23 @@ jobs:
           cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
           tar -czf "artifacts/$portable.tar.gz" "$portable"
 
+      # Bundling quietly leaving it out is the failure mode worth guarding, so
+      # look inside the finished packages instead of trusting the build log.
+      - name: Check the X11 entry point reached the packages
+        shell: bash
+        run: |
+          version="${ORBIT_VERSION#v}"
+          bash packaging/linux/check-x11.sh "The deb" "artifacts/orbit_${version}_amd64.deb" dpkg-deb --contents
+          bash packaging/linux/check-x11.sh "The rpm" "artifacts/orbit-${version}-1.x86_64.rpm" rpm -qlvp
+          # The tarball keeps its files at the top level, so the check written
+          # for an installed layout does not fit it.
+          portable="Orbit-${version}-linux-portable.tar.gz"
+          tar -tzvf "artifacts/$portable" | grep -E '/orbit-x11$' | grep -q rwx \
+            || { echo "::error title=The portable tarball::the X11 wrapper is missing or cannot be run"; exit 1; }
+          tar -tzf "artifacts/$portable" | grep -qE '/orbit-x11\.desktop$' \
+            || { echo "::error title=The portable tarball::the X11 menu entry is missing"; exit 1; }
+          echo "::notice title=The portable tarball::both X11 entry points are in $portable"
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -314,6 +331,12 @@ jobs:
           mkdir -p artifacts
           cp web/src-tauri/target/release/bundle/deb/*.deb "artifacts/orbit_${version}_debian_amd64.deb"
 
+      - name: Check the X11 entry point reached the package
+        shell: bash
+        run: |
+          version="${ORBIT_VERSION#v}"
+          bash packaging/linux/check-x11.sh "The Debian deb" "artifacts/orbit_${version}_debian_amd64.deb" dpkg-deb --contents
+
       - uses: actions/upload-artifact@v4
         with:
           name: debian
@@ -383,6 +406,12 @@ jobs:
           version="${ORBIT_VERSION#v}"
           mkdir -p artifacts
           cp web/src-tauri/target/release/bundle/rpm/*.rpm "artifacts/orbit-${version}-1.fc.x86_64.rpm"
+
+      - name: Check the X11 entry point reached the package
+        shell: bash
+        run: |
+          version="${ORBIT_VERSION#v}"
+          bash packaging/linux/check-x11.sh "The Fedora rpm" "artifacts/orbit-${version}-1.fc.x86_64.rpm" rpm -qlvp
 
       - uses: actions/upload-artifact@v4
         with:
@@ -469,6 +498,12 @@ jobs:
           cd "$work"
           sudo -u builder makepkg -f
           cp "$work"/*.pkg.tar.zst "$GITHUB_WORKSPACE/artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
+
+      - name: Check the X11 entry point reached the package
+        shell: bash
+        run: |
+          version="${ORBIT_VERSION#v}"
+          bash packaging/linux/check-x11.sh "The Arch package" "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" tar -tvf
 
       - uses: actions/upload-artifact@v4
         with:
