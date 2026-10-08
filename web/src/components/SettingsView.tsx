@@ -893,15 +893,16 @@ export function SettingsView({
         id="orbit-achievements"
         icon={Trophy}
         title="Achievements"
-        lead="Achievements are read from Steam's public pages, and whether one is ticked is your own mark. Give Orbit a key and your account and it will read what you actually unlocked, and when, instead."
+        lead="Orbit reads your achievements from the Steam client on this machine first, which needs nothing at all. These two are only for the games it has no record of, and they are entirely optional."
       >
         <div className="rounded-2xl border border-line bg-panel/40 p-3">
           <label className="block text-sm font-semibold text-fg" htmlFor="steam-key">
             Steam Web API key
           </label>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            Optional, and both fields are needed before anything is asked. Steam only reads your
-            unlock record out to a key that your account vouched for, so a{' '}
+            For games the Steam client has no local record of, and only then. Both fields are
+            needed before anything is asked. Steam only reads your unlock record out to a key that
+            your account vouched for, so a{' '}
             <button
               type="button"
               className="underline decoration-line underline-offset-2 transition hover:text-accent"

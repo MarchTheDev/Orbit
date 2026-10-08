@@ -18,6 +18,7 @@ mod process;
 mod session;
 mod sgdb;
 mod steam;
+mod steam_stats;
 mod storage;
 mod store;
 mod update;
@@ -893,8 +894,13 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 }
 
 /// Read fresh each time, because the share of players who have each one moves.
-/// Whether an achievement is ticked is the player's own mark and is kept in the
-/// library, so this never overwrites that.
+///
+/// Three sources, best first. The Steam client's own stats files hold the list
+/// and the moment each one was unlocked, offline, with no key and no public
+/// profile, so they win when they are there. The Web API is next, and needs a
+/// key and an account. The community page is the fallback that always works,
+/// but it only lists the achievements and never says who has them, so with
+/// nothing else the ticks stay the player's own and are carried over.
 #[tauri::command]
 async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<achievements::Achievement>, String> {
     let game = orbit
@@ -911,9 +917,64 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         })?,
     };
 
-    let mut fetched = achievements::fetch(app_id).await?;
+    let settings = orbit.store.load_settings();
+    let extra: Vec<String> = setting_text(&settings, "steamPath")
+        .map(|path| vec![path])
+        .unwrap_or_default();
 
-    // What the player ticked comes back with the fresh list; a new achievement
+    // The client's own files come first. They are offline, need no key and no
+    // public profile, and they carry the moment each achievement happened,
+    // which is more than any of the other sources can say.
+    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &extra))
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("reading Steam's stats files failed: {e}");
+            None
+        });
+
+    // Unlock times worth believing, and where they came from. `None` means no
+    // source had an answer, so the player's own ticks stand.
+    let mut known: Option<std::collections::HashMap<String, u64>> = None;
+
+    let mut fetched = match local {
+        Some(found) => {
+            let mut rows: Vec<achievements::Achievement> = found
+                .rows
+                .into_iter()
+                .map(|row| achievements::Achievement {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    icon: steam_stats::icon_url(app_id, &row.icon),
+                    // The schema says what the achievements are, not how rare
+                    // they are. That is a separate, public, keyless question.
+                    percent: 0.0,
+                    unlocked: row.unlocked_at > 0,
+                    unlocked_at: row.unlocked_at,
+                })
+                .collect();
+            for (id, percent) in steam_stats::global_percentages(app_id).await {
+                if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                    row.percent = percent;
+                }
+            }
+            // Only believe "nothing here is unlocked" when the client actually
+            // said who is signed in. Otherwise this install's answer is silence,
+            // and silence is not the same as no.
+            if found.knows_account {
+                known = Some(
+                    rows.iter()
+                        .filter(|row| row.unlocked_at > 0)
+                        .map(|row| (row.id.clone(), row.unlocked_at))
+                        .collect(),
+                );
+            }
+            rows
+        }
+        None => achievements::fetch(app_id).await?,
+    };
+
+    // What the player ticked comes back with a fresh list; a new achievement
     // arrives locked, which is the honest default.
     let ticked: std::collections::HashSet<String> = game
         .achievements
@@ -931,20 +992,16 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         })
         .collect();
 
-    // Steam's own record, when it can be asked. It needs a key and the player's
-    // id, and both are optional, so most libraries never make this call. When
-    // it does answer it is taken both ways: it knows what is unlocked *and*
-    // what is not, which is more than a hand-ticked list can say.
-    //
-    // A refusal is a log line and not an error, because the list itself is worth
-    // showing even when Steam will not say who unlocked what.
-    let settings = orbit.store.load_settings();
-    let steam_record: Option<std::collections::HashMap<String, u64>> = match (
-        setting_text(&settings, "steamApiKey"),
-        setting_text(&settings, "steamId"),
-    ) {
-        (Some(key), Some(who)) => {
-            match achievements::resolve_steam_id(&who, &key).await {
+    // Steam's API, when the client's files had nothing and a key is there. It
+    // is taken both ways, because it knows what has *not* been unlocked too,
+    // which is more than a hand-ticked list can say. A refusal is a log line
+    // and not an error: the list is worth showing either way.
+    if known.is_none() {
+        if let (Some(key), Some(who)) = (
+            setting_text(&settings, "steamApiKey"),
+            setting_text(&settings, "steamId"),
+        ) {
+            known = match achievements::resolve_steam_id(&who, &key).await {
                 Ok(steam_id) => match achievements::unlocks(app_id, &steam_id, &key).await {
                     Ok(found) => Some(
                         found
@@ -961,21 +1018,20 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
                     log::warn!("Steam did not recognise that account: {e}");
                     None
                 }
-            }
+            };
         }
-        _ => None,
-    };
+    }
 
     for row in &mut fetched {
-        match &steam_record {
+        match &known {
             Some(found) => {
                 row.unlocked = found.contains_key(&row.id);
                 row.unlocked_at = found.get(&row.id).copied().unwrap_or(0);
             }
             None => {
                 row.unlocked = ticked.contains(&row.id);
-                // A time Steam gave earlier is worth keeping, even though a tick
-                // done by hand has none.
+                // A time read earlier is worth keeping, even though a tick done
+                // by hand has none.
                 row.unlocked_at = when.get(&row.id).copied().unwrap_or(0);
             }
         }

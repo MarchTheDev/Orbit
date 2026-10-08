@@ -90,7 +90,7 @@ pub fn installed_games(extra: &[String]) -> Result<Vec<SteamGame>, String> {
 /// `extra` comes first. It is where the player said Steam is, from Settings, and
 /// it covers the case nobody can enumerate: a relocated install, or one inside a
 /// sandbox whose folder Orbit has never heard of.
-fn steam_roots(extra: &[String]) -> Vec<PathBuf> {
+pub(crate) fn steam_roots(extra: &[String]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     for path in extra {
