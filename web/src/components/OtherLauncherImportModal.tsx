@@ -173,6 +173,23 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
         )}
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* One square, on the left where the eye lands first: tick every
+              install in view, across every launcher shown, or untick them. */}
+          <button
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-muted transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={toggleAll}
+            disabled={inView.length === 0}
+            title={
+              inView.length === 0
+                ? 'Nothing here to select'
+                : `${allChosen ? 'Deselect' : 'Select'} all ${inView.length} ${
+                    inView.length === 1 ? 'install' : 'installs'
+                  }${filter.trim() ? ' the filter shows' : ''}`
+            }
+            aria-label={allChosen ? 'Deselect all' : 'Select all'}
+          >
+            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
+          </button>
           <SearchField
             value={filter}
             onChange={setFilter}
@@ -180,21 +197,6 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
             className="min-w-[14rem] flex-1"
             inputClassName="w-full"
           />
-          <button
-            className={`${btnGhost} flex items-center gap-2`}
-            onClick={toggleAll}
-            disabled={inView.length === 0}
-            title={
-              inView.length === 0
-                ? 'Nothing here to select'
-                : filter.trim()
-                  ? `Works on the ${inView.length} ${inView.length === 1 ? 'install' : 'installs'} the filter shows`
-                  : `Works on all ${inView.length} ${inView.length === 1 ? 'install' : 'installs'}`
-            }
-          >
-            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
-            {allChosen ? 'Deselect all' : 'Select all'}
-          </button>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy || !isNative()}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Scanning…' : 'Scan again'}
