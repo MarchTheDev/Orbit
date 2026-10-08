@@ -44,6 +44,9 @@ pub fn installed_games(only: Option<&str>) -> Result<Vec<LauncherGame>, String> 
         if only.is_none() || matches!(only, Some("Ubisoft Connect" | "GOG Galaxy" | "EA app")) {
             scan_windows_registry(&mut games, only);
         }
+        if only.is_none() || only == Some("Xbox") {
+            scan_xbox(&mut games);
+        }
     }
 
     if let Some(launcher) = only {
@@ -335,6 +338,93 @@ fn deduplicate_installations(games: &mut Vec<LauncherGame>) {
     });
 }
 
+/* ---------- Xbox and PC Game Pass ---------- */
+
+/// What the Xbox app calls a game in its `MicrosoftGame.config`.
+///
+/// The title is an attribute on `<ShellVisuals>` in some packages and an
+/// element in others, so both are looked at.
+fn xbox_display_name(xml: &str) -> Option<String> {
+    xml_attr(xml, "DefaultDisplayName").or_else(|| xml_text(xml, "DefaultDisplayName"))
+}
+
+/// The value of `attr="..."`, wherever it appears in a fragment of XML.
+fn xml_attr(xml: &str, attr: &str) -> Option<String> {
+    let key = format!("{attr}=\"");
+    let rest = xml.split(&key).nth(1)?;
+    let value = rest.split('"').next()?.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// The text inside the first `<tag>...</tag>`.
+fn xml_text(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let rest = xml.split(&open).nth(1)?;
+    let value = rest.split('<').next()?.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// The `Name` on `<Executable>`, which is the program and not the package.
+fn xbox_executable(xml: &str) -> Option<String> {
+    let rest = xml.split("<Executable ").nth(1)?;
+    let tag = rest.split(['/', '>']).next()?;
+    xml_attr(tag, "Name")
+}
+
+/// The program the config names, but only while it stays inside the folder.
+///
+/// A name that climbs out with `..` is not a program Orbit should offer to
+/// start, whatever the file said.
+#[cfg(windows)]
+fn xbox_exe(content: &Path, relative: &str) -> Option<String> {
+    if relative.is_empty() || relative.contains("..") {
+        return None;
+    }
+    let path = content.join(relative.replace('/', "\\"));
+    path.is_file().then(|| path.to_string_lossy().to_string())
+}
+
+/// The games the Xbox app installed, as `<drive>:\XboxGames\<title>\Content`.
+///
+/// The app lets the player choose a drive and then writes a folder it names
+/// after the game, with a `MicrosoftGame.config` inside saying what it is and
+/// what starts it. That is the readable part of a PC Game Pass install: the
+/// packages themselves live under `WindowsApps`, which is locked to the system
+/// and cannot be listed, so anything there is simply not seen.
+#[cfg(windows)]
+fn scan_xbox(games: &mut Vec<LauncherGame>) {
+    for drive in crate::storage::list_drives() {
+        let root = Path::new(&drive.root).join("XboxGames");
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let folder = entry.file_name().to_string_lossy().to_string();
+            // Saves sit alongside the games and are not one.
+            if folder.eq_ignore_ascii_case("GameSave") {
+                continue;
+            }
+            let content = path.join("Content");
+            let xml = std::fs::read_to_string(content.join("MicrosoftGame.config"))
+                .unwrap_or_default();
+            let exe = xbox_exe(&content, &xbox_executable(&xml).unwrap_or_default());
+            games.push(LauncherGame {
+                launcher: "Xbox".to_string(),
+                // The folder name is what the player sees in Explorer, so it is
+                // the honest fallback when the config does not say.
+                name: xbox_display_name(&xml).unwrap_or(folder),
+                install_dir: path.to_string_lossy().to_string(),
+                exe_path: exe,
+                size_bytes: 0,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,5 +488,46 @@ mod tests {
         deduplicate_installations(&mut games);
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].name, "A");
+    }
+
+    #[test]
+    fn an_xbox_config_gives_its_title_and_its_program() {
+        let xml = r#"<Game>
+          <ExecutableList><Executable Name="Binaries\Hades.exe" Id="Hades"/></ExecutableList>
+          <ShellVisuals DefaultDisplayName="Hades II" />
+          <StoreId>BQVQTL3PCH05</StoreId>
+        </Game>"#;
+        assert_eq!(xbox_display_name(xml).as_deref(), Some("Hades II"));
+        assert_eq!(xbox_executable(xml).as_deref(), Some("Binaries\\Hades.exe"));
+        assert_eq!(xml_text(xml, "StoreId").as_deref(), Some("BQVQTL3PCH05"));
+    }
+
+    #[test]
+    fn a_title_can_be_an_element_instead_of_an_attribute() {
+        let xml = "<ShellVisuals><DefaultDisplayName>Minecraft</DefaultDisplayName></ShellVisuals>";
+        assert_eq!(xbox_display_name(xml).as_deref(), Some("Minecraft"));
+    }
+
+    #[test]
+    fn a_config_that_says_nothing_is_not_invented() {
+        assert_eq!(xbox_display_name(""), None);
+        assert_eq!(xbox_display_name("<Game></Game>"), None);
+        // `<ExecutableList>` is not `<Executable `; the space is what tells them
+        // apart, and without it the container would be read as the program.
+        assert_eq!(xbox_executable("<ExecutableList></ExecutableList>"), None);
+        assert_eq!(xml_text("<StoreId></StoreId>", "StoreId"), None);
+        assert_eq!(xml_attr(r#"<a Name=""/>"#, "Name"), None);
+    }
+
+    #[test]
+    fn a_program_that_climbs_out_of_the_folder_is_not_offered() {
+        // Only checked where the filesystem is, but the rule is worth stating.
+        let refused = ["", "..\\..\\Windows\\system32\\cmd.exe", "a/../../b.exe"];
+        for relative in refused {
+            assert!(
+                relative.is_empty() || relative.contains(".."),
+                "{relative} should have been refused"
+            );
+        }
     }
 }

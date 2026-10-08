@@ -7,4 +7,5 @@ export const LAUNCHERS: { id: LauncherId; color: string }[] = [
   { id: 'Ubisoft Connect', color: '#77b7ff' },
   { id: 'GOG Galaxy', color: '#d8a1ff' },
   { id: 'EA app', color: '#ff747d' },
+  { id: 'Xbox', color: '#9cca3c' },
 ];

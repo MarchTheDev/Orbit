@@ -1,7 +1,7 @@
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
 /** The Library has an Unplayed filter; Backlog is its own page. */
 export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
-export type OtherLauncher = 'Epic Games' | 'Ubisoft Connect' | 'GOG Galaxy' | 'EA app';
+export type OtherLauncher = 'Epic Games' | 'Ubisoft Connect' | 'GOG Galaxy' | 'EA app' | 'Xbox';
 export type LauncherId = 'Steam' | OtherLauncher;
 export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
