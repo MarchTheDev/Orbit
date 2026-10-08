@@ -895,12 +895,13 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 
 /// Read fresh each time, because the share of players who have each one moves.
 ///
-/// Three sources, best first. The Steam client's own stats files hold the list
-/// and the moment each one was unlocked, offline, with no key and no public
-/// profile, so they win when they are there. The Web API is next, and needs a
-/// key and an account. The community page is the fallback that always works,
-/// but it only lists the achievements and never says who has them, so with
-/// nothing else the ticks stay the player's own and are carried over.
+/// Two sources, best first. The Steam client's own stats files hold the list
+/// and the moment each one was unlocked, offline, with no key, no login and no
+/// public profile — so for a game played through Steam on this machine that is
+/// the whole answer, and nothing is asked of anybody. The community page is the
+/// fallback for a game with no local schema; it lists the achievements and
+/// their rarity but cannot say who has them, so the ticks stay the player's own
+/// and are carried over.
 #[tauri::command]
 async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<achievements::Achievement>, String> {
     let game = orbit
@@ -925,8 +926,7 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
     // The client's own files come first. They are offline, need no key and no
     // public profile, and they carry the moment each achievement happened,
     // which is more than any of the other sources can say.
-    let where_steam_is = extra.clone();
-    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &where_steam_is))
+    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &extra))
         .await
         .unwrap_or_else(|e| {
             log::warn!("reading Steam's stats files failed: {e}");
@@ -992,39 +992,6 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
             (at > 0).then_some((id.to_string(), at))
         })
         .collect();
-
-    // Steam's API, for the games the client has no record of, and only when a
-    // key is there. The account is not asked for: `loginusers.vdf` already says
-    // who last used this machine, and that is the same file the offline path
-    // reads, so there is nothing to type.
-    //
-    // The answer is taken both ways, because it knows what has *not* been
-    // unlocked too, which is more than a hand-ticked list can say. A refusal is
-    // a log line and not an error: the list is worth showing either way.
-    if known.is_none() {
-        if let Some(key) = setting_text(&settings, "steamApiKey") {
-            let id = tokio::task::spawn_blocking(move || steam_stats::active_id64(&extra))
-                .await
-                .unwrap_or_else(|e| {
-                    log::warn!("reading Steam's signed-in account failed: {e}");
-                    None
-                });
-            match id {
-                Some(steam_id) => match achievements::unlocks(app_id, &steam_id, &key).await {
-                    Ok(found) => {
-                        known = Some(
-                            found
-                                .into_iter()
-                                .map(|u| (u.id, u.at))
-                                .collect::<std::collections::HashMap<String, u64>>(),
-                        );
-                    }
-                    Err(e) => log::warn!("Steam would not say what was unlocked: {e}"),
-                },
-                None => log::info!("no Steam account is signed in here, so the API was not asked"),
-            }
-        }
-    }
 
     for row in &mut fetched {
         match &known {

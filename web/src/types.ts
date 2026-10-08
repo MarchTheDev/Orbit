@@ -321,14 +321,6 @@ export interface Settings {
    * ships one nor invents one.
    */
   sgdbApiKey?: string;
-  /**
-   * A Steam Web API key, for the games the Steam client has no local record of.
-   *
-   * Empty means those games fall back to their public achievement list with no
-   * unlock state, which is what Orbit could always do. Which account to ask
-   * about is not a setting: it is read from the client's own `loginusers.vdf`.
-   */
-  steamApiKey?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

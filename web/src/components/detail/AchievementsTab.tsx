@@ -11,13 +11,14 @@ import { cn } from '../../utils/cn';
  * The game's achievements, read from its Steam Community page.
  *
  * Whether an achievement is unlocked is the player's own mark, and clicking it
- * is the whole interaction — until something that actually knows answers. The
- * Steam client on this machine holds the list and the moment each one happened,
- * and needs nothing to be asked; a Steam key and account work when the client
- * has no record of the game. Either way the answer overwrites the ticks in both
- * directions, because it knows what has *not* been unlocked too. Nothing is
- * ever reported back. The share of players who have each one comes from Steam
- * and is worth showing: it is what tells you an achievement is rare.
+ * is the whole interaction — unless the Steam client on this machine has the
+ * game, in which case it already knows the list and the moment each one
+ * happened, needs nothing to be asked, and overwrites the ticks in both
+ * directions because it knows what has *not* been unlocked too. For a game with
+ * no local record the list comes from the community page instead, which cannot
+ * say who has what, so the ticks stay the player's own. Nothing is ever
+ * reported back. The share of players who have each one comes from Steam and is
+ * worth showing: it is what tells you an achievement is rare.
  */
 export function AchievementsTab({
   game,

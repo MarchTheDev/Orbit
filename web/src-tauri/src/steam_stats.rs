@@ -294,11 +294,12 @@ pub fn account_id(steam: &Path) -> Option<u64> {
     account_id_of(&signed_in(steam)?)
 }
 
-/// The 64-bit id of whoever the client used last, as a string.
+/// The 64-bit id of whoever the client used last.
 ///
-/// This is the same answer the Web API wants, read out of the same file, which
-/// is why nobody has to type their id into Settings.
-pub fn signed_in(steam: &Path) -> Option<String> {
+/// Only the account number in the stats file names is wanted from it, but the
+/// id is what the file holds, so this reads it as written and leaves the
+/// arithmetic to [`account_id_of`].
+fn signed_in(steam: &Path) -> Option<String> {
     let text = std::fs::read_to_string(steam.join("config").join("loginusers.vdf")).ok()?;
     let users = login_users(&text);
     users
@@ -306,16 +307,6 @@ pub fn signed_in(steam: &Path) -> Option<String> {
         .find(|(_, recent)| *recent)
         .or_else(|| users.first())
         .map(|(id, _)| id.clone())
-}
-
-/// The signed-in player across every Steam install that can be found.
-pub fn active_id64(extra: &[String]) -> Option<String> {
-    for root in crate::steam::steam_roots(extra) {
-        if let Some(id) = signed_in(&root) {
-            return Some(id);
-        }
-    }
-    None
 }
 
 /// The 64-bit id every personal account starts with.

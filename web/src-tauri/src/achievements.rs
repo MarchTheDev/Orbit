@@ -1,17 +1,19 @@
-//! Achievements, read from the game's own Steam Community page.
+//! The fallback achievement list, read from the game's own Steam Community page.
+//!
+//! The real source is the Steam client's own files, in [`crate::steam_stats`]:
+//! they hold the list *and* what the player unlocked, offline, with no key and
+//! no login. This page is what Orbit falls back to when there is no local
+//! schema for a game — one that was never run through Steam on this machine, or
+//! a library with no Steam behind it at all.
 //!
 //! The list is public: every game with achievements has a page at
 //! `steamcommunity.com/stats/<app>/achievements`, which is HTML and needs no
 //! key, no login and no SDK. That is the same page a player would read, so it
-//! is the same list, and it even carries the share of players who have each one,
-//! which is more interesting than the achievement alone.
+//! is the same list, and it even carries the share of players who have each one.
 //!
-//! Whether an achievement is ticked is the player's own mark by default, kept
-//! in the library, and nothing is ever reported back to Steam. Orbit will only
-//! claim to know what somebody unlocked when Steam itself says so: with an API
-//! key and the player's own id, [`unlocks`] asks for the real record and gets
-//! it with the moment each one happened. Without a key there is nothing to ask,
-//! so the ticks stay manual rather than guessed.
+//! What it cannot say is who has unlocked what, because it is one page for
+//! everybody. So from here every achievement arrives locked and the ticks stay
+//! the player's own, which is the honest answer rather than a guessed one.
 
 use serde::{Deserialize, Serialize};
 
@@ -156,102 +158,6 @@ fn unescape(text: &str) -> String {
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&nbsp;", " ")
-}
-
-/// One achievement the player actually has, with the moment it happened.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Unlock {
-    /// Steam's own API name, which is what the community page calls `id`.
-    pub id: String,
-    /// Seconds since the epoch. Zero when Steam did not say.
-    pub at: u64,
-}
-
-/// The part of `GetPlayerAchievements` that Orbit reads, and no more.
-///
-/// Everything is defaulted because a refused request comes back as a 200 with
-/// `success: false` and none of the rest, and that shape has to parse rather
-/// than fail before its message can be read.
-#[derive(Debug, Deserialize)]
-struct PlayerStats {
-    playerstats: PlayerStatsBody,
-}
-
-#[derive(Debug, Deserialize)]
-struct PlayerStatsBody {
-    #[serde(default)]
-    success: bool,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(default)]
-    achievements: Vec<ApiAchievement>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiAchievement {
-    #[serde(default)]
-    apiname: String,
-    /// A flag, not a bool: Steam sends `1` and `0`.
-    #[serde(default)]
-    achieved: u8,
-    #[serde(default)]
-    unlocktime: u64,
-}
-
-/// What this player has unlocked in this game, straight from Steam.
-///
-/// This is the only source that knows a real answer instead of a guess, which
-/// is why it needs a key: the record belongs to the account, and Steam will
-/// only read it out to something the account vouched for. A private profile
-/// answers `success: false`, and so does a key that belongs to somebody else,
-/// so the message is passed up rather than swallowed.
-pub async fn unlocks(app_id: u64, steam_id: &str, api_key: &str) -> Result<Vec<Unlock>, String> {
-    let client = crate::metadata::client()?;
-    let app = app_id.to_string();
-    let response = client
-        .get("https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/")
-        .query(&[
-            ("key", api_key),
-            ("steamid", steam_id),
-            ("appid", &app),
-            ("format", "json"),
-            ("l", "english"),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach the Steam API: {e}"))?;
-
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err("Steam turned that key down. Check it in Settings.".to_string());
-    }
-    if !status.is_success() {
-        return Err(format!("Steam answered {status}."));
-    }
-
-    let body: PlayerStats = response
-        .json()
-        .await
-        .map_err(|_| "Steam's answer was not the shape its API promises.".to_string())?;
-    if !body.playerstats.success {
-        // The usual reason is a private profile, which says so in its own words.
-        return Err(body
-            .playerstats
-            .error
-            .unwrap_or_else(|| "Steam would not read this profile out.".to_string()));
-    }
-
-    Ok(body
-        .playerstats
-        .achievements
-        .into_iter()
-        .filter(|row| row.achieved != 0 && !row.apiname.is_empty())
-        .map(|row| Unlock {
-            id: row.apiname,
-            at: row.unlocktime,
-        })
-        .collect())
 }
 
 #[cfg(test)]
