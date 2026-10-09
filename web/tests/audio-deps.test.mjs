@@ -163,6 +163,9 @@ for (const want of ['gst-plugins-good', 'gstreamer1.0-plugins-good', 'gstreamer1
 check('the note explains how to tell', note.includes('gst-inspect-1.0 autoaudiosink'));
 check('the tarball carries the note', /cp packaging\/linux\/portable-readme\.txt "\$portable\/README\.txt"/.test(release));
 check('the release checks it got in', /README\\\.txt\$/.test(release));
+// A verdict with nothing behind it is not much use when it turns out to be
+// wrong, so the check reports the listing as well.
+check('and reports what the tarball held', /The portable tarball contains::/.test(release));
 
 rmSync(sandbox, { recursive: true, force: true });
 

@@ -261,15 +261,18 @@ jobs:
           # The tarball keeps its files at the top level, so the check written
           # for an installed layout does not fit it.
           portable="Orbit-${version}-linux-portable.tar.gz"
-          tar -tzvf "artifacts/$portable" | grep -E '/orbit-x11$' | grep -q rwx \
+          listing=$(tar -tzvf "artifacts/$portable")
+          # Say what is actually in there. A check that only reports its own
+          # verdict leaves nothing to reason from when it is wrong.
+          echo "::notice title=The portable tarball contains::$(printf '%s' "$listing" | tr '\n' ' ')"
+          printf '%s\n' "$listing" | grep -E '/orbit-x11$' | grep -q rwx \
             || { echo "::error title=The portable tarball::the X11 wrapper is missing or cannot be run"; exit 1; }
-          tar -tzf "artifacts/$portable" | grep -qE '/orbit-x11\.desktop$' \
+          printf '%s\n' "$listing" | grep -qE '/orbit-x11\.desktop$' \
             || { echo "::error title=The portable tarball::the X11 menu entry is missing"; exit 1; }
           # The only channel that cannot declare its dependencies has to carry
           # the note about them instead.
-          tar -tzf "artifacts/$portable" | grep -qE '/README\.txt$' \
-            || { echo "::error title=The portable tarball::the note about the sound plugins is missing"; exit 1; }
-          echo "::notice title=The portable tarball::both X11 entry points are in $portable"
+          printf '%s\n' "$listing" | grep -qE '/README\.txt$' \
+            || { echo "::error title=The portable tarball::the note about the sound plugins is missing, saw: $(printf '%s' "$listing" | tr '\n' ' ')"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -448,9 +451,14 @@ jobs:
     steps:
       - name: Install what the build needs
         run: |
+          # Everything the PKGBUILD names in depends has to be here too:
+          # makepkg checks them before it will build, and exits 8 if one is
+          # missing. Keeping this list and the PKGBUILD's in step is what makes
+          # that check worth anything.
           pacman -Syu --noconfirm --needed \
             base-devel git nodejs npm sudo curl ca-certificates \
             webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg openssl \
+            gst-plugins-base gst-plugins-good gst-plugin-pipewire \
             libsoup3 xdotool
 
       # Keep the Rust compiler in step with the toolchain used by the other
