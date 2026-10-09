@@ -88,6 +88,28 @@ Try `WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit` first if all you get is a blank or
 white window: that keeps the native backend, where X11 means drawing through
 XWayland and losing fractional scaling.
 
+### If there is no sound
+
+The music is synthesized in the page, and WebKit hands it to GStreamer, which
+needs an element called `autoaudiosink`. That element is not part of WebKit and
+is not installed by it, so a system can have a working WebKit and no way to
+hear anything. The app runs normally and is simply silent.
+
+```sh
+gst-inspect-1.0 autoaudiosink
+```
+
+If that says there is no such element, install the plugins:
+
+| Distribution | Command |
+| --- | --- |
+| Arch | `pacman -S gst-plugins-base gst-plugins-good gst-plugin-pipewire` |
+| Debian, Ubuntu | `apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire` |
+| Fedora | `dnf install gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer` |
+
+The packages above ask for these themselves. Only the portable tarball needs
+this done by hand, and it carries the same note as `README.txt`.
+
 ## Where things are kept
 
 In `%APPDATA%\com.orbit.launcher`:

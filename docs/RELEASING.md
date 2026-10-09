@@ -150,3 +150,43 @@ with a "does not exist" naming the target as though it were the source.
 
 Arch takes theirs from the `source` array and `package()` in the PKGBUILD, and
 `sha256sums` has to have one entry per source or `makepkg` refuses to run.
+
+## The sound needs GStreamer plugins that WebKit does not ask for
+
+The music is synthesized in the page with the Web Audio API. On Linux, WebKit
+routes that through GStreamer as `webkitwebaudiosrc ! audioconvert !
+audioresample ! autoaudiosink`. If `autoaudiosink` cannot be created, WebKit
+logs a single line and returns: the `AudioContext` still exists, still reports
+itself running, and the app is silent with no error anywhere the front end can
+see. There is nothing to catch in the app, which is why this is a packaging
+concern.
+
+`autoaudiosink` is in `gst-plugins-good`, and `audioconvert` and
+`audioresample` are in `gst-plugins-base`. Neither is pulled in by WebKit,
+which depends only on the `-libs` split packages that carry libraries rather
+than plugin files. The PipeWire plugin gives `autoaudiosink` a native sink on a
+PipeWire session; where PulseAudio is the daemon, `pulsesink` from
+`gst-plugins-good` reaches it instead.
+
+The names differ per distribution and are easy to get subtly wrong:
+
+| | base | good | PipeWire plugin |
+| --- | --- | --- | --- |
+| Arch | `gst-plugins-base` | `gst-plugins-good` | `gst-plugin-pipewire` |
+| Debian, Ubuntu | `gstreamer1.0-plugins-base` | `gstreamer1.0-plugins-good` | `gstreamer1.0-pipewire` |
+| Fedora | `gstreamer1-plugins-base` | `gstreamer1-plugins-good` | `pipewire-gstreamer` |
+
+Arch takes them from `depends` in the PKGBUILD; the deb and the rpm take them
+from `bundle.linux.deb.depends` and `bundle.linux.rpm.depends`. Tauri's CLI
+starts those lists from the config and pushes `libwebkit2gtk-4.1-0` and
+`libgtk-3-0` onto them, so WebKit must not be restated here.
+
+A dependency nothing has heard of does not fail a build — it fails an install,
+on somebody else's machine. So each Linux job runs
+[packaging/linux/check-deps.sh](../packaging/linux/check-deps.sh), which reads
+the dependencies back out of the finished package and resolves every one of
+them against the distribution that is about to receive it.
+
+The portable tarball has no dependency field to put these in, so it carries
+[portable-readme.txt](../packaging/linux/portable-readme.txt) as `README.txt`
+instead.

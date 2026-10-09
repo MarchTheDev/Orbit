@@ -33,6 +33,7 @@ const checks = [
   'tests/updates.test.mjs',
   'tests/version.test.mjs',
   'tests/x11-entry.test.mjs',
+  'tests/audio-deps.test.mjs',
 ];
 
 try {

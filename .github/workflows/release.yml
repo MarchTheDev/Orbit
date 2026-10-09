@@ -239,6 +239,9 @@ jobs:
           cp packaging/linux/orbit-x11 "$portable/orbit-x11"
           cp packaging/linux/orbit-x11.desktop "$portable/orbit-x11.desktop"
           cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
+          # A tarball cannot declare dependencies, so it says what it needs
+          # instead. The packaged builds ask for the same things themselves.
+          cp packaging/linux/portable-readme.txt "$portable/README.txt"
           tar -czf "artifacts/$portable.tar.gz" "$portable"
 
       # Bundling quietly leaving it out is the failure mode worth guarding, so
@@ -248,6 +251,12 @@ jobs:
         run: |
           version="${ORBIT_VERSION#v}"
           bash packaging/linux/check-x11.sh "The deb" "artifacts/orbit_${version}_amd64.deb" dpkg-deb --contents
+          # This deb is built on 22.04 so that it installs anywhere newer, so
+          # that is the release its dependencies are checked against. The rpm
+          # beside it is checked in the Fedora job, which has the repositories
+          # to check it against.
+          bash packaging/linux/check-deps.sh "The deb" apt "artifacts/orbit_${version}_amd64.deb" \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire
           bash packaging/linux/check-x11.sh "The rpm" "artifacts/orbit-${version}-1.x86_64.rpm" rpm -qlvp
           # The tarball keeps its files at the top level, so the check written
           # for an installed layout does not fit it.
@@ -256,6 +265,10 @@ jobs:
             || { echo "::error title=The portable tarball::the X11 wrapper is missing or cannot be run"; exit 1; }
           tar -tzf "artifacts/$portable" | grep -qE '/orbit-x11\.desktop$' \
             || { echo "::error title=The portable tarball::the X11 menu entry is missing"; exit 1; }
+          # The only channel that cannot declare its dependencies has to carry
+          # the note about them instead.
+          tar -tzf "artifacts/$portable" | grep -qE '/README\.txt$' \
+            || { echo "::error title=The portable tarball::the note about the sound plugins is missing"; exit 1; }
           echo "::notice title=The portable tarball::both X11 entry points are in $portable"
 
       - uses: actions/upload-artifact@v4
@@ -336,6 +349,8 @@ jobs:
         run: |
           version="${ORBIT_VERSION#v}"
           bash packaging/linux/check-x11.sh "The Debian deb" "artifacts/orbit_${version}_debian_amd64.deb" dpkg-deb --contents
+          bash packaging/linux/check-deps.sh "The Debian deb" apt "artifacts/orbit_${version}_debian_amd64.deb" \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire
 
       - uses: actions/upload-artifact@v4
         with:
@@ -412,6 +427,8 @@ jobs:
         run: |
           version="${ORBIT_VERSION#v}"
           bash packaging/linux/check-x11.sh "The Fedora rpm" "artifacts/orbit-${version}-1.fc.x86_64.rpm" rpm -qlvp
+          bash packaging/linux/check-deps.sh "The Fedora rpm" dnf "artifacts/orbit-${version}-1.fc.x86_64.rpm" \
+            gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer
 
       - uses: actions/upload-artifact@v4
         with:
@@ -504,6 +521,8 @@ jobs:
         run: |
           version="${ORBIT_VERSION#v}"
           bash packaging/linux/check-x11.sh "The Arch package" "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" tar -tvf
+          bash packaging/linux/check-deps.sh "The Arch package" pacman "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" \
+            gst-plugins-base gst-plugins-good gst-plugin-pipewire
 
       - uses: actions/upload-artifact@v4
         with:

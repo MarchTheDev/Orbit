@@ -21,7 +21,17 @@ pkgdesc="A library for the games on your PC: launches them, times them, and show
 arch=('x86_64')
 url="https://github.com/MarchTheDev/Orbit"
 license=('GPL-3.0-only')
-depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
+# The GStreamer plugins are not optional and webkit2gtk-4.1 does not ask for
+# them: it depends only on gst-plugins-base-libs and gst-plugins-bad-libs, which
+# are libraries, not the plugin files that carry the elements. WebKit plays
+# Orbit's sound through `audioconvert ! audioresample ! autoaudiosink`, and
+# autoaudiosink lives in gst-plugins-good. Without it the pipeline is never
+# built, WebKit logs one line, and the app stays silent with no error anywhere.
+# gst-plugins-base carries audioconvert and audioresample, and the PipeWire
+# plugin gives autoaudiosink a native sink to prefer on a PipeWire session;
+# where PulseAudio is the daemon instead, pulsesink from -good reaches it.
+depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl'
+         'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire')
 options=('!strip')
 source=('orbit' 'orbit.desktop' 'orbit-x11' 'orbit-x11.desktop' 'orbit.png' 'LICENSE')
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
