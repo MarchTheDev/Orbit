@@ -175,11 +175,21 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
         });
 
-    if let Some(icon) = app.default_window_icon().cloned() {
-        tray = tray.icon(icon);
-    }
+    // Without an icon the entry is there but nothing is drawn, and most panels
+    // show that as no entry at all. Say so, and do not count the tray as ready:
+    // a hidden window with an invisible way back is the same as no way back.
+    let has_icon = match app.default_window_icon().cloned() {
+        Some(icon) => {
+            tray = tray.icon(icon);
+            true
+        }
+        None => {
+            log::warn!("no window icon available, so the tray entry may be invisible");
+            false
+        }
+    };
     tray.build(app)?;
-    TRAY_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    TRAY_READY.store(has_icon, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
@@ -1245,6 +1255,21 @@ pub fn run() {
                 let store = store.clone();
                 let cache = sizes.clone();
                 std::thread::spawn(move || {
+                    // Start from what the last run found, if it is still recent
+                    // enough to believe. A week is long enough for a library to
+                    // have moved on and short enough that the numbers are not
+                    // fiction; anything older is walked again from scratch.
+                    const FRESH_FOR: u64 = 7 * 24 * 60 * 60;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if let Some((measured_at, known)) = store.load_sizes() {
+                        if now.saturating_sub(measured_at) < FRESH_FOR {
+                            cache.seed(known);
+                        }
+                    }
+
                     let mut paths: Vec<String> = store
                         .load_settings()
                         .and_then(|s| s.get("libraryFolders").cloned())
@@ -1260,6 +1285,9 @@ pub fn run() {
                     paths.sort();
                     paths.dedup();
                     cache.measure(&paths);
+                    if let Err(error) = store.save_sizes(now, &cache.snapshot()) {
+                        log::warn!("could not remember the folder sizes: {error}");
+                    }
                 });
             }
 

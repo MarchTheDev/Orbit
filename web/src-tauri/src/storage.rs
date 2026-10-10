@@ -78,6 +78,20 @@ impl SizeCache {
         out
     }
 
+    /// Take the sizes a previous run measured, so they need not be walked again.
+    ///
+    /// Both spellings go in for each path, for the same reason `measure` keeps
+    /// both: a lookup arrives as whichever string the caller happened to hold.
+    pub fn seed(&self, sizes: std::collections::HashMap<String, u64>) {
+        if let Ok(mut map) = self.sizes.lock() {
+            for (path, size) in sizes {
+                let normalized = key(&path);
+                map.insert(normalized, size);
+                map.insert(path, size);
+            }
+        }
+    }
+
     /// Forget everything, so the next measurement is a fresh walk of the disk.
     pub fn clear(&self) {
         if let Ok(mut map) = self.sizes.lock() {

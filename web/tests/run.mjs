@@ -34,6 +34,7 @@ const checks = [
   'tests/version.test.mjs',
   'tests/x11-entry.test.mjs',
   'tests/audio-deps.test.mjs',
+  'tests/hover-tint.test.mjs',
 ];
 
 try {

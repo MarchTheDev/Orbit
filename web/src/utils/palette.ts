@@ -73,10 +73,26 @@ function tintOf(hue: number | null, light: number): string {
  *
  * `fromCover` is the player's setting; `active` is whether the pointer is over
  * the tile, which is what starts the measuring.
+ *
+ * The colour is kept once it is known, rather than dropped when the pointer
+ * leaves. It used to fall back to the plain shadow on every unhover, so every
+ * hover afterwards repainted the tile a second time while it was still fading
+ * in — and the very first hover repainted it whenever the picture finished
+ * arriving, which on a cover fetched over the network was visibly late. That
+ * two-step change on each pass of the mouse is what read as flicker.
+ *
+ * What is still true is that nothing is measured before a tile is hovered, and
+ * that the first hover of a game whose picture has not been measured yet fades
+ * from shadow to its own colour once, when the picture arrives.
  */
 export function useHoverTint(game: Game, fromCover: boolean, active: boolean): string {
-  const url = fromCover && active ? coverArt(game) : null;
-  const [tint, setTint] = useState<string>(() => (fromCover ? SHADOW : themeTint()));
+  // Deliberately not gated on `active`: the tile keeps the colour it already
+  // has while the pointer is away, and a cover that was measured earlier in
+  // this session starts out correct instead of starting out dark.
+  const url = fromCover ? coverArt(game) : null;
+  const [tint, setTint] = useState<string>(() =>
+    fromCover ? tintOf(url ? CACHE.get(url) ?? null : null, 26) : themeTint(),
+  );
 
   useEffect(() => {
     if (!fromCover) {
@@ -92,6 +108,9 @@ export function useHoverTint(game: Game, fromCover: boolean, active: boolean): s
       setTint(tintOf(known, 26));
       return;
     }
+    // Wait for the pointer rather than measuring the whole library, but do not
+    // undo the colour when it leaves.
+    if (!active) return;
     let alive = true;
     void dominant(url).then((hue) => {
       CACHE.set(url, hue);
@@ -100,7 +119,7 @@ export function useHoverTint(game: Game, fromCover: boolean, active: boolean): s
     return () => {
       alive = false;
     };
-  }, [url, fromCover]);
+  }, [url, fromCover, active]);
 
   return tint;
 }

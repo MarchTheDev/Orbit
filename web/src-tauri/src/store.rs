@@ -44,6 +44,37 @@ impl Store {
     pub fn save_settings(&self, settings: &Settings) -> Result<(), String> {
         write_json(&self.settings_file(), settings)
     }
+
+    fn sizes_file(&self) -> PathBuf {
+        self.root.join("sizes.json")
+    }
+
+    /// The folder sizes the last run measured, and when it measured them.
+    ///
+    /// A size is found by walking the folder, which across a library of
+    /// installed games is a great deal of disk. They used to be thrown away at
+    /// every exit, so starting Orbit walked every game folder all over again —
+    /// and on a library that had just been imported, that was enough disk to
+    /// keep the window from drawing while it was happening. This is a cache
+    /// rather than a record: the Storage page can ask for a fresh walk whenever
+    /// it likes.
+    pub fn load_sizes(&self) -> Option<(u64, std::collections::HashMap<String, u64>)> {
+        let saved: serde_json::Value = read_json(&self.sizes_file())?;
+        let at = saved.get("measuredAt")?.as_u64()?;
+        let sizes = serde_json::from_value(saved.get("sizes")?.clone()).ok()?;
+        Some((at, sizes))
+    }
+
+    pub fn save_sizes(
+        &self,
+        at: u64,
+        sizes: &std::collections::HashMap<String, u64>,
+    ) -> Result<(), String> {
+        write_json(
+            &self.sizes_file(),
+            &serde_json::json!({ "measuredAt": at, "sizes": sizes }),
+        )
+    }
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
