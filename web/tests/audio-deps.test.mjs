@@ -96,7 +96,9 @@ const run = (args) => {
   try {
     return {
       code: 0,
-      out: execFileSync(checker, args, {
+      // Through bash, for the same reason as in x11-entry: the executable bit
+      // has its own check, and these are about what the script decides.
+      out: execFileSync('bash', [checker, ...args], {
         encoding: 'utf8',
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
       }),
