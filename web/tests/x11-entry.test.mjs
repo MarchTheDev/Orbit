@@ -152,4 +152,31 @@ check('it checks the portable tarball too', /orbit-x11\$' \| grep -q rwx/.test(r
 
 rmSync(fixture, { recursive: true, force: true });
 
+console.log('every entry point and script keeps its executable bit');
+
+// Git stores the bit, and it is easy to lose: a file added through the web
+// interface is stored 100644, and the bundler then copies the wrapper into the
+// package preserving that, so what ships is a /usr/bin/orbit-x11 nobody can
+// run. tauri-build.sh sets the bit before building so a package cannot go out
+// broken, but the repository being wrong is still worth failing over.
+for (const entry of [
+  ['packaging', 'linux', 'orbit-x11'],
+  ['packaging', 'linux', 'appimage', 'AppRun'],
+  ['packaging', 'linux', 'check-x11.sh'],
+  ['packaging', 'linux', 'check-deps.sh'],
+  ['packaging', 'linux', 'check-appimage.sh'],
+]) {
+  const bits = statSync(path.join(root, ...entry)).mode & 0o777;
+  check(`${entry.join('/')} is executable`, (bits & 0o111) !== 0, `mode ${bits.toString(8)}`);
+}
+
+// The build sets the bit itself, so a checkout that lost it cannot ship a
+// package nobody can run. Without this, the failure only shows up in three
+// separate jobs after a full build.
+const builder = read('packaging', 'tauri-build.sh');
+check('the build sets the executable bit before bundling',
+  /chmod \+x "\$repository\/\$entry_point"/.test(builder) &&
+  builder.includes('packaging/linux/orbit-x11') &&
+  builder.includes('packaging/linux/appimage/AppRun'));
+
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

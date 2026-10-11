@@ -8,6 +8,25 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# The executable bit lives in Git, and Git gives it up more easily than it
+# should: a file added through the web interface is stored without it, and a
+# checkout on a filesystem with no such bit reports one either way. The bundler
+# copies the X11 wrapper into the package preserving whatever mode it found, so
+# a lost bit ships a /usr/bin/orbit-x11 nobody can run - and check-x11.sh only
+# catches that after a full build, in three separate jobs.
+#
+# Setting it here costs nothing and makes every package right whatever the
+# checkout said. It says so out loud, because the bit being missing in the first
+# place is the thing worth knowing about.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository=$(dirname "$here")
+for entry_point in packaging/linux/orbit-x11 packaging/linux/appimage/AppRun; do
+  if [ -f "$repository/$entry_point" ] && [ ! -x "$repository/$entry_point" ]; then
+    echo "::notice title=Executable bit::$entry_point was checked out without the executable bit; setting it"
+    chmod +x "$repository/$entry_point"
+  fi
+done
+
 log="${GITHUB_WORKSPACE:-$PWD}/tauri-build.log"
 rm -f "$log"
 
