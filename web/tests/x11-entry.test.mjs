@@ -122,7 +122,10 @@ const write = (name, text) => {
 };
 const run = (at) => {
   try {
-    return { code: 0, out: execFileSync(checker, ['A package', at, 'cat'], { encoding: 'utf8' }) };
+    // Through bash, not directly: whether the file carries the executable bit
+    // is asserted above on purpose, and letting it break these too would turn
+    // one missing bit into twenty failures about packages that are fine.
+    return { code: 0, out: execFileSync('bash', [checker, 'A package', at, 'cat'], { encoding: 'utf8' }) };
   } catch (error) {
     return { code: error.status, out: `${error.stdout ?? ''}${error.stderr ?? ''}` };
   }
