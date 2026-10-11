@@ -80,7 +80,7 @@ Grab the file for your system from the
 
 ## Where things are kept
 
-In `%APPDATA%\com.orbit.launcher`:
+In `\com.orbit.launcher`:
 
 - `orbit.db` - the library, every session and every log note, in SQLite
 - `settings.json` - theme, library folders, and whether to look games up
