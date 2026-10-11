@@ -1,7 +1,14 @@
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
 /** The Library has an Unplayed filter; Backlog is its own page. */
 export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
-export type OtherLauncher = 'Epic Games' | 'Ubisoft Connect' | 'GOG Galaxy' | 'EA app';
+export type OtherLauncher =
+  | 'Epic Games'
+  | 'Ubisoft Connect'
+  | 'GOG Galaxy'
+  | 'EA app'
+  | 'Xbox'
+  | 'Heroic Games Library'
+  | 'Amazon Luna';
 export type LauncherId = 'Steam' | OtherLauncher;
 export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
@@ -156,6 +163,13 @@ export interface Achievement {
   percent: number;
   /** The player's own mark, kept in the library. Locked until they say so. */
   unlocked: boolean;
+  /**
+   * When it was unlocked, in seconds since the epoch.
+   *
+   * Only Steam knows this, and only when it has been asked with a key. Zero
+   * means locked, or unlocked by hand, which has no moment attached.
+   */
+  unlockedAt?: number;
 }
 
 /** A suggested game while a title is being typed. */
@@ -289,6 +303,21 @@ export interface Settings {
    * player asking for it.
    */
   steamOnLaunch: boolean;
+  /**
+   * Where Steam is installed, for the installs Orbit cannot find on its own.
+   *
+   * Linux and sandboxed builds are the usual reason: Steam under Flatpak or snap
+   * sits in a folder of its own, and a player who relocated it has moved it
+   * somewhere no list of guesses covers. Empty means Orbit works it out from the
+   * machine, which is enough on Windows.
+   */
+  steamPath?: string;
+  /**
+   * Where a launcher keeps its files, when the places Orbit looks by default do
+   * not cover it: a Flatpak sandbox, a portable install, a drive the walk does
+   * not reach. Only launchers that can be pointed somewhere appear here.
+   */
+  launcherPaths?: Partial<Record<OtherLauncher, string>>;
   /** Other launcher libraries to rescan on Orbit launch. Off for every launcher by default. */
   launcherScanOnLaunch?: OtherLauncher[];
   /** Whether Orbit should be registered to start when the user signs in. Off by default. */
@@ -297,6 +326,14 @@ export interface Settings {
   launchOnStartupBackground?: boolean;
   /** Add or remove Orbit's per-user Windows Explorer action for `.exe` files. On by default. */
   openExeInOrbit?: boolean;
+  /**
+   * A SteamGridDB API key, for the community's artwork on top of Steam's own.
+   *
+   * Empty means SteamGridDB is never asked: the store's catalogue needs no key
+   * and stays the default. A key is free but it is personal, so Orbit neither
+   * ships one nor invents one.
+   */
+  sgdbApiKey?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */
@@ -362,7 +399,8 @@ export interface Settings {
   startupAnimation?: boolean;
   /**
    * Music to play behind everything else, made by the app rather than shipped
-   * with it. Silent until it is turned on.
+   * with it. On unless it has been turned off, so that a fresh install is not
+   * silent in a way that reads as broken.
    */
   sound?: {
     enabled: boolean;

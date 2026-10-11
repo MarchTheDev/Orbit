@@ -1,0 +1,148 @@
+name: Checks
+
+# Runs the tests on every push, so a change is checked before it is ever put
+# into an installer.
+#
+# release.yml only builds. Building proves the program compiles, which is worth
+# knowing, but it says nothing about whether the achievements page is still
+# parsed the same way, whether the version maths still rounds the way the
+# updater expects, or whether a move still cleans up after itself. Those have
+# tests, and until now nothing ran them: a mistake was only found by reading a
+# failed build's annotations after the fact.
+#
+# This is separate from release.yml on purpose. The releases are slow because
+# they build five platforms; these are quick, and running them on every branch
+# push is the only way a Rust change gets an answer before it ships.
+#
+# Every step that pipes into `tee` says `shell: bash` on purpose. The default
+# shell here is `bash -e` without pipefail, so a failing command in a pipe is
+# reported as a success and the whole check goes green for nothing.
+
+on:
+  push:
+    # Every branch, but not tags: a release tag is already covered by the
+    # release build, and running these again on it would say nothing new.
+    branches:
+      - '**'
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the system libraries Tauri needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libfuse2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Tauri's build script checks that the front end has been built before it
+      # will compile at all, so this comes before the tests rather than in the
+      # other job.
+      - name: Build the front end
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      # `--message-format=short` puts every compile error on one line with its
+      # file and position, which is what the annotations below need.
+      #
+      # No `--locked`: the committed Cargo.lock is version 3 and a current Cargo
+      # rewrites it to version 4 on sight, so insisting on the file as it stands
+      # stops the tests before they start. The release builds have never used
+      # `--locked` either, so they resolve the same way this does.
+      - name: cargo test
+        working-directory: web/src-tauri
+        shell: bash
+        run: |
+          set -o pipefail
+          # --color=never because cargo colourises even into a pipe, and the
+          # escape codes sit between the file name and the word "error", which
+          # is exactly where the greps below are looking.
+          cargo test --color=never --message-format=short 2>&1 | tee ../cargo.log
+
+      # A failed run's log cannot always be downloaded, so anything worth
+      # reading is turned into an annotation, which can.
+      - name: Put the failures where they can be read
+        if: failure()
+        run: |
+          sed 's/\x1b\[[0-9;]*m//g' web/cargo.log > web/plain.log
+          grep -E "^[^ ]*\.rs:[0-9]+:[0-9]+: error" web/plain.log \
+            | head -25 \
+            | sed -E 's/^([^:]+):([0-9]+):([0-9]+): /::error file=\1,line=\2,col=\3::/' || true
+          grep -E "error(\[E[0-9]+\])?:|panicked at|FAILED|^failures:" web/plain.log \
+            | head -25 | sed -E 's/^/::error ::/' || true
+          tail -20 web/plain.log | sed -E 's/^/::error ::/' || true
+
+      # Green is only worth something if the tests ran, and the log that says so
+      # cannot be read from here. So the count goes somewhere it can be read.
+      - name: Say what ran
+        if: always()
+        run: |
+          sed 's/\x1b\[[0-9;]*m//g' web/cargo.log > web/plain.log
+          results="$(grep -hE '^test result:' web/plain.log | tr -d '\r' | paste -sd' ' -)"
+          echo "::notice title=Rust tests::${results:-nothing ran; no test result line was printed}"
+
+  web:
+    name: Front end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Not 20, which release.yml builds with. The app itself needs no Node
+          # at all, but these checks do: jsdom pulls in undici, which will not
+          # load before Node 22.19, and the whole run dies inside it before a
+          # single check is reached.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Types
+        working-directory: web
+        run: ./node_modules/.bin/tsc --noEmit
+
+      - name: Tests
+        working-directory: web
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee ../web.log
+
+      - name: Put the failures where they can be read
+        if: failure()
+        run: tail -25 web.log | sed -E 's/^/::error ::/' || true
+
+      - name: Say what ran
+        if: always()
+        run: |
+          passed="$(grep -cE '^  ok ' web.log || true)"
+          echo "::notice title=Front end::${passed} checks passed; last line: $(tail -1 web.log)"

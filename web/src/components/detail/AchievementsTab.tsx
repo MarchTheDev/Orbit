@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Lock, RefreshCw, Sparkles, Trophy } from 'lucide-react';
 import type { Achievement, Game } from '../../types';
 import { fetchAchievements } from '../../services/native';
+import { fmtDate } from '../../utils/format';
 import { Cover } from '../ui/Cover';
 import { SearchField } from '../ui/SearchField';
 import { cn } from '../../utils/cn';
@@ -9,11 +10,15 @@ import { cn } from '../../utils/cn';
 /**
  * The game's achievements, read from its Steam Community page.
  *
- * Whether an achievement is unlocked is the player's own mark: Orbit has no way
- * of knowing what somebody has done on their Steam account, so nothing is
- * assumed and nothing is reported. Every one starts locked, and clicking it is
- * the whole interaction. The share of players who have each one comes from Steam
- * and is worth showing: it is what tells you an achievement is rare.
+ * Whether an achievement is unlocked is the player's own mark, and clicking it
+ * is the whole interaction — unless the Steam client on this machine has the
+ * game, in which case it already knows the list and the moment each one
+ * happened, needs nothing to be asked, and overwrites the ticks in both
+ * directions because it knows what has *not* been unlocked too. For a game with
+ * no local record the list comes from the community page instead, which cannot
+ * say who has what, so the ticks stay the player's own. Nothing is ever
+ * reported back. The share of players who have each one comes from Steam and is
+ * worth showing: it is what tells you an achievement is rare.
  */
 export function AchievementsTab({
   game,
@@ -69,9 +74,16 @@ export function AchievementsTab({
   }, [rows, query, show]);
 
   const toggle = (id: string) => {
-    const next: Achievement[] = rows.map((a) => (a.id === id ? { ...a, unlocked: !a.unlocked } : a));
+    const next: Achievement[] = rows.map((a) =>
+      // Locking it again by hand drops the moment Steam gave it: that date
+      // described a real unlock, not this tick.
+      a.id === id ? { ...a, unlocked: !a.unlocked, unlockedAt: a.unlocked ? 0 : a.unlockedAt } : a,
+    );
     onUpdate({ achievements: next });
   };
+
+  /** Anything Steam itself said, as opposed to a tick done here. */
+  const synced = rows.some((a) => (a.unlockedAt ?? 0) > 0);
 
   const pct = rows.length > 0 ? Math.round((unlocked / rows.length) * 100) : 0;
 
@@ -84,12 +96,13 @@ export function AchievementsTab({
             <Trophy className="size-4 text-accent" />
             Achievements
           </h3>
-          {/* Just the count and the share: how the ticks got there is not the
-              page's business. */}
+          {/* The count and the share, plus whether Steam had a hand in it. */}
           <p className="text-xs text-muted">
             {rows.length === 0
               ? 'Nothing read yet. Orbit reads the list from the game\'s Steam page.'
-              : `${unlocked} of ${rows.length} unlocked · ${pct}%`}
+              : `${unlocked} of ${rows.length} unlocked · ${pct}%${
+                  synced ? ' · read from Steam' : ''
+                }`}
           </p>
           {rows.length > 0 && (
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-bg">
@@ -170,6 +183,13 @@ export function AchievementsTab({
                   <span className={cn('block truncate text-sm font-medium', !a.unlocked && 'text-muted')}>{a.name}</span>
                   {a.description && <span className="block truncate text-[11px] text-muted">{a.description}</span>}
                 </span>
+                {/* The day it happened is the one thing Steam can say that a
+                    tick by hand cannot. */}
+                {(a.unlockedAt ?? 0) > 0 && (
+                  <span className="hidden shrink-0 text-[11px] text-muted sm:block">
+                    {fmtDate(new Date((a.unlockedAt ?? 0) * 1000).toISOString())}
+                  </span>
+                )}
                 <span className="shrink-0 text-right">
                   {a.percent > 0 && <span className="block text-[11px] text-muted">{a.percent}% have it</span>}
                   <span

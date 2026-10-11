@@ -1,0 +1,27 @@
+#!/bin/sh
+# Orbit's AppImage entry point.
+#
+# An AppImage is mounted read-only and run from wherever it was mounted, so
+# nothing inside it can rely on being on the PATH. Every path here is resolved
+# relative to this file rather than assumed.
+#
+# WEBKIT_DISABLE_DMABUF_RENDERER is set with := rather than = so that it is a
+# default and not an override: a player who has already worked out what their
+# session needs can set it to 0 and keep DMA-BUF. It is on by default because
+# the AppImage is the package people reach for on a system nobody tested, and a
+# window that never paints is a worse first impression than a slightly slower
+# one. See the X11 note in the README for the other half of this.
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+: "${WEBKIT_DISABLE_DMABUF_RENDERER:=1}"
+export WEBKIT_DISABLE_DMABUF_RENDERER
+
+# The X11 menu entry passes --x11 here rather than running the orbit-x11
+# wrapper: inside the image the wrapper's bare `orbit` would not resolve, and
+# this is the same one binary either way.
+if [ "${1-}" = --x11 ]; then
+    shift
+    exec env GDK_BACKEND=x11 "$HERE/usr/bin/orbit" "$@"
+fi
+
+exec "$HERE/usr/bin/orbit" "$@"

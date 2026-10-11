@@ -1,15 +1,19 @@
-//! Achievements, read from the game's own Steam Community page.
+//! The fallback achievement list, read from the game's own Steam Community page.
+//!
+//! The real source is the Steam client's own files, in [`crate::steam_stats`]:
+//! they hold the list *and* what the player unlocked, offline, with no key and
+//! no login. This page is what Orbit falls back to when there is no local
+//! schema for a game — one that was never run through Steam on this machine, or
+//! a library with no Steam behind it at all.
 //!
 //! The list is public: every game with achievements has a page at
 //! `steamcommunity.com/stats/<app>/achievements`, which is HTML and needs no
 //! key, no login and no SDK. That is the same page a player would read, so it
-//! is the same list, and it even carries the share of players who have each one,
-//! which is more interesting than the achievement alone.
+//! is the same list, and it even carries the share of players who have each one.
 //!
-//! What Orbit does with them is deliberately modest: it reads the list, and
-//! whether an achievement is ticked is the player's own mark, kept in the
-//! library. Nothing is reported to Steam and nothing is written to disk, because
-//! claiming to know what somebody unlocked on their account would be a lie.
+//! What it cannot say is who has unlocked what, because it is one page for
+//! everybody. So from here every achievement arrives locked and the ticks stay
+//! the player's own, which is the honest answer rather than a guessed one.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,10 +29,14 @@ pub struct Achievement {
     pub icon: String,
     /// The share of players who have it, as a percentage.
     pub percent: f64,
-    /// Whether the player has ticked it. Read back as it was saved; a fresh
-    /// list is all locked, which is the honest default: Orbit does not know.
+    /// Whether the player has it. Read back as it was saved; a fresh list is
+    /// all locked, which is the honest default: Orbit does not know.
     #[serde(default)]
     pub unlocked: bool,
+    /// When it was unlocked, as seconds since the epoch. Zero means "not
+    /// unlocked", or "unlocked, but nobody said when" for a tick done by hand.
+    #[serde(default)]
+    pub unlocked_at: u64,
 }
 
 /// Every achievement for an app, in the order the page lists them.
@@ -93,6 +101,7 @@ fn parse(html: &str, app_id: u64) -> Vec<Achievement> {
             icon: format!("https://shared.fastly.steamstatic.com/{icon_path}"),
             percent: first_percent(row),
             unlocked: false,
+            unlocked_at: 0,
         });
     }
     out

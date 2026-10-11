@@ -6,7 +6,7 @@
  * beat or singable tune: the notes are sparse points of light over a steady,
  * gently moving atmosphere.
  *
- * Sound is off until someone asks for it. If the webview has not received a
+ * Sound plays unless it has been turned off. If the webview has not received a
  * user gesture yet, playback waits quietly for the first click or key press.
  */
 
@@ -351,3 +351,4 @@ export class Ambient {
 
 /** One sound for the whole app: two of these would be two atmospheres at once. */
 export const ambient = new Ambient();
+

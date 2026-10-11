@@ -14,8 +14,11 @@ mod launch;
 mod launch_target;
 mod launchers;
 mod metadata;
+mod process;
 mod session;
+mod sgdb;
 mod steam;
+mod steam_stats;
 mod storage;
 mod store;
 mod update;
@@ -172,11 +175,21 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
         });
 
-    if let Some(icon) = app.default_window_icon().cloned() {
-        tray = tray.icon(icon);
-    }
+    // Without an icon the entry is there but nothing is drawn, and most panels
+    // show that as no entry at all. Say so, and do not count the tray as ready:
+    // a hidden window with an invisible way back is the same as no way back.
+    let has_icon = match app.default_window_icon().cloned() {
+        Some(icon) => {
+            tray = tray.icon(icon);
+            true
+        }
+        None => {
+            log::warn!("no window icon available, so the tray entry may be invisible");
+            false
+        }
+    };
     tray.build(app)?;
-    TRAY_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    TRAY_READY.store(has_icon, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
@@ -863,7 +876,27 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
         ));
     };
 
-    let picks = metadata::artwork(app_id).await?;
+    let mut picks = metadata::artwork(app_id).await?;
+
+    // The key is read here rather than passed in, because the settings file is
+    // the one place it is written and this is the only place it is used.
+    //
+    // SteamGridDB goes in front when there is a key and is skipped entirely when
+    // there is not: the store's own art is free and needs no account, so it
+    // stays the default rather than the fallback. A failure here must not lose
+    // the store's pictures, which is why it is a log line and not an error.
+    let settings = orbit.store.load_settings();
+    let sgdb_key = setting_text(&settings, "sgdbApiKey");
+    if let Some(key) = sgdb_key {
+        match sgdb::art(app_id, &key).await {
+            Ok(mut found) => {
+                found.append(&mut picks);
+                picks = found;
+            }
+            Err(e) => log::warn!("SteamGridDB offered nothing: {e}"),
+        }
+    }
+
     Ok(Artwork {
         app_id: known.or(Some(app_id)),
         picks,
@@ -871,8 +904,14 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 }
 
 /// Read fresh each time, because the share of players who have each one moves.
-/// Whether an achievement is ticked is the player's own mark and is kept in the
-/// library, so this never overwrites that.
+///
+/// Two sources, best first. The Steam client's own stats files hold the list
+/// and the moment each one was unlocked, offline, with no key, no login and no
+/// public profile — so for a game played through Steam on this machine that is
+/// the whole answer, and nothing is asked of anybody. The community page is the
+/// fallback for a game with no local schema; it lists the achievements and
+/// their rarity but cannot say who has them, so the ticks stay the player's own
+/// and are carried over.
 #[tauri::command]
 async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<achievements::Achievement>, String> {
     let game = orbit
@@ -889,9 +928,64 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         })?,
     };
 
-    let mut fetched = achievements::fetch(app_id).await?;
+    let settings = orbit.store.load_settings();
+    let extra: Vec<String> = setting_text(&settings, "steamPath")
+        .map(|path| vec![path])
+        .unwrap_or_default();
 
-    // What the player ticked comes back with the fresh list; a new achievement
+    // The client's own files come first. They are offline, need no key and no
+    // public profile, and they carry the moment each achievement happened,
+    // which is more than any of the other sources can say.
+    let local = tokio::task::spawn_blocking(move || steam_stats::read_any(app_id, &extra))
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("reading Steam's stats files failed: {e}");
+            None
+        });
+
+    // Unlock times worth believing, and where they came from. `None` means no
+    // source had an answer, so the player's own ticks stand.
+    let mut known: Option<std::collections::HashMap<String, u64>> = None;
+
+    let mut fetched = match local {
+        Some(found) => {
+            let mut rows: Vec<achievements::Achievement> = found
+                .rows
+                .into_iter()
+                .map(|row| achievements::Achievement {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    icon: steam_stats::icon_url(app_id, &row.icon),
+                    // The schema says what the achievements are, not how rare
+                    // they are. That is a separate, public, keyless question.
+                    percent: 0.0,
+                    unlocked: row.unlocked_at > 0,
+                    unlocked_at: row.unlocked_at,
+                })
+                .collect();
+            for (id, percent) in steam_stats::global_percentages(app_id).await {
+                if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                    row.percent = percent;
+                }
+            }
+            // Only believe "nothing here is unlocked" when the client actually
+            // said who is signed in. Otherwise this install's answer is silence,
+            // and silence is not the same as no.
+            if found.knows_account {
+                known = Some(
+                    rows.iter()
+                        .filter(|row| row.unlocked_at > 0)
+                        .map(|row| (row.id.clone(), row.unlocked_at))
+                        .collect(),
+                );
+            }
+            rows
+        }
+        None => achievements::fetch(app_id).await?,
+    };
+
+    // What the player ticked comes back with a fresh list; a new achievement
     // arrives locked, which is the honest default.
     let ticked: std::collections::HashSet<String> = game
         .achievements
@@ -899,10 +993,45 @@ async fn achievements_fetch(orbit: State<'_, Orbit>, game_id: String) -> Result<
         .filter(|a| a.get("unlocked").and_then(|v| v.as_bool()).unwrap_or(false))
         .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(str::to_string))
         .collect();
+    let when: std::collections::HashMap<String, u64> = game
+        .achievements
+        .iter()
+        .filter_map(|a| {
+            let id = a.get("id")?.as_str()?;
+            let at = a.get("unlockedAt")?.as_u64()?;
+            (at > 0).then_some((id.to_string(), at))
+        })
+        .collect();
+
     for row in &mut fetched {
-        row.unlocked = ticked.contains(&row.id);
+        match &known {
+            Some(found) => {
+                row.unlocked = found.contains_key(&row.id);
+                row.unlocked_at = found.get(&row.id).copied().unwrap_or(0);
+            }
+            None => {
+                row.unlocked = ticked.contains(&row.id);
+                // A time read earlier is worth keeping, even though a tick done
+                // by hand has none.
+                row.unlocked_at = when.get(&row.id).copied().unwrap_or(0);
+            }
+        }
     }
     Ok(fetched)
+}
+
+/// A non-blank string setting, read from the settings file.
+///
+/// Settings is a bag of JSON rather than a struct, so every optional field is
+/// picked out the same way: present, a string, and not just spaces.
+fn setting_text(settings: &Option<Settings>, key: &str) -> Option<String> {
+    settings
+        .as_ref()?
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// Put one game's notes in the order they were dragged into.
@@ -912,9 +1041,14 @@ fn reorder_game_logs(orbit: State<'_, Orbit>, game_id: String, ids: Vec<i64>) ->
 }
 
 /// The player's installed Steam games, for the import dialog.
+///
+/// `extra_paths` is where the player says Steam is, from Settings. On Linux, and
+/// inside a sandbox, Steam is often somewhere Orbit cannot work out from the
+/// machine, and the answer to that is to be told rather than to guess harder.
 #[tauri::command]
-async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
-    tokio::task::spawn_blocking(steam::installed_games)
+async fn steam_library(extra_paths: Option<Vec<String>>) -> Result<Vec<steam::SteamGame>, String> {
+    let extra = extra_paths.unwrap_or_default();
+    tokio::task::spawn_blocking(move || steam::installed_games(&extra))
         .await
         .map_err(|e| format!("Could not read the Steam library: {e}"))?
 }
@@ -924,8 +1058,13 @@ async fn steam_library() -> Result<Vec<steam::SteamGame>, String> {
 /// This read-only scan runs only after a player selects a launcher, or when that
 /// specific library is enabled for startup. It never contacts a launcher service.
 #[tauri::command]
-async fn launcher_games(launcher: Option<String>) -> Result<Vec<launchers::LauncherGame>, String> {
-    tokio::task::spawn_blocking(move || launchers::installed_games(launcher.as_deref()))
+async fn launcher_games(
+    launcher: Option<String>,
+    path: Option<String>,
+) -> Result<Vec<launchers::LauncherGame>, String> {
+    tokio::task::spawn_blocking(move || {
+        launchers::installed_games(launcher.as_deref(), path.as_deref())
+    })
         .await
         .map_err(|e| format!("Could not scan game launchers: {e}"))?
 }
@@ -968,19 +1107,45 @@ async fn data_dir_size(orbit: State<'_, Orbit>) -> Result<u64, String> {
         .map_err(|e| format!("Could not measure the data folder: {e}"))
 }
 
-/// Open a folder in Explorer, so a path in the UI is one click from the files.
+/// Open a folder with one file in it selected, so a path in the UI is one click
+/// from the files.
+///
+/// Windows and macOS both have a "show me this one file" verb. Linux has only
+/// "open this folder", so the folder is what opens; on Orbit's own data folder
+/// that is the same thing, since the folder was the path all along. This used to
+/// run `explorer` on every platform, which on Linux is a program that does not
+/// exist, and the button simply did nothing.
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if !target.exists() {
         return Err(format!("{path} is not there any more."));
     }
-    std::process::Command::new("explorer")
-        .arg("/select,")
-        .arg(&target)
-        .spawn()
+
+    #[cfg(windows)]
+    let spawned = process::command("explorer").arg("/select,").arg(&target).spawn();
+
+    #[cfg(target_os = "macos")]
+    let spawned = process::command("open").arg("-R").arg(&target).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = {
+        // No select verb to reach for. A folder opens as itself; a file opens
+        // the folder it is in, which is the closest thing to being selected.
+        let folder = if target.is_dir() {
+            target.clone()
+        } else {
+            target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| target.clone())
+        };
+        process::command("xdg-open").arg(folder).spawn()
+    };
+
+    spawned
         .map(|_| ())
-        .map_err(|e| format!("Could not open Explorer: {e}"))
+        .map_err(|e| format!("Could not open the folder: {e}"))
 }
 
 /// Open a game's install folder itself in the system file manager.
@@ -992,11 +1157,11 @@ fn open_game_folder(path: String) -> Result<(), String> {
     }
 
     #[cfg(windows)]
-    let result = std::process::Command::new("explorer").arg(&target).spawn();
+    let result = process::command("explorer").arg(&target).spawn();
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&target).spawn();
+    let result = process::command("open").arg(&target).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
-    let result = std::process::Command::new("xdg-open").arg(&target).spawn();
+    let result = process::command("xdg-open").arg(&target).spawn();
 
     result
         .map(|_| ())
@@ -1095,6 +1260,21 @@ pub fn run() {
                 let store = store.clone();
                 let cache = sizes.clone();
                 std::thread::spawn(move || {
+                    // Start from what the last run found, if it is still recent
+                    // enough to believe. A week is long enough for a library to
+                    // have moved on and short enough that the numbers are not
+                    // fiction; anything older is walked again from scratch.
+                    const FRESH_FOR: u64 = 7 * 24 * 60 * 60;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if let Some((measured_at, known)) = store.load_sizes() {
+                        if now.saturating_sub(measured_at) < FRESH_FOR {
+                            cache.seed(known);
+                        }
+                    }
+
                     let mut paths: Vec<String> = store
                         .load_settings()
                         .and_then(|s| s.get("libraryFolders").cloned())
@@ -1110,6 +1290,9 @@ pub fn run() {
                     paths.sort();
                     paths.dedup();
                     cache.measure(&paths);
+                    if let Err(error) = store.save_sizes(now, &cache.snapshot()) {
+                        log::warn!("could not remember the folder sizes: {error}");
+                    }
                 });
             }
 

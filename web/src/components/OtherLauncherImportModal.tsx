@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, Square, SquareCheck, X } from 'lucide-react';
 import type { Game, LauncherGame, OtherLauncher } from '../types';
 import { isNative, launcherGames } from '../services/native';
+import { pickFolder } from '../services/desktop';
 import { fmtBytes } from '../utils/format';
 import { gameFromLauncher, normalizeInstallPath } from '../utils/launcherGame';
-import { Modal, btnGhost, btnPrimary } from './ui/Modal';
+import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
+import { pathPromptFor } from '../data/launchers';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
 
@@ -20,9 +22,12 @@ interface Row extends LauncherGame {
  * are added, and they are saved as timer-only games so Orbit never guesses that
  * a game can safely bypass its launcher.
  */
-export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }: {
+export function OtherLauncherImportModal({ existing, launcher, path, onPath, onAdd, onClose }: {
   existing: Game[];
   launcher?: OtherLauncher;
+  /** A folder to search as well as the defaults, kept in settings. */
+  path?: string;
+  onPath: (path: string) => void;
   onAdd: (games: Game[]) => void;
   onClose: () => void;
 }) {
@@ -31,6 +36,8 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  // Only the launchers whose files live in a folder a player can move get one.
+  const pathPrompt = launcher ? pathPromptFor(launcher) : undefined;
 
   const knownPaths = useMemo(
     () => new Set(existing.map((game) => normalizeInstallPath(game.installDir)).filter(Boolean)),
@@ -41,15 +48,22 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
     [existing],
   );
 
+  /** Whether an install is already in the library, and so listed but not tickable. */
+  const isKnown = (game: Row) =>
+    knownPaths.has(normalizeInstallPath(game.installDir)) ||
+    knownTitles.has(game.name.trim().toLocaleLowerCase());
+
   const scan = async () => {
     setBusy(true);
     setError(null);
     try {
-      const found = await launcherGames(launcher);
+      const found = await launcherGames(launcher, path);
       found.sort((a, b) => a.launcher.localeCompare(b.launcher) || a.name.localeCompare(b.name));
       setRows(found.map((game) => ({
         ...game,
-        include: !knownPaths.has(normalizeInstallPath(game.installDir)) && !knownTitles.has(game.name.trim().toLocaleLowerCase()),
+        // Unticked, so opening the dialog never puts a whole library one click
+        // away from being added. Selecting all of it is one click too.
+        include: false,
       })));
       if (found.length === 0) {
         setError(launcher
@@ -83,11 +97,29 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
   }, new Map<string, Row[]>())].sort(([a], [b]) => a.localeCompare(b));
   const selected = (rows ?? []).filter((game) => game.include);
 
+  /** Every tickable install in the whole scan, and the ones on screen. */
+  const tickable = (rows ?? []).filter((game) => !isKnown(game));
+  const inView = visible.filter((game) => !isKnown(game));
+  const allChosen = inView.length > 0 && inView.every((game) => game.include);
+
+  /**
+   * Tick or untick everything on screen at once, across every launcher shown.
+   *
+   * It follows the filter rather than the whole scan, because selecting a
+   * hundred installs that a search was hiding is the accident to avoid. The
+   * buttons on each launcher group still work one group at a time.
+   */
+  const toggleAll = () => {
+    const paths = new Set(inView.map((game) => normalizeInstallPath(game.installDir)));
+    setRows((current) => (current ?? []).map((game) =>
+      paths.has(normalizeInstallPath(game.installDir))
+        ? { ...game, include: !allChosen }
+        : game,
+    ));
+  };
+
   const toggleLauncher = (launcher: string, group: Row[]) => {
-    const importable = group.filter((game) =>
-      !knownPaths.has(normalizeInstallPath(game.installDir)) &&
-      !knownTitles.has(game.name.trim().toLocaleLowerCase()),
-    );
+    const importable = group.filter((game) => !isKnown(game));
     const allSelected = importable.length > 0 && importable.every((game) => game.include);
     const paths = new Set(importable.map((game) => normalizeInstallPath(game.installDir)));
     setRows((current) => (current ?? []).map((game) =>
@@ -127,7 +159,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
       onClose={onClose}
       footer={(
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-muted">{selected.length} of {rows?.length ?? 0} selected</span>
+          <span className="text-xs text-muted">{selected.length} of {tickable.length} selected</span>
           <div className="flex gap-2">
             <button className={`${btnGhost} flex items-center gap-2`} onClick={onClose} disabled={saving}>
               <X className="size-4" /> Cancel
@@ -148,6 +180,23 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
         )}
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* One square, on the left where the eye lands first: tick every
+              install in view, across every launcher shown, or untick them. */}
+          <button
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-muted transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={toggleAll}
+            disabled={inView.length === 0}
+            title={
+              inView.length === 0
+                ? 'Nothing here to select'
+                : `${allChosen ? 'Deselect' : 'Select'} all ${inView.length} ${
+                    inView.length === 1 ? 'install' : 'installs'
+                  }${filter.trim() ? ' the filter shows' : ''}`
+            }
+            aria-label={allChosen ? 'Deselect all' : 'Select all'}
+          >
+            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
+          </button>
           <SearchField
             value={filter}
             onChange={setFilter}
@@ -155,6 +204,37 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
             className="min-w-[14rem] flex-1"
             inputClassName="w-full"
           />
+          {pathPrompt && (
+            /* The same place Steam's custom path lives: this is the page that
+               needs it, and an empty scan is the moment to set it. */
+            <label className="min-w-[13rem] flex-1">
+              <span className="mb-1 block text-xs uppercase tracking-widest text-muted">
+                Custom path
+              </span>
+              <span className="flex gap-2">
+                <input
+                  value={path ?? ''}
+                  onChange={(e) => onPath(e.target.value)}
+                  placeholder="Leave empty to find it automatically"
+                  className={`${inputCls} min-w-0 flex-1 font-mono`}
+                  spellCheck={false}
+                />
+                {isNative() && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void pickFolder(pathPrompt, path || undefined).then(
+                        (picked) => picked && onPath(picked),
+                      )
+                    }
+                    className="shrink-0 rounded-lg border border-line bg-panel px-3 text-sm text-muted transition hover:border-accent hover:text-accent"
+                  >
+                    Browse
+                  </button>
+                )}
+              </span>
+            </label>
+          )}
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy || !isNative()}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Scanning…' : 'Scan again'}
@@ -172,10 +252,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
         {(rows?.length ?? 0) > 0 && (
           <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
             {groups.map(([launcher, games]) => {
-              const importable = games.filter((game) =>
-                !knownPaths.has(normalizeInstallPath(game.installDir)) &&
-                !knownTitles.has(game.name.trim().toLocaleLowerCase()),
-              );
+              const importable = games.filter((game) => !isKnown(game));
               const selectedInGroup = importable.filter((game) => game.include).length;
               const allSelected = importable.length > 0 && selectedInGroup === importable.length;
               return (
@@ -199,7 +276,7 @@ export function OtherLauncherImportModal({ existing, launcher, onAdd, onClose }:
                   </div>
                   <ul className="space-y-1">
                     {games.map((game) => {
-                      const known = knownPaths.has(normalizeInstallPath(game.installDir)) || knownTitles.has(game.name.trim().toLocaleLowerCase());
+                      const known = isKnown(game);
                       return (
                         <li key={`${game.launcher}:${normalizeInstallPath(game.installDir)}`}>
                           <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/50'}`}>

@@ -53,6 +53,8 @@ import { OtherLauncherImportModal } from './components/OtherLauncherImportModal'
 import { AddGameModal } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
+import { MoveProgressOrb } from './components/MoveProgressOrb';
+import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
@@ -110,6 +112,10 @@ export default function App() {
   const [showOtherLaunchers, setShowOtherLaunchers] = useState<OtherLauncher | null>(null);
   const [importFolder, setImportFolder] = useState<string | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
+  // The move lives here rather than in the dialog that starts it, so the dialog
+  // can be put away and a large game can carry on copying while the library is
+  // being used. The ring in the corner is the visible half of this.
+  const move = useGameMove((gameId, paths) => updateGame(gameId, paths));
   /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
   const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
@@ -249,7 +255,7 @@ export default function App() {
   }, [ready, settings?.updateCheck, settings?.updatePrerelease]);
 
   /**
-   * The background sound, which is off until somebody asks for it.
+   * The background sound, which plays unless somebody has asked it not to.
    *
    * Starting it is all this does. A webview that has not been touched yet
    * refuses to play audio, so `start` quietly waits for the first click and
@@ -257,12 +263,14 @@ export default function App() {
    */
   useEffect(() => {
     const sound = settings?.sound;
-    if (sound?.enabled !== true) {
+    if (sound?.enabled === false) {
       ambient.stop();
       return;
     }
-    ambient.start(sound.volume);
-    ambient.setFocused(document.hasFocus(), sound.unfocused === true);
+    // A library with no sound settings at all is the usual case, and it means
+    // "nobody has said anything", not "somebody said no".
+    ambient.start(sound?.volume ?? 0.35);
+    ambient.setFocused(document.hasFocus(), sound?.unfocused === true);
   }, [settings?.sound?.enabled, settings?.sound?.volume, settings?.sound?.unfocused]);
 
   /**
@@ -273,7 +281,7 @@ export default function App() {
    * returns.
    */
   useEffect(() => {
-    if (settings?.sound?.enabled !== true) return;
+    if (settings?.sound?.enabled === false) return;
     const look = () => ambient.setFocused(document.hasFocus(), settings?.sound?.unfocused === true);
     window.addEventListener('focus', look);
     window.addEventListener('blur', look);
@@ -408,7 +416,7 @@ export default function App() {
     if (!ready || !settings?.steamOnLaunch || steamChecked.current) return;
     steamChecked.current = true;
     void (async () => {
-      const found = await steamLibrary().catch(() => []);
+      const found = await steamLibrary(settings.steamPath ? [settings.steamPath] : undefined).catch(() => []);
       if (found.length === 0) return;
       const byId = new Set(games.filter((g) => g.meta?.steamAppId).map((g) => g.meta!.steamAppId));
       const byTitle = new Set(games.map((g) => g.title.trim().toLowerCase()));
@@ -1182,6 +1190,12 @@ export default function App() {
         <OtherLauncherImportModal
           existing={games}
           launcher={showOtherLaunchers}
+          path={settings?.launcherPaths?.[showOtherLaunchers]}
+          onPath={(picked) =>
+            setSettings({
+              launcherPaths: { ...settings?.launcherPaths, [showOtherLaunchers]: picked },
+            })
+          }
           onAdd={addGames}
           onClose={() => setShowOtherLaunchers(null)}
         />
@@ -1195,6 +1209,8 @@ export default function App() {
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
           onClose={() => setShowSteam(false)}
+          steamPath={settings.steamPath}
+          onSteamPath={(steamPath) => setSettings({ steamPath })}
         />
       )}
       {menu && menuGame && (
@@ -1206,8 +1222,14 @@ export default function App() {
           game={moving}
           folders={settings.libraryFolders}
           onClose={() => setMoveId(null)}
-          onMoved={(paths) => updateGame(moving.id, paths)}
+          job={move.job}
+          onStartMove={(game, toFolder, libraryFolders) => void move.start(game, toFolder, libraryFolders)}
+          onMinimize={() => setMoveId(null)}
         />
+      )}
+
+      {move.job && moveId !== move.job.gameId && (
+        <MoveProgressOrb job={move.job} onOpen={setMoveId} onDismiss={move.dismiss} />
       )}
 
       {!isNative() && (

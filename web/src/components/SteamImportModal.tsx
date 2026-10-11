@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Download, LoaderCircle, RefreshCw, Trash2, X } from 'lucide-react';
+import { Download, LoaderCircle, RefreshCw, Square, SquareCheck, Trash2, X } from 'lucide-react';
 import type { Game, SteamGame } from '../types';
 import { isNative, steamLibrary } from '../services/native';
+import { pickFolder } from '../services/desktop';
 import { fetchMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, fmtDate, hashHue, uid } from '../utils/format';
@@ -14,8 +15,9 @@ import { isSteamGame } from '../utils/steam';
  * Bring games over from the Steam library installed on this PC.
  *
  * Nothing here is automatic. The library is only read when this page is opened,
- * and a game is only added once it has been ticked, so a Steam account with two
- * hundred games never lands in the library by surprise.
+ * every game arrives unticked, and a game is only added once it has been ticked,
+ * so a Steam account with two hundred games never lands in the library by
+ * surprise — not even most of it.
  *
  * It is a page rather than a card: a list of games wants the whole window, with
  * the list itself taking the room and scrolling inside it, and the controls for
@@ -34,6 +36,8 @@ export function SteamImportModal({
   onRemoveSteam,
   onClose,
   from = 'library',
+  steamPath,
+  onSteamPath,
 }: {
   existing: Game[];
   /** Whether the player wants details and artwork fetched as games come in. */
@@ -51,6 +55,9 @@ export function SteamImportModal({
    * down as planned, which is what a list of games to play next is for.
    */
   from?: 'library' | 'backlog';
+  /** Where the player says Steam is, kept in Settings and edited from here. */
+  steamPath?: string;
+  onSteamPath: (path: string) => void;
 }) {
   const [rows, setRows] = useState<(SteamGame & { include: boolean })[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,7 +75,7 @@ export function SteamImportModal({
     setBusy(true);
     setError(null);
     try {
-      const found = await steamLibrary();
+      const found = await steamLibrary(steamPath ? [steamPath] : undefined);
       // Steam hands the library over in no particular order; most recently
       // played first is the order that makes this dialog useful.
       found.sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));
@@ -78,7 +85,10 @@ export function SteamImportModal({
       setRows(
         found.map((g) => ({
           ...g,
-          include: !byId.includes(g.appId) && !byTitle.includes(g.name.trim().toLowerCase()),
+          // Unticked, including the ones that are not in the library yet:
+          // arriving already chosen is how two hundred games get added by
+          // accident. Selecting is one click away, for all of them at once.
+          include: false,
         })),
       );
       if (found.length === 0) {
@@ -171,6 +181,27 @@ export function SteamImportModal({
   const visible = (rows ?? []).filter((r) => !filter || r.name.toLowerCase().includes(filter.toLowerCase()));
   const chosen = (rows ?? []).filter((r) => r.include);
 
+  /** Whether a game is already in the library, and so listed but not tickable. */
+  const isKnown = (r: SteamGame) =>
+    byId.includes(r.appId) || byTitle.includes(r.name.trim().toLowerCase());
+
+  /** Every tickable game in the whole library, and the ones on screen. */
+  const tickable = (rows ?? []).filter((r) => !isKnown(r));
+  const inView = visible.filter((r) => !isKnown(r));
+  const allChosen = inView.length > 0 && inView.every((r) => r.include);
+
+  /**
+   * Tick or untick everything on screen at once.
+   *
+   * It follows the filter rather than the whole library, because selecting two
+   * hundred games that a search was hiding is the accident this dialog exists
+   * to avoid.
+   */
+  const toggleAll = () => {
+    const ids = new Set(inView.map((r) => r.appId));
+    setRows((list) => (list ?? []).map((r) => (ids.has(r.appId) ? { ...r, include: !allChosen } : r)));
+  };
+
   return (
     <Modal
       title="From your Steam library"
@@ -180,7 +211,7 @@ export function SteamImportModal({
       footer={
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-muted">
-            {chosen.length} of {rows?.length ?? 0} selected
+            {chosen.length} of {tickable.length} selected
             {chosen.length > 0 && ` · ${fmtBytes(chosen.reduce((s, r) => s + r.sizeBytes, 0))}`}
           </span>
           <div className="flex gap-2">
@@ -207,7 +238,25 @@ export function SteamImportModal({
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* One square, on the left where the eye lands first: tick every game
+              in view, or untick them. What it will act on is in the tooltip,
+              because the icon has to carry the whole meaning on its own. */}
+          <button
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-muted transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={toggleAll}
+            disabled={inView.length === 0}
+            title={
+              inView.length === 0
+                ? 'Nothing here to select'
+                : `${allChosen ? 'Deselect' : 'Select'} all ${inView.length} ${
+                    inView.length === 1 ? 'game' : 'games'
+                  }${filter.trim() ? ' the filter shows' : ''}`
+            }
+            aria-label={allChosen ? 'Deselect all' : 'Select all'}
+          >
+            {allChosen ? <Square className="size-4" /> : <SquareCheck className="size-4" />}
+          </button>
           <SearchField
             value={filter}
             onChange={setFilter}
@@ -215,6 +264,32 @@ export function SteamImportModal({
             className="min-w-[12rem] flex-1"
             inputClassName="w-full"
           />
+          {/* Where Steam is, for the installs Orbit cannot find on its own. It
+              lives here rather than in Settings because this is the page that
+              needs it: a scan that came back empty is the moment to set it. */}
+          <label className="min-w-[13rem] flex-1">
+            <span className="mb-1 block text-xs uppercase tracking-widest text-muted">Custom Steam Path</span>
+            <span className="flex gap-2">
+              <input
+                value={steamPath ?? ''}
+                onChange={(e) => onSteamPath(e.target.value)}
+                placeholder="Leave empty to find Steam automatically"
+                className={`${inputCls} min-w-0 flex-1 font-mono`}
+                spellCheck={false}
+              />
+              {isNative() && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void pickFolder('Where is Steam installed?', steamPath || undefined).then((p) => p && onSteamPath(p))
+                  }
+                  className="shrink-0 rounded-lg border border-line bg-panel px-3 text-sm text-muted transition hover:border-accent hover:text-accent"
+                >
+                  Browse
+                </button>
+              )}
+            </span>
+          </label>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void scan()} disabled={busy}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {busy ? 'Reading Steam…' : 'Scan Steam library'}
@@ -226,7 +301,7 @@ export function SteamImportModal({
         {(rows?.length ?? 0) > 0 && (
           <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
             {visible.map((r) => {
-              const known = byId.includes(r.appId) || byTitle.includes(r.name.trim().toLowerCase());
+              const known = isKnown(r);
               return (
                 <li key={r.appId}>
                   <div

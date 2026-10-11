@@ -33,7 +33,7 @@ export function MusicButton({
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(() => typeof document === 'undefined' || document.hasFocus());
   const box = useRef<HTMLDivElement | null>(null);
-  const playing = sound?.enabled === true;
+  const playing = sound?.enabled !== false;
   const volume = sound?.volume ?? 0.35;
   const unfocused = sound?.unfocused === true;
   const animateBars = playing && volume > 0 && (focused || unfocused);

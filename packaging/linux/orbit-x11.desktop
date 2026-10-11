@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Orbit (X11)
+Comment=The same Orbit, forced onto X11 for sessions where the native Wayland window misbehaves
+# Calls `env` rather than the orbit-x11 wrapper so that this entry works even
+# if a package failed to keep the wrapper executable. Same variable, same
+# binary, no dependency on a file mode.
+Exec=env GDK_BACKEND=x11 orbit
+Icon=orbit
+Terminal=false
+Categories=Game;Utility;
+Keywords=games;library;launcher;playtime;steam;x11;xwayland;
+StartupWMClass=orbit

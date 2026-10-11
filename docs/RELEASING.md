@@ -49,7 +49,7 @@ because Cargo, npm and Tauri refuse a version without one.
 | Platform | Files |
 | --- | --- |
 | Windows | `Orbit-<version>-windows-setup.exe` (installer), `Orbit.exe` (standalone program), `Orbit-<version>-windows.msi`, `Orbit-<version>-windows-portable.zip` (program and readme) |
-| Linux | `Orbit-<version>-linux-x86_64.AppImage`, `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
+| Linux | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
 | Debian | `orbit_<version>_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
 | Fedora | `orbit-<version>-1.fc.x86_64.rpm`, built in a Fedora container |
 | Arch | `orbit-<version>-1-x86_64.pkg.tar.zst`, installed with `pacman -U` |
@@ -108,12 +108,13 @@ live in `%APPDATA%\Orbit`.
 ```sh
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 rpm
-cd web && npm ci && npx tauri build --bundles deb,appimage,rpm
+cd web && npm ci && npx tauri build --bundles deb,rpm
 ```
 
 **Arch.** Install the dependencies and build the binary, then copy it next to
-[packaging/arch/PKGBUILD](../packaging/arch/PKGBUILD) with `orbit.desktop` and
-`orbit.png` before running `makepkg -f`:
+[packaging/arch/PKGBUILD](../packaging/arch/PKGBUILD) with everything its
+`source` array names — `orbit.desktop`, `orbit-x11`, `orbit-x11.desktop`,
+`orbit.png` and `LICENSE` — before running `makepkg -f`:
 
 ```sh
 sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 libappindicator-gtk3 \
@@ -125,3 +126,97 @@ cd web && npm ci && npx tauri build --no-bundle
 Every one of these stamps the version from [`VERSION`](../VERSION) into the app,
 so bump that file first if the build needs to say something other than what is
 there.
+
+## The AppImage
+
+The AppImage is assembled by the `linux` job rather than produced by Tauri's
+`appimage` bundle target, and the reason is what that target does. It runs
+`linuxdeploy`, which copies every library it can resolve into the image. For
+WebKitGTK and GStreamer that is hundreds of megabytes taken from the runner's
+distribution, which then fail on the distributions they were not taken from.
+Orbit's image is thin instead: it carries the binary, both menu entries, the icon
+and the licence, and asks the host for the libraries exactly as every other
+package here does.
+
+`packaging/linux/appimage/AppRun` is the entry point. It resolves the binary
+relative to itself, because nothing inside a mounted image is on the `PATH`. It
+defaults `WEBKIT_DISABLE_DMABUF_RENDERER` to `1`, with `:=` rather than `=`, so
+that is a default a player can still set to `0`. And it treats `--x11` as the X11
+launch, which is what the second menu entry asks for.
+
+The two menu entries inside the image are generated from the ordinary `.desktop`
+files at build time, with `Exec` rewritten to `AppRun` and `AppRun --x11`. They
+are not a second copy kept on disk, because a second copy is a thing that drifts.
+
+`packaging/linux/check-appimage.sh` unpacks the finished image and checks all of
+it. It is the only step that can tell an image that was built from one that can
+actually be opened; `appimagetool` exits 0 either way.
+
+Two details in the build matter. `appimagetool` is pinned to a release, `1.9.1`,
+rather than `continuous`, so rebuilding a tag makes the same image. And `APP` is
+set explicitly, because with two desktop files at the root the tool would
+otherwise pick one alphabetically, and alphabetically that is the X11 one.
+
+## The X11 entry point
+
+Every Linux package ships two ways to start the same program: `orbit`, and
+`orbit-x11`, which sets `GDK_BACKEND=x11` before GDK starts. It is not a second
+build and there is nothing to configure per target — the wrapper in
+[packaging/linux/orbit-x11](../packaging/linux/orbit-x11) is the whole thing.
+Its menu entry calls `env` directly rather than the wrapper, so it keeps working
+if a package ever loses the executable bit.
+
+Adding a file to a package is easy to get wrong quietly, because a bundler that
+copies nothing does not fail. Each Linux job therefore opens the package it
+just built, through
+[packaging/linux/check-x11.sh](../packaging/linux/check-x11.sh), and fails the
+release if either file is missing or the wrapper is not executable.
+
+The deb and rpm take their files from `bundle.linux.deb.files` and
+`bundle.linux.rpm.files` in `tauri.conf.json`. Those maps read as
+`{ path in the package: file on disk }`. Tauri's own schema example shows the
+opposite and is wrong; writing it that way fails every Linux job at bundling
+with a "does not exist" naming the target as though it were the source.
+
+Arch takes theirs from the `source` array and `package()` in the PKGBUILD, and
+`sha256sums` has to have one entry per source or `makepkg` refuses to run.
+
+## The sound needs GStreamer plugins that WebKit does not ask for
+
+The music is synthesized in the page with the Web Audio API. On Linux, WebKit
+routes that through GStreamer as `webkitwebaudiosrc ! audioconvert !
+audioresample ! autoaudiosink`. If `autoaudiosink` cannot be created, WebKit
+logs a single line and returns: the `AudioContext` still exists, still reports
+itself running, and the app is silent with no error anywhere the front end can
+see. There is nothing to catch in the app, which is why this is a packaging
+concern.
+
+`autoaudiosink` is in `gst-plugins-good`, and `audioconvert` and
+`audioresample` are in `gst-plugins-base`. Neither is pulled in by WebKit,
+which depends only on the `-libs` split packages that carry libraries rather
+than plugin files. The PipeWire plugin gives `autoaudiosink` a native sink on a
+PipeWire session; where PulseAudio is the daemon, `pulsesink` from
+`gst-plugins-good` reaches it instead.
+
+The names differ per distribution and are easy to get subtly wrong:
+
+| | base | good | PipeWire plugin |
+| --- | --- | --- | --- |
+| Arch | `gst-plugins-base` | `gst-plugins-good` | `gst-plugin-pipewire` |
+| Debian, Ubuntu | `gstreamer1.0-plugins-base` | `gstreamer1.0-plugins-good` | `gstreamer1.0-pipewire` |
+| Fedora | `gstreamer1-plugins-base` | `gstreamer1-plugins-good` | `pipewire-gstreamer` |
+
+Arch takes them from `depends` in the PKGBUILD; the deb and the rpm take them
+from `bundle.linux.deb.depends` and `bundle.linux.rpm.depends`. Tauri's CLI
+starts those lists from the config and pushes `libwebkit2gtk-4.1-0` and
+`libgtk-3-0` onto them, so WebKit must not be restated here.
+
+A dependency nothing has heard of does not fail a build — it fails an install,
+on somebody else's machine. So each Linux job runs
+[packaging/linux/check-deps.sh](../packaging/linux/check-deps.sh), which reads
+the dependencies back out of the finished package and resolves every one of
+them against the distribution that is about to receive it.
+
+The portable tarball has no dependency field to put these in, so it carries
+[portable-readme.txt](../packaging/linux/portable-readme.txt) as `README.txt`
+instead.

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Orbit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.orbit.launcher",
   "build": {
     "frontendDist": "../dist",
@@ -32,7 +32,9 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["**"],
+          "allow": [
+            "**"
+          ],
           "deny": []
         }
       }
@@ -48,6 +50,30 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-pipewire"
+        ],
+        "files": {
+          "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
+        }
+      },
+      "rpm": {
+        "depends": [
+          "gstreamer1-plugins-base",
+          "gstreamer1-plugins-good",
+          "pipewire-gstreamer"
+        ],
+        "files": {
+          "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
+        }
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

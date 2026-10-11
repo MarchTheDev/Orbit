@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
-import { LAUNCHERS } from '../../data/launchers';
+import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../../data/launchers';
 import { exeInfo, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
@@ -660,7 +660,9 @@ export function AddGameModal({
                 key={launcher.id}
                 type="button"
                 onClick={() => onImportLauncher(launcher.id)}
-                className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
+                disabled={!canScan(launcher)}
+                title={canScan(launcher) ? undefined : NOT_SCANNABLE_NOTE}
+                className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-line disabled:hover:bg-panel/75"
               >
                 <span
                   className="grid size-9 shrink-0 place-items-center rounded-xl border bg-panel"
@@ -669,7 +671,11 @@ export function AddGameModal({
                   <LauncherIcon launcher={launcher.id} className="size-5" />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">{launcher.id}</span>
-                <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                {canScan(launcher) ? (
+                  <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                ) : (
+                  <span className="shrink-0 text-[10px] text-muted">streaming</span>
+                )}
               </button>
             ))}
           </div>

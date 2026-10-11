@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, MoveRight, X } from 'lucide-react';
+import { Check, Minimize2, MoveRight, X } from 'lucide-react';
 import type { Game } from '../../types';
-import { diskSpace, moveGameToFolder } from '../../services/native';
+import { diskSpace } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { driveOf, isInside } from '../../utils/paths';
-import { movedGamePaths, type MovedGamePaths } from '../../utils/movedGamePaths';
+import type { MoveJob } from '../../hooks/useGameMove';
 import { Modal, btnGhost, btnPrimary } from '../ui/Modal';
 import { cn } from '../../utils/cn';
 import { driveLabel } from '../../utils/drive';
@@ -13,7 +13,12 @@ interface Props {
   game: Game;
   folders: string[];
   onClose: () => void;
-  onMoved: (paths: MovedGamePaths) => void;
+  /** The move for this game, if one is going. Owned above this dialog. */
+  job: MoveJob | null;
+  /** Starts the copy. It runs whether this dialog stays open or not. */
+  onStartMove: (game: Game, toFolder: string, folders: string[]) => void;
+  /** Puts the dialog away and leaves the move to the ring in the corner. */
+  onMinimize: () => void;
 }
 
 function freeOn(folder: string): Promise<number | null> {
@@ -27,8 +32,13 @@ function freeOn(folder: string): Promise<number | null> {
  * move is a move between two places games actually live, and the native side
  * refuses anything outside them. Nothing is deleted until the copy has been
  * checked, and the original is left alone if anything goes wrong.
+ *
+ * The copy itself is not started here. A large game takes minutes, and this is a
+ * modal, so owning the copy here would mean the rest of the app was unusable for
+ * the duration. It is handed up instead, and this dialog is free to be
+ * minimized and reopened while the ring in the corner keeps the score.
  */
-export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
+export function MoveDriveModal({ game, folders, onClose, job, onStartMove, onMinimize }: Props) {
   const installDir = game.installDir;
   const elsewhere = !installDir || !folders.some((f) => isInside(installDir, f));
   // Only same-drive folders are pointless as targets. A game whose drive was
@@ -39,9 +49,6 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
   );
   const [target, setTarget] = useState(targets[0] ?? '');
   const [space, setSpace] = useState<Record<string, number | null>>({});
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState('');
-  const [done, setDone] = useState<{ dir: string; message: string | null } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -53,28 +60,20 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
     };
   }, [targets]);
 
-  const move = async () => {
-    if (!installDir) return;
-    setError('');
-    setProgress(0);
-    try {
-      const moved = await moveGameToFolder(installDir, target, folders, setProgress);
-      const newDir = moved.installDir;
-      onMoved(movedGamePaths(game, moved));
-      setDone({ dir: newDir, message: moved.message });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setProgress(null);
-    }
-  };
-
-  // While a move runs there is nothing to cancel, so the only way out is done.
-  const locked = progress !== null && !done;
+  // Everything about the move comes from the job rather than from state here, so
+  // reopening the dialog mid-copy shows the copy as it actually is.
+  const mine = job && job.gameId === game.id ? job : null;
+  const running = mine?.state === 'running';
+  const done = mine?.state === 'done' ? mine : null;
+  const failed = mine?.state === 'error' ? mine : null;
+  const progress = mine?.progress ?? null;
 
   return (
     <Modal
-      title={done ? 'Moved' : `Move “${game.title}”`}
-      onClose={locked ? () => {} : onClose}
+      title={done ? 'Moved' : running ? `Moving “${game.title}”` : `Move “${game.title}”`}
+      // While a copy runs there is nothing to cancel, but there is everything to
+      // put away: minimizing is the way out, and the corner keeps the score.
+      onClose={running ? onMinimize : onClose}
       footer={
         done ? (
           <div className="flex justify-end">
@@ -83,15 +82,22 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
               Done
             </button>
           </div>
+        ) : running ? (
+          <div className="flex justify-end">
+            <button className={`${btnPrimary} flex items-center gap-2`} onClick={onMinimize}>
+              <Minimize2 className="size-4" />
+              Keep playing, move in the corner
+            </button>
+          </div>
         ) : (
           <div className="flex justify-end gap-2">
-            <button onClick={onClose} disabled={locked} className={`${btnGhost} flex items-center gap-2`}>
+            <button onClick={onClose} className={`${btnGhost} flex items-center gap-2`}>
               <X className="size-4" />
               Cancel
             </button>
             <button
-              onClick={move}
-              disabled={!target || locked || elsewhere}
+              onClick={() => onStartMove(game, target, folders)}
+              disabled={!target || elsewhere}
               className={`${btnPrimary} flex items-center gap-2`}
             >
               <MoveRight className="size-4" />
@@ -137,7 +143,7 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
               {targets.map((f) => (
                 <button
                   key={f}
-                  disabled={locked}
+                  disabled={running}
                   onClick={() => setTarget(f)}
                   className={cn('rounded-xl border p-3 text-left', target === f ? 'border-accent bg-accent/15' : 'border-line bg-panel2')}
                 >
@@ -155,29 +161,36 @@ export function MoveDriveModal({ game, folders, onClose, onMoved }: Props) {
             </div>
           )}
 
-          {locked && (
+          {running && (
             <div className="mb-4">
-              {progress >= 0 ? (
+              {progress === null ? (
+                // A folder too large to measure still moves; Orbit just cannot
+                // say how far along it is, and a bar stuck on 0% would be a lie.
+                <div className="h-2 overflow-hidden rounded-full bg-bg">
+                  <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-accent to-accent2" />
+                </div>
+              ) : (
                 <div className="h-2 overflow-hidden rounded-full bg-bg">
                   <div
                     className="h-full bg-gradient-to-r from-accent to-accent2 transition-all"
                     style={{ width: `${Math.round(progress * 100)}%` }}
                   />
                 </div>
-              ) : (
-                // A folder too large to measure still moves; Orbit just cannot say how far along it is.
-                <div className="h-2 overflow-hidden rounded-full bg-bg">
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-accent to-accent2" />
-                </div>
               )}
               <p className="mt-1 text-xs text-muted">
-                {progress >= 1 ? 'Checking the copy…' : progress < 0 ? 'Copying files…' : `Copying files… ${Math.round(progress * 100)}%`}
+                {progress === null
+                  ? 'Copying files…'
+                  : progress >= 1
+                    ? 'Checking the copy…'
+                    : `Copying files… ${Math.round(progress * 100)}%`}
               </p>
-              <p className="mt-0.5 text-[11px] text-muted">Do not close Orbit until this finishes.</p>
+              <p className="mt-0.5 text-[11px] text-muted">
+                Do not close Orbit until this finishes. You can close this window: the move carries on.
+              </p>
             </div>
           )}
 
-          {error && <p className="text-sm text-rose-400">{error}</p>}
+          {failed && <p className="text-sm text-rose-400">{failed.error}</p>}
         </>
       )}
     </Modal>

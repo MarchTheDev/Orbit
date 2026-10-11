@@ -22,6 +22,7 @@ const checks = [
   'tests/markdownInput.test.mjs',
   'tests/playtime.test.mjs',
   'tests/movedGamePaths.test.mjs',
+  'tests/move-job.test.mjs',
   'tests/session-error.test.mjs',
   'tests/storage-open.test.mjs',
   'tests/reader.test.mjs',
@@ -31,6 +32,12 @@ const checks = [
   'tests/steam.test.mjs',
   'tests/updates.test.mjs',
   'tests/version.test.mjs',
+  'tests/x11-entry.test.mjs',
+  'tests/audio-deps.test.mjs',
+  'tests/hover-tint.test.mjs',
+  'tests/sound-default.test.mjs',
+  'tests/launchers.test.mjs',
+  'tests/launcher-path.test.mjs',
 ];
 
 try {
