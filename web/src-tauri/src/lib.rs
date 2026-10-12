@@ -1203,6 +1203,8 @@ fn saves_backup(
     install_dir: Option<String>,
     prefix: Option<String>,
     steam_app_id: Option<u32>,
+    publisher: Option<String>,
+    backup_root: Option<String>,
 ) -> Result<saves::SaveBackup, String> {
     saves::backup(
         orbit.store.root(),
@@ -1210,6 +1212,8 @@ fn saves_backup(
         &title,
         save_dir.as_deref(),
         &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+        publisher.as_deref(),
+        backup_root.as_deref(),
     )
 }
 

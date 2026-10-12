@@ -485,7 +485,6 @@ fn copy_folder(
     if dest.exists() {
         dest = game_dir.join(format!("{}-{}", stamp_folder(at), at));
     }
-    let _ = game_id;
     copy_tree(from, &dest, 0)?;
     let note = format!(
         "Game: {game}\nPublisher: {studio}\nCopied from: {}\nAt: {at}\n",
