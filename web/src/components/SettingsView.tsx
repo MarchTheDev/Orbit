@@ -291,6 +291,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
+  { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
+  { label: 'Minimise button', section: 'orbit-playing', keywords: 'minimize tray taskbar' },
+  { label: 'Wine', section: 'orbit-playing', keywords: 'wine prefix exe linux' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
@@ -765,6 +768,48 @@ export function SettingsView({
             can still say how long you played, by hand, afterwards.
           </p>
         )}
+
+        <SubHead>Closing and minimising Orbit itself</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          Separate from what happens around a game. Hiding only works when the tray icon is there; otherwise Orbit
+          quits or stays on the taskbar, so it cannot vanish with no way back.
+        </p>
+        <Setting
+          label="When the close button is pressed"
+          value={settings.window.onAppClose ?? 'quit'}
+          onChange={(v) => setSettings({ window: { ...settings.window, onAppClose: v } })}
+          options={[
+            { value: 'quit', label: 'Close completely', hint: 'The window goes, the clock is written down, and Orbit exits.' },
+            {
+              value: 'tray',
+              label: 'Hide to the tray',
+              hint: 'The window leaves the taskbar. Left click the tray icon to bring it back.',
+            },
+          ]}
+        />
+        <Setting
+          label="When the minimise button is pressed"
+          value={settings.window.onMinimize ?? 'taskbar'}
+          onChange={(v) => setSettings({ window: { ...settings.window, onMinimize: v } })}
+          options={[
+            { value: 'taskbar', label: 'Taskbar', hint: 'The usual minimise. Orbit stays one click away on the bar.' },
+            {
+              value: 'tray',
+              label: 'Tray',
+              hint: 'Minimising hides Orbit instead, off the taskbar, behind the tray icon.',
+            },
+          ]}
+        />
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Wine program, when a game does not name one</span>
+          <input
+            className="w-full rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
+            value={settings.winePath ?? ''}
+            onChange={(e) => setSettings({ winePath: e.target.value })}
+            placeholder="wine"
+            spellCheck={false}
+          />
+        </label>
 
         <Setting
           label="When the game closes"

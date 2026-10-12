@@ -109,6 +109,29 @@ body::before {
   animation: none !important;
 }
 
+/* WebKitGTK keeps compositing every blurred panel and every infinite transform
+   for as long as the window is open, and the cost grows until tabs and hovers
+   stall. On Linux those loops stay still, and the glass is a flat panel. The
+   mark is still drawn. A controller, when one is connected, gets a ring that
+   does not depend on the mouse. */
+html.orbit-linux .glass,
+html.orbit-linux .backdrop-blur-xl,
+html.orbit-linux .backdrop-blur-sm {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.orbit-linux .orbit-spin-outer,
+html.orbit-linux .orbit-spin-inner,
+html.orbit-linux .orbit-twinkle,
+html.orbit-linux .orbit-pulse,
+html.orbit-linux .orbit-bars i {
+  animation: none !important;
+}
+html.orbit-pad :focus {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 3px;
+}
+
 /* Nobody who has asked for less motion gets a spinning anything. */
 @media (prefers-reduced-motion: reduce) {
   .orbit-spin-inner,

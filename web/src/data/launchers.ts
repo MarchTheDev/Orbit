@@ -28,6 +28,10 @@ export const LAUNCHERS: {
   // nothing to find, and an empty list is the honest answer for them.
   { id: 'Amazon Luna', color: '#c2a3ff',
     pathPrompt: 'Where is Nile\u2019s config folder?' },
+  // Lutris keeps a SQLite library and one YAML file per game. A player who
+  // moved that folder, or runs the Flatpak, can point Orbit at it.
+  { id: 'Lutris', color: '#ff8a4c',
+    pathPrompt: 'Where is Lutris\u2019s data folder?' },
 ];
 
 /**

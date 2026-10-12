@@ -635,3 +635,56 @@ export function dataDir(): Promise<string | null> {
 export function dataDirSize(): Promise<number> {
   return call('data_dir_size', {}, async () => 0);
 }
+
+// ------------------------------------------------------------------- the pad
+
+/**
+ * Play the background pad through the system, on Linux.
+ *
+ * Returns false when no system player is available, which is the web view's
+ * cue to try its own audio instead. Anywhere else this is a no-op that says
+ * the web view should play.
+ */
+export function ambientSet(enabled: boolean, volume: number, audible: boolean): Promise<boolean> {
+  return call('ambient_set', { enabled, volume, audible }, () => false);
+}
+
+// ----------------------------------------------------------------- save copies
+
+export interface SaveBackup {
+  at: number;
+  path: string;
+  kind: string;
+  note: string;
+}
+
+export interface SaveStatus {
+  ludusavi: boolean;
+  root: string;
+}
+
+export function savesStatus(): Promise<SaveStatus> {
+  return call('saves_status', {}, () => ({ ludusavi: false, root: '' }));
+}
+
+export function backupSave(gameId: string, title: string, saveDir: string | null): Promise<SaveBackup> {
+  return call('saves_backup', { gameId, title, saveDir }, async () => {
+    throw new Error('Backups need the desktop app.');
+  });
+}
+
+export function restoreSave(gameId: string, title: string, saveDir: string | null): Promise<string> {
+  return call('saves_restore', { gameId, title, saveDir }, async () => {
+    throw new Error('Restoring needs the desktop app.');
+  });
+}
+
+export function listSaves(gameId: string, title: string): Promise<SaveBackup[]> {
+  return call('saves_list', { gameId, title }, () => []);
+}
+
+export function suggestSaves(title: string): Promise<string[]> {
+  return call('saves_suggest', { title }, async () => {
+    throw new Error('Looking up save paths needs the desktop app.');
+  });
+}

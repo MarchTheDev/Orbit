@@ -5,6 +5,7 @@
 //! reading folders, and fetching metadata the browser is not allowed to reach.
 
 mod achievements;
+mod ambient;
 mod db;
 #[cfg(windows)]
 mod explorer;
@@ -15,6 +16,7 @@ mod launch_target;
 mod launchers;
 mod metadata;
 mod process;
+mod saves;
 mod session;
 mod sgdb;
 mod steam;
@@ -51,6 +53,13 @@ pub struct WindowPolicy {
     /// `nothing`, `show` or `quit`.
     #[serde(default)]
     pub on_close: String,
+    /// What the close button does. `quit` or `tray`. Empty means quit.
+    #[serde(default)]
+    pub on_app_close: String,
+    /// Where the minimise button puts the window. `taskbar` or `tray`. Empty
+    /// means the taskbar, which is what a library saved before this choice did.
+    #[serde(default)]
+    pub on_minimize: String,
 }
 
 /// Everything the commands need, kept in one place by Tauri.
@@ -132,6 +141,10 @@ pub(crate) fn apply_policy(app: &tauri::AppHandle, on_launch: bool, policy: Wind
 /// with no tray is an app the player cannot get back, which is not a preference
 /// anybody asked for.
 static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set once an exit has been asked for, so the minimise watcher can leave and
+/// a second exit event does not start a second watchdog.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Put an icon in the notification area, with a way back to the window.
 ///
@@ -290,6 +303,8 @@ fn launch_info(launch: serde_json::Value) -> LaunchInfo {
             LaunchTarget::None => "none",
             LaunchTarget::Executable { .. } => "executable",
             LaunchTarget::Steam { .. } => "steam",
+            LaunchTarget::Wine { .. } => "wine",
+            LaunchTarget::Lutris { .. } => "lutris",
         }
         .to_string(),
         label: target.label(),
@@ -1089,13 +1104,108 @@ fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), Stri
     if let Ok(mut policy) = orbit.policy.lock() {
         *policy = policy_from_settings(Some(&settings));
     }
+    remember_wine(Some(&settings));
     orbit.store.save_settings(&settings)
+}
+
+fn remember_wine(settings: Option<&Settings>) {
+    let path = settings
+        .and_then(|saved| saved.get("winePath"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    launch_target::set_wine_fallback(path);
 }
 
 /// Where Orbit keeps its files, so the settings screen can show it.
 #[tauri::command]
 fn data_dir(orbit: State<'_, Orbit>) -> String {
     orbit.store.root().to_string_lossy().to_string()
+}
+
+/// Play the background pad through the system. False means the web view should try.
+#[tauri::command]
+fn ambient_set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
+    // Windows and macOS already play through the web view. Feeding a second
+    // player there would be two copies of the same pad.
+    #[cfg(target_os = "linux")]
+    {
+        ambient::set(enabled, volume, audible)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (enabled, volume, audible);
+        Ok(false)
+    }
+}
+
+/// Stop the system player. The exit path calls this too, so a quit cannot
+/// leave `pw-cat` running after the window has gone.
+#[tauri::command]
+fn ambient_stop() {
+    ambient::stop();
+}
+
+#[tauri::command]
+fn saves_status(orbit: State<'_, Orbit>) -> saves::SaveStatus {
+    saves::status(orbit.store.root())
+}
+
+#[tauri::command]
+fn saves_backup(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    save_dir: Option<String>,
+) -> Result<saves::SaveBackup, String> {
+    saves::backup(orbit.store.root(), &game_id, &title, save_dir.as_deref())
+}
+
+#[tauri::command]
+fn saves_restore(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    save_dir: Option<String>,
+) -> Result<String, String> {
+    saves::restore(orbit.store.root(), &game_id, &title, save_dir.as_deref())
+}
+
+#[tauri::command]
+fn saves_list(orbit: State<'_, Orbit>, game_id: String, title: String) -> Vec<saves::SaveBackup> {
+    saves::list(orbit.store.root(), &game_id, &title)
+}
+
+/// Ask PCGamingWiki where a game usually keeps its saves. The API needs no key.
+#[tauri::command]
+async fn saves_suggest(title: String) -> Result<Vec<String>, String> {
+    let page = saves::wiki_title(&title);
+    if page.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!(
+        "https://www.pcgamingwiki.com/w/api.php?action=parse&page={page}&prop=wikitext&format=json&redirects=1"
+    );
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION"), " (save path lookup)"))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let value = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach PCGamingWiki: {e}"))?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("PCGamingWiki did not answer in a form Orbit can read: {e}"))?;
+    if value.get("error").is_some() {
+        return Ok(Vec::new());
+    }
+    let wikitext = value
+        .pointer("/parse/wikitext/*")
+        .and_then(|text| text.as_str())
+        .unwrap_or("");
+    Ok(saves::paths_from_wikitext(wikitext))
 }
 
 /// How much space Orbit's own files take.
@@ -1223,6 +1333,7 @@ pub fn run() {
             );
             let saved_settings = store.load_settings();
             let policy = Arc::new(Mutex::new(policy_from_settings(saved_settings.as_ref())));
+            remember_wine(saved_settings.as_ref());
             let start_in_background = started_by_autostart
                 && saved_settings.as_ref().is_some_and(|settings| {
                     settings.get("launchOnStartup").and_then(serde_json::Value::as_bool) == Some(true)
@@ -1332,7 +1443,61 @@ pub fn run() {
                 });
             }
 
-            app.manage(Orbit { db, runner, store, sizes, policy });
+            app.manage(Orbit { db, runner, store, sizes, policy: Arc::clone(&policy) });
+
+            // The close button. Hiding is only done when the player asked for
+            // the tray and the icon is actually there; otherwise the window
+            // closes and the exit path below finishes the process.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                let policy = Arc::clone(&policy);
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let hide = policy
+                            .lock()
+                            .map(|current| current.on_app_close == "tray")
+                            .unwrap_or(false)
+                            && TRAY_READY.load(Ordering::SeqCst);
+                        if hide {
+                            api.prevent_close();
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.hide();
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Minimise-to-tray cannot be a window event: the minimise already
+            // happened by the time we hear about it. Asking the window only
+            // while the option is on keeps this from being another always-on
+            // cost. The thread leaves as soon as an exit starts.
+            {
+                let handle = app.handle().clone();
+                let policy = Arc::clone(&policy);
+                std::thread::spawn(move || {
+                    while !QUITTING.load(Ordering::SeqCst) {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        if QUITTING.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let to_tray = policy
+                            .lock()
+                            .map(|current| current.on_minimize == "tray")
+                            .unwrap_or(false);
+                        if !to_tray || !TRAY_READY.load(Ordering::SeqCst) {
+                            continue;
+                        }
+                        let Some(window) = handle.get_webview_window("main") else {
+                            continue;
+                        };
+                        if window.is_minimized().unwrap_or(false) {
+                            let _ = window.hide();
+                            let _ = window.unminimize();
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1393,6 +1558,13 @@ pub fn run() {
             save_settings,
             data_dir,
             data_dir_size,
+            ambient_set,
+            ambient_stop,
+            saves_status,
+            saves_backup,
+            saves_restore,
+            saves_list,
+            saves_suggest,
             reveal_in_explorer,
             open_game_folder,
         ])
@@ -1412,6 +1584,23 @@ pub fn run() {
             ) {
                 if let Some(orbit) = app.try_state::<Orbit>() {
                     orbit.runner.close_for_app_exit();
+                }
+                // A system player started for the pad has to die with the app.
+                // process::exit below does not run destructors.
+                ambient::stop();
+                // WebKitGTK on Linux can keep the process up after the window
+                // has gone, which is the close that does not fully quit. Two
+                // seconds is long enough for a normal exit to finish, and then
+                // the process is ended whether the web view agreed or not.
+                // The swap also tells the minimise watcher to leave, and keeps
+                // a second exit event from starting a second watchdog.
+                let first = !QUITTING.swap(true, Ordering::SeqCst);
+                if first && matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                    #[cfg(target_os = "linux")]
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        std::process::exit(0);
+                    });
                 }
             }
         });

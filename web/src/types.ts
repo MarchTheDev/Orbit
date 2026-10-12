@@ -8,7 +8,8 @@ export type OtherLauncher =
   | 'EA app'
   | 'Xbox'
   | 'Heroic Games Library'
-  | 'Amazon Luna';
+  | 'Amazon Luna'
+  | 'Lutris';
 export type LauncherId = 'Steam' | OtherLauncher;
 export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
@@ -68,7 +69,23 @@ export interface MetaData {
 export type LaunchTarget =
   | { kind: 'none' }
   | { kind: 'executable'; path: string; args: string; workingDir: string | null }
-  | { kind: 'steam'; appId: number };
+  | { kind: 'steam'; appId: number }
+  | {
+      kind: 'wine';
+      path: string;
+      args: string;
+      /** The Wine prefix. Empty means Wine's default. */
+      prefix: string | null;
+      /** The wine binary. Empty means `wine` on PATH, or the one in Settings. */
+      wine: string | null;
+    }
+  | {
+      kind: 'lutris';
+      slug: string;
+      gameId: number | null;
+      exe: string | null;
+      prefix: string | null;
+    };
 
 /** A program Orbit starts at the same time as the game. */
 export interface Companion {
@@ -149,7 +166,7 @@ export type ViewMode = 'grid' | 'list';
 export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | 'manual';
 
 /** The three top-level screens; Settings is reached from the gear. */
-export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'settings';
+export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'saves' | 'settings';
 
 /** A game imported from a Steam library. */
 /** One achievement, as the game's Steam Community page lists it. */
@@ -207,6 +224,12 @@ export interface LauncherGame {
   /** A path recorded by Epic, if it still exists; imports do not auto-launch it. */
   exePath: string | null;
   sizeBytes: number;
+  /** Lutris's own slug, when the row came from there. */
+  slug?: string | null;
+  /** Lutris's numeric id, for `lutris:rungameid`. */
+  lutrisId?: number | null;
+  runner?: string | null;
+  winePrefix?: string | null;
 }
 
 /** One play session, as stored. */
@@ -451,5 +474,24 @@ export interface Settings {
     onLaunch: 'nothing' | 'minimize' | 'tray' | 'close';
     /** `nothing`, `show` or `quit`. */
     onClose: 'nothing' | 'show' | 'quit';
+    /**
+     * What the close button does. `quit` leaves, `tray` hides.
+     *
+     * Missing means quit, which is what a library saved before this choice
+     * already did. Hiding is only honoured when a tray icon exists.
+     */
+    onAppClose?: 'quit' | 'tray';
+    /** Where the minimise button puts the window. Missing means the taskbar. */
+    onMinimize?: 'taskbar' | 'tray';
+  };
+  /** The wine binary to use when a game does not name one. */
+  winePath?: string;
+  /**
+   * Which games back themselves up, and a folder to copy when ludusavi is not
+   * the thing doing it.
+   */
+  saves?: {
+    auto?: string[];
+    dirs?: Record<string, string>;
   };
 }

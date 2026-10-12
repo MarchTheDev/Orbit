@@ -33,8 +33,8 @@ license=('GPL-3.0-only')
 depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl'
          'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire')
 options=('!strip')
-source=('orbit' 'orbit.desktop' 'orbit-x11' 'orbit-x11.desktop' 'orbit.png' 'LICENSE')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+source=('orbit' 'orbit.desktop' 'orbit-x11' 'orbit-x11.desktop' 'orbit.png' 'com.orbit.launcher.desktop' 'LICENSE')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 package() {
   install -Dm755 "$srcdir/orbit" "$pkgdir/usr/bin/orbit"
@@ -45,6 +45,9 @@ package() {
   install -Dm755 "$srcdir/orbit-x11" "$pkgdir/usr/bin/orbit-x11"
   install -Dm644 "$srcdir/orbit-x11.desktop" "$pkgdir/usr/share/applications/orbit-x11.desktop"
   install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/orbit.png"
+  # Wayland panels ask for the app id, not the binary name. Same picture.
+  install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png"
+  install -Dm644 "$srcdir/com.orbit.launcher.desktop" "$pkgdir/usr/share/applications/com.orbit.launcher.desktop"
   # The licence text itself, so the package says what the program is under
   # without this file carrying thirty-five kilobytes of it.
   install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

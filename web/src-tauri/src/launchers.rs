@@ -23,6 +23,17 @@ pub struct LauncherGame {
     /// Unknown for registry/manifest records; scanning entire game folders just
     /// to calculate a size would be slow and surprising during discovery.
     pub size_bytes: u64,
+    /// Lutris's slug, when the row came from there. Absent for every other launcher.
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Lutris's numeric id, for `lutris:rungameid`.
+    #[serde(default)]
+    pub lutris_id: Option<i64>,
+    #[serde(default)]
+    pub runner: Option<String>,
+    /// The Wine prefix Lutris recorded, if it recorded one.
+    #[serde(default)]
+    pub wine_prefix: Option<String>,
 }
 
 /// Find installations for one launcher on Windows, or return an empty list elsewhere.
@@ -65,6 +76,11 @@ pub fn installed_games(
     }
     if only.is_none() || only == Some("Amazon Luna") {
         scan_amazon(&mut games, extra_for(only, extra, "Amazon Luna"));
+    }
+    // Lutris is a Linux launcher. Its library is a SQLite file plus one YAML
+    // file per game, and both are read and never written.
+    if only.is_none() || only == Some("Lutris") {
+        scan_lutris(&mut games, extra_for(only, extra, "Lutris"));
     }
 
     if let Some(launcher) = only {
@@ -129,6 +145,10 @@ fn parse_epic_manifest(text: &str) -> Option<LauncherGame> {
             .get("InstallSize")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
+        slug: None,
+        lutris_id: None,
+        runner: None,
+        wine_prefix: None,
     })
 }
 
@@ -288,6 +308,10 @@ fn scan_windows_registry(games: &mut Vec<LauncherGame>, only: Option<&str>) {
             install_dir: path.to_string_lossy().into_owned(),
             exe_path: None,
             size_bytes: 0,
+            slug: None,
+            lutris_id: None,
+            runner: None,
+            wine_prefix: None,
         });
     }
 
@@ -322,6 +346,10 @@ fn scan_windows_registry(games: &mut Vec<LauncherGame>, only: Option<&str>) {
             install_dir: path.to_string_lossy().into_owned(),
             exe_path: None,
             size_bytes: 0,
+            slug: None,
+            lutris_id: None,
+            runner: None,
+            wine_prefix: None,
         });
     }
 }
@@ -486,6 +514,10 @@ fn xbox_games_in(root: &Path) -> Vec<LauncherGame> {
             install_dir: path.to_string_lossy().to_string(),
             exe_path: exe,
             size_bytes: 0,
+            slug: None,
+            lutris_id: None,
+            runner: None,
+            wine_prefix: None,
         });
     }
     games
@@ -584,6 +616,10 @@ fn push_heroic_records(path: &Path, games: &mut Vec<LauncherGame>) {
             install_dir: install_path.to_string(),
             exe_path: None,
             size_bytes: 0,
+            slug: None,
+            lutris_id: None,
+            runner: None,
+            wine_prefix: None,
         });
     }
 }
@@ -685,8 +721,299 @@ fn push_amazon_records(library: &Path, installed: &Path, games: &mut Vec<Launche
             install_dir: path.to_string(),
             exe_path: None,
             size_bytes: 0,
+            slug: None,
+            lutris_id: None,
+            runner: None,
+            wine_prefix: None,
         });
     }
+}
+
+/// Find the games Lutris has marked installed.
+///
+/// The library is `pga.db`. The program and the Wine prefix, when Lutris
+/// recorded them, live in a YAML file next to that database or in the config
+/// folder. Both are read and never written. A row with no folder, no prefix
+/// and no program is skipped: an import needs somewhere to point at.
+fn scan_lutris(games: &mut Vec<LauncherGame>, extra: Option<&str>) {
+    let mut found = Vec::new();
+    for root in with_extra(extra, lutris_roots()) {
+        if !root.is_dir() {
+            continue;
+        }
+        if let Some(db) = find_pga(&root) {
+            match read_pga(&db, &root) {
+                Ok(rows) => found.extend(rows),
+                Err(error) => log::warn!("could not read {}: {error}", db.display()),
+            }
+        }
+        // A config folder can hold the YAML without the database beside it.
+        // Those files are also how a prefix is filled in when the row only
+        // knew a slug.
+        enrich_lutris_yaml(&root, &mut found);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    found.retain(|game| {
+        let key = game
+            .slug
+            .clone()
+            .filter(|slug| !slug.is_empty())
+            .unwrap_or_else(|| normalize_path(Path::new(&game.install_dir)));
+        seen.insert(key)
+    });
+    games.extend(found);
+}
+
+fn lutris_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let Some(home) = std::env::var_os("HOME") else {
+        return roots;
+    };
+    let home = PathBuf::from(home);
+    for rel in [
+        ".local/share/lutris",
+        ".config/lutris",
+        ".var/app/net.lutris.Lutris/data/lutris",
+        ".var/app/net.lutris.Lutris/config/lutris",
+    ] {
+        roots.push(home.join(rel));
+    }
+    roots
+}
+
+fn find_pga(root: &Path) -> Option<PathBuf> {
+    let direct = root.join("pga.db");
+    if direct.is_file() {
+        return Some(direct);
+    }
+    // A player may point at the parent of the data folder, or at `games/`.
+    let nested = root.join("lutris").join("pga.db");
+    if nested.is_file() {
+        return Some(nested);
+    }
+    None
+}
+
+fn read_pga(db: &Path, root: &Path) -> Result<Vec<LauncherGame>, String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| format!("Could not open {}: {e}", db.display()))?;
+    // Older libraries omit a column. The short query still names a game.
+    let full = "SELECT id, name, slug, runner, executable, directory, configpath \
+                FROM games WHERE installed = 1";
+    let short = "SELECT id, name, slug, runner, executable, directory, NULL \
+                 FROM games WHERE installed = 1";
+    // Preparing the long query and the short one in one match keeps the
+    // connection borrowed in both arms, which does not compile. A probe that
+    // is dropped first is the way to pick.
+    let sql = if conn.prepare("SELECT configpath FROM games LIMIT 0").is_ok() {
+        full
+    } else {
+        short
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("Could not read {}: {e}", db.display()))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut games = Vec::new();
+    for row in rows {
+        let (id, name, slug, runner, executable, directory, configpath) =
+            row.map_err(|e| e.to_string())?;
+        let name = name.unwrap_or_default().trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let yaml = configpath.as_deref().and_then(|name| lutris_yaml(root, name));
+        let bits = yaml.as_deref().map(read_game_yaml).unwrap_or_default();
+        let exe = first_nonempty([
+            bits.exe.as_deref(),
+            executable.as_deref(),
+        ]);
+        let prefix = bits.prefix.clone();
+        let install = first_nonempty([
+            directory.as_deref(),
+            prefix.as_deref(),
+            exe.as_deref().and_then(|path| Path::new(path).parent().and_then(|p| p.to_str())),
+        ]);
+        let Some(install) = install else {
+            continue;
+        };
+        if !Path::new(&install).exists() {
+            continue;
+        }
+        games.push(LauncherGame {
+            launcher: "Lutris".to_string(),
+            name,
+            install_dir: install,
+            exe_path: exe.filter(|path| !path.is_empty()),
+            size_bytes: 0,
+            slug: slug.filter(|slug| !slug.trim().is_empty()),
+            lutris_id: id,
+            runner: runner.filter(|runner| !runner.trim().is_empty()),
+            wine_prefix: prefix.filter(|prefix| !prefix.trim().is_empty()),
+        });
+    }
+    Ok(games)
+}
+
+fn lutris_yaml(root: &Path, configpath: &str) -> Option<PathBuf> {
+    let name = Path::new(configpath).file_name()?.to_owned();
+    for dir in yaml_dirs(root) {
+        let candidate = dir.join(&name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn yaml_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![root.join("games"), root.join("lutris").join("games")];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".config/lutris/games"));
+        dirs.push(home.join(".var/app/net.lutris.Lutris/config/lutris/games"));
+    }
+    dirs
+}
+
+/// Fill a prefix or a program from YAML when the database row did not have it.
+fn enrich_lutris_yaml(root: &Path, games: &mut Vec<LauncherGame>) {
+    for dir in yaml_dirs(root) {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("yml")
+                && path.extension().and_then(|ext| ext.to_str()) != Some("yaml")
+            {
+                continue;
+            }
+            let bits = read_game_yaml(&path);
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("")
+                .to_string();
+            let slug = slug_from_configpath(&stem);
+            if let Some(game) = games.iter_mut().find(|game| {
+                game.launcher == "Lutris"
+                    && game
+                        .slug
+                        .as_deref()
+                        .is_some_and(|known| stem.starts_with(known) || known == slug)
+            }) {
+                if game.wine_prefix.is_none() {
+                    game.wine_prefix = bits.prefix.clone();
+                }
+                if game.exe_path.is_none() {
+                    game.exe_path = bits.exe.clone();
+                }
+                continue;
+            }
+            // No database row. A YAML file on its own is still a game if it
+            // names a folder that is there.
+            let install = bits
+                .prefix
+                .clone()
+                .or_else(|| bits.exe.as_ref().and_then(|exe| Path::new(exe).parent().map(|p| p.display().to_string())));
+            let Some(install) = install.filter(|path| Path::new(path).exists()) else {
+                continue;
+            };
+            if games.iter().any(|game| {
+                game.launcher == "Lutris" && same_path(Path::new(&game.install_dir), Path::new(&install))
+            }) {
+                continue;
+            }
+            games.push(LauncherGame {
+                launcher: "Lutris".to_string(),
+                name: slug.replace('-', " "),
+                install_dir: install,
+                exe_path: bits.exe,
+                size_bytes: 0,
+                slug: if slug.is_empty() { None } else { Some(slug) },
+                lutris_id: None,
+                runner: Some("wine".into()),
+                wine_prefix: bits.prefix,
+            });
+        }
+    }
+}
+
+/// `hades-ii-1710000000` is the slug `hades-ii`, not `hades`.
+fn slug_from_configpath(stem: &str) -> String {
+    if let Some((slug, stamp)) = stem.rsplit_once('-') {
+        if !slug.is_empty() && stamp.chars().all(|ch| ch.is_ascii_digit()) {
+            return slug.to_string();
+        }
+    }
+    stem.to_string()
+}
+
+fn first_nonempty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
+    values
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+#[derive(Default)]
+struct YamlBits {
+    exe: Option<String>,
+    prefix: Option<String>,
+}
+
+/// The two fields a Lutris game file is opened for. Anything else in the file
+/// is the launcher's own business.
+fn read_game_yaml(path: &Path) -> YamlBits {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return YamlBits::default();
+    };
+    let mut section = String::new();
+    let mut bits = YamlBits::default();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        if indent == 0 {
+            section = key.to_string();
+            continue;
+        }
+        if value.is_empty() {
+            continue;
+        }
+        if key == "exe" && bits.exe.is_none() {
+            bits.exe = Some(value.to_string());
+        }
+        if key == "prefix" && bits.prefix.is_none() && (section == "game" || section == "wine") {
+            bits.prefix = Some(value.to_string());
+        }
+    }
+    bits
 }
 
 /// Find the Amazon Games installs Nile recorded.
@@ -757,6 +1084,10 @@ mod tests {
                 install_dir: r"C:\Games\A".into(),
                 exe_path: None,
                 size_bytes: 0,
+                slug: None,
+                lutris_id: None,
+                runner: None,
+                wine_prefix: None,
             },
             LauncherGame {
                 launcher: "GOG Galaxy".into(),
@@ -764,6 +1095,10 @@ mod tests {
                 install_dir: r"c:/games/a/".into(),
                 exe_path: None,
                 size_bytes: 0,
+                slug: None,
+                lutris_id: None,
+                runner: None,
+                wine_prefix: None,
             },
         ];
         deduplicate_installations(&mut games);

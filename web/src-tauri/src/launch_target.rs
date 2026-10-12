@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +39,49 @@ pub enum LaunchTarget {
     Steam {
         app_id: u32,
     },
+    /// A Windows program, started through Wine. The prefix is the game's own
+    /// bottle when it has one, and empty means Wine's default.
+    Wine {
+        path: PathBuf,
+        #[serde(default)]
+        args: String,
+        #[serde(default)]
+        prefix: Option<String>,
+        /// The wine binary. Empty means `wine` on PATH, or the one in Settings.
+        #[serde(default)]
+        wine: Option<String>,
+    },
+    /// A game imported from Lutris. An exe and a prefix are started through
+    /// Wine and watched. A slug on its own is handed to Lutris.
+    Lutris {
+        #[serde(default)]
+        slug: String,
+        #[serde(default)]
+        game_id: Option<i64>,
+        #[serde(default)]
+        exe: Option<String>,
+        #[serde(default)]
+        prefix: Option<String>,
+    },
+}
+
+/// The wine binary from Settings, used when a game does not name one.
+static WINE_FALLBACK: Mutex<String> = Mutex::new(String::new());
+
+pub fn set_wine_fallback(path: &str) {
+    if let Ok(mut slot) = WINE_FALLBACK.lock() {
+        *slot = path.trim().to_string();
+    }
+}
+
+fn wine_fallback() -> Option<String> {
+    let slot = WINE_FALLBACK.lock().ok()?;
+    let trimmed = slot.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 impl LaunchTarget {
@@ -60,6 +104,16 @@ impl LaunchTarget {
             LaunchTarget::None => "Time only".to_string(),
             LaunchTarget::Executable { path, .. } => file_name(path),
             LaunchTarget::Steam { app_id } => format!("Steam · {app_id}"),
+            LaunchTarget::Wine { path, .. } => format!("Wine · {}", file_name(path)),
+            LaunchTarget::Lutris { slug, exe, .. } => {
+                if !slug.is_empty() {
+                    format!("Lutris · {slug}")
+                } else if let Some(exe) = exe {
+                    format!("Lutris · {}", file_name(Path::new(exe)))
+                } else {
+                    "Lutris".to_string()
+                }
+            }
         }
     }
 
@@ -74,6 +128,8 @@ impl LaunchTarget {
             LaunchTarget::None => None,
             LaunchTarget::Executable { path, .. } => Some(path),
             LaunchTarget::Steam { .. } => None,
+            LaunchTarget::Wine { path, .. } => Some(path),
+            LaunchTarget::Lutris { exe, .. } => exe.as_deref().map(Path::new),
         }
     }
 }
@@ -123,7 +179,106 @@ pub fn spawn(target: &LaunchTarget) -> Result<Option<Child>, String> {
             open_url(&format!("steam://rungameid/{app_id}"))?;
             Ok(None)
         }
+        LaunchTarget::Wine {
+            path,
+            args,
+            prefix,
+            wine,
+        } => spawn_wine(path, args, prefix.as_deref(), wine.as_deref()),
+        LaunchTarget::Lutris {
+            slug,
+            game_id,
+            exe,
+            prefix,
+        } => {
+            // A recorded program and prefix can be started directly, and then
+            // the session can watch the process. Anything else is Lutris's job:
+            // Orbit is not a prefix manager, and a slug-only game has to go
+            // through the launcher that knows how to start it.
+            if let Some(exe) = exe.as_deref().map(str::trim).filter(|exe| !exe.is_empty()) {
+                let raw = PathBuf::from(exe);
+                let joined = prefix.as_deref().map(str::trim).filter(|prefix| !prefix.is_empty()).map(|prefix| Path::new(prefix).join(&raw));
+                let exe_path = if raw.is_file() {
+                    Some(raw)
+                } else {
+                    joined.filter(|path| path.is_file())
+                };
+                if let Some(exe_path) = exe_path {
+                    return spawn_wine(&exe_path, "", prefix.as_deref(), None);
+                }
+            }
+            hand_to_lutris(slug, *game_id)?;
+            Ok(None)
+        }
     }
+}
+
+fn spawn_wine(
+    path: &Path,
+    args: &str,
+    prefix: Option<&str>,
+    wine: Option<&str>,
+) -> Result<Option<Child>, String> {
+    if !path.exists() {
+        return Err(format!("{} is not there any more.", path.display()));
+    }
+    let bin = wine
+        .map(str::trim)
+        .filter(|bin| !bin.is_empty())
+        .map(str::to_string)
+        .or_else(wine_fallback)
+        .unwrap_or_else(|| "wine".to_string());
+    let mut cmd = crate::process::command(&bin);
+    if let Some(prefix) = prefix.map(str::trim).filter(|prefix| !prefix.is_empty()) {
+        cmd.env("WINEPREFIX", prefix);
+    }
+    cmd.arg(path);
+    let args = args.trim();
+    if !args.is_empty() {
+        cmd.args(parse_args(args));
+    }
+    if let Some(dir) = path.parent() {
+        cmd.current_dir(dir);
+    }
+    quiet(&mut cmd)
+        .map(Some)
+        .map_err(|e| format!("Could not start {} through Wine: {e}", path.display()))
+}
+
+fn hand_to_lutris(slug: &str, game_id: Option<i64>) -> Result<(), String> {
+    let uri = if let Some(id) = game_id.filter(|id| *id > 0) {
+        format!("lutris:rungameid/{id}")
+    } else if !slug.trim().is_empty() {
+        format!("lutris:rungame/{}", slug.trim())
+    } else {
+        return Err("This Lutris game has no slug and no program.".into());
+    };
+    if which("lutris").is_some() {
+        crate::process::command("lutris")
+            .arg(&uri)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not ask Lutris to start the game: {e}"))
+    } else if which("flatpak").is_some() {
+        crate::process::command("flatpak")
+            .args(["run", "net.lutris.Lutris", uri.as_str()])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not ask the Lutris Flatpak to start the game: {e}"))
+    } else {
+        open_url(&uri)
+    }
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn quiet(cmd: &mut Command) -> std::io::Result<Child> {

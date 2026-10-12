@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Orbit",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "identifier": "com.orbit.launcher",
   "build": {
     "frontendDist": "../dist",
@@ -59,7 +59,9 @@
         ],
         "files": {
           "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
-          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop",
+          "/usr/share/applications/com.orbit.launcher.desktop": "../../packaging/linux/com.orbit.launcher.desktop",
+          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png"
         }
       },
       "rpm": {
@@ -70,7 +72,9 @@
         ],
         "files": {
           "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
-          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop"
+          "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop",
+          "/usr/share/applications/com.orbit.launcher.desktop": "../../packaging/linux/com.orbit.launcher.desktop",
+          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png"
         }
       }
     },

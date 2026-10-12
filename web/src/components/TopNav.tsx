@@ -1,4 +1,4 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, ScrollText, Settings as SettingsIcon } from 'lucide-react';
+import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
@@ -18,6 +18,7 @@ export const TABS: Tab[] = [
   { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'logs', label: 'Journal', Icon: ScrollText },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
+  { id: 'saves', label: 'Saves', Icon: Save },
 ];
 
 /**

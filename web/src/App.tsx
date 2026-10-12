@@ -19,7 +19,9 @@ import {
 import type { Game, LauncherGame, OtherLauncher, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
+import { useGamepad } from './hooks/useGamepad';
 import {
+  backupSave,
   clearLibrary,
   isNative,
   launcherGames,
@@ -43,6 +45,7 @@ import { Logo } from './components/ui/Logo';
 import { GameGrid } from './components/GameGrid';
 import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
+import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
 import { SessionsView } from './components/SessionsView';
 import { BacklogView } from './components/BacklogView';
@@ -489,12 +492,38 @@ export default function App() {
     })().catch(() => undefined);
   }, [ready]);
 
-  /** A finished session changes one game's numbers, so re-read that game. */
-  const onSessionEnded = useCallback(() => {
+  /**
+   * A finished session changes one game's numbers, so re-read that game. If the
+   * player asked for an automatic copy, take it now, while the files are the
+   * ones the session just wrote.
+   */
+  const onSessionEnded = useCallback((gameId: string) => {
     void reload();
-  }, [reload]);
+    if (!settings?.saves?.auto?.includes(gameId)) return;
+    const game = games.find((item) => item.id === gameId);
+    if (!game) return;
+    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null)
+      .then(() => toast({ text: `Backed up ${game.title}` }))
+      .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
+  }, [reload, settings, games, toast]);
 
   const { session, play, stop, busy, error } = useSession(onSessionEnded);
+
+  // A controller moves the real focus. It only polls after one is connected.
+  useGamepad();
+
+  // Linux WebKit keeps blurring and spinning forever if we leave those styles
+  // on, and the cost grows the longer the window is open. The class is the
+  // switch that turns them off. The window also starts treated as focused
+  // until a real blur, because WebKit often reports the opposite at startup
+  // and then the pad never starts.
+  useEffect(() => {
+    if (!isNative()) return;
+    const platform = navigator.userAgent.toLowerCase();
+    if (!platform.includes('linux') && !platform.includes('x11')) return;
+    document.documentElement.classList.add('orbit-linux');
+    return () => document.documentElement.classList.remove('orbit-linux');
+  }, []);
 
   // The clock in the tray and the detail page only tick while something runs.
   useEffect(() => {
@@ -825,6 +854,30 @@ export default function App() {
     byRecent.find((g) => !g.hidden) ??
     played.find((g) => !g.planned && !g.hidden) ??
     null;
+
+  // Start on a controller starts the selected game, or the hero game. Back
+  // clears a selection, then leaves the page. Escape, which the pad also
+  // sends, already closes a dialog that is open.
+  useEffect(() => {
+    const onPlay = () => {
+      if (session) {
+        void stop();
+        return;
+      }
+      const picked = (selectedId && games.find((item) => item.id === selectedId)) || heroGame;
+      if (picked) void startGame(picked);
+    };
+    const onBack = () => {
+      if (selectedId) setSelectedId(null);
+      else if (page !== 'library') setPage('library');
+    };
+    window.addEventListener('orbit-pad-play', onPlay);
+    window.addEventListener('orbit-pad-back', onBack);
+    return () => {
+      window.removeEventListener('orbit-pad-play', onPlay);
+      window.removeEventListener('orbit-pad-back', onBack);
+    };
+  }, [session, stop, selectedId, games, heroGame, page]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -976,6 +1029,8 @@ export default function App() {
               setShowImport(true);
             }}
           />
+        ) : page === 'saves' ? (
+          <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
             {showHome && settings.showHero !== false && heroGame && (

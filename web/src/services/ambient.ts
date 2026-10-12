@@ -10,6 +10,8 @@
  * user gesture yet, playback waits quietly for the first click or key press.
  */
 
+import { ambientSet, isNative } from './native';
+
 /** C3 keeps the chimes warm while leaving room for game audio. */
 const ROOT = 130.8128;
 
@@ -89,17 +91,54 @@ export class Ambient {
   private wanted = false;
   private volume = 0.35;
   private resumeOn: (() => void) | null = null;
+  /**
+   * Linux WebKit's Web Audio graph often stays silent. When the system player
+   * took the pad, the oscillators stay off so two copies don't play.
+   */
+  private nativeHeld = false;
+  /** The first focus report is often a lie on WebKitGTK, before any real blur. */
+  private focusArmed = false;
 
   /** Turn the sound on, and keep it on. */
   start(volume: number): void {
     this.wanted = true;
     this.setVolume(volume);
-    this.ensure();
+    void this.tryNative();
+  }
+
+  /**
+   * Ask the system player first. It answers false when it has nothing to play
+   * through, and that is the cue to use the web view instead.
+   */
+  private async tryNative(): Promise<void> {
+    if (!isNative()) {
+      this.ensure();
+      return;
+    }
+    try {
+      const held = await ambientSet(true, this.volume, true);
+      if (!this.wanted) {
+        if (held) void ambientSet(false, 0, true).catch(() => undefined);
+        return;
+      }
+      this.nativeHeld = held;
+      if (held) this.stopOscillators();
+      else this.ensure();
+    } catch {
+      this.nativeHeld = false;
+      if (this.wanted) this.ensure();
+    }
   }
 
   /** Fade to silence, stop the notes, and suspend the audio graph shortly after. */
   stop(): void {
     this.wanted = false;
+    this.nativeHeld = false;
+    if (isNative()) void ambientSet(false, this.volume, true).catch(() => undefined);
+    this.stopOscillators();
+  }
+
+  private stopOscillators(): void {
     this.clearTimer();
     this.fadeVoices(this.voices);
     this.fadeVoices(this.padVoices);
@@ -128,6 +167,9 @@ export class Ambient {
   /** Volume, 0 to 1. Safe to call before anything is playing. */
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
+    if (this.nativeHeld) {
+      void ambientSet(this.wanted, this.volume, true).catch(() => undefined);
+    }
     if (!this.master || !this.context || !this.wanted) return;
     try {
       this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.7);
@@ -138,6 +180,19 @@ export class Ambient {
 
   /** Whether the window is being looked at, and whether sound may continue away. */
   setFocused(focused: boolean, keepWhenUnfocused: boolean): void {
+    // WebKitGTK reports a blur at startup, before the window has ever been
+    // focused, and a pad that believes that never starts. A later blur is real.
+    if (!this.focusArmed) {
+      this.focusArmed = true;
+      if (!focused && this.onLinux() && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+        focused = true;
+      }
+    }
+    const audible = focused || keepWhenUnfocused;
+    if (this.nativeHeld) {
+      void ambientSet(this.wanted, audible ? this.volume : 0, audible).catch(() => undefined);
+      return;
+    }
     if (!this.context || !this.master) return;
     const target = !focused && !keepWhenUnfocused ? 0 : this.volume;
     try {
@@ -148,6 +203,10 @@ export class Ambient {
   }
 
   // ------------------------------------------------------------------ private
+
+  private onLinux(): boolean {
+    return typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent);
+  }
 
   private ensure(): void {
     if (!this.context) {
