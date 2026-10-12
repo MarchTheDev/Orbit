@@ -147,7 +147,7 @@ function Tile({
           // A neutral shadow on hover, not an accent-coloured one: with the
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover.
-          'relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
+          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
         )}
       >

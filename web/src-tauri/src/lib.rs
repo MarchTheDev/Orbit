@@ -14,6 +14,8 @@ mod hltb;
 mod launch;
 mod launch_target;
 mod launchers;
+#[cfg(target_os = "linux")]
+mod linux_window;
 mod metadata;
 mod process;
 mod saves;
@@ -146,6 +148,31 @@ static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 /// a second exit event does not start a second watchdog.
 static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+pub(crate) fn quitting() -> bool {
+    QUITTING.load(Ordering::SeqCst)
+}
+
+/// Hide the window and take it off the taskbar. Unminimizing first is what
+/// makes a Wayland compositor drop the minimized entry instead of keeping it.
+fn withdraw_to_tray(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    linux_window::note_parked();
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.unminimize();
+    let _ = window.hide();
+}
+
+fn remember_minimize_policy(policy: &WindowPolicy) {
+    #[cfg(target_os = "linux")]
+    linux_window::set_armed(
+        policy.on_minimize == "tray" && TRAY_READY.load(Ordering::SeqCst),
+    );
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = policy;
+    }
+}
+
 /// Put an icon in the notification area, with a way back to the window.
 ///
 /// This is what makes "step aside while I play" possible: Orbit leaves the
@@ -209,7 +236,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// Bring Orbit back to the front, wherever it went.
 pub(crate) fn reveal_window(app: &tauri::AppHandle) {
     use tauri::Manager;
+    #[cfg(target_os = "linux")]
+    linux_window::note_revealed();
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_skip_taskbar(false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -1103,6 +1133,7 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
 fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), String> {
     if let Ok(mut policy) = orbit.policy.lock() {
         *policy = policy_from_settings(Some(&settings));
+        remember_minimize_policy(&policy);
     }
     remember_wine(Some(&settings));
     orbit.store.save_settings(&settings)
@@ -1166,8 +1197,44 @@ fn saves_restore(
     game_id: String,
     title: String,
     save_dir: Option<String>,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
 ) -> Result<String, String> {
-    saves::restore(orbit.store.root(), &game_id, &title, save_dir.as_deref())
+    saves::restore(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        save_dir.as_deref(),
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+    )
+}
+
+fn save_hints<'a>(
+    install_dir: Option<&'a str>,
+    prefix: Option<&'a str>,
+    steam_app_id: Option<u32>,
+) -> saves::Hints<'a> {
+    saves::Hints {
+        install_dir,
+        prefix,
+        steam_app_id,
+    }
+}
+
+/// Look for the save folder. Nothing extra is installed to do this.
+#[tauri::command]
+fn saves_find(
+    title: String,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
+) -> Option<String> {
+    saves::detect(
+        &title,
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+    )
+    .map(|path| path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1445,6 +1512,15 @@ pub fn run() {
 
             app.manage(Orbit { db, runner, store, sizes, policy: Arc::clone(&policy) });
 
+            if let Ok(current) = policy.lock() {
+                remember_minimize_policy(&current);
+            }
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                linux_window::install(&window);
+            }
+            gamepad::start(app.handle().clone());
+
             // The close button. Hiding is only done when the player asked for
             // the tray and the icon is actually there; otherwise the window
             // closes and the exit path below finishes the process.
@@ -1452,26 +1528,46 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let policy = Arc::clone(&policy);
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let hide = policy
-                            .lock()
-                            .map(|current| current.on_app_close == "tray")
-                            .unwrap_or(false)
-                            && TRAY_READY.load(Ordering::SeqCst);
-                        if hide {
-                            api.prevent_close();
-                            if let Some(window) = handle.get_webview_window("main") {
-                                let _ = window.hide();
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            let hide = policy
+                                .lock()
+                                .map(|current| current.on_app_close == "tray")
+                                .unwrap_or(false)
+                                && TRAY_READY.load(Ordering::SeqCst);
+                            if hide {
+                                api.prevent_close();
+                                if let Some(window) = handle.get_webview_window("main") {
+                                    withdraw_to_tray(&window);
+                                }
                             }
                         }
+                        // Some compositors report a minimise as a zero size
+                        // instead of an iconified state. Same destination.
+                        #[cfg(target_os = "linux")]
+                        tauri::WindowEvent::Resized(size)
+                            if size.width == 0 && size.height == 0 && !linux_window::is_parked() =>
+                        {
+                            let to_tray = policy
+                                .lock()
+                                .map(|current| current.on_minimize == "tray")
+                                .unwrap_or(false)
+                                && TRAY_READY.load(Ordering::SeqCst);
+                            if to_tray {
+                                if let Some(window) = handle.get_webview_window("main") {
+                                    withdraw_to_tray(&window);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 });
             }
 
-            // Minimise-to-tray cannot be a window event: the minimise already
-            // happened by the time we hear about it. Asking the window only
-            // while the option is on keeps this from being another always-on
-            // cost. The thread leaves as soon as an exit starts.
+            // Minimise-to-tray cannot wait on a window event: on Linux the
+            // minimise has already happened, and `is_minimized` is often the
+            // only report. The GTK hook does the same the moment the state
+            // changes. This poll is the fallback, and it leaves on exit.
             {
                 let handle = app.handle().clone();
                 let policy = Arc::clone(&policy);
@@ -1483,17 +1579,23 @@ pub fn run() {
                         }
                         let to_tray = policy
                             .lock()
-                            .map(|current| current.on_minimize == "tray")
+                            .map(|current| {
+                                remember_minimize_policy(&current);
+                                current.on_minimize == "tray"
+                            })
                             .unwrap_or(false);
                         if !to_tray || !TRAY_READY.load(Ordering::SeqCst) {
+                            continue;
+                        }
+                        #[cfg(target_os = "linux")]
+                        if linux_window::is_parked() {
                             continue;
                         }
                         let Some(window) = handle.get_webview_window("main") else {
                             continue;
                         };
                         if window.is_minimized().unwrap_or(false) {
-                            let _ = window.hide();
-                            let _ = window.unminimize();
+                            withdraw_to_tray(&window);
                         }
                     }
                 });
@@ -1564,6 +1666,7 @@ pub fn run() {
             saves_backup,
             saves_restore,
             saves_list,
+            saves_find,
             saves_suggest,
             reveal_in_explorer,
             open_game_folder,
@@ -1646,6 +1749,13 @@ mod tests {
         }
         assert!(!drives.is_empty(), "this machine has at least one drive");
         assert!(drives.iter().all(|d| d.drive.ends_with(':')));
+        assert!(
+            drives.iter().any(|d| d.total > 0),
+            "at least one drive reports its size"
+        );
+    }
+}
+l(|d| d.drive.ends_with(':')));
         assert!(
             drives.iter().any(|d| d.total > 0),
             "at least one drive reports its size"

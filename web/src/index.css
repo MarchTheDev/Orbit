@@ -115,6 +115,7 @@ body::before {
    mark is still drawn. A controller, when one is connected, gets a ring that
    does not depend on the mouse. */
 html.orbit-linux .glass,
+html.orbit-linux .backdrop-blur,
 html.orbit-linux .backdrop-blur-xl,
 html.orbit-linux .backdrop-blur-sm {
   -webkit-backdrop-filter: none !important;
@@ -123,8 +124,57 @@ html.orbit-linux .backdrop-blur-sm {
 html.orbit-linux .orbit-spin-outer,
 html.orbit-linux .orbit-spin-inner,
 html.orbit-linux .orbit-twinkle,
-html.orbit-linux .orbit-pulse,
-html.orbit-linux .orbit-bars i {
+html.orbit-linux .orbit-pulse {
+  animation: none !important;
+}
+/* The bars are four pixels. They are not what made the window stall, and
+   freezing them made a playing pad look silent. */
+html.orbit-linux .orbit-bars-active i {
+  animation: orbit-bar 1.1s ease-in-out infinite;
+}
+
+/* A translucent sticky bar is a full-width repaint on every scroll once the
+   blur is gone, and it reads as the bar turning transparent. Shadows, filters
+   and hover scales do the same in software. The star field is a fixed layer
+   over the whole window. None of those are needed to use the app. */
+html.orbit-linux body {
+  background: var(--c-bg);
+}
+html.orbit-linux body::before {
+  display: none;
+}
+html.orbit-linux .sticky,
+html.orbit-linux .orbit-sticky {
+  background-color: var(--c-panel) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.orbit-linux .orbit-topbar {
+  background-color: var(--c-bg) !important;
+  background-image: none !important;
+}
+html.orbit-linux *,
+html.orbit-linux *::before,
+html.orbit-linux *::after {
+  transition: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  text-shadow: none !important;
+}
+html.orbit-linux .orbit-cover,
+html.orbit-linux .group:hover .orbit-cover {
+  transform: none !important;
+}
+html.orbit-linux .fade-in,
+html.orbit-linux .drawer-in,
+html.orbit-linux .orbit-tab-enter,
+html.orbit-linux .orbit-hero-enter,
+html.orbit-linux .modal-backdrop-enter,
+html.orbit-linux .modal-panel-enter,
+html.orbit-linux .save-tick,
+html.orbit-linux .settings-spot {
   animation: none !important;
 }
 html.orbit-pad :focus {

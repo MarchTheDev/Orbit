@@ -96,8 +96,13 @@ export class Ambient {
    * took the pad, the oscillators stay off so two copies don't play.
    */
   private nativeHeld = false;
-  /** The first focus report is often a lie on WebKitGTK, before any real blur. */
-  private focusArmed = false;
+  /** Whether the pad should be heard right now. A fake blur must not clear this. */
+  private audible = true;
+  /**
+   * WebKitGTK reports a blur at startup, before the window has ever been
+   * focused. That blur is ignored until a real focus has been seen.
+   */
+  private sawFocus = false;
 
   /** Turn the sound on, and keep it on. */
   start(volume: number): void {
@@ -168,7 +173,7 @@ export class Ambient {
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
     if (this.nativeHeld) {
-      void ambientSet(this.wanted, this.volume, true).catch(() => undefined);
+      void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
     }
     if (!this.master || !this.context || !this.wanted) return;
     try {
@@ -180,17 +185,18 @@ export class Ambient {
 
   /** Whether the window is being looked at, and whether sound may continue away. */
   setFocused(focused: boolean, keepWhenUnfocused: boolean): void {
-    // WebKitGTK reports a blur at startup, before the window has ever been
-    // focused, and a pad that believes that never starts. A later blur is real.
-    if (!this.focusArmed) {
-      this.focusArmed = true;
-      if (!focused && this.onLinux() && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
-        focused = true;
-      }
+    // The first reports are often a blur with no focus before it. Honouring
+    // that writes silence into the system player and the bars stay still.
+    // A blur only counts after the window has actually been focused once.
+    if (this.onLinux() && !this.sawFocus) {
+      if (focused) this.sawFocus = true;
+      else if (typeof document === 'undefined' || document.visibilityState !== 'hidden') focused = true;
+    } else if (focused) {
+      this.sawFocus = true;
     }
-    const audible = focused || keepWhenUnfocused;
+    this.audible = focused || keepWhenUnfocused;
     if (this.nativeHeld) {
-      void ambientSet(this.wanted, audible ? this.volume : 0, audible).catch(() => undefined);
+      void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
       return;
     }
     if (!this.context || !this.master) return;

@@ -1,6 +1,16 @@
 import { useEffect } from 'react';
 import { heldDirection, padEdges, type PadSnapshot } from '../utils/gamepad';
 
+interface NativePad {
+  connected: boolean;
+  buttons: boolean[];
+  axes: number[];
+}
+
+function tauriEvent() {
+  return (window as Window & { __TAURI__?: { event: { listen: (name: string, handler: (e: { payload: unknown }) => void) => Promise<() => void> } } }).__TAURI__?.event;
+}
+
 const FOCUSABLE = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function snapshot(pad: Gamepad): PadSnapshot {
@@ -74,63 +84,135 @@ function play() {
   window.dispatchEvent(new CustomEvent('orbit-pad-play'));
 }
 
+function act(action: 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'play') {
+  if (action === 'activate') activate();
+  else if (action === 'back') back();
+  else if (action === 'play') play();
+  else move(action);
+}
+
+function ensureFocus() {
+  const current = document.activeElement;
+  if (current instanceof HTMLElement && current !== document.body && focusables().includes(current)) return;
+  focusables()[0]?.focus();
+}
+
 /**
  * Drive the window from a controller, and only while one is connected.
  *
  * A loop that ran with no pad attached would be the same always-on work the
- * Linux slowdown came from. `gamepadconnected` starts it; the last disconnect
- * stops it.
+ * Linux slowdown came from. The browser event starts it where that event
+ * exists. On Linux WebKit often never fires it, so the desktop side reads
+ * the controller and says when one is there. A one-second look is only a
+ * presence check, not a frame poll, and it stops once a pad is known.
  */
 export function useGamepad() {
   useEffect(() => {
     let timer = 0;
+    let scan = 0;
     let previous: PadSnapshot | null = null;
     let heldFor = 0;
+    let native: PadSnapshot | null = null;
+    let nativeOn = false;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+
+    const apply = (now: PadSnapshot) => {
+      document.documentElement.classList.add('orbit-pad');
+      ensureFocus();
+      for (const action of padEdges(previous, now)) {
+        act(action);
+        heldFor = 0;
+      }
+      previous = now;
+    };
     const tick = () => {
+      if (nativeOn && native) {
+        const held = heldDirection(native);
+        if (held) {
+          heldFor += 1;
+          if (heldFor === 10 || (heldFor > 10 && heldFor % 4 === 0)) move(held);
+        } else {
+          heldFor = 0;
+        }
+        return;
+      }
       const pads = navigator.getGamepads?.() ?? [];
       const pad = Array.from(pads).find((item) => item && item.connected) ?? null;
       if (!pad) {
         previous = null;
         return;
       }
-      document.documentElement.classList.add('orbit-pad');
-      const now = snapshot(pad);
-      for (const action of padEdges(previous, now)) {
-        if (action === 'activate') activate();
-        else if (action === 'back') back();
-        else if (action === 'play') play();
-        else if (action === 'up' || action === 'down' || action === 'left' || action === 'right') move(action);
-        heldFor = 0;
-      }
-      const held = heldDirection(now);
+      apply(snapshot(pad));
+      const held = heldDirection(snapshot(pad));
       if (held) {
         heldFor += 1;
         if (heldFor === 10 || (heldFor > 10 && heldFor % 4 === 0)) move(held);
       } else {
         heldFor = 0;
       }
-      previous = now;
     };
     const start = () => {
       if (timer) return;
       document.documentElement.classList.add('orbit-pad');
+      ensureFocus();
       timer = window.setInterval(tick, 50);
     };
+    const webConnected = () => Array.from(navigator.getGamepads?.() ?? []).some((item) => item && item.connected);
     const stop = () => {
-      const still = Array.from(navigator.getGamepads?.() ?? []).some((item) => item && item.connected);
-      if (still) return;
+      if (nativeOn || webConnected()) return;
       window.clearInterval(timer);
       timer = 0;
       previous = null;
+      heldFor = 0;
       document.documentElement.classList.remove('orbit-pad');
     };
     window.addEventListener('gamepadconnected', start);
     window.addEventListener('gamepaddisconnected', stop);
-    if (Array.from(navigator.getGamepads?.() ?? []).some((item) => item && item.connected)) start();
+    if (webConnected()) start();
+
+    const api = tauriEvent();
+    if (api) {
+      void api.listen('orbit-gamepad', (event) => {
+        const payload = event.payload as NativePad;
+        if (!payload?.connected) {
+          nativeOn = false;
+          native = null;
+          stop();
+          return;
+        }
+        const now = { buttons: payload.buttons ?? [], axes: payload.axes ?? [] };
+        if (!nativeOn) {
+          nativeOn = true;
+          native = now;
+          previous = now;
+          start();
+          return;
+        }
+        native = now;
+        apply(now);
+        if (!timer) start();
+      }).then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      });
+    }
+
+    const linux = /linux|x11/i.test(navigator.userAgent);
+    if (linux) {
+      scan = window.setInterval(() => {
+        if (nativeOn || timer) return;
+        if (webConnected()) start();
+      }, 1000);
+    }
+
     return () => {
+      alive = false;
+      unlisten?.();
       window.removeEventListener('gamepadconnected', start);
       window.removeEventListener('gamepaddisconnected', stop);
       window.clearInterval(timer);
+      window.clearInterval(scan);
       document.documentElement.classList.remove('orbit-pad');
     };
   }, []);

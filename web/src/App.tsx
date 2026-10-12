@@ -26,6 +26,7 @@ import {
   isNative,
   launcherGames,
   onOpenExeRequested,
+  saveHintsOf,
   setPlaytime,
   steamLibrary,
   takeOpenExePaths,
@@ -502,7 +503,7 @@ export default function App() {
     if (!settings?.saves?.auto?.includes(gameId)) return;
     const game = games.find((item) => item.id === gameId);
     if (!game) return;
-    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null)
+    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game))
       .then(() => toast({ text: `Backed up ${game.title}` }))
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);

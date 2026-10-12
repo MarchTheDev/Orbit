@@ -17,8 +17,8 @@ export const TABS: Tab[] = [
   { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
   { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'logs', label: 'Journal', Icon: ScrollText },
-  { id: 'storage', label: 'Storage', Icon: HardDrive },
   { id: 'saves', label: 'Saves', Icon: Save },
+  { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
 
 /**
@@ -29,8 +29,12 @@ export const TABS: Tab[] = [
  * than dropping it, and an id that no longer exists is ignored, so a stale
  * setting can never hide a page.
  */
+const PREVIOUS_DEFAULT: Page[] = ['library', 'sessions', 'backlog', 'logs', 'storage', 'saves'];
+
 export function orderedTabs(order: Page[] | undefined): Tab[] {
-  if (!order || order.length === 0) return TABS;
+  // A saved copy of the old default still has Storage before Saves. That was
+  // the list, not a choice the player made, so it follows the new order.
+  if (!order || order.length === 0 || order.join() === PREVIOUS_DEFAULT.join()) return TABS;
   const known = new Map(TABS.map((t) => [t.id, t]));
   const seen = new Set<Page>();
   const out: Tab[] = [];
@@ -105,7 +109,7 @@ export function TopNav({
   }, [activeTab, tabKey]);
 
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-base/80 backdrop-blur-xl">
+    <header className="orbit-topbar sticky top-0 z-20 border-b border-line bg-bg/95 backdrop-blur-xl">
       {/* The bar is the one thing that spans the whole window rather than sitting
           in a column: on a wide screen the logo belongs at the left edge and the
           settings button at the right, not both of them a hand's width in. */}

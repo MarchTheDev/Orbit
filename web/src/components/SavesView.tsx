@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { ArchiveRestore, FolderOpen, Ghost, HardDriveDownload, RefreshCw } from 'lucide-react';
+import { ArchiveRestore, FolderOpen, HardDriveDownload, RefreshCw, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
-import { openExternal, pickFolder } from '../services/desktop';
+import { pickFolder } from '../services/desktop';
 import {
   backupSave,
+  findSave,
   isNative,
   listSaves,
   restoreSave,
+  saveHintsOf,
   savesStatus,
   suggestSaves,
   type SaveBackup,
@@ -19,9 +21,10 @@ import { cn } from '../utils/cn';
 /**
  * Copies of the files a game writes while it is played.
  *
- * ludusavi finds those files from PCGamingWiki when it is installed. Without
- * it, Orbit copies a folder the player names, and can still ask the wiki
- * where that folder usually is. A backup never leaves the machine.
+ * Orbit looks in the usual places — Documents, Saved Games, the game's own
+ * folder, a Wine prefix, a Steam prefix — and copies what it finds. Nothing
+ * else has to be installed. A folder the player names is used instead. A
+ * backup never leaves the machine.
  */
 export function SavesView({
   games,
@@ -58,27 +61,14 @@ export function SavesView({
           <h1 className="text-xl font-semibold">Saves</h1>
           <p className="mt-1 max-w-xl text-sm text-muted">
             A copy of each game's save files, made here and kept on this machine. Turn auto on and
-            Orbit takes one when a session ends.
+            Orbit takes one when a session ends. Nothing else has to be installed.
           </p>
         </div>
-        <button
-          onClick={() => void openExternal('https://github.com/mtkennerly/ludusavi')}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
-        >
-          ludusavi
-        </button>
       </div>
 
-      {status && !status.ludusavi && (
-        <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
-          ludusavi is not installed, so Orbit cannot find save folders by itself. Name a folder for
-          a game, or install ludusavi and it will use the PCGamingWiki list. Ghost Hunter Pro can
-          clean leftovers; it does not replace a backup.
-        </p>
-      )}
-      {status?.ludusavi && (
+      {status?.root && (
         <p className="mb-4 text-xs text-muted">
-          ludusavi is installed. Backups go to <span className="text-fg">{status.root}</span>.
+          Copies are kept in <span className="text-fg">{status.root}</span>.
         </p>
       )}
 
@@ -117,13 +107,6 @@ export function SavesView({
         </ul>
       )}
 
-      <button
-        onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
-        className="mt-6 flex items-center gap-2 text-xs text-muted hover:text-fg"
-      >
-        <Ghost className="size-3.5" />
-        Ghost Hunter Pro finds leftover save data. It is separate from these copies.
-      </button>
     </div>
   );
 }
@@ -175,7 +158,7 @@ function SaveRow({
         hint="Orbit takes a copy as the clock stops. It does not do this for a session that was already over when Orbit opened."
       />
       <label className="block">
-        <span className="mb-1 block text-xs text-muted">Save folder, if ludusavi is not finding it</span>
+        <span className="mb-1 block text-xs text-muted">Save folder, if the search looks in the wrong place</span>
         <div className="flex gap-2">
           <input
             className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
@@ -198,7 +181,7 @@ function SaveRow({
       <div className="flex flex-wrap gap-2">
         <button
           disabled={busy || !isNative()}
-          onClick={() => void run(() => backupSave(game.id, game.title, dir || null), `Backed up ${game.title}`)}
+          onClick={() => void run(() => backupSave(game.id, game.title, dir || null, saveHintsOf(game)), `Backed up ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-40"
         >
           <HardDriveDownload className="size-3.5" />
@@ -206,11 +189,25 @@ function SaveRow({
         </button>
         <button
           disabled={busy || !isNative()}
-          onClick={() => void run(() => restoreSave(game.id, game.title, dir || null), `Restored ${game.title}`)}
+          onClick={() => void run(() => restoreSave(game.id, game.title, dir || null, saveHintsOf(game)), `Restored ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
         >
           <ArchiveRestore className="size-3.5" />
           Restore latest
+        </button>
+        <button
+          disabled={busy || !isNative()}
+          onClick={() =>
+            void run(async () => {
+              const found = await findSave(game.title, saveHintsOf(game));
+              if (!found) throw new Error(`Orbit could not find a save folder for ${game.title}.`);
+              onDir(found);
+            }, `Found a save folder for ${game.title}`)
+          }
+          className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
+        >
+          <Search className="size-3.5" />
+          Find folder
         </button>
         <button
           disabled={busy || !isNative()}
@@ -223,7 +220,7 @@ function SaveRow({
           className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
         >
           <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
-          Ask PCGamingWiki
+          Wiki paths
         </button>
       </div>
       {error && <p className="text-xs text-rose-300">{error}</p>}

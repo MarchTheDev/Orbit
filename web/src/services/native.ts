@@ -659,24 +659,43 @@ export interface SaveBackup {
 }
 
 export interface SaveStatus {
-  ludusavi: boolean;
   root: string;
 }
 
-export function savesStatus(): Promise<SaveStatus> {
-  return call('saves_status', {}, () => ({ ludusavi: false, root: '' }));
+/** Where a game is installed, so a save search can look in that prefix. */
+export interface SaveHints {
+  installDir?: string | null;
+  prefix?: string | null;
+  steamAppId?: number | null;
 }
 
-export function backupSave(gameId: string, title: string, saveDir: string | null): Promise<SaveBackup> {
-  return call('saves_backup', { gameId, title, saveDir }, async () => {
+export function saveHintsOf(game: { installDir: string | null; launch: { kind: string; prefix?: string | null; appId?: number } }): SaveHints {
+  const launch = game.launch;
+  return {
+    installDir: game.installDir,
+    prefix: launch.kind === 'wine' || launch.kind === 'lutris' ? launch.prefix ?? null : null,
+    steamAppId: launch.kind === 'steam' ? launch.appId ?? null : null,
+  };
+}
+
+export function savesStatus(): Promise<SaveStatus> {
+  return call('saves_status', {}, () => ({ root: '' }));
+}
+
+export function backupSave(gameId: string, title: string, saveDir: string | null, hints?: SaveHints): Promise<SaveBackup> {
+  return call('saves_backup', { gameId, title, saveDir, ...hints }, async () => {
     throw new Error('Backups need the desktop app.');
   });
 }
 
-export function restoreSave(gameId: string, title: string, saveDir: string | null): Promise<string> {
-  return call('saves_restore', { gameId, title, saveDir }, async () => {
+export function restoreSave(gameId: string, title: string, saveDir: string | null, hints?: SaveHints): Promise<string> {
+  return call('saves_restore', { gameId, title, saveDir, ...hints }, async () => {
     throw new Error('Restoring needs the desktop app.');
   });
+}
+
+export function findSave(title: string, hints?: SaveHints): Promise<string | null> {
+  return call('saves_find', { title, ...hints }, async () => null);
 }
 
 export function listSaves(gameId: string, title: string): Promise<SaveBackup[]> {

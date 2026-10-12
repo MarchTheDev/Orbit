@@ -1,13 +1,14 @@
 //! Backups of a game's save files.
 //!
-//! [ludusavi](https://github.com/mtkennerly/ludusavi) already knows where a game
-//! keeps its saves, from PCGamingWiki, and Orbit uses it when it is installed.
-//! When it is not, a folder the player named is copied instead. Nothing here
-//! uploads a save, and nothing deletes the original.
+//! Orbit finds the folder the way a launcher does: look in the usual places
+//! for a directory named after the game, then copy that directory. Nothing else
+//! has to be installed, nothing is uploaded, and the original files are left
+//! where the game wrote them. A folder the player names is used instead of the
+//! search. PCGamingWiki can still be asked where a game usually keeps its
+//! saves; that is a free page, not a program.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -24,8 +25,15 @@ pub struct SaveBackup {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveStatus {
-    pub ludusavi: bool,
     pub root: String,
+}
+
+/// Extra places to look, taken from the game itself.
+#[derive(Clone, Debug, Default)]
+pub struct Hints<'a> {
+    pub install_dir: Option<&'a str>,
+    pub prefix: Option<&'a str>,
+    pub steam_app_id: Option<u32>,
 }
 
 pub fn root_of(data_dir: &Path) -> PathBuf {
@@ -34,31 +42,23 @@ pub fn root_of(data_dir: &Path) -> PathBuf {
 
 pub fn status(data_dir: &Path) -> SaveStatus {
     SaveStatus {
-        ludusavi: which("ludusavi").is_some(),
         root: root_of(data_dir).to_string_lossy().to_string(),
     }
 }
 
-/// Copy or ask ludusavi to copy, and remember which one it was.
+/// Copy the save folder. A named folder wins. Otherwise Orbit looks.
 pub fn backup(
     data_dir: &Path,
     game_id: &str,
     title: &str,
     save_dir: Option<&str>,
+    hints: &Hints<'_>,
 ) -> Result<SaveBackup, String> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err("This game has no name to back up under.".into());
+    let from = resolve(title, save_dir, hints)?;
+    if from.starts_with(root_of(data_dir)) {
+        return Err("That folder is a backup Orbit already made, not the game's saves.".into());
     }
-    if which("ludusavi").is_some() {
-        return ludusavi_backup(data_dir, title);
-    }
-    let Some(from) = save_dir.map(str::trim).filter(|p| !p.is_empty()) else {
-        return Err(
-            "ludusavi is not installed, and no save folder has been named for this game.".into(),
-        );
-    };
-    copy_folder(data_dir, game_id, Path::new(from))
+    copy_folder(data_dir, game_id, &from)
 }
 
 /// Put the newest backup back where it came from.
@@ -67,74 +67,366 @@ pub fn restore(
     game_id: &str,
     title: &str,
     save_dir: Option<&str>,
+    hints: &Hints<'_>,
 ) -> Result<String, String> {
-    if which("ludusavi").is_some() {
-        ludusavi(data_dir, "restore", title.trim())?;
-        return Ok(format!("Restored {title} with ludusavi."));
-    }
     let backups = list_folder_backups(data_dir, game_id);
     let Some(latest) = backups.into_iter().max_by_key(|b| b.at) else {
-        return Err("There is no folder backup to restore.".into());
+        return Err("There is no backup to restore.".into());
     };
-    let Some(dest) = save_dir.map(str::trim).filter(|p| !p.is_empty()) else {
-        return Err("Name the save folder before restoring a copy into it.".into());
-    };
-    copy_tree(&PathBuf::from(&latest.path), Path::new(dest))?;
-    Ok(format!("Restored the copy from {}.", latest.path))
+    let dest = resolve(title, save_dir, hints)?;
+    copy_tree(&PathBuf::from(&latest.path), &dest, 0)?;
+    Ok(format!("Restored the copy into {}.", dest.display()))
 }
 
-pub fn list(data_dir: &Path, game_id: &str, title: &str) -> Vec<SaveBackup> {
+pub fn list(data_dir: &Path, game_id: &str, _title: &str) -> Vec<SaveBackup> {
     let mut found = list_folder_backups(data_dir, game_id);
-    if which("ludusavi").is_some() {
-        let dir = ludusavi_root(data_dir).join(safe_name(title));
-        if dir.is_dir() {
-            found.push(SaveBackup {
-                at: mtime(&dir),
-                path: dir.to_string_lossy().to_string(),
-                kind: "ludusavi".into(),
-                note: "Kept by ludusavi".into(),
-            });
-        }
-    }
     found.sort_by_key(|b| std::cmp::Reverse(b.at));
     found
 }
 
-fn ludusavi_backup(data_dir: &Path, title: &str) -> Result<SaveBackup, String> {
-    ludusavi(data_dir, "backup", title)?;
-    Ok(SaveBackup {
-        at: now(),
-        path: ludusavi_root(data_dir).to_string_lossy().to_string(),
-        kind: "ludusavi".into(),
-        note: format!("ludusavi backup of {title}"),
+/// The folder a backup would copy, if Orbit can see one.
+pub fn detect(title: &str, hints: &Hints<'_>) -> Option<PathBuf> {
+    resolve(title, None, hints).ok()
+}
+
+fn resolve(title: &str, save_dir: Option<&str>, hints: &Hints<'_>) -> Result<PathBuf, String> {
+    if let Some(named) = save_dir.map(str::trim).filter(|p| !p.is_empty()) {
+        let path = PathBuf::from(named);
+        if path.is_dir() {
+            return Ok(path);
+        }
+        return Err(format!("{} is not a folder.", path.display()));
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("This game has no name to look up a save folder with.".into());
+    }
+    if let Some(found) = search(title, hints) {
+        return Ok(found);
+    }
+    Err(format!(
+        "Orbit could not find a save folder for {title}. Name the folder, and the next copy will use that."
+    ))
+}
+
+fn search(title: &str, hints: &Hints<'_>) -> Option<PathBuf> {
+    let names = candidates(title, hints.install_dir);
+    if names.is_empty() {
+        return None;
+    }
+
+    if let Some(install) = hints.install_dir.map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some(found) = install_saves(Path::new(install)) {
+            return Some(found);
+        }
+    }
+
+    let mut roots = Vec::new();
+    if let Some(prefix) = hints.prefix.map(str::trim).filter(|p| !p.is_empty()) {
+        roots.extend(wine_user_roots(Path::new(prefix)));
+    }
+    if let Some(app_id) = hints.steam_app_id {
+        for prefix in steam_prefixes_for(app_id) {
+            roots.extend(wine_user_roots(&prefix));
+        }
+    }
+    roots.extend(home_roots());
+
+    if let Some(found) = scan_roots(&roots, &names) {
+        return Some(found);
+    }
+
+    // A Steam game that was not imported as one still keeps its prefix under a
+    // number. Look only at the user folders, and stop after a handful.
+    let mut extra = Vec::new();
+    for prefix in other_steam_prefixes(hints.steam_app_id) {
+        extra.extend(wine_user_roots(&prefix));
+        if extra.len() > 240 {
+            break;
+        }
+    }
+    scan_roots(&extra, &names)
+}
+
+fn scan_roots(roots: &[PathBuf], names: &[String]) -> Option<PathBuf> {
+    for root in roots {
+        if let Some(found) = match_in(root, names, true) {
+            if !too_broad(&found) {
+                return Some(prefer_inner(found));
+            }
+        }
+    }
+    None
+}
+
+/// A child of `root` whose name is the game, or a publisher folder's child.
+pub fn match_in(root: &Path, names: &[String], nested: bool) -> Option<PathBuf> {
+    if !root.is_dir() {
+        return None;
+    }
+    let entries = fs::read_dir(root).ok()?.flatten().collect::<Vec<_>>();
+    for entry in &entries {
+        if entry.path().is_dir() && name_matches(&entry.file_name().to_string_lossy(), names) {
+            return Some(entry.path());
+        }
+    }
+    if !nested || entries.len() > 400 {
+        return None;
+    }
+    for entry in &entries {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let Ok(children) = fs::read_dir(entry.path()) else {
+            continue;
+        };
+        for child in children.flatten() {
+            if child.path().is_dir() && name_matches(&child.file_name().to_string_lossy(), names) {
+                return Some(child.path());
+            }
+        }
+    }
+    None
+}
+
+fn prefer_inner(found: PathBuf) -> PathBuf {
+    let saved = found.join("Saved").join("SaveGames");
+    if saved.is_dir() {
+        return saved;
+    }
+    for sub in ["Saves", "saves", "SaveGames"] {
+        let inner = found.join(sub);
+        if inner.is_dir() {
+            return inner;
+        }
+    }
+    found
+}
+
+fn install_saves(install: &Path) -> Option<PathBuf> {
+    if !install.is_dir() {
+        return None;
+    }
+    for sub in ["Saved/SaveGames", "Saved", "Saves", "saves", "Save", "save", "SaveGames"] {
+        let candidate = install.join(sub);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn wine_user_roots(prefix: &Path) -> Vec<PathBuf> {
+    let users = prefix.join("drive_c").join("users");
+    let Ok(entries) = fs::read_dir(&users) else {
+        return Vec::new();
+    };
+    let mut roots = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.eq_ignore_ascii_case("Public") || !entry.path().is_dir() {
+            continue;
+        }
+        let user = entry.path();
+        for sub in [
+            "Saved Games",
+            "Documents/My Games",
+            "Documents",
+            "AppData/LocalLow",
+            "AppData/Local",
+            "AppData/Roaming",
+        ] {
+            roots.push(user.join(sub));
+        }
+    }
+    roots
+}
+
+fn home_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let base = PathBuf::from(profile);
+            roots.push(base.join("Saved Games"));
+            roots.push(base.join("Documents").join("My Games"));
+            roots.push(base.join("Documents"));
+            roots.push(base.join("AppData").join("LocalLow"));
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            roots.push(PathBuf::from(local));
+        }
+        if let Ok(roaming) = std::env::var("APPDATA") {
+            roots.push(PathBuf::from(roaming));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = home_dir() {
+            if let Some(data) = std::env::var_os("XDG_DATA_HOME") {
+                roots.push(PathBuf::from(data));
+            } else {
+                roots.push(home.join(".local/share"));
+            }
+            if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+                roots.push(PathBuf::from(config));
+            } else {
+                roots.push(home.join(".config"));
+            }
+            roots.push(home.join(".config/unity3d"));
+            roots.push(home.join("Documents"));
+            roots.push(home.join("Documents/My Games"));
+            roots.extend(wine_user_roots(&home.join(".wine")));
+        }
+    }
+    roots
+}
+
+fn steam_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            roots.push(PathBuf::from(local).join("Steam"));
+        }
+        for var in ["ProgramFiles(x86)", "ProgramFiles"] {
+            if let Ok(dir) = std::env::var(var) {
+                roots.push(PathBuf::from(dir).join("Steam"));
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = home_dir() {
+            roots.extend([
+                home.join(".steam/steam"),
+                home.join(".steam/root"),
+                home.join(".local/share/Steam"),
+                home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+                home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
+                home.join("snap/steam/common/.steam/steam"),
+            ]);
+        }
+    }
+    roots.into_iter().filter(|path| path.is_dir()).collect()
+}
+
+fn steam_prefixes_for(app_id: u32) -> Vec<PathBuf> {
+    steam_roots()
+        .into_iter()
+        .map(|root| {
+            root.join("steamapps")
+                .join("compatdata")
+                .join(app_id.to_string())
+                .join("pfx")
+        })
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+fn other_steam_prefixes(skip: Option<u32>) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for root in steam_roots() {
+        let compat = root.join("steamapps").join("compatdata");
+        let Ok(entries) = fs::read_dir(&compat) else {
+            continue;
+        };
+        for entry in entries.flatten().take(48) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if skip.is_some_and(|id| name == id.to_string()) {
+                continue;
+            }
+            let prefix = entry.path().join("pfx");
+            if prefix.is_dir() {
+                found.push(prefix);
+            }
+            if found.len() >= 48 {
+                return found;
+            }
+        }
+    }
+    found
+}
+
+fn candidates(title: &str, install_dir: Option<&str>) -> Vec<String> {
+    let mut names = Vec::new();
+    push_name(&mut names, title);
+    if let Some((main, sub)) = title.split_once(':').or_else(|| title.split_once(" - ")) {
+        push_name(&mut names, main);
+        push_name(&mut names, sub);
+    }
+    if let Some(install) = install_dir {
+        if let Some(folder) = Path::new(install).file_name().and_then(|n| n.to_str()) {
+            push_name(&mut names, folder);
+        }
+    }
+    names
+}
+
+fn push_name(names: &mut Vec<String>, raw: &str) {
+    let trimmed = raw.trim().trim_matches(|c: char| c == '™' || c == '®' || c == '©');
+    if trimmed.chars().count() >= 3 {
+        names.push(trimmed.to_string());
+    }
+    let normalized = normalize(trimmed);
+    if normalized.len() >= 3 && !names.iter().any(|n| normalize(n) == normalized) {
+        names.push(normalized);
+    }
+}
+
+fn name_matches(dir_name: &str, names: &[String]) -> bool {
+    let dir_norm = normalize(dir_name);
+    if dir_norm.len() < 3 {
+        return false;
+    }
+    names.iter().any(|name| {
+        name.eq_ignore_ascii_case(dir_name) || normalize(name) == dir_norm
     })
 }
 
-/// `--path` belongs to the backup and restore commands, not in front of them.
-fn ludusavi(data_dir: &Path, command: &str, title: &str) -> Result<(), String> {
-    let root = ludusavi_root(data_dir);
-    fs::create_dir_all(&root).map_err(|e| format!("Could not create {}: {e}", root.display()))?;
-    let mut cmd = Command::new("ludusavi");
-    cmd.arg(command)
-        .arg("--force")
-        .arg("--path")
-        .arg(&root)
-        .arg(title)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let out = cmd
-        .output()
-        .map_err(|e| format!("Could not run ludusavi: {e}"))?;
-    if out.status.success() {
-        return Ok(());
+fn normalize(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn too_broad(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return true;
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "users"
+            | "documents"
+            | "saved games"
+            | "my games"
+            | "appdata"
+            | "local"
+            | "roaming"
+            | "locallow"
+            | "share"
+            | "config"
+            | ".config"
+            | ".local"
+            | "home"
+            | "public"
+            | "steamuser"
+    )
+}
+
+#[allow(dead_code)]
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
     }
-    let err = String::from_utf8_lossy(&out.stderr);
-    let msg = err.trim();
-    if msg.is_empty() {
-        Err(format!("ludusavi exited with {}", out.status))
-    } else {
-        Err(format!("ludusavi: {msg}"))
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from)
     }
 }
 
@@ -143,10 +435,8 @@ fn copy_folder(data_dir: &Path, game_id: &str, from: &Path) -> Result<SaveBackup
         return Err(format!("{} is not a folder.", from.display()));
     }
     let at = now();
-    let dest = root_of(data_dir)
-        .join(safe_name(game_id))
-        .join(at.to_string());
-    copy_tree(from, &dest)?;
+    let dest = root_of(data_dir).join(safe_name(game_id)).join(at.to_string());
+    copy_tree(from, &dest, 0)?;
     let note = format!("Copied from {}", from.display());
     fs::write(dest.join(".orbit-note"), &note).ok();
     Ok(SaveBackup {
@@ -180,10 +470,16 @@ fn list_folder_backups(data_dir: &Path, game_id: &str) -> Vec<SaveBackup> {
     found
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+fn copy_tree(from: &Path, to: &Path, depth: i32) -> Result<(), String> {
+    if depth > 16 {
+        return Ok(());
+    }
     fs::create_dir_all(to).map_err(|e| format!("Could not create {}: {e}", to.display()))?;
     for entry in fs::read_dir(from).map_err(|e| format!("Could not read {}: {e}", from.display()))? {
         let entry = entry.map_err(|e| format!("Could not read {}: {e}", from.display()))?;
+        if entry.file_name() == ".orbit-note" {
+            continue;
+        }
         let dest = to.join(entry.file_name());
         let kind = entry
             .file_type()
@@ -194,29 +490,18 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
             continue;
         }
         if kind.is_dir() {
-            copy_tree(&entry.path(), &dest)?;
+            copy_tree(&entry.path(), &dest, depth + 1)?;
         } else if kind.is_file() {
             fs::copy(entry.path(), &dest).map_err(|e| {
-                format!("Could not copy {} to {}: {e}", entry.path().display(), dest.display())
+                format!(
+                    "Could not copy {} to {}: {e}",
+                    entry.path().display(),
+                    dest.display()
+                )
             })?;
         }
     }
     Ok(())
-}
-
-fn ludusavi_root(data_dir: &Path) -> PathBuf {
-    root_of(data_dir).join("ludusavi")
-}
-
-fn which(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 fn safe_name(raw: &str) -> String {
@@ -415,5 +700,41 @@ mod tests {
     fn a_name_cannot_leave_its_folder() {
         assert_eq!(safe_name("../nope"), "nope");
         assert_eq!(safe_name("   "), "game");
+    }
+
+    #[test]
+    fn a_folder_named_after_the_game_is_the_save_folder() {
+        let root = std::env::temp_dir().join(format!("orbit-saves-{}", std::process::id()));
+        let saved = root.join("Saved Games").join("Celeste");
+        fs::create_dir_all(&saved).unwrap();
+        let found = match_in(&root.join("Saved Games"), &["Celeste".into()], true);
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(found.unwrap(), saved);
+    }
+
+    #[test]
+    fn a_publisher_folder_does_not_hide_the_game() {
+        let root = std::env::temp_dir().join(format!("orbit-saves-nested-{}", std::process::id()));
+        let saved = root.join("CD Projekt Red").join("Cyberpunk 2077");
+        fs::create_dir_all(&saved).unwrap();
+        let found = match_in(&root, &["Cyberpunk 2077".into()], true);
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(found.unwrap(), saved);
+    }
+
+    #[test]
+    fn a_missing_folder_does_not_ask_for_another_program() {
+        let dir = std::env::temp_dir().join(format!("orbit-backup-missing-{}", std::process::id()));
+        let err = backup(
+            &dir,
+            "id",
+            "Orbit Missing Save Zzq",
+            None,
+            &Hints::default(),
+        )
+        .unwrap_err();
+        let lower = err.to_ascii_lowercase();
+        assert!(!lower.contains("ludusavi"), "{err}");
+        assert!(!lower.contains("ghost"), "{err}");
     }
 }

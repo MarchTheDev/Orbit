@@ -39,6 +39,7 @@ const checks = [
   'tests/launchers.test.mjs',
   'tests/launcher-path.test.mjs',
   'tests/idle-animations.test.mjs',
+  'tests/tab-order.test.mjs',
 ];
 
 try {

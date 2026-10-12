@@ -487,8 +487,8 @@ export interface Settings {
   /** The wine binary to use when a game does not name one. */
   winePath?: string;
   /**
-   * Which games back themselves up, and a folder to copy when ludusavi is not
-   * the thing doing it.
+   * Which games back themselves up, and a folder to copy when Orbit cannot
+   * find one by looking.
    */
   saves?: {
     auto?: string[];

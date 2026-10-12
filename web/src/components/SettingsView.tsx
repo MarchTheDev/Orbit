@@ -521,7 +521,7 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel/95 p-2 shadow-lg backdrop-blur-xl">
+      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel p-2 shadow-lg backdrop-blur-xl">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
