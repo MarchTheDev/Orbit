@@ -1187,8 +1187,17 @@ fn saves_backup(
     game_id: String,
     title: String,
     save_dir: Option<String>,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
 ) -> Result<saves::SaveBackup, String> {
-    saves::backup(orbit.store.root(), &game_id, &title, save_dir.as_deref())
+    saves::backup(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        save_dir.as_deref(),
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+    )
 }
 
 #[tauri::command]

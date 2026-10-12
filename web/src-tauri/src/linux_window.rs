@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use gdk::WindowState;
 use glib::Propagation;
 use gtk::prelude::*;
-use webkit2gtk::prelude::*;
+use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
 
 static ARMED: AtomicBool = AtomicBool::new(false);
 static PARKED: AtomicBool = AtomicBool::new(false);
@@ -45,8 +45,9 @@ pub fn is_parked() -> bool {
 pub fn install(window: &tauri::WebviewWindow) {
     let installed = window.with_webview(|webview| {
         let view = webview.inner();
-        if let Some(settings) = view.settings() {
-            settings.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Never);
+        // The GTK prelude also has a settings method. Name the web view one.
+        if let Some(settings) = WebViewExt::settings(&view) {
+            settings.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
             // A single-page app never navigates. The cache is only a growing
             // snapshot of panels that are already on screen.
             settings.set_enable_page_cache(false);
