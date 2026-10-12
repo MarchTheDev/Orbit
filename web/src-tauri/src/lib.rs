@@ -1755,10 +1755,3 @@ mod tests {
         );
     }
 }
-l(|d| d.drive.ends_with(':')));
-        assert!(
-            drives.iter().any(|d| d.total > 0),
-            "at least one drive reports its size"
-        );
-    }
-}
