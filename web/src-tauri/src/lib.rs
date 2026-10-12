@@ -1767,8 +1767,3 @@ mod tests {
         );
     }
 }
-0),
-            "at least one drive reports its size"
-        );
-    }
-}
