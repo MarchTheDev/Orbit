@@ -10,6 +10,7 @@ mod db;
 #[cfg(windows)]
 mod explorer;
 mod format;
+mod gamepad;
 mod hltb;
 mod launch;
 mod launch_target;
