@@ -364,7 +364,10 @@ fn registry_install_path(entry: &RegistryEntry) -> Option<PathBuf> {
         .filter(|path| !path.as_os_str().is_empty())
 }
 
-#[cfg(windows)]
+/// Two install folders are the same game even when the separators differ.
+///
+/// Not Windows-only: a Lutris scan on Linux uses it too, and the comparison
+/// itself does not touch the registry.
 fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path(left) == normalize_path(right)
 }

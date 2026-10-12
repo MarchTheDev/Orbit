@@ -295,7 +295,7 @@ pub fn paths_from_wikitext(text: &str) -> Vec<String> {
 /// Index of the `}` that closes the template starting at `start` (`{{`).
 fn template_end(text: &str, start: usize) -> Option<usize> {
     let rest = text[start..].as_bytes();
-    let mut depth = 0;
+    let mut depth: i32 = 0;
     let mut i = 0;
     while i + 1 < rest.len() {
         if rest[i] == b'{' && rest[i + 1] == b'{' {
@@ -320,7 +320,7 @@ fn template_end(text: &str, start: usize) -> Option<usize> {
 fn split_pipes(body: &str) -> Vec<&str> {
     let bytes = body.as_bytes();
     let mut parts = Vec::new();
-    let mut depth = 0;
+    let mut depth: i32 = 0;
     let mut start = 0;
     let mut i = 0;
     while i < bytes.len() {
