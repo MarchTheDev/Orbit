@@ -73,7 +73,7 @@ ok(
 ok(
   'Linux prefers its Debian package',
   pickReleaseAsset([
-    { name: 'Orbit-0.2.0-linux-x86_64.AppImage', browser_download_url: 'https://example.com/orbit.AppImage' },
+    { name: 'Orbit-0.2.0-x86_64.AppImage', browser_download_url: 'https://example.com/orbit.AppImage' },
     { name: 'orbit_0.2.0_amd64.deb', browser_download_url: 'https://example.com/orbit.deb' },
   ], 'Linux x86_64')?.name === 'orbit_0.2.0_amd64.deb',
 );
@@ -103,7 +103,7 @@ const realAssets = [
   'orbit-1.0-1.fc.x86_64.rpm',
   'orbit-1.0-1.x86_64.rpm',
   'Orbit-1.0-linux-portable.tar.gz',
-  'Orbit-1.0-linux-x86_64.AppImage',
+  'Orbit-1.0-x86_64.AppImage',
   'Orbit-1.0-windows-portable.zip',
   'Orbit-1.0-windows-setup.exe',
   'Orbit-1.0-windows.msi',

@@ -11,8 +11,9 @@ import { useId } from 'react';
  * `src/assets/orbit-mark.svg` and the application icon are made from.
  *
  * Colour is `currentColor`, so the mark follows the theme and whatever surface
- * it sits on. It is always animated, since the turning is most of what makes it
- * the Orbit mark, and it stops for anyone who has asked for less motion.
+ * it sits on. It turns while Orbit is the window in front, since the turning is
+ * most of what makes it the Orbit mark. It stops when the window is not
+ * (`.orbit-idle` in index.css) and for anyone who has asked for less motion.
  */
 export function Logo({
   className,

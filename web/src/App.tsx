@@ -122,6 +122,16 @@ export default function App() {
   /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
+  /**
+   * Whether this window is the one in front.
+   *
+   * A game taking focus is the usual reason it is not. The decorative loops
+   * stop then — the same way the music bars already do — so the webview has
+   * nothing left to repaint and can hand the CPU and GPU back to the game.
+   */
+  const [focused, setFocused] = useState(
+    () => typeof document === 'undefined' || (document.hasFocus() && !document.hidden),
+  );
   /** Programs dragged onto the window, waiting to be added. */
   const [droppedPaths, setDroppedPaths] = useState<string[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -272,6 +282,27 @@ export default function App() {
     ambient.start(sound?.volume ?? 0.35);
     ambient.setFocused(document.hasFocus(), sound?.unfocused === true);
   }, [settings?.sound?.enabled, settings?.sound?.volume, settings?.sound?.unfocused]);
+
+  /**
+   * Stop the decorative loops whenever something else has the window.
+   *
+   * The logo, the stars and the now-playing dot are transforms and opacity, so
+   * they look cheap, but each one asks Chromium to keep producing frames for as
+   * long as it runs. A game in front is exactly when that budget is wanted
+   * elsewhere. Coming back is instant: nothing was moved, only paused.
+   */
+  useEffect(() => {
+    const sync = () => setFocused(document.hasFocus() && !document.hidden);
+    window.addEventListener('focus', sync);
+    window.addEventListener('blur', sync);
+    document.addEventListener('visibilitychange', sync);
+    sync();
+    return () => {
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('blur', sync);
+      document.removeEventListener('visibilitychange', sync);
+    };
+  }, []);
 
   /**
    * Whether the window is being looked at, so the music can step aside.
@@ -857,7 +888,9 @@ export default function App() {
           // Opacity only, never a transform: an ancestor with a transform on it
           // becomes the thing a fixed element is measured against, and the
           // dialogs would then scroll with the page instead of sitting over it.
-          opening ? 'orbit-enter relative h-full overflow-y-auto text-fg' : 'relative h-full overflow-y-auto text-fg'
+          // `orbit-idle` is the other half of that: when a game has the window,
+          // the decorative loops stop so this shell has nothing to repaint.
+          `${opening ? 'orbit-enter ' : ''}relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
       <TopNav
