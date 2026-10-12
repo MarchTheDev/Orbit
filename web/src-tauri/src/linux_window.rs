@@ -165,7 +165,7 @@ fn walk(widget: &gtk::Widget, found: &std::cell::RefCell<Option<gtk::Button>>) {
         let icon = image.icon_name().map(|name| name.to_string()).unwrap_or_default();
         // The icon name is not translated. The tooltip is, so it is only a hint.
         if icon.contains("window-minimize") {
-            if let Some(button) = button_above(&image) {
+            if let Some(button) = button_above(image.upcast_ref()) {
                 *found.borrow_mut() = Some(button);
                 return;
             }
