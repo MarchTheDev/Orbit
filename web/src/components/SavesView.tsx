@@ -9,6 +9,7 @@ import {
   listSaves,
   restoreSave,
   saveHintsOf,
+  savePlaceOf,
   savesStatus,
   suggestSaves,
   type SaveBackup,
@@ -16,6 +17,7 @@ import {
 } from '../services/native';
 import { Checkbox } from './ui/Checkbox';
 import { Cover } from './ui/Cover';
+import { btnAccent } from './ui/buttons';
 import { say } from '../utils/toast';
 import { cn } from '../utils/cn';
 
@@ -45,8 +47,8 @@ export function SavesView({
 
   useEffect(() => {
     if (!isNative()) return;
-    void savesStatus().then(setStatus).catch(() => undefined);
-  }, []);
+    void savesStatus(settings.saves?.backupRoot).then(setStatus).catch(() => undefined);
+  }, [settings.saves?.backupRoot]);
 
   const setAuto = (id: string, on: boolean) => {
     const next = on ? [...new Set([...auto, id])] : auto.filter((item) => item !== id);
@@ -63,7 +65,7 @@ export function SavesView({
     let skipped = 0;
     for (const game of rows) {
       try {
-        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game));
+        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
         copied += 1;
       } catch {
         skipped += 1;
@@ -96,7 +98,7 @@ export function SavesView({
             type="button"
             disabled={backingAll}
             onClick={() => void backupAll()}
-            className="flex items-center gap-2 rounded-full bg-fg px-4 py-2 text-sm font-semibold text-bg disabled:opacity-60"
+            className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-4 py-2 text-sm')}
           >
             <HardDriveDownload className="size-4" />
             {backingAll ? 'Backing up…' : 'Backup all'}
@@ -123,7 +125,7 @@ export function SavesView({
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
               >
                 <span className="flex min-w-0 items-center gap-3">
-                  <Cover game={game} className="h-12 w-9 shrink-0 overflow-hidden rounded-md [&_span]:text-[10px]" />
+                  <Cover game={game} className="h-28 w-20 shrink-0 overflow-hidden rounded-xl shadow-sm [&_span]:text-sm" />
                   <span className="min-w-0">
                   <span className="block truncate font-medium">{game.title}</span>
                   <span className="block truncate text-xs text-muted">
@@ -135,13 +137,16 @@ export function SavesView({
                 <span className="text-xs text-muted">{openId === game.id ? 'Hide' : 'Manage'}</span>
               </button>
               {openId === game.id && (
-                <SaveRow
-                  game={game}
-                  auto={auto.includes(game.id)}
-                  dir={dirs[game.id] ?? ''}
-                  onAuto={(on) => setAuto(game.id, on)}
-                  onDir={(dir) => setDir(game.id, dir)}
-                />
+                <div className="save-manage-in">
+                  <SaveRow
+                    game={game}
+                    auto={auto.includes(game.id)}
+                    dir={dirs[game.id] ?? ''}
+                    settings={settings}
+                    onAuto={(on) => setAuto(game.id, on)}
+                    onDir={(dir) => setDir(game.id, dir)}
+                  />
+                </div>
               )}
             </li>
           ))}
@@ -156,12 +161,14 @@ function SaveRow({
   game,
   auto,
   dir,
+  settings,
   onAuto,
   onDir,
 }: {
   game: Game;
   auto: boolean;
   dir: string;
+  settings: Settings;
   onAuto: (on: boolean) => void;
   onDir: (dir: string) => void;
 }) {
@@ -172,9 +179,9 @@ function SaveRow({
 
   const refresh = () => {
     if (!isNative()) return;
-    void listSaves(game.id, game.title).then(setBackups).catch(() => setBackups([]));
+    void listSaves(game.id, game.title, savePlaceOf(game, settings)).then(setBackups).catch(() => setBackups([]));
   };
-  useEffect(refresh, [game.id, game.title]);
+  useEffect(refresh, [game.id, game.title, settings.saves?.backupRoot, game.meta?.developer]);
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -222,7 +229,7 @@ function SaveRow({
       <div className="flex flex-wrap gap-2">
         <button
           disabled={busy || !isNative()}
-          onClick={() => void run(() => backupSave(game.id, game.title, dir || null, saveHintsOf(game)), `Backed up ${game.title}`)}
+          onClick={() => void run(() => backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings)), `Backed up ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-40"
         >
           <HardDriveDownload className="size-3.5" />
@@ -230,7 +237,7 @@ function SaveRow({
         </button>
         <button
           disabled={busy || !isNative()}
-          onClick={() => void run(() => restoreSave(game.id, game.title, dir || null, saveHintsOf(game)), `Restored ${game.title}`)}
+          onClick={() => void run(() => restoreSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings)), `Restored ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
         >
           <ArchiveRestore className="size-3.5" />

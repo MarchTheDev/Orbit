@@ -1190,8 +1190,8 @@ fn ambient_stop() {
 }
 
 #[tauri::command]
-fn saves_status(orbit: State<'_, Orbit>) -> saves::SaveStatus {
-    saves::status(orbit.store.root())
+fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::SaveStatus {
+    saves::status(orbit.store.root(), backup_root.as_deref())
 }
 
 #[tauri::command]
@@ -1222,6 +1222,8 @@ fn saves_restore(
     install_dir: Option<String>,
     prefix: Option<String>,
     steam_app_id: Option<u32>,
+    publisher: Option<String>,
+    backup_root: Option<String>,
 ) -> Result<String, String> {
     saves::restore(
         orbit.store.root(),
@@ -1229,6 +1231,8 @@ fn saves_restore(
         &title,
         save_dir.as_deref(),
         &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+        publisher.as_deref(),
+        backup_root.as_deref(),
     )
 }
 
@@ -1260,8 +1264,20 @@ fn saves_find(
 }
 
 #[tauri::command]
-fn saves_list(orbit: State<'_, Orbit>, game_id: String, title: String) -> Vec<saves::SaveBackup> {
-    saves::list(orbit.store.root(), &game_id, &title)
+fn saves_list(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    publisher: Option<String>,
+    backup_root: Option<String>,
+) -> Vec<saves::SaveBackup> {
+    saves::list(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        publisher.as_deref(),
+        backup_root.as_deref(),
+    )
 }
 
 /// Ask PCGamingWiki where a game usually keeps its saves. The API needs no key.
@@ -1747,6 +1763,11 @@ mod tests {
         assert!(drives.iter().all(|d| d.drive.ends_with(':')));
         assert!(
             drives.iter().any(|d| d.total > 0),
+            "at least one drive reports its size"
+        );
+    }
+}
+0),
             "at least one drive reports its size"
         );
     }

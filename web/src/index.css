@@ -151,8 +151,12 @@ html.orbit-linux .orbit-topbar {
   background-image: none !important;
 }
 html.orbit-pad :focus {
-  outline: 2px solid var(--c-accent);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--c-accent);
+}
+html.orbit-pad .orbit-logo:focus {
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--c-bg), 0 0 0 5px var(--c-accent);
 }
 
 /* Nobody who has asked for less motion gets a spinning anything. */
@@ -162,6 +166,7 @@ html.orbit-pad :focus {
   .orbit-twinkle,
   .drawer-in,
   .save-tick,
+  .save-manage-in,
   .fade-in { animation: none !important; }
 }
 
@@ -482,6 +487,20 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .orbit-bars i { animation: none !important; transition: none !important; }
+}
+
+@keyframes save-manage-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.save-manage-in {
+  animation: save-manage-in 200ms ease-out;
 }
 
 .orbit-hero-wash {

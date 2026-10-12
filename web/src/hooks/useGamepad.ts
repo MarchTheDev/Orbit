@@ -84,10 +84,25 @@ function play() {
   window.dispatchEvent(new CustomEvent('orbit-pad-play'));
 }
 
-function act(action: 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'play') {
+function page(direction: 'left' | 'right') {
+  window.dispatchEvent(new CustomEvent('orbit-pad-page', { detail: direction }));
+}
+
+function scrollByStick(pad: PadSnapshot) {
+  const x = pad.axes[2] ?? 0;
+  const y = pad.axes[3] ?? 0;
+  if (Math.abs(x) < 0.2 && Math.abs(y) < 0.2) return;
+  const scroller = document.querySelector('.orbit-scroll');
+  if (!(scroller instanceof HTMLElement)) return;
+  scroller.scrollBy({ left: x * 22, top: y * 28 });
+}
+
+function act(action: 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'play' | 'page-left' | 'page-right') {
   if (action === 'activate') activate();
   else if (action === 'back') back();
   else if (action === 'play') play();
+  else if (action === 'page-left') page('left');
+  else if (action === 'page-right') page('right');
   else move(action);
 }
 
@@ -131,6 +146,7 @@ export function useGamepad() {
     };
     const tick = () => {
       if (nativeOn && native) {
+        scrollByStick(native);
         const held = heldDirection(native);
         if (held) {
           heldFor += 1;
@@ -148,8 +164,10 @@ export function useGamepad() {
         previous = null;
         return;
       }
-      apply(snapshot(pad));
-      const held = heldDirection(snapshot(pad));
+      const now = snapshot(pad);
+      scrollByStick(now);
+      apply(now);
+      const held = heldDirection(now);
       if (held) {
         heldFor += 1;
         if (heldFor === 10 || (heldFor > 10 && heldFor % 4 === 0)) move(held);

@@ -23,6 +23,7 @@ import { useGamepad } from './hooks/useGamepad';
 import {
   backupSave,
   clearLibrary,
+  savePlaceOf,
   isNative,
   launcherGames,
   onOpenExeRequested,
@@ -37,7 +38,7 @@ import { ambient } from './services/ambient';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
-import { TopNav } from './components/TopNav';
+import { TopNav, orderedTabs } from './components/TopNav';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Hero } from './components/Hero';
@@ -513,7 +514,7 @@ export default function App() {
     if (!settings?.saves?.auto?.includes(gameId)) return;
     const game = games.find((item) => item.id === gameId);
     if (!game) return;
-    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game))
+    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings))
       .then(() => toast({ text: `Backed up ${game.title}` }))
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);
@@ -882,13 +883,24 @@ export default function App() {
       if (selectedId) setSelectedId(null);
       else if (page !== 'library') setPage('library');
     };
+    const onPage = (event: Event) => {
+      const direction = (event as CustomEvent<string>).detail;
+      const tabs = orderedTabs(settings?.tabOrder).map((tab) => tab.id);
+      if (tabs.length === 0) return;
+      const index = tabs.indexOf(page);
+      const from = index >= 0 ? index : direction === 'right' ? -1 : tabs.length;
+      const next = direction === 'right' ? tabs[(from + 1) % tabs.length] : tabs[(from - 1 + tabs.length) % tabs.length];
+      if (next) setPage(next);
+    };
     window.addEventListener('orbit-pad-play', onPlay);
     window.addEventListener('orbit-pad-back', onBack);
+    window.addEventListener('orbit-pad-page', onPage);
     return () => {
       window.removeEventListener('orbit-pad-play', onPlay);
       window.removeEventListener('orbit-pad-back', onBack);
+      window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page]);
+  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -954,7 +966,7 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
       <TopNav

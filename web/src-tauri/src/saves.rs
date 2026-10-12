@@ -36,29 +36,36 @@ pub struct Hints<'a> {
     pub steam_app_id: Option<u32>,
 }
 
-pub fn root_of(data_dir: &Path) -> PathBuf {
-    data_dir.join("backups")
+pub fn root_of(data_dir: &Path, custom: Option<&str>) -> PathBuf {
+    let custom = custom.map(str::trim).filter(|path| !path.is_empty());
+    match custom {
+        Some(path) => PathBuf::from(path),
+        None => data_dir.join("backups"),
+    }
 }
 
-pub fn status(data_dir: &Path) -> SaveStatus {
+pub fn status(data_dir: &Path, custom: Option<&str>) -> SaveStatus {
     SaveStatus {
-        root: root_of(data_dir).to_string_lossy().to_string(),
+        root: root_of(data_dir, custom).to_string_lossy().to_string(),
     }
 }
 
 /// Copy the save folder. A named folder wins. Otherwise Orbit looks.
 pub fn backup(
     data_dir: &Path,
-    game_id: &str,
+    _game_id: &str,
     title: &str,
     save_dir: Option<&str>,
     hints: &Hints<'_>,
+    publisher: Option<&str>,
+    backup_root: Option<&str>,
 ) -> Result<SaveBackup, String> {
     let from = resolve(title, save_dir, hints)?;
-    if from.starts_with(root_of(data_dir)) {
+    let root = root_of(data_dir, backup_root);
+    if from.starts_with(&root) {
         return Err("That folder is a backup Orbit already made, not the game's saves.".into());
     }
-    copy_folder(data_dir, game_id, &from)
+    copy_folder(&root, title, publisher, &from)
 }
 
 /// Put the newest backup back where it came from.
@@ -68,8 +75,10 @@ pub fn restore(
     title: &str,
     save_dir: Option<&str>,
     hints: &Hints<'_>,
+    publisher: Option<&str>,
+    backup_root: Option<&str>,
 ) -> Result<String, String> {
-    let backups = list_folder_backups(data_dir, game_id);
+    let backups = list(data_dir, game_id, title, publisher, backup_root);
     let Some(latest) = backups.into_iter().max_by_key(|b| b.at) else {
         return Err("There is no backup to restore.".into());
     };
@@ -78,8 +87,38 @@ pub fn restore(
     Ok(format!("Restored the copy into {}.", dest.display()))
 }
 
-pub fn list(data_dir: &Path, game_id: &str, _title: &str) -> Vec<SaveBackup> {
-    let mut found = list_folder_backups(data_dir, game_id);
+pub fn list(
+    data_dir: &Path,
+    game_id: &str,
+    title: &str,
+    publisher: Option<&str>,
+    backup_root: Option<&str>,
+) -> Vec<SaveBackup> {
+    let root = root_of(data_dir, backup_root);
+    let mut found = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for dir in game_backup_dirs(&root, game_id, title, publisher) {
+        for backup in list_folder_backups(&dir) {
+            if seen.insert(backup.path.clone()) {
+                found.push(backup);
+            }
+        }
+    }
+    // A copy made before the folders used the real names still lives under the
+    // old id, next to Orbit's own files, even if the player has since chosen
+    // another folder.
+    if backup_root.is_some() {
+        let previous = data_dir.join("backups");
+        if previous != root {
+            for dir in game_backup_dirs(&previous, game_id, title, publisher) {
+                for backup in list_folder_backups(&dir) {
+                    if seen.insert(backup.path.clone()) {
+                        found.push(backup);
+                    }
+                }
+            }
+        }
+    }
     found.sort_by_key(|b| std::cmp::Reverse(b.at));
     found
 }
@@ -430,15 +469,29 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-fn copy_folder(data_dir: &Path, game_id: &str, from: &Path) -> Result<SaveBackup, String> {
+fn copy_folder(
+    root: &Path,
+    title: &str,
+    publisher: Option<&str>,
+    from: &Path,
+) -> Result<SaveBackup, String> {
     if !from.is_dir() {
         return Err(format!("{} is not a folder.", from.display()));
     }
     let at = now();
-    let dest = root_of(data_dir).join(safe_name(game_id)).join(at.to_string());
+    let (studio, game) = place_names(title, publisher, from);
+    let game_dir = root.join(&studio).join(&game);
+    let mut dest = game_dir.join(stamp_folder(at));
+    if dest.exists() {
+        dest = game_dir.join(format!("{}-{}", stamp_folder(at), at));
+    }
+    let _ = game_id;
     copy_tree(from, &dest, 0)?;
-    let note = format!("Copied from {}", from.display());
-    fs::write(dest.join(".orbit-note"), &note).ok();
+    let note = format!(
+        "Game: {game}\nPublisher: {studio}\nCopied from: {}\nAt: {at}\n",
+        from.display()
+    );
+    fs::write(dest.join("note.txt"), &note).map_err(|e| format!("Could not write the note: {e}"))?;
     Ok(SaveBackup {
         at,
         path: dest.to_string_lossy().to_string(),
@@ -447,9 +500,8 @@ fn copy_folder(data_dir: &Path, game_id: &str, from: &Path) -> Result<SaveBackup
     })
 }
 
-fn list_folder_backups(data_dir: &Path, game_id: &str) -> Vec<SaveBackup> {
-    let dir = root_of(data_dir).join(safe_name(game_id));
-    let Ok(entries) = fs::read_dir(&dir) else {
+fn list_folder_backups(dir: &Path) -> Vec<SaveBackup> {
+    let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut found = Vec::new();
@@ -458,8 +510,14 @@ fn list_folder_backups(data_dir: &Path, game_id: &str) -> Vec<SaveBackup> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        let at = name.parse::<i64>().unwrap_or_else(|_| mtime(&entry.path()));
-        let note = fs::read_to_string(entry.path().join(".orbit-note")).unwrap_or_default();
+        let note = fs::read_to_string(entry.path().join("note.txt"))
+            .or_else(|_| fs::read_to_string(entry.path().join(".orbit-note")))
+            .unwrap_or_default();
+        let at = note
+            .lines()
+            .find_map(|line| line.strip_prefix("At: ").and_then(|rest| rest.trim().parse().ok()))
+            .or_else(|| name.parse().ok())
+            .unwrap_or_else(|| mtime(&entry.path()));
         found.push(SaveBackup {
             at,
             path: entry.path().to_string_lossy().to_string(),
@@ -470,6 +528,84 @@ fn list_folder_backups(data_dir: &Path, game_id: &str) -> Vec<SaveBackup> {
     found
 }
 
+/// Publisher, then the game. A copy made from `Documents/Rockstar Games/Red
+/// Dead Redemption 2` is filed that way, not under an id and a number.
+fn place_names(title: &str, studio: Option<&str>, from: &Path) -> (String, String) {
+    let game = folder_name(title);
+    let publisher = studio
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(folder_name)
+        .or_else(|| publisher_above(from, &game))
+        .unwrap_or_else(|| "Unknown".into());
+    (publisher, game)
+}
+
+fn publisher_above(from: &Path, game: &str) -> Option<String> {
+    let mut cursor = Some(from);
+    while let Some(dir) = cursor {
+        let name = dir.file_name().and_then(|part| part.to_str()).unwrap_or("");
+        if !name.is_empty() && folder_name(name).eq_ignore_ascii_case(game) {
+            let parent = dir.parent()?;
+            let parent_name = parent.file_name().and_then(|part| part.to_str()).unwrap_or("");
+            if !parent_name.is_empty() && !generic_folder(parent_name) {
+                return Some(folder_name(parent_name));
+            }
+        }
+        cursor = dir.parent();
+    }
+    None
+}
+
+fn game_backup_dirs(root: &Path, game_id: &str, title: &str, publisher: Option<&str>) -> Vec<PathBuf> {
+    let game = folder_name(title);
+    let mut dirs = Vec::new();
+    if let Some(publisher) = publisher.map(str::trim).filter(|name| !name.is_empty()) {
+        dirs.push(root.join(folder_name(publisher)).join(&game));
+    }
+    dirs.push(root.join("Unknown").join(&game));
+    dirs.push(root.join(safe_name(game_id)));
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let child = entry.path().join(&game);
+            if child.is_dir() {
+                dirs.push(child);
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn generic_folder(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "users"
+            | "user"
+            | "documents"
+            | "my documents"
+            | "saved games"
+            | "my games"
+            | "profiles"
+            | "profile"
+            | "savegames"
+            | "saves"
+            | "saved"
+            | "save"
+            | "appdata"
+            | "local"
+            | "locallow"
+            | "roaming"
+            | "public"
+            | "home"
+            | "desktop"
+            | "downloads"
+            | "onedrive"
+            | "drive_c"
+    )
+}
+
 fn copy_tree(from: &Path, to: &Path, depth: i32) -> Result<(), String> {
     if depth > 16 {
         return Ok(());
@@ -477,7 +613,8 @@ fn copy_tree(from: &Path, to: &Path, depth: i32) -> Result<(), String> {
     fs::create_dir_all(to).map_err(|e| format!("Could not create {}: {e}", to.display()))?;
     for entry in fs::read_dir(from).map_err(|e| format!("Could not read {}: {e}", from.display()))? {
         let entry = entry.map_err(|e| format!("Could not read {}: {e}", from.display()))?;
-        if entry.file_name() == ".orbit-note" {
+        let file_name = entry.file_name();
+        if file_name == ".orbit-note" || file_name == "note.txt" {
             continue;
         }
         let dest = to.join(entry.file_name());
@@ -526,6 +663,59 @@ fn now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// A folder name that keeps the original spelling. Spaces stay. Only the
+/// characters a folder cannot contain are taken out.
+fn folder_name(raw: &str) -> String {
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_control() || matches!(ch, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim_matches(|ch: char| ch == '.' || ch == ' ');
+    if trimmed.is_empty() || is_reserved(trimmed) {
+        "Game".into()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn is_reserved(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name);
+    matches!(
+        base.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "LPT1" | "LPT2"
+    )
+}
+
+fn stamp_folder(at: i64) -> String {
+    let days = at.div_euclid(86_400);
+    let tod = at.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = tod / 3600;
+    let minute = (tod % 3600) / 60;
+    let second = tod % 60;
+    format!("{year:04}-{month:02}-{day:02} {hour:02}-{minute:02}-{second:02}")
+}
+
+/// Howard Hinnant's civil_from_days, with the Unix epoch.
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { y + 1 } else { y };
+    (year as i32, month as u32, day as u32)
 }
 
 fn mtime(path: &Path) -> i64 {
@@ -703,6 +893,28 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_keeps_the_original_name() {
+        assert_eq!(folder_name("Red Dead Redemption 2"), "Red Dead Redemption 2");
+        assert_eq!(folder_name("Rockstar Games"), "Rockstar Games");
+        assert!(!folder_name("Red/Dead").contains('/'));
+    }
+
+    #[test]
+    fn a_rockstar_save_is_filed_under_the_publisher_and_the_game() {
+        let from = Path::new("/home/user/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/abc");
+        let (publisher, game) = place_names("Red Dead Redemption 2", None, from);
+        assert_eq!(publisher, "Rockstar Games");
+        assert_eq!(game, "Red Dead Redemption 2");
+        let (named, _) = place_names("Red Dead Redemption 2", Some("Rockstar Games"), Path::new("/tmp/saves"));
+        assert_eq!(named, "Rockstar Games");
+    }
+
+    #[test]
+    fn a_stamp_is_a_date_not_a_bare_number() {
+        assert_eq!(stamp_folder(0), "1970-01-01 00-00-00");
+    }
+
+    #[test]
     fn a_folder_named_after_the_game_is_the_save_folder() {
         let root = std::env::temp_dir().join(format!("orbit-saves-{}", std::process::id()));
         let saved = root.join("Saved Games").join("Celeste");
@@ -731,6 +943,8 @@ mod tests {
             "Orbit Missing Save Zzq",
             None,
             &Hints::default(),
+            None,
+            None,
         )
         .unwrap_err();
         let lower = err.to_ascii_lowercase();

@@ -116,7 +116,7 @@ export function TopNav({
       <div className="flex w-full items-center gap-5 px-6 py-3">
         <button
           onClick={() => setPage('library')}
-          className="flex items-center gap-2.5"
+          className="orbit-logo flex items-center gap-2.5 rounded-full px-2 py-1"
           title="Orbit"
           aria-label="Orbit"
         >

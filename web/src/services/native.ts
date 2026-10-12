@@ -678,18 +678,45 @@ export function saveHintsOf(game: { installDir: string | null; launch: { kind: s
   };
 }
 
-export function savesStatus(): Promise<SaveStatus> {
-  return call('saves_status', {}, () => ({ root: '' }));
+export interface SavePlace {
+  publisher?: string | null;
+  backupRoot?: string | null;
 }
 
-export function backupSave(gameId: string, title: string, saveDir: string | null, hints?: SaveHints): Promise<SaveBackup> {
-  return call('saves_backup', { gameId, title, saveDir, ...hints }, async () => {
+export function savePlaceOf(
+  game: { meta?: { developer?: string } | null },
+  settings?: { saves?: { backupRoot?: string } } | null,
+): SavePlace {
+  return {
+    publisher: game.meta?.developer?.trim() || null,
+    backupRoot: settings?.saves?.backupRoot?.trim() || null,
+  };
+}
+
+export function savesStatus(backupRoot?: string | null): Promise<SaveStatus> {
+  return call('saves_status', { backupRoot: backupRoot || null }, () => ({ root: '' }));
+}
+
+export function backupSave(
+  gameId: string,
+  title: string,
+  saveDir: string | null,
+  hints?: SaveHints,
+  place?: SavePlace,
+): Promise<SaveBackup> {
+  return call('saves_backup', { gameId, title, saveDir, ...hints, ...place }, async () => {
     throw new Error('Backups need the desktop app.');
   });
 }
 
-export function restoreSave(gameId: string, title: string, saveDir: string | null, hints?: SaveHints): Promise<string> {
-  return call('saves_restore', { gameId, title, saveDir, ...hints }, async () => {
+export function restoreSave(
+  gameId: string,
+  title: string,
+  saveDir: string | null,
+  hints?: SaveHints,
+  place?: SavePlace,
+): Promise<string> {
+  return call('saves_restore', { gameId, title, saveDir, ...hints, ...place }, async () => {
     throw new Error('Restoring needs the desktop app.');
   });
 }
@@ -698,8 +725,8 @@ export function findSave(title: string, hints?: SaveHints): Promise<string | nul
   return call('saves_find', { title, ...hints }, async () => null);
 }
 
-export function listSaves(gameId: string, title: string): Promise<SaveBackup[]> {
-  return call('saves_list', { gameId, title }, () => []);
+export function listSaves(gameId: string, title: string, place?: SavePlace): Promise<SaveBackup[]> {
+  return call('saves_list', { gameId, title, ...place }, () => []);
 }
 
 export function suggestSaves(title: string): Promise<string[]> {

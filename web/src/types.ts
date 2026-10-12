@@ -493,5 +493,7 @@ export interface Settings {
   saves?: {
     auto?: string[];
     dirs?: Record<string, string>;
+    /** Where copies are kept. Empty means Orbit's own backups folder. */
+    backupRoot?: string;
   };
 }

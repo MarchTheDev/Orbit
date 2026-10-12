@@ -16,6 +16,7 @@ import {
   Palette,
   Piano,
   RefreshCw,
+  Save,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -269,6 +270,7 @@ const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
   { id: 'orbit-playing', label: 'Playing' },
+  { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
@@ -293,6 +295,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
+  { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
@@ -802,6 +805,74 @@ export function SettingsView({
           ]}
         />
 
+      </Section>
+
+      <Section
+        id="orbit-backups"
+        icon={Save}
+        title="Backups"
+        lead="Copies of save files stay on this machine. Choose the folder they are filed in."
+      >
+        <p className="text-xs leading-relaxed text-muted">
+          A copy is filed as the publisher, then the game, so it can be found again by those names.
+          Red Dead Redemption 2 from Rockstar Games is <span className="text-fg">Rockstar Games / Red Dead Redemption 2</span>,
+          not an id. Leave the path blank and Orbit uses its own backups folder.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Where copies are kept</span>
+          <div className="flex gap-2">
+            <input
+              className={`${inputCls} min-w-0 flex-1 font-mono`}
+              value={settings.saves?.backupRoot ?? ''}
+              onChange={(e) =>
+                setSettings({ saves: { ...settings.saves, backupRoot: e.target.value } })
+              }
+              placeholder={where ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups` : 'Orbit’s own backups folder'}
+              spellCheck={false}
+            />
+            {isNative() && (
+              <button
+                type="button"
+                className={`${btnBrowse} flex items-center gap-2`}
+                onClick={() =>
+                  void pickFolder('Where should save copies be kept?', settings.saves?.backupRoot || undefined).then(
+                    (path) => path && setSettings({ saves: { ...settings.saves, backupRoot: path } }),
+                  )
+                }
+              >
+                <FolderOpen className="size-4" />
+                Browse…
+              </button>
+            )}
+          </div>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {settings.saves?.backupRoot && (
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+              onClick={() => setSettings({ saves: { ...settings.saves, backupRoot: '' } })}
+            >
+              Use Orbit’s folder
+            </button>
+          )}
+          {isNative() && (
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+              onClick={() => {
+                const custom = settings.saves?.backupRoot?.trim();
+                const fallback = where
+                  ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups`
+                  : '';
+                const target = custom || fallback;
+                if (target) void revealInExplorer(target);
+              }}
+            >
+              Open folder
+            </button>
+          )}
+        </div>
       </Section>
 
       <Section

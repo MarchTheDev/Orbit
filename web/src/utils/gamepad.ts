@@ -11,7 +11,16 @@ export interface PadSnapshot {
   axes: number[];
 }
 
-export type PadAction = 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'play';
+export type PadAction =
+  | 'up'
+  | 'down'
+  | 'left'
+  | 'right'
+  | 'activate'
+  | 'back'
+  | 'play'
+  | 'page-left'
+  | 'page-right';
 
 const DEAD = 0.45;
 
@@ -26,6 +35,8 @@ export function padEdges(previous: PadSnapshot | null, next: PadSnapshot): PadAc
   if (pressed(0)) actions.push('activate');
   if (pressed(1)) actions.push('back');
   if (pressed(9)) actions.push('play');
+  if (pressed(4)) actions.push('page-left');
+  if (pressed(5)) actions.push('page-right');
   if (pressed(12)) actions.push('up');
   if (pressed(13)) actions.push('down');
   if (pressed(14)) actions.push('left');
