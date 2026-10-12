@@ -98,6 +98,17 @@ body::before {
 .orbit-twinkle { animation: orbit-twinkle 3.6s ease-in-out infinite; }
 @keyframes orbit-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+/* When a game (or anything else) has taken focus, these loops stop. A webview
+   with nothing changing to draw stops producing frames and gives the CPU and
+   GPU back. The music bars already pause themselves the same way. The pulse
+   rule lives further down; the extra class is what beats it. */
+.orbit-idle .orbit-spin-outer,
+.orbit-idle .orbit-spin-inner,
+.orbit-idle .orbit-twinkle,
+.orbit-idle .orbit-pulse {
+  animation: none !important;
+}
+
 /* Nobody who has asked for less motion gets a spinning anything. */
 @media (prefers-reduced-motion: reduce) {
   .orbit-spin-inner,
