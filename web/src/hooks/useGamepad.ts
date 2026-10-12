@@ -102,20 +102,21 @@ function ensureFocus() {
  *
  * A loop that ran with no pad attached would be the same always-on work the
  * Linux slowdown came from. The browser event starts it where that event
- * exists. On Linux WebKit often never fires it, so the desktop side reads
- * the controller and says when one is there. A one-second look is only a
- * presence check, not a frame poll, and it stops once a pad is known.
+ * exists. On Linux that event, and `getGamepads` itself, can freeze the
+ * window the moment a controller is plugged in, so only the desktop reader
+ * is used there.
  */
 export function useGamepad() {
   useEffect(() => {
     let timer = 0;
-    let scan = 0;
     let previous: PadSnapshot | null = null;
     let heldFor = 0;
     let native: PadSnapshot | null = null;
     let nativeOn = false;
     let unlisten: (() => void) | undefined;
     let alive = true;
+    let lastNative = 0;
+    const linux = /linux|x11/i.test(navigator.userAgent);
 
     const apply = (now: PadSnapshot) => {
       const edges = padEdges(previous, now);
@@ -139,6 +140,8 @@ export function useGamepad() {
         }
         return;
       }
+      // WebKit's gamepad API can block the UI thread when a pad appears.
+      if (linux) return;
       const pads = navigator.getGamepads?.() ?? [];
       const pad = Array.from(pads).find((item) => item && item.connected) ?? null;
       if (!pad) {
@@ -162,16 +165,18 @@ export function useGamepad() {
     };
     const webConnected = () => Array.from(navigator.getGamepads?.() ?? []).some((item) => item && item.connected);
     const stop = () => {
-      if (nativeOn || webConnected()) return;
+      if (nativeOn || (!linux && webConnected())) return;
       window.clearInterval(timer);
       timer = 0;
       previous = null;
       heldFor = 0;
       document.documentElement.classList.remove('orbit-pad');
     };
-    window.addEventListener('gamepadconnected', start);
-    window.addEventListener('gamepaddisconnected', stop);
-    if (webConnected()) start();
+    if (!linux) {
+      window.addEventListener('gamepadconnected', start);
+      window.addEventListener('gamepaddisconnected', stop);
+      if (webConnected()) start();
+    }
 
     const api = tauriEvent();
     if (api) {
@@ -183,7 +188,14 @@ export function useGamepad() {
           stop();
           return;
         }
-        const now = { buttons: payload.buttons ?? [], axes: payload.axes ?? [] };
+        const buttons = payload.buttons ?? [];
+        // A mis-read device looks like every button going down at once. That
+        // is not a press, and acting on it is what made the window unusable.
+        if (buttons.filter(Boolean).length > 4) return;
+        const stamp = Date.now();
+        if (stamp - lastNative < 40) return;
+        lastNative = stamp;
+        const now = { buttons, axes: payload.axes ?? [] };
         if (!nativeOn) {
           nativeOn = true;
           native = now;
@@ -200,21 +212,14 @@ export function useGamepad() {
       });
     }
 
-    const linux = /linux|x11/i.test(navigator.userAgent);
-    if (linux) {
-      scan = window.setInterval(() => {
-        if (nativeOn || timer) return;
-        if (webConnected()) start();
-      }, 1000);
-    }
-
     return () => {
       alive = false;
       unlisten?.();
-      window.removeEventListener('gamepadconnected', start);
-      window.removeEventListener('gamepaddisconnected', stop);
+      if (!linux) {
+        window.removeEventListener('gamepadconnected', start);
+        window.removeEventListener('gamepaddisconnected', stop);
+      }
       window.clearInterval(timer);
-      window.clearInterval(scan);
       document.documentElement.classList.remove('orbit-pad');
     };
   }, []);

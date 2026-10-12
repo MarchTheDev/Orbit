@@ -518,7 +518,7 @@ export default function App() {
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);
 
-  const { session, play, stop, busy, error } = useSession(onSessionEnded);
+  const { session, play, stop, busy, notice, error } = useSession(onSessionEnded);
 
   // A controller moves the real focus. It only polls after one is connected.
   useGamepad();
@@ -1132,8 +1132,8 @@ export default function App() {
         </p>
       )}
       {busy && !session && (
-        <p className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full bg-panel px-4 py-1.5 text-xs text-muted">
-          Starting…
+        <p className="fixed bottom-20 left-1/2 z-30 max-w-md -translate-x-1/2 rounded-full bg-panel px-4 py-1.5 text-center text-xs text-muted">
+          {notice ?? 'Starting…'}
         </p>
       )}
 

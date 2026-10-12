@@ -255,7 +255,7 @@ export function LaunchEditor({
                 className={inputCls}
                 value={target.wine ?? ''}
                 onChange={(e) => setTarget({ ...target, wine: e.target.value || null })}
-                placeholder="Blank uses the one in Settings, then Wine on this machine"
+                placeholder="Leave blank. Orbit finds Wine, or gets a copy if it is missing"
                 spellCheck={false}
               />
             </label>

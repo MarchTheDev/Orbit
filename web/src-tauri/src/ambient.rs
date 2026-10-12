@@ -3,8 +3,9 @@
 //! WebKitGTK's Web Audio graph often stays suspended, or builds a GStreamer
 //! pipeline that never starts, and the app is then silent with no error the
 //! player can see. A synthesised pad through the system sink does not depend
-//! on that graph. A player that exits, or that never accepts a sample, is not
-//! reported as playing: the web view should try instead of staying mute.
+//! on that graph. It is the same open chord the web view plays on Windows,
+//! not a bass drone. A player that exits, or that never accepts a sample, is
+//! not reported as playing: the web view should try instead of staying mute.
 //! Windows keeps using the web view, which already plays there.
 
 use std::io::Write;
@@ -68,7 +69,9 @@ pub fn set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
         }
     }
     stop_locked();
-    if start_gst(volume) || start_pcm(volume) {
+    // The raw writer moves through the same chords as the Windows pad.
+    // GStreamer is the still chord, used only when no raw player will take it.
+    if start_pcm(volume) || start_gst(volume) {
         return Ok(true);
     }
     Ok(false)
@@ -94,12 +97,15 @@ fn stop_locked() {
 /// A quiet chord through the plugins the packages already ask for. No file.
 fn gst_args(volume: f32) -> Vec<String> {
     let vol = format!("{:.3}", sink_volume(volume));
+    // The same open voicing as the Windows pad: a quiet low note, then the
+    // notes that actually sit in the middle. A 65 Hz drone is what sounded
+    // too deep next to that release.
     vec![
         "-q".into(),
         "audiotestsrc".into(),
         "wave=sine".into(),
-        "freq=65.41".into(),
-        "volume=0.22".into(),
+        "freq=146.83".into(),
+        "volume=0.16".into(),
         "is-live=true".into(),
         "!".into(),
         "audiomixer".into(),
@@ -115,15 +121,22 @@ fn gst_args(volume: f32) -> Vec<String> {
         "autoaudiosink".into(),
         "audiotestsrc".into(),
         "wave=sine".into(),
-        "freq=98".into(),
+        "freq=164.81".into(),
         "volume=0.12".into(),
         "is-live=true".into(),
         "!".into(),
         "mix.".into(),
         "audiotestsrc".into(),
         "wave=sine".into(),
-        "freq=130.81".into(),
-        "volume=0.07".into(),
+        "freq=246.94".into(),
+        "volume=0.08".into(),
+        "is-live=true".into(),
+        "!".into(),
+        "mix.".into(),
+        "audiotestsrc".into(),
+        "wave=sine".into(),
+        "freq=329.63".into(),
+        "volume=0.05".into(),
         "is-live=true".into(),
         "!".into(),
         "mix.".into(),
@@ -144,7 +157,7 @@ fn start_gst(volume: f32) -> bool {
 
 fn gst_tone(volume: f32) -> Vec<String> {
     let vol = format!("{:.3}", sink_volume(volume));
-    ["-q", "audiotestsrc", "wave=sine", "freq=82.41", "is-live=true"]
+    ["-q", "audiotestsrc", "wave=sine", "freq=196.00", "is-live=true"]
         .into_iter()
         .map(str::to_string)
         .chain([format!("volume={vol}")])
@@ -316,19 +329,56 @@ fn write_pad(mut stdin: ChildStdin) {
     RUN.store(false, Ordering::SeqCst);
 }
 
-/// A quiet C major pad. Loud enough to be heard, quiet enough to sit under a game.
+/// C3, the same root the Windows pad uses. The low octave is present, quietly.
+const ROOT: f64 = 130.8128;
+
+/// Open voicings from the web pad. The first number is semitones from C3.
+const CHORDS: [[(i32, f64); 5]; 4] = [
+    [(-12, 0.023), (-5, 0.016), (2, 0.013), (4, 0.010), (11, 0.008)],
+    [(-10, 0.021), (-3, 0.014), (2, 0.012), (4, 0.010), (9, 0.008)],
+    [(-3, 0.021), (2, 0.014), (4, 0.012), (7, 0.010), (11, 0.008)],
+    [(-5, 0.021), (2, 0.015), (4, 0.012), (9, 0.010), (11, 0.008)],
+];
+
+fn note(semitones: i32) -> f64 {
+    ROOT * 2f64.powf(semitones as f64 / 12.0)
+}
+
+fn chord_mix(t: f64, chord: usize) -> f64 {
+    let tau = std::f64::consts::TAU;
+    CHORDS[chord % 4]
+        .iter()
+        .map(|(semitones, level)| (t * note(*semitones) * tau).sin() * level)
+        .sum()
+}
+
+/// A soft chime an octave or two up, on the same slow clock as the web pad.
+fn sparkle(t: f64) -> f64 {
+    let period = 8.0;
+    let phase = t % period;
+    if phase > 5.2 {
+        return 0.0;
+    }
+    let semis = [24, 19, 26, 21, 28, 16][((t / period) as usize) % 6];
+    let env = (-phase / 1.6).exp() * (1.0 - (-phase / 0.04).exp());
+    (t * note(semis) * std::f64::consts::TAU).sin() * env * 0.04
+}
+
+/// The Windows chord, written as samples. Loud enough to hear, not a bass drone.
 fn sample(t: f64, level: f64, audible: bool) -> i16 {
     if !audible || level <= 0.0 {
         return 0;
     }
-    let tau = std::f64::consts::TAU;
-    let lfo = 0.82 + 0.18 * (t * 0.12).sin();
-    let tone = (t * 65.406 * tau).sin() * 0.55
-        + (t * 98.0 * tau).sin() * 0.28
-        + (t * 130.813 * tau).sin() * 0.16;
-    // 0.16 of the slider was a whisper on a system sink. This is still under
-    // a game at the volumes the slider offers.
-    let shaped = (tone * lfo * level * 0.38).clamp(-1.0, 1.0);
+    let cycle = 18.0;
+    let pos = t % (cycle * 4.0);
+    let index = (pos / cycle) as usize;
+    let into = pos % cycle;
+    let blend = if into < 7.8 { into / 7.8 } else { 1.0 };
+    let pad = chord_mix(t, index.wrapping_sub(1)) * (1.0 - blend) + chord_mix(t, index) * blend;
+    let lfo = 0.9 + 0.1 * (t * 0.12).sin();
+    // The web levels are oscillator gains. Scaled so the default slider matches
+    // that pad, and still stays under a game.
+    let shaped = ((pad * 3.2 + sparkle(t)) * lfo * level).clamp(-1.0, 1.0);
     (shaped * i16::MAX as f64) as i16
 }
 
@@ -356,6 +406,8 @@ mod tests {
         let joined = args.join(" ");
         assert!(joined.contains("audiotestsrc"));
         assert!(joined.contains("autoaudiosink"));
+        assert!(joined.contains("freq=164.81"));
+        assert!(!joined.contains("freq=65.41"));
         assert!(!joined.contains(".wav"));
         assert!(!joined.contains(".mp3"));
     }

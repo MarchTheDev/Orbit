@@ -12,6 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Manager};
 
 use crate::launch::parse_args;
 
@@ -222,9 +223,7 @@ fn spawn_wine(
     if !path.is_file() {
         return Err(format!("{} is not there any more.", path.display()));
     }
-    let bin = resolve_wine(wine).ok_or_else(|| {
-        "Wine was not found. Name the wine program in Settings, or install Wine. Orbit does not install it.".to_string()
-    })?;
+    let bin = ensure_wine(wine)?;
     let mut cmd = crate::process::command(&bin);
     // Lutris starts the game's own bottle, not a prefix invented for the launch.
     // A folder that is not a bottle is ignored, and one that contains drive_c
@@ -261,6 +260,7 @@ fn resolve_wine(explicit: Option<&str>) -> Option<PathBuf> {
         .or_else(|| which("wine"))
         .or_else(|| which("wine64"))
         .or_else(lutris_wine)
+        .or_else(orbit_wine)
         .or_else(|| {
             ["/usr/bin/wine", "/usr/bin/wine64", "/usr/bin/wine-stable"]
                 .into_iter()
@@ -299,6 +299,306 @@ fn lutris_wine() -> Option<PathBuf> {
     }
     found.sort();
     found.pop()
+}
+
+/// A copy Orbit already fetched, under its own data directory.
+fn orbit_wine() -> Option<PathBuf> {
+    let root = crate::app_handle()?
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("runners")
+        .join("wine");
+    find_wine_bin(&root)
+}
+
+/// Wine on the machine, or a runner fetched the way Lutris fetches one.
+///
+/// Lutris does not assume Wine is installed. When the runner is missing it
+/// asks its site for the default build and downloads that. Orbit does the
+/// same on the first Wine launch, so a player does not have to know that
+/// Wine is a separate program. Nothing else is installed.
+fn ensure_wine(explicit: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(found) = resolve_wine(explicit) {
+        return Ok(found);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        fetch_wine().map_err(|reason| {
+            format!("Wine is not on this machine, and Orbit could not get a copy ({reason}).")
+        })?;
+        if let Some(found) = resolve_wine(None) {
+            return Ok(found);
+        }
+    }
+    Err("Wine is not on this machine, and Orbit could not get a copy.".into())
+}
+
+#[cfg(target_os = "linux")]
+static WINE_FETCH: Mutex<()> = Mutex::new(());
+
+#[cfg(target_os = "linux")]
+fn fetch_wine() -> Result<(), String> {
+    if orbit_wine().is_some() {
+        return Ok(());
+    }
+    let _guard = WINE_FETCH.lock().unwrap_or_else(|poison| poison.into_inner());
+    if orbit_wine().is_some() {
+        return Ok(());
+    }
+    say("Getting Wine. This happens once, and it can take a few minutes.");
+    let release = tauri::async_runtime::block_on(wine_catalog()).and_then(|catalog| {
+        pick_wine_version(&catalog).ok_or_else(|| "the Wine list had no copy Orbit can download".to_string())
+    })?;
+    let root = wine_root()?;
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let dest = root.join(&release.folder);
+    let archive = root.join(format!("{}.download", release.folder));
+    if let Err(reason) = tauri::async_runtime::block_on(download_file(&release.url, &archive)) {
+        let _ = std::fs::remove_file(&archive);
+        return Err(reason);
+    }
+    say("Unpacking Wine.");
+    if let Err(reason) = extract_archive(&archive, &dest) {
+        let _ = std::fs::remove_file(&archive);
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err(reason);
+    }
+    let _ = std::fs::remove_file(&archive);
+    let Some(bin) = find_wine_bin(&dest) else {
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err("the Wine download did not contain a wine program".into());
+    };
+    mark_bin_executable(&bin);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn wine_root() -> Result<PathBuf, String> {
+    let app = crate::app_handle().ok_or_else(|| "Orbit is still starting.".to_string())?;
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runners")
+        .join("wine"))
+}
+
+#[cfg(target_os = "linux")]
+async fn wine_catalog() -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get("https://lutris.net/api/runners/wine")
+        .send()
+        .await
+        .map_err(|e| format!("could not reach the Wine list ({e})"))?;
+    if !response.status().is_success() {
+        return Err(format!("the Wine list answered {}", response.status()));
+    }
+    response
+        .json()
+        .await
+        .map_err(|e| format!("the Wine list was not readable ({e})"))
+}
+
+#[cfg(target_os = "linux")]
+async fn download_file(url: &str, dest: &Path) -> Result<(), String> {
+    if !allowed_wine_url(url) {
+        return Err("the Wine list pointed somewhere Orbit will not download from".into());
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(900))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("the Wine download did not start ({e})"))?;
+    if !response.status().is_success() {
+        return Err(format!("the Wine download failed ({})", response.status()));
+    }
+    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    let mut written = 0u64;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("the Wine download stopped ({e})"))?
+    {
+        written += chunk.len() as u64;
+        if written > 800 * 1024 * 1024 {
+            return Err("the Wine download was larger than expected".into());
+        }
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    let output = Command::new("tar")
+        .arg("-xf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dest)
+        .output()
+        .map_err(|_| "could not unpack Wine (tar is not available)".to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr);
+    let detail = detail.trim();
+    let detail: String = detail.chars().take(180).collect();
+    if detail.is_empty() {
+        Err("could not unpack the Wine download".into())
+    } else {
+        Err(format!("could not unpack the Wine download ({detail})"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn mark_bin_executable(bin: &Path) {
+    let Some(dir) = bin.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(perms.mode() | 0o755);
+                    let _ = std::fs::set_permissions(entry.path(), perms);
+                }
+            }
+        }
+    }
+}
+
+fn find_wine_bin(root: &Path) -> Option<PathBuf> {
+    find_named(root, "wine", 0).or_else(|| find_named(root, "wine64", 0))
+}
+
+fn find_named(root: &Path, name: &str, depth: u8) -> Option<PathBuf> {
+    if depth > 4 || !root.is_dir() {
+        return None;
+    }
+    let direct = root.join("bin").join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_named(&path, name, depth + 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+struct WineRelease {
+    folder: String,
+    url: String,
+}
+
+fn version_list(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    if let Some(list) = value.as_array() {
+        return Some(list);
+    }
+    value
+        .get("versions")
+        .or_else(|| value.get("results")?.get(0)?.get("versions"))?
+        .as_array()
+}
+
+fn pick_wine_version(value: &serde_json::Value) -> Option<WineRelease> {
+    let versions = version_list(value)?;
+    let mut chosen: Option<&serde_json::Value> = None;
+    for item in versions {
+        let arch = item.get("architecture").and_then(|v| v.as_str()).unwrap_or("");
+        let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        if arch != "x86_64" && arch != "all" {
+            continue;
+        }
+        if !allowed_wine_url(url) {
+            continue;
+        }
+        let is_default = item.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+        if is_default {
+            chosen = Some(item);
+            break;
+        }
+        if chosen.is_none() {
+            chosen = Some(item);
+        }
+    }
+    let item = chosen?;
+    let version = item.get("version").and_then(|v| v.as_str()).unwrap_or("wine");
+    let arch = item.get("architecture").and_then(|v| v.as_str()).unwrap_or("x86_64");
+    Some(WineRelease {
+        folder: sanitize_folder(&format!("{version}-{arch}")),
+        url: item.get("url")?.as_str()?.to_string(),
+    })
+}
+
+fn sanitize_folder(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "wine".into()
+    } else {
+        cleaned
+    }
+}
+
+fn allowed_wine_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    let host = host.split('@').next_back().unwrap_or(host);
+    let host = host.split(':').next().unwrap_or(host);
+    host == "github.com"
+        || host.ends_with(".github.com")
+        || host.ends_with(".githubusercontent.com")
+        || host == "lutris.net"
+        || host.ends_with(".lutris.net")
+        || host.ends_with(".digitaloceanspaces.com")
+}
+
+#[cfg(target_os = "linux")]
+fn say(message: &str) {
+    let Some(app) = crate::app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "orbit-launch-status",
+        serde_json::json!({ "message": message }),
+    );
 }
 
 /// The bottle to hand Wine, if the player named one or the program sits in one.
@@ -495,5 +795,31 @@ mod tests {
         // A game folder that is not a bottle is not handed to Wine as one.
         assert!(bottle_of(Some(exe_dir.to_str().unwrap()), &exe).is_some());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn wine_is_only_fetched_from_the_places_lutris_uses() {
+        assert!(allowed_wine_url(
+            "https://github.com/lutris/wine/releases/download/lutris-wine/wine.tar.xz"
+        ));
+        assert!(allowed_wine_url(
+            "https://github.com/lutris/wine/releases/download/lutris-wine/wine.tar.xz?archive=1"
+        ));
+        assert!(!allowed_wine_url("http://github.com/lutris/wine/wine.tar.xz"));
+        assert!(!allowed_wine_url("https://example.com/wine.tar.xz"));
+    }
+
+    #[test]
+    fn the_default_64_bit_runner_is_the_one_lutris_would_install() {
+        let catalog = serde_json::json!({
+            "versions": [
+                {"version": "old", "architecture": "x86_64", "url": "https://github.com/lutris/wine/releases/download/old/wine.tar.xz", "default": false},
+                {"version": "lutris-7.2", "architecture": "x86_64", "url": "https://github.com/lutris/wine/releases/download/lutris-7.2/wine.tar.xz", "default": true},
+                {"version": "skip", "architecture": "i386", "url": "https://github.com/lutris/wine/releases/download/skip/wine.tar.xz", "default": true}
+            ]
+        });
+        let picked = pick_wine_version(&catalog).unwrap();
+        assert_eq!(picked.folder, "lutris-7.2-x86_64");
+        assert!(picked.url.contains("lutris-7.2"));
     }
 }

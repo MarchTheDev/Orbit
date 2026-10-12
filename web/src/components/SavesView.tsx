@@ -15,6 +15,7 @@ import {
   type SaveStatus,
 } from '../services/native';
 import { Checkbox } from './ui/Checkbox';
+import { Cover } from './ui/Cover';
 import { say } from '../utils/toast';
 import { cn } from '../utils/cn';
 
@@ -37,6 +38,7 @@ export function SavesView({
 }) {
   const [status, setStatus] = useState<SaveStatus | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [backingAll, setBackingAll] = useState(false);
   const rows = [...games].sort((a, b) => a.title.localeCompare(b.title));
   const auto = settings.saves?.auto ?? [];
   const dirs = settings.saves?.dirs ?? {};
@@ -54,6 +56,31 @@ export function SavesView({
     setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
   };
 
+  const backupAll = async () => {
+    if (!isNative() || backingAll) return;
+    setBackingAll(true);
+    let copied = 0;
+    let skipped = 0;
+    for (const game of rows) {
+      try {
+        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game));
+        copied += 1;
+      } catch {
+        skipped += 1;
+      }
+    }
+    setBackingAll(false);
+    if (copied === 0) {
+      say(skipped === 0 ? 'There are no games to back up.' : 'No save folders were found to copy.');
+      return;
+    }
+    say(
+      skipped > 0
+        ? `Backed up ${copied} ${copied === 1 ? 'game' : 'games'}. ${skipped} had no save folder.`
+        : `Backed up ${copied} ${copied === 1 ? 'game' : 'games'}.`,
+    );
+  };
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -64,6 +91,17 @@ export function SavesView({
             Orbit takes one when a session ends. Nothing else has to be installed.
           </p>
         </div>
+        {isNative() && rows.length > 0 && (
+          <button
+            type="button"
+            disabled={backingAll}
+            onClick={() => void backupAll()}
+            className="flex items-center gap-2 rounded-full bg-fg px-4 py-2 text-sm font-semibold text-bg disabled:opacity-60"
+          >
+            <HardDriveDownload className="size-4" />
+            {backingAll ? 'Backing up…' : 'Backup all'}
+          </button>
+        )}
       </div>
 
       {status?.root && (
@@ -84,11 +122,14 @@ export function SavesView({
                 onClick={() => setOpenId((current) => (current === game.id ? null : game.id))}
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
               >
-                <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-3">
+                  <Cover game={game} className="h-12 w-9 shrink-0 overflow-hidden rounded-md [&_span]:text-[10px]" />
+                  <span className="min-w-0">
                   <span className="block truncate font-medium">{game.title}</span>
                   <span className="block truncate text-xs text-muted">
                     {auto.includes(game.id) ? 'Backs up when a session ends' : 'Manual only'}
                     {dirs[game.id] ? ` · ${dirs[game.id]}` : ''}
+                  </span>
                   </span>
                 </span>
                 <span className="text-xs text-muted">{openId === game.id ? 'Hide' : 'Manage'}</span>

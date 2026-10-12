@@ -19,6 +19,7 @@ const eventApi = () =>
 export function useSession(onEnded: (gameId: string) => void) {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const endedRef = useRef(onEnded);
 
@@ -44,6 +45,26 @@ export function useSession(onEnded: (gameId: string) => void) {
     };
   }, []);
 
+  // A first Wine launch can spend a while getting a runner. The command says so.
+  useEffect(() => {
+    const api = eventApi();
+    if (!api) return;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void api.listen('orbit-launch-status', (e) => {
+      const payload = e.payload as { message?: string } | string;
+      const text = typeof payload === 'string' ? payload : payload?.message;
+      if (text) setNotice(text);
+    }).then((fn) => {
+      if (alive) unlisten = fn;
+      else fn();
+    });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
+
   // Rust closes the session when the game exits, and says so.
   useEffect(() => {
     const api = eventApi();
@@ -66,6 +87,7 @@ export function useSession(onEnded: (gameId: string) => void) {
 
   const play = useCallback(async (gameId: string, category?: string) => {
     setBusy(true);
+    setNotice(null);
     setError(null);
     try {
       const started = await startSession(gameId, category);
@@ -76,6 +98,7 @@ export function useSession(onEnded: (gameId: string) => void) {
       return null;
     } finally {
       setBusy(false);
+      setNotice(null);
     }
   }, []);
 
@@ -93,5 +116,5 @@ export function useSession(onEnded: (gameId: string) => void) {
     }
   }, [session]);
 
-  return { session, busy, error, play, stop, native: isNative() };
+  return { session, busy, notice, error, play, stop, native: isNative() };
 }

@@ -1,9 +1,11 @@
 //! A controller, read from the kernel when the web view never says one arrived.
 //!
-//! WebKitGTK often never fires `gamepadconnected`, so a hook that waits for
-//! that event waits forever. `/dev/input` is the same pad the browser would
-//! have read. The thread blocks on the device: it does not poll while nothing
-//! is plugged in, and it does not run a frame loop.
+//! WebKitGTK often never fires `gamepadconnected`, and asking it
+//! (`getGamepads`) can freeze the window the moment a pad is plugged in. This
+//! thread reads `/dev/input/js*` only. It does not open evdev nodes, it does
+//! not use a hand-declared `fcntl` (that call was undefined and could take
+//! the process down), and a device that floods or looks broken is abandoned
+//! so the window stays up.
 
 use serde::Serialize;
 
@@ -12,7 +14,9 @@ use std::fs::{self, File};
 #[cfg(target_os = "linux")]
 use std::io::{self, Read};
 #[cfg(target_os = "linux")]
-use std::os::unix::io::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "linux")]
+use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
@@ -59,7 +63,14 @@ impl State {
 pub fn start(app: AppHandle) {
     #[cfg(target_os = "linux")]
     {
-        std::thread::spawn(move || watch(app));
+        std::thread::spawn(move || {
+            let app_for_fault = app.clone();
+            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch(app)));
+            if ran.is_err() {
+                log::error!("controller reader stopped after a fault so the window can stay up");
+                let _ = app_for_fault.emit("orbit-gamepad", State::new().event(false));
+            }
+        });
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -68,15 +79,8 @@ pub fn start(app: AppHandle) {
 }
 
 #[cfg(target_os = "linux")]
-enum DeviceKind {
-    /// `/dev/input/js*`, 8-byte `js_event`.
-    Joystick,
-    /// `/dev/input/event*`, evdev `input_event`.
-    Evdev,
-}
-
-#[cfg(target_os = "linux")]
 fn watch(app: AppHandle) {
+    let mut faults = 0u8;
     while !crate::quitting() {
         let devices = find_devices();
         if devices.is_empty() {
@@ -84,21 +88,36 @@ fn watch(app: AppHandle) {
             continue;
         }
         let mut opened = false;
+        let mut failed = false;
         for (path, kind) in devices {
-            if let Some(file) = open_device(&path) {
-                opened = true;
-                if run_device(&app, file, kind).is_err() {
-                    let _ = app.emit("orbit-gamepad", State::new().event(false));
-                }
-                break;
+            let Some(file) = open_input(&path) else {
+                log::info!(
+                    "a controller is at {} but Orbit cannot read it",
+                    path.display()
+                );
+                continue;
+            };
+            opened = true;
+            // Unplugging is ordinary. Only a device that looks broken counts,
+            // and three of those stop the reader so it cannot freeze the window.
+            if let Err(error) = run_device(&app, file, kind) {
+                let _ = app.emit("orbit-gamepad", State::new().event(false));
+                failed = error.kind() == io::ErrorKind::InvalidData;
             }
-            log::info!(
-                "a controller is at {} but Orbit cannot read it",
-                path.display()
-            );
+            break;
         }
-        // A device that disappears, or that cannot be read, must not become a
-        // tight loop. A live pad blocks inside `run_device` and never gets here.
+        if failed {
+            faults = faults.saturating_add(1);
+            // Retrying a device that already took the reader down is how a
+            // plug-in becomes a relaunch. Three faults and the reader stops.
+            if faults >= 3 {
+                log::error!("controller reader stopped so a bad device cannot freeze the window");
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(3));
+            continue;
+        }
+        faults = 0;
         std::thread::sleep(Duration::from_millis(if opened { 400 } else { 1500 }));
     }
 }
@@ -106,38 +125,66 @@ fn watch(app: AppHandle) {
 #[cfg(target_os = "linux")]
 fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<()> {
     let mut state = State::new();
-    set_nonblocking(&file, true);
+    let mut drained = 0u32;
     loop {
-        match read_one(&mut file, &kind, &mut state) {
-            Ok(()) => {}
+        match read_event(&mut file, kind, &mut state) {
+            Ok(()) => {
+                drained += 1;
+                if drained > 64 {
+                    break;
+                }
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
             Err(error) => return Err(error),
         }
     }
-    // The first report is the resting position, so a button that was already
-    // down is not treated as a fresh press.
-        let _ = app.emit("orbit-gamepad", state.event(true));
+    if too_many_buttons(&state) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "controller state is not a pad",
+        ));
+    }
+    // The first report is the resting position. The page treats it as a
+    // baseline, not as a press.
+    let _ = app.emit("orbit-gamepad", state.event(true));
     let mut sent = state.clone();
-    // The connect report is not a move. The next real change should still go out.
-    let mut last_emit = std::time::Instant::now() - Duration::from_millis(50);
-    set_nonblocking(&file, false);
+    let mut last_emit = std::time::Instant::now();
+    let mut window_start = std::time::Instant::now();
+    let mut reads = 0u32;
     loop {
         if crate::quitting() {
             return Ok(());
         }
-        read_one(&mut file, &kind, &mut state)?;
-        // A pad at rest still reports. Sending every report makes the page
-        // measure the whole window on each one, which is the freeze.
-        let buttons = state.buttons != sent.buttons;
-        let axes = state
-            .axes
-            .iter()
-            .zip(sent.axes.iter())
-            .any(|(now, then)| (now - then).abs() > 0.08);
-        if !buttons && !axes {
+        if !wait_readable(&file, 400)? {
             continue;
         }
-        if !buttons && last_emit.elapsed() < Duration::from_millis(50) {
+        read_event(&mut file, kind, &mut state)?;
+        reads += 1;
+        if window_start.elapsed() >= Duration::from_secs(1) {
+            // A real stick does not write hundreds of reports a second. A
+            // device that does is not safe to keep feeding the window.
+            if reads > 200 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "controller is flooding",
+                ));
+            }
+            reads = 0;
+            window_start = std::time::Instant::now();
+        }
+        if too_many_buttons(&state) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "controller state is not a pad",
+            ));
+        }
+        let changed = state.buttons != sent.buttons
+            || state
+                .axes
+                .iter()
+                .zip(sent.axes.iter())
+                .any(|(now, then)| (now - then).abs() > 0.12);
+        if !changed || last_emit.elapsed() < Duration::from_millis(80) {
             continue;
         }
         let _ = app.emit("orbit-gamepad", state.event(true));
@@ -147,19 +194,33 @@ fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<(
 }
 
 #[cfg(target_os = "linux")]
+fn too_many_buttons(state: &State) -> bool {
+    state.buttons.iter().filter(|down| **down).count() > 6
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+enum DeviceKind {
+    /// `/dev/input/js*`, a fixed 8-byte `js_event`.
+    Joystick,
+    /// `/dev/input/event*`, only when no joystick node exists.
+    Evdev,
+}
+
+#[cfg(target_os = "linux")]
 fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
-    // js* first. Its records are a fixed 8 bytes. An evdev read of the wrong
-    // size looks like every button going down at once, which is a stuck page.
+    let joysticks: Vec<_> = (0..8)
+        .map(|index| PathBuf::from(format!("/dev/input/js{index}")))
+        .filter(|path| path.exists())
+        .map(|path| (path, DeviceKind::Joystick))
+        .collect();
+    if !joysticks.is_empty() {
+        return joysticks;
+    }
+    // Some machines never create js*. The event node is the pad then, read at
+    // the real `input_event` size so a short read cannot look like every
+    // button going down.
     let mut found = Vec::new();
-    for index in 0..8 {
-        let path = PathBuf::from(format!("/dev/input/js{index}"));
-        if path.exists() {
-            found.push((path, DeviceKind::Joystick));
-        }
-    }
-    if !found.is_empty() {
-        return found;
-    }
     for dir in ["/dev/input/by-id", "/dev/input/by-path"] {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -176,24 +237,76 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
 }
 
 #[cfg(target_os = "linux")]
-fn open_device(path: &Path) -> Option<File> {
-    // Read only. Opening for write can take the device away from the desktop.
-    File::open(path).ok()
+fn open_input(path: &Path) -> Option<File> {
+    // Read only, and non-blocking from the start. `O_NONBLOCK` is passed to
+    // `open` so nothing has to call `fcntl` afterwards. Opening for write can
+    // take the device away from the desktop.
+    let bytes = path.as_os_str().as_bytes();
+    let Ok(c_path) = std::ffi::CString::new(bytes) else {
+        return None;
+    };
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return None;
+    }
+    Some(unsafe { File::from_raw_fd(fd) })
 }
 
 #[cfg(target_os = "linux")]
-fn read_one(file: &mut File, kind: &DeviceKind, state: &mut State) -> io::Result<()> {
+fn wait_readable(file: &File, timeout_ms: i32) -> io::Result<bool> {
+    let mut pollfd = libc::pollfd {
+        fd: file.as_raw_fd(),
+        events: libc::POLLIN as libc::c_short,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::Interrupted {
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    let revents = i32::from(pollfd.revents);
+    let bad = i32::from(libc::POLLERR) | i32::from(libc::POLLHUP) | i32::from(libc::POLLNVAL);
+    if (revents & bad) != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "controller went away",
+        ));
+    }
+    Ok(ready > 0)
+}
+
+#[cfg(target_os = "linux")]
+fn read_event(file: &mut File, kind: DeviceKind, state: &mut State) -> io::Result<()> {
     match kind {
         DeviceKind::Joystick => {
             let mut buf = [0u8; 8];
             file.read_exact(&mut buf)?;
-            apply_js(state, buf[6], buf[7], i16::from_le_bytes([buf[4], buf[5]]));
+            apply_js(
+                state,
+                buf[6],
+                buf[7],
+                i16::from_le_bytes([buf[4], buf[5]]),
+            );
         }
         DeviceKind::Evdev => {
-            let size = if cfg!(target_pointer_width = "64") { 24 } else { 16 };
+            let size = std::mem::size_of::<libc::input_event>();
             let mut buf = vec![0u8; size];
             file.read_exact(&mut buf)?;
             let n = buf.len();
+            if n < 8 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "controller event is too short",
+                ));
+            }
             let value = i32::from_le_bytes([buf[n - 4], buf[n - 3], buf[n - 2], buf[n - 1]]);
             let code = u16::from_le_bytes([buf[n - 6], buf[n - 5]]);
             let kind = u16::from_le_bytes([buf[n - 8], buf[n - 7]]);
@@ -304,26 +417,6 @@ fn apply_evdev_axis(state: &mut State, code: u16, value: i32) {
 
 fn norm_axis(value: i32) -> f32 {
     (value as f32 / 32767.0).clamp(-1.0, 1.0)
-}
-
-#[cfg(target_os = "linux")]
-fn set_nonblocking(file: &File, on: bool) {
-    const F_GETFL: i32 = 3;
-    const F_SETFL: i32 = 4;
-    const O_NONBLOCK: i32 = 0x800;
-    unsafe {
-        let flags = fcntl(file.as_raw_fd(), F_GETFL);
-        if flags < 0 {
-            return;
-        }
-        let flags = if on { flags | O_NONBLOCK } else { flags & !O_NONBLOCK };
-        fcntl(file.as_raw_fd(), F_SETFL, flags);
-    }
-}
-
-#[cfg(target_os = "linux")]
-extern "C" {
-    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
 #[cfg(test)]

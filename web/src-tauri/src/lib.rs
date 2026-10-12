@@ -59,9 +59,10 @@ pub struct WindowPolicy {
     /// What the close button does. `quit` or `tray`. Empty means quit.
     #[serde(default)]
     pub on_app_close: String,
-    /// Where the minimise button puts the window. `taskbar` or `tray`. Empty
-    /// means the taskbar, which is what a library saved before this choice did.
+    /// Kept so a library saved with the old minimise choice still opens.
+    /// The button itself is always the taskbar one now.
     #[serde(default)]
+    #[allow(dead_code)]
     pub on_minimize: String,
 }
 
@@ -164,10 +165,13 @@ fn withdraw_to_tray(window: &tauri::WebviewWindow) {
 }
 
 fn remember_minimize_policy(policy: &WindowPolicy) {
+    // The minimise button is the window's own. There is no setting that turns
+    // it into a hide, so the hook must not take the window off the taskbar.
     #[cfg(target_os = "linux")]
-    linux_window::set_armed(
-        policy.on_minimize == "tray" && TRAY_READY.load(Ordering::SeqCst),
-    );
+    {
+        let _ = policy;
+        linux_window::set_armed(false);
+    }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = policy;
@@ -1150,12 +1154,10 @@ fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), Stri
     orbit.store.save_settings(&settings)
 }
 
-fn remember_wine(settings: Option<&Settings>) {
-    let path = settings
-        .and_then(|saved| saved.get("winePath"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    launch_target::set_wine_fallback(path);
+fn remember_wine(_settings: Option<&Settings>) {
+    // The settings field is gone. A path saved from it must not override the
+    // lookup, because there is no longer a place to clear it.
+    launch_target::set_wine_fallback("");
 }
 
 /// Where Orbit keeps its files, so the settings screen can show it.
@@ -1584,58 +1586,16 @@ pub fn run() {
                         tauri::WindowEvent::Resized(size)
                             if size.width == 0 && size.height == 0 && !linux_window::is_parked() =>
                         {
-                            let to_tray = policy
-                                .lock()
-                                .map(|current| current.on_minimize == "tray")
-                                .unwrap_or(false)
-                                && TRAY_READY.load(Ordering::SeqCst);
-                            if to_tray {
-                                if let Some(window) = handle.get_webview_window("main") {
-                                    withdraw_to_tray(&window);
-                                }
-                            }
+                            // A zero-size report is a minimise on some compositors.
+                            // Leave it on the taskbar. The close button is what
+                            // can hide to the tray.
+                            let _ = size;
                         }
                         _ => {}
                     }
                 });
             }
 
-            // Minimise-to-tray cannot wait on a window event: on Linux the
-            // minimise has already happened, and `is_minimized` is often the
-            // only report. The GTK hook does the same the moment the state
-            // changes. This poll is the fallback, and it leaves on exit.
-            {
-                let handle = app.handle().clone();
-                let policy = Arc::clone(&policy);
-                std::thread::spawn(move || {
-                    while !QUITTING.load(Ordering::SeqCst) {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        if QUITTING.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        let to_tray = policy
-                            .lock()
-                            .map(|current| {
-                                remember_minimize_policy(&current);
-                                current.on_minimize == "tray"
-                            })
-                            .unwrap_or(false);
-                        if !to_tray || !TRAY_READY.load(Ordering::SeqCst) {
-                            continue;
-                        }
-                        #[cfg(target_os = "linux")]
-                        if linux_window::is_parked() {
-                            continue;
-                        }
-                        let Some(window) = handle.get_webview_window("main") else {
-                            continue;
-                        };
-                        if window.is_minimized().unwrap_or(false) {
-                            withdraw_to_tray(&window);
-                        }
-                    }
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
