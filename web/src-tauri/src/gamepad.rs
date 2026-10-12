@@ -116,20 +116,50 @@ fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<(
     }
     // The first report is the resting position, so a button that was already
     // down is not treated as a fresh press.
-    let _ = app.emit("orbit-gamepad", state.event(true));
+        let _ = app.emit("orbit-gamepad", state.event(true));
+    let mut sent = state.clone();
+    // The connect report is not a move. The next real change should still go out.
+    let mut last_emit = std::time::Instant::now() - Duration::from_millis(50);
     set_nonblocking(&file, false);
     loop {
         if crate::quitting() {
             return Ok(());
         }
         read_one(&mut file, &kind, &mut state)?;
+        // A pad at rest still reports. Sending every report makes the page
+        // measure the whole window on each one, which is the freeze.
+        let buttons = state.buttons != sent.buttons;
+        let axes = state
+            .axes
+            .iter()
+            .zip(sent.axes.iter())
+            .any(|(now, then)| (now - then).abs() > 0.08);
+        if !buttons && !axes {
+            continue;
+        }
+        if !buttons && last_emit.elapsed() < Duration::from_millis(50) {
+            continue;
+        }
         let _ = app.emit("orbit-gamepad", state.event(true));
+        sent = state.clone();
+        last_emit = std::time::Instant::now();
     }
 }
 
 #[cfg(target_os = "linux")]
 fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
+    // js* first. Its records are a fixed 8 bytes. An evdev read of the wrong
+    // size looks like every button going down at once, which is a stuck page.
     let mut found = Vec::new();
+    for index in 0..8 {
+        let path = PathBuf::from(format!("/dev/input/js{index}"));
+        if path.exists() {
+            found.push((path, DeviceKind::Joystick));
+        }
+    }
+    if !found.is_empty() {
+        return found;
+    }
     for dir in ["/dev/input/by-id", "/dev/input/by-path"] {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -142,23 +172,13 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
         }
     }
     found.sort_by(|a, b| a.0.cmp(&b.0));
-    for index in 0..8 {
-        let path = PathBuf::from(format!("/dev/input/js{index}"));
-        if path.exists() {
-            found.push((path, DeviceKind::Joystick));
-        }
-    }
     found
 }
 
 #[cfg(target_os = "linux")]
 fn open_device(path: &Path) -> Option<File> {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .ok()
-        .or_else(|| File::open(path).ok())
+    // Read only. Opening for write can take the device away from the desktop.
+    File::open(path).ok()
 }
 
 #[cfg(target_os = "linux")]

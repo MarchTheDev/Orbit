@@ -3,6 +3,7 @@ import { AppWindow, FolderOpen, Plus, Timer, Wine, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
+import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
 import { SaveButton } from '../ui/SaveButton';
 import { say } from '../../utils/toast';
@@ -21,6 +22,12 @@ const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: ty
   },
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
 ];
+
+/** Windows starts a program. Linux starts that program through Wine. */
+function kindsForThisMachine() {
+  const want = desktopOs() === 'linux' ? ['wine', 'none'] : ['executable', 'none'];
+  return KINDS.filter((kind) => want.includes(kind.kind));
+}
 
 /** The folder a program lives in, which is where it expects to be started. */
 function parentOf(path: string): string | null {
@@ -68,6 +75,10 @@ export function LaunchEditor({
   );
   const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
+  const offered = kindsForThisMachine();
+  const kinds = offered.some((kind) => kind.kind === target.kind)
+    ? offered
+    : [...offered, ...KINDS.filter((kind) => kind.kind === target.kind)];
 
   /**
    * Pick a way to start the game, and save it straight away.
@@ -108,7 +119,9 @@ export function LaunchEditor({
         kind: 'wine',
         path: game.exePath ?? '',
         args: '',
-        prefix: game.installDir,
+        // The install folder is not the bottle. Wine finds the bottle from the
+        // program when it sits in drive_c; otherwise the default bottle is used.
+        prefix: null,
         wine: null,
       };
       setTarget(picked);
@@ -151,7 +164,7 @@ export function LaunchEditor({
         <h3 className="mb-2 text-sm font-semibold">Launching</h3>
 
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <button
               key={k.kind}
               onClick={() => switchKind(k.kind)}
@@ -165,7 +178,7 @@ export function LaunchEditor({
           ))}
         </div>
 
-        <p className="mb-3 text-xs text-muted">{KINDS.find((k) => k.kind === target.kind)?.hint}</p>
+        <p className="mb-3 text-xs text-muted">{kinds.find((k) => k.kind === target.kind)?.hint}</p>
 
         {target.kind === 'executable' && (
           <div className="space-y-3">
@@ -237,12 +250,12 @@ export function LaunchEditor({
               />
             </label>
             <label className="block">
-              <span className={labelCls}>Wine program</span>
+              <span className={labelCls}>Wine program for this game</span>
               <input
                 className={inputCls}
                 value={target.wine ?? ''}
                 onChange={(e) => setTarget({ ...target, wine: e.target.value || null })}
-                placeholder="wine"
+                placeholder="Blank uses the one in Settings, then Wine on this machine"
                 spellCheck={false}
               />
             </label>

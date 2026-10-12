@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import type { FontChoice, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
-import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../data/launchers';
+import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
+import { desktopOs } from '../utils/platform';
 import {
   dataDir,
   dataDirSize,
@@ -800,16 +801,22 @@ export function SettingsView({
             },
           ]}
         />
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">Wine program, when a game does not name one</span>
-          <input
-            className="w-full rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
-            value={settings.winePath ?? ''}
-            onChange={(e) => setSettings({ winePath: e.target.value })}
-            placeholder="wine"
-            spellCheck={false}
-          />
-        </label>
+        {desktopOs() === 'linux' && (
+          <label className="block">
+            <span className="mb-1 block text-xs text-muted">Wine program</span>
+            <p className="mb-1.5 text-xs leading-relaxed text-muted">
+              The wine binary, not the game. Used only when a game does not name its own. Leave this blank and
+              Orbit looks for Wine on the system, then for the copy Lutris already installed. Nothing is downloaded.
+            </p>
+            <input
+              className="w-full rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
+              value={settings.winePath ?? ''}
+              onChange={(e) => setSettings({ winePath: e.target.value })}
+              placeholder="Leave blank to look for Wine"
+              spellCheck={false}
+            />
+          </label>
+        )}
 
         <Setting
           label="When the game closes"
@@ -836,7 +843,7 @@ export function SettingsView({
       >
         {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
-          {LAUNCHERS.map((launcher) => {
+          {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
               ? settings.steamOnLaunch

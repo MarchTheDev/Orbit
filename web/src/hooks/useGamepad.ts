@@ -118,13 +118,15 @@ export function useGamepad() {
     let alive = true;
 
     const apply = (now: PadSnapshot) => {
+      const edges = padEdges(previous, now);
+      previous = now;
+      if (edges.length === 0) return;
       document.documentElement.classList.add('orbit-pad');
       ensureFocus();
-      for (const action of padEdges(previous, now)) {
+      for (const action of edges) {
         act(action);
         heldFor = 0;
       }
-      previous = now;
     };
     const tick = () => {
       if (nativeOn && native) {

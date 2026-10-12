@@ -133,9 +133,7 @@ export default function App() {
    * stop then — the same way the music bars already do — so the webview has
    * nothing left to repaint and can hand the CPU and GPU back to the game.
    */
-  const [focused, setFocused] = useState(
-    () => typeof document === 'undefined' || (document.hasFocus() && !document.hidden),
-  );
+  const [focused, setFocused] = useState(true);
   /** Programs dragged onto the window, waiting to be added. */
   const [droppedPaths, setDroppedPaths] = useState<string[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -296,7 +294,19 @@ export default function App() {
    * elsewhere. Coming back is instant: nothing was moved, only paused.
    */
   useEffect(() => {
-    const sync = () => setFocused(document.hasFocus() && !document.hidden);
+    // Linux WebKit reports a blur before the window has ever been focused.
+    // Honouring that leaves the mark still for the whole session. A blur only
+    // counts after a real focus, which is also when a game has taken the window.
+    const linux = /linux|x11/i.test(navigator.userAgent);
+    let sawFocus = !linux && document.hasFocus();
+    const sync = () => {
+      const next = document.hasFocus() && !document.hidden;
+      if (linux && !sawFocus) {
+        if (next) sawFocus = true;
+        else return;
+      }
+      setFocused(document.hasFocus() && !document.hidden);
+    };
     window.addEventListener('focus', sync);
     window.addEventListener('blur', sync);
     document.addEventListener('visibilitychange', sync);

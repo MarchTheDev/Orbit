@@ -109,7 +109,7 @@ export function TopNav({
   }, [activeTab, tabKey]);
 
   return (
-    <header className="orbit-topbar sticky top-0 z-20 border-b border-line bg-bg/95 backdrop-blur-xl">
+    <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
       {/* The bar is the one thing that spans the whole window rather than sitting
           in a column: on a wide screen the logo belongs at the left edge and the
           settings button at the right, not both of them a hand's width in. */}

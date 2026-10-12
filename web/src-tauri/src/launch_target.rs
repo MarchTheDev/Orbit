@@ -219,18 +219,18 @@ fn spawn_wine(
     prefix: Option<&str>,
     wine: Option<&str>,
 ) -> Result<Option<Child>, String> {
-    if !path.exists() {
+    if !path.is_file() {
         return Err(format!("{} is not there any more.", path.display()));
     }
-    let bin = wine
-        .map(str::trim)
-        .filter(|bin| !bin.is_empty())
-        .map(str::to_string)
-        .or_else(wine_fallback)
-        .unwrap_or_else(|| "wine".to_string());
+    let bin = resolve_wine(wine).ok_or_else(|| {
+        "Wine was not found. Name the wine program in Settings, or install Wine. Orbit does not install it.".to_string()
+    })?;
     let mut cmd = crate::process::command(&bin);
-    if let Some(prefix) = prefix.map(str::trim).filter(|prefix| !prefix.is_empty()) {
-        cmd.env("WINEPREFIX", prefix);
+    // Lutris starts the game's own bottle, not a prefix invented for the launch.
+    // A folder that is not a bottle is ignored, and one that contains drive_c
+    // is the bottle even when the field names the game folder inside it.
+    if let Some(prefix) = bottle_of(prefix, path) {
+        cmd.env("WINEPREFIX", &prefix);
     }
     cmd.arg(path);
     let args = args.trim();
@@ -240,9 +240,98 @@ fn spawn_wine(
     if let Some(dir) = path.parent() {
         cmd.current_dir(dir);
     }
-    quiet(&mut cmd)
-        .map(Some)
-        .map_err(|e| format!("Could not start {} through Wine: {e}", path.display()))
+    quiet(&mut cmd).map(Some).map_err(|e| {
+        format!(
+            "Could not start {} through {}: {e}",
+            path.display(),
+            bin.display()
+        )
+    })
+}
+
+/// The wine binary to run, in the order Lutris itself searches.
+///
+/// A path the player named wins. Then Wine on PATH. Then the runners Lutris
+/// has already downloaded, which is where Wine lives when it was never
+/// installed as a system program. `wine` with nothing behind it is what comes
+/// back as "os error 2".
+fn resolve_wine(explicit: Option<&str>) -> Option<PathBuf> {
+    existing_program(explicit)
+        .or_else(|| existing_program(wine_fallback().as_deref()))
+        .or_else(|| which("wine"))
+        .or_else(|| which("wine64"))
+        .or_else(lutris_wine)
+        .or_else(|| {
+            ["/usr/bin/wine", "/usr/bin/wine64", "/usr/bin/wine-stable"]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|path| path.is_file())
+        })
+}
+
+fn existing_program(raw: Option<&str>) -> Option<PathBuf> {
+    let raw = raw.map(str::trim).filter(|value| !value.is_empty())?;
+    let path = PathBuf::from(raw);
+    if path.is_file() {
+        return Some(path);
+    }
+    which(raw)
+}
+
+/// `~/.local/share/lutris/runners/wine/<version>/bin/wine`, and the Flatpak copy.
+fn lutris_wine() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let roots = [
+        home.join(".local/share/lutris/runners/wine"),
+        home.join(".var/app/net.lutris.Lutris/data/lutris/runners/wine"),
+    ];
+    let mut found = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let bin = entry.path().join("bin").join("wine");
+            if bin.is_file() {
+                found.push(bin);
+            }
+        }
+    }
+    found.sort();
+    found.pop()
+}
+
+/// The bottle to hand Wine, if the player named one or the program sits in one.
+fn bottle_of(given: Option<&str>, exe: &Path) -> Option<PathBuf> {
+    if let Some(path) = given.map(str::trim).filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(path);
+        if looks_like_bottle(&path) {
+            return Some(path);
+        }
+        if let Some(inferred) = bottle_above(&path) {
+            return Some(inferred);
+        }
+    }
+    bottle_above(exe)
+}
+
+fn looks_like_bottle(path: &Path) -> bool {
+    path.join("system.reg").is_file() || path.join("drive_c").is_dir()
+}
+
+/// The directory above `drive_c`, which is the bottle Lutris records.
+fn bottle_above(path: &Path) -> Option<PathBuf> {
+    let mut cursor = path.parent();
+    while let Some(dir) = cursor {
+        if dir.file_name().and_then(|name| name.to_str()) == Some("drive_c") {
+            return dir.parent().map(Path::to_path_buf);
+        }
+        if looks_like_bottle(dir) {
+            return Some(dir.to_path_buf());
+        }
+        cursor = dir.parent();
+    }
+    None
 }
 
 fn hand_to_lutris(slug: &str, game_id: Option<i64>) -> Result<(), String> {
@@ -392,5 +481,19 @@ mod tests {
         std::fs::write(&art, b"x").unwrap();
         assert_eq!(nearby_cover(&exe), Some(art));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_program_inside_drive_c_names_the_bottle_above_it() {
+        let root = std::env::temp_dir().join("orbit-wine-bottle");
+        let exe_dir = root.join("drive_c").join("Game");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let exe = exe_dir.join("Game.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(bottle_above(&exe).as_deref(), Some(root.as_path()));
+        // A game folder that is not a bottle is not handed to Wine as one.
+        assert!(bottle_of(Some(exe_dir.to_str().unwrap()), &exe).is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

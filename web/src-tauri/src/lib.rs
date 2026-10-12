@@ -665,16 +665,26 @@ fn open_exe_paths_from_args(args: &[String]) -> Vec<String> {
 /// failure than one that flashes.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
+    #[cfg(target_os = "linux")]
+    linux_window::note_shown();
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    if window.is_visible().unwrap_or(true) {
+    // A minimized window still counts as visible, so returning here left the
+    // open sitting in the taskbar. Tray Show unminimizes, which is why that
+    // one was immediate. Do the same here, and only skip the focus steal when
+    // the window is already up.
+    let minimized = window.is_minimized().unwrap_or(false);
+    let _ = window.unminimize();
+    let _ = window.set_skip_taskbar(false);
+    if window.is_visible().unwrap_or(false) && !minimized {
         return;
     }
     if let Err(e) = window.show() {
         log::warn!("could not show the window: {e}");
         return;
     }
+    let _ = window.unminimize();
     let _ = window.set_focus();
 }
 
@@ -1528,6 +1538,22 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
                 linux_window::install(&window);
+                // The titlebar button is not always built on the first visit.
+                // Retry on the GTK thread until it is, then stop.
+                let handle = app.handle().clone();
+                let tries = std::rc::Rc::new(std::cell::Cell::new(0u8));
+                glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+                    let n = tries.get();
+                    tries.set(n.saturating_add(1));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        linux_window::install(&window);
+                    }
+                    if linux_window::ready() || n > 40 {
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
             }
             gamepad::start(app.handle().clone());
 

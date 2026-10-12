@@ -40,6 +40,15 @@ static BUSY: Mutex<()> = Mutex::new(());
 /// the web view should try its own audio instead. `Ok(true)` means the request
 /// was carried out, including turning the pad off.
 pub fn set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
+    // Windows plays the web view's own chord. A system tone here would replace
+    // it, which is not the sound that release already had.
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (enabled, volume, audible);
+        return Ok(false);
+    }
+    #[cfg(target_os = "linux")]
+    {
     let _guard = BUSY.lock().unwrap_or_else(|poison| poison.into_inner());
     let volume = volume.clamp(0.0, 1.0);
     if !enabled || volume <= 0.0 || !audible {
@@ -63,6 +72,7 @@ pub fn set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
         return Ok(true);
     }
     Ok(false)
+    }
 }
 
 /// Stop the pad and the player process. Safe to call when nothing is playing.

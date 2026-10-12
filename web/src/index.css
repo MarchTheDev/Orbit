@@ -109,11 +109,11 @@ body::before {
   animation: none !important;
 }
 
-/* WebKitGTK keeps compositing every blurred panel and every infinite transform
-   for as long as the window is open, and the cost grows until tabs and hovers
-   stall. On Linux those loops stay still, and the glass is a flat panel. The
-   mark is still drawn. A controller, when one is connected, gets a ring that
-   does not depend on the mouse. */
+/* WebKitGTK keeps a texture for every blurred panel, and that set grows until
+   tabs and hovers stall. The glass is a flat colour on Linux. The mark, the
+   short transitions and the loops stay; they stop only when the window is not
+   in front. A controller, when one is connected, gets a ring that does not
+   depend on the mouse. */
 html.orbit-linux .glass,
 html.orbit-linux .backdrop-blur,
 html.orbit-linux .backdrop-blur-xl,
@@ -121,22 +121,16 @@ html.orbit-linux .backdrop-blur-sm {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html.orbit-linux .orbit-spin-outer,
-html.orbit-linux .orbit-spin-inner,
-html.orbit-linux .orbit-twinkle,
-html.orbit-linux .orbit-pulse {
-  animation: none !important;
-}
 /* The bars are four pixels. They are not what made the window stall, and
    freezing them made a playing pad look silent. */
 html.orbit-linux .orbit-bars-active i {
   animation: orbit-bar 1.1s ease-in-out infinite;
 }
 
-/* A translucent sticky bar is a full-width repaint on every scroll once the
-   blur is gone, and it reads as the bar turning transparent. Shadows, filters
-   and hover scales do the same in software. The star field is a fixed layer
-   over the whole window. None of those are needed to use the app. */
+/* Glass blur is the part that stalls: WebKit keeps a texture for every panel,
+   and a translucent sticky bar paints over the top bar as it scrolls. The
+   short animations and the mark stay. The star field is a fixed layer over
+   the whole window, so it stays off. */
 html.orbit-linux body {
   background: var(--c-bg);
 }
@@ -153,29 +147,6 @@ html.orbit-linux .orbit-sticky {
 html.orbit-linux .orbit-topbar {
   background-color: var(--c-bg) !important;
   background-image: none !important;
-}
-html.orbit-linux *,
-html.orbit-linux *::before,
-html.orbit-linux *::after {
-  transition: none !important;
-  box-shadow: none !important;
-  filter: none !important;
-  -webkit-filter: none !important;
-  text-shadow: none !important;
-}
-html.orbit-linux .orbit-cover,
-html.orbit-linux .group:hover .orbit-cover {
-  transform: none !important;
-}
-html.orbit-linux .fade-in,
-html.orbit-linux .drawer-in,
-html.orbit-linux .orbit-tab-enter,
-html.orbit-linux .orbit-hero-enter,
-html.orbit-linux .modal-backdrop-enter,
-html.orbit-linux .modal-panel-enter,
-html.orbit-linux .save-tick,
-html.orbit-linux .settings-spot {
-  animation: none !important;
 }
 html.orbit-pad :focus {
   outline: 2px solid var(--c-accent);

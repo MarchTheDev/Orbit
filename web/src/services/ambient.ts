@@ -108,7 +108,11 @@ export class Ambient {
   start(volume: number): void {
     this.wanted = true;
     this.setVolume(volume);
-    void this.tryNative();
+    // Windows already has the chord the 1.0 release played. The system player
+    // is a Linux fallback for a web view that stays silent, and using it on
+    // Windows replaces that chord with a plain tone.
+    if (this.onLinux()) void this.tryNative();
+    else this.ensure();
   }
 
   /**
@@ -139,7 +143,7 @@ export class Ambient {
   stop(): void {
     this.wanted = false;
     this.nativeHeld = false;
-    if (isNative()) void ambientSet(false, this.volume, true).catch(() => undefined);
+    if (this.onLinux() && isNative()) void ambientSet(false, this.volume, true).catch(() => undefined);
     this.stopOscillators();
   }
 
