@@ -30,6 +30,9 @@ use tauri::Emitter;
 
 const BUTTONS: usize = 16;
 const AXES: usize = 4;
+/// The page ignores a stick inside this. Matching it here means a value that
+/// would not move the page is not treated as a held direction either.
+const REST_DEAD: f32 = 0.45;
 
 #[derive(Clone, Serialize)]
 pub struct PadEvent {
@@ -135,6 +138,61 @@ struct State {
     axes: Vec<f32>,
 }
 
+/// What the device was doing the first time it was actually read.
+///
+/// That sample is the device sitting still. An empty receiver slot, a pad
+/// that has not sent a report yet, and a hat whose neutral value is negative
+/// all report the same thing as holding up, and the value never changes. It
+/// is not a press. A stick that starts there is ignored until it has been
+/// near the middle; a button that starts down is ignored until it comes up.
+struct Calm {
+    seen: bool,
+    held_at_open: Vec<bool>,
+    axis_ready: Vec<bool>,
+}
+
+impl Calm {
+    fn new() -> Self {
+        Self {
+            seen: false,
+            held_at_open: Vec::new(),
+            axis_ready: Vec::new(),
+        }
+    }
+}
+
+fn calm_state(calm: &mut Calm, raw: &State) -> State {
+    if !calm.seen {
+        calm.seen = true;
+        calm.held_at_open = raw.buttons.clone();
+        calm.axis_ready = vec![false; raw.axes.len()];
+    }
+    let mut out = raw.clone();
+    for (index, held) in calm.held_at_open.iter_mut().enumerate() {
+        if !*held {
+            continue;
+        }
+        if raw.buttons.get(index) == Some(&true) {
+            if let Some(slot) = out.buttons.get_mut(index) {
+                *slot = false;
+            }
+        } else {
+            *held = false;
+        }
+    }
+    for (index, ready) in calm.axis_ready.iter_mut().enumerate() {
+        let value = raw.axes.get(index).copied().unwrap_or(0.0);
+        if !*ready {
+            if value.abs() <= REST_DEAD {
+                *ready = true;
+            } else if let Some(slot) = out.axes.get_mut(index) {
+                *slot = 0.0;
+            }
+        }
+    }
+    out
+}
+
 impl State {
     fn new() -> Self {
         Self {
@@ -205,12 +263,23 @@ fn watch(app: AppHandle) {
         }
         let mut merged = State::new();
         let mut live = false;
+        let mut heard = false;
         open.retain_mut(|pad| match pad.sample() {
-            Ok(()) => {
+            Ok(fresh) => {
                 if too_many_buttons(&pad.state) {
                     return false;
                 }
-                merge_state(&mut merged, &pad.state);
+                // The opening ioctl, or the burst a joystick sends when it is
+                // opened, is the rest position. Baselining before that burst
+                // arrives would treat the burst as the user holding up.
+                if fresh {
+                    pad.synced = true;
+                }
+                if pad.synced {
+                    let presented = calm_state(&mut pad.calm, &pad.state);
+                    merge_state(&mut merged, &presented);
+                    heard = true;
+                }
                 live = true;
                 true
             }
@@ -225,6 +294,15 @@ fn watch(app: AppHandle) {
             let _ = app.emit("orbit-gamepad", disconnected());
             announced = false;
             std::thread::sleep(Duration::from_millis(400));
+            continue;
+        }
+        if !heard {
+            if announced {
+                publish(&State::new(), false);
+                let _ = app.emit("orbit-gamepad", disconnected());
+                announced = false;
+            }
+            std::thread::sleep(Duration::from_millis(16));
             continue;
         }
         announced = true;
@@ -242,13 +320,22 @@ struct OpenPad {
     state: State,
     ranges: AxisRanges,
     hid: Option<HidMap>,
+    calm: Calm,
+    /// False until a sample has actually been read. A joystick's first read
+    /// is the init burst; baselining the empty state before that would make
+    /// the burst look like a press.
+    synced: bool,
 }
 
 #[cfg(target_os = "linux")]
 impl OpenPad {
-    fn sample(&mut self) -> io::Result<()> {
+    /// `Ok(true)` once this sample read the device. An empty poll is not a reading.
+    fn sample(&mut self) -> io::Result<bool> {
         match self.kind {
-            DeviceKind::Evdev => sample_evdev(&self.file, &mut self.state, &self.ranges),
+            DeviceKind::Evdev => {
+                sample_evdev(&self.file, &mut self.state, &self.ranges)?;
+                Ok(true)
+            }
             DeviceKind::Joystick => {
                 drain_stream(&mut self.file, self.kind, &mut self.state, &self.ranges)
             }
@@ -310,6 +397,8 @@ fn adopt_pads(open: &mut Vec<OpenPad>) {
                     state,
                     ranges,
                     hid: None,
+                    calm: Calm::new(),
+                    synced: false,
                 });
             }
             DeviceKind::Joystick => {
@@ -322,6 +411,8 @@ fn adopt_pads(open: &mut Vec<OpenPad>) {
                     state: State::new(),
                     ranges: AxisRanges::standard(),
                     hid: None,
+                    calm: Calm::new(),
+                    synced: false,
                 });
             }
             DeviceKind::Hid => {
@@ -339,6 +430,8 @@ fn adopt_pads(open: &mut Vec<OpenPad>) {
                     state: State::new(),
                     ranges: AxisRanges::standard(),
                     hid: Some(map),
+                    calm: Calm::new(),
+                    synced: false,
                 });
             }
         }
@@ -369,21 +462,23 @@ fn drain_stream(
     kind: DeviceKind,
     state: &mut State,
     ranges: &AxisRanges,
-) -> io::Result<()> {
+) -> io::Result<bool> {
+    let mut read_any = false;
     for _ in 0..64 {
         match read_event(file, kind, state, ranges) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+            Ok(()) => read_any = true,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(read_any),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(read_any),
             Err(error) => return Err(error),
         }
     }
-    Ok(())
+    Ok(read_any)
 }
 
 #[cfg(target_os = "linux")]
-fn drain_hid(file: &mut File, map: &HidMap, state: &mut State) -> io::Result<()> {
+fn drain_hid(file: &mut File, map: &HidMap, state: &mut State) -> io::Result<bool> {
     let mut buf = [0u8; 256];
+    let mut read_any = false;
     for _ in 0..32 {
         match file.read(&mut buf) {
             Ok(0) => {
@@ -392,13 +487,16 @@ fn drain_hid(file: &mut File, map: &HidMap, state: &mut State) -> io::Result<()>
                     "controller went away",
                 ));
             }
-            Ok(n) => *state = decode_hid_report(map, &buf[..n]),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+            Ok(n) => {
+                *state = decode_hid_report(map, &buf[..n]);
+                read_any = true;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(read_any),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(read_any),
             Err(error) => return Err(error),
         }
     }
-    Ok(())
+    Ok(read_any)
 }
 
 #[cfg(target_os = "linux")]
@@ -1660,5 +1758,79 @@ B: KEY=e520 10000 0 0 0
             0x01, 0x75, 0x01, 0x95, 0x03, 0x81, 0x02, 0xc0,
         ];
         assert!(parse_hid_descriptor(&mouse).is_none());
+    }
+
+    #[test]
+    fn an_axis_parked_at_open_is_not_holding_up() {
+        // A 0..255 axis the kernel has not reported yet sits at 0, which is
+        // full up. An empty slot sits at the negative rail. Neither is a press.
+        assert!(norm_range(0, (0, 255)) < -0.9);
+        let mut calm = Calm::new();
+        let mut stuck = State::new();
+        stuck.axes[1] = -1.0;
+        stuck.buttons[12] = true;
+        let first = calm_state(&mut calm, &stuck);
+        assert!(first.axes[1].abs() < 0.01);
+        assert!(!first.buttons[12]);
+        let still = calm_state(&mut calm, &stuck);
+        assert!(still.axes[1].abs() < 0.01);
+        assert!(!still.buttons[12]);
+    }
+
+    #[test]
+    fn a_parked_axis_works_after_it_returns_to_the_middle() {
+        let mut calm = Calm::new();
+        let mut stuck = State::new();
+        stuck.axes[1] = -1.0;
+        let _ = calm_state(&mut calm, &stuck);
+        let mid = calm_state(&mut calm, &State::new());
+        assert!(mid.axes[1].abs() < 0.01);
+        let mut up = State::new();
+        up.axes[1] = -0.8;
+        assert!(calm_state(&mut calm, &up).axes[1] < -0.45);
+    }
+
+    #[test]
+    fn a_resting_stick_still_moves_on_the_first_push() {
+        let mut calm = Calm::new();
+        let _ = calm_state(&mut calm, &State::new());
+        let mut up = State::new();
+        up.axes[1] = -0.8;
+        up.buttons[0] = true;
+        let moved = calm_state(&mut calm, &up);
+        assert!(moved.axes[1] < -0.45);
+        assert!(moved.buttons[0]);
+    }
+
+    #[test]
+    fn a_button_held_at_open_counts_only_after_it_is_released() {
+        let mut calm = Calm::new();
+        let mut held = State::new();
+        held.buttons[12] = true;
+        assert!(!calm_state(&mut calm, &held).buttons[12]);
+        assert!(!calm_state(&mut calm, &State::new()).buttons[12]);
+        let mut again = State::new();
+        again.buttons[12] = true;
+        assert!(calm_state(&mut calm, &again).buttons[12]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_parked_pad_does_not_outrank_a_real_one() {
+        let mut calm = Calm::new();
+        let mut stuck = State::new();
+        stuck.axes[1] = -1.0;
+        stuck.buttons[12] = true;
+        let phantom = calm_state(&mut calm, &stuck);
+        let mut real = State::new();
+        real.axes[0] = 0.7;
+        real.buttons[15] = true;
+        let mut merged = State::new();
+        merge_state(&mut merged, &phantom);
+        merge_state(&mut merged, &real);
+        assert!(merged.axes[1].abs() < 0.01);
+        assert!(!merged.buttons[12]);
+        assert!(merged.axes[0] > 0.45);
+        assert!(merged.buttons[15]);
     }
 }

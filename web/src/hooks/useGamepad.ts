@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { heldDirection, journalMove, padDistance, padEdges, type JournalZone, type PadBox, type PadSnapshot } from '../utils/gamepad';
+import { directionsHeld, heldDirection, journalMove, padDistance, padEdges, releaseRest, withoutRest, type HeldDirs, type JournalZone, type PadBox, type PadSnapshot } from '../utils/gamepad';
 
 interface NativePad {
   connected: boolean;
@@ -244,6 +244,8 @@ export function useGamepad() {
     let frame = 0;
     let lastScroll = 0;
     let scrolling = false;
+    let restReady = false;
+    let restHold: HeldDirs = { up: false, down: false, left: false, right: false };
     const pump = (time: number) => {
       if (!scrolling) return;
       frame = window.requestAnimationFrame(pump);
@@ -267,7 +269,13 @@ export function useGamepad() {
     const linux = /linux|x11/i.test(navigator.userAgent);
 
     const apply = (now: PadSnapshot) => {
-      const edges = padEdges(previous, now);
+      const heldNow = directionsHeld(now);
+      // The first snapshot is the device at rest. A stick already at the rail
+      // is the same reading as holding up, and repeating it pulls every move
+      // back to the top. It starts counting only after it has been let go.
+      restHold = restReady ? releaseRest(restHold, heldNow) : heldNow;
+      restReady = true;
+      const edges = withoutRest(padEdges(previous, now), restHold);
       previous = now;
       if (edges.length === 0) return;
       document.documentElement.classList.add('orbit-pad');
@@ -282,7 +290,7 @@ export function useGamepad() {
     const tick = () => {
       if (nativeOn && native) {
         latest = native;
-        const held = heldDirection(native);
+        const held = heldDirection(native, restHold);
         if (held) {
           heldFor += 1;
           if (heldFor === 10 || (heldFor > 10 && heldFor % 4 === 0)) move(held);
@@ -297,12 +305,14 @@ export function useGamepad() {
       const pad = Array.from(pads).find((item) => item && item.connected) ?? null;
       if (!pad) {
         previous = null;
+        restReady = false;
+        restHold = { up: false, down: false, left: false, right: false };
         return;
       }
       const now = snapshot(pad);
       latest = now;
       apply(now);
-      const held = heldDirection(now);
+      const held = heldDirection(now, restHold);
       if (held) {
         heldFor += 1;
         if (heldFor === 10 || (heldFor > 10 && heldFor % 4 === 0)) move(held);
@@ -325,6 +335,8 @@ export function useGamepad() {
       previous = null;
       heldFor = 0;
       latest = null;
+      restReady = false;
+      restHold = { up: false, down: false, left: false, right: false };
       stopScroll();
       document.documentElement.classList.remove('orbit-pad');
       document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
@@ -364,9 +376,9 @@ export function useGamepad() {
       if (!nativeOn) {
         nativeOn = true;
         native = now;
-        // The first report the page hears may already be a press: the
-        // resting report can arrive before this listener exists. Treat
-        // released as the baseline so that press still counts.
+        // A face button already down still counts: it may have landed before
+        // this listener existed. A direction already held is the device at
+        // rest, and apply() does not treat that as a push.
         previous = { buttons: buttons.map(() => false), axes: (payload.axes ?? []).map(() => 0) };
         start();
         apply(now);

@@ -1,4 +1,4 @@
-import { journalMove, padDistance } from '../src/utils/gamepad.ts';
+import { directionsHeld, heldDirection, journalMove, padDistance, padEdges, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
 
 let failures = 0;
 const check = (name, pass) => {
@@ -31,5 +31,22 @@ check('left from a log entry stays on that row when edit is beside it', journalM
 check('left from the log itself returns to the game', journalMove('journal-logs', 'left', false) === 'game');
 check('down from the last log opens the notes', journalMove('journal-logs', 'down', false) === 'notes');
 check('right from the end of a log row does not escape', journalMove('journal-logs', 'right', false) === 'stay');
+
+console.log('a stick already held when the pad is first heard is rest, not up');
+const stuckButtons = Array(16).fill(false);
+stuckButtons[12] = true;
+const stuck = { buttons: stuckButtons, axes: [0, -1, 0, 0] };
+const rest = directionsHeld(stuck);
+check('a parked stick and d-pad are already up', rest.up && !rest.down && !rest.left && !rest.right);
+check('that opening reading is not a press', withoutRest(padEdges(null, stuck), rest).includes('up') === false);
+check('and it does not keep stepping', heldDirection(stuck, rest) === null);
+const rightButtons = Array(16).fill(false);
+rightButtons[12] = true;
+rightButtons[15] = true;
+const rightWhileStuck = { buttons: rightButtons, axes: [0.8, -1, 0, 0] };
+check('another direction still counts while up is only the opening hold', heldDirection(rightWhileStuck, rest) === 'right');
+const cleared = releaseRest(rest, directionsHeld({ buttons: Array(16).fill(false), axes: [0, 0, 0, 0] }));
+check('letting the stick go clears the hold', !cleared.up);
+check('a later push up still counts', heldDirection({ buttons: Array(16).fill(false), axes: [0, -0.8, 0, 0] }, cleared) === 'up');
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

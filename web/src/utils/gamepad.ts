@@ -125,11 +125,52 @@ export function journalMove(
   return 'leave';
 }
 
+export interface HeldDirs {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+const NONE_HELD: HeldDirs = { up: false, down: false, left: false, right: false };
+
+/** Directions a snapshot is already holding. The opening one is rest, not a press. */
+export function directionsHeld(pad: PadSnapshot): HeldDirs {
+  const y = pad.axes[1] ?? 0;
+  const x = pad.axes[0] ?? 0;
+  return {
+    up: pad.buttons[12] === true || y < -DEAD,
+    down: pad.buttons[13] === true || y > DEAD,
+    left: pad.buttons[14] === true || x < -DEAD,
+    right: pad.buttons[15] === true || x > DEAD,
+  };
+}
+
+/** Drop a rest direction once the device has let it go. A later press then counts. */
+export function releaseRest(rest: HeldDirs, now: HeldDirs): HeldDirs {
+  return {
+    up: rest.up && now.up,
+    down: rest.down && now.down,
+    left: rest.left && now.left,
+    right: rest.right && now.right,
+  };
+}
+
+export function withoutRest(actions: PadAction[], rest: HeldDirs): PadAction[] {
+  return actions.filter((action) => {
+    if (action === 'up') return !rest.up;
+    if (action === 'down') return !rest.down;
+    if (action === 'left') return !rest.left;
+    if (action === 'right') return !rest.right;
+    return true;
+  });
+}
+
 /** Whether a direction is still held, so a grid can keep stepping. */
-export function heldDirection(pad: PadSnapshot): 'up' | 'down' | 'left' | 'right' | null {
-  if (pad.buttons[12] || (pad.axes[1] ?? 0) < -DEAD) return 'up';
-  if (pad.buttons[13] || (pad.axes[1] ?? 0) > DEAD) return 'down';
-  if (pad.buttons[14] || (pad.axes[0] ?? 0) < -DEAD) return 'left';
-  if (pad.buttons[15] || (pad.axes[0] ?? 0) > DEAD) return 'right';
+export function heldDirection(pad: PadSnapshot, rest: HeldDirs = NONE_HELD): 'up' | 'down' | 'left' | 'right' | null {
+  if ((pad.buttons[12] || (pad.axes[1] ?? 0) < -DEAD) && !rest.up) return 'up';
+  if ((pad.buttons[13] || (pad.axes[1] ?? 0) > DEAD) && !rest.down) return 'down';
+  if ((pad.buttons[14] || (pad.axes[0] ?? 0) < -DEAD) && !rest.left) return 'left';
+  if ((pad.buttons[15] || (pad.axes[0] ?? 0) > DEAD) && !rest.right) return 'right';
   return null;
 }
