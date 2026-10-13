@@ -181,97 +181,224 @@ pub fn start(app: AppHandle) {
 
 #[cfg(target_os = "linux")]
 fn watch(app: AppHandle) {
+    let mut open: Vec<OpenPad> = Vec::new();
+    let mut sent = State::new();
+    let mut last_emit = std::time::Instant::now();
+    let mut next_scan = std::time::Instant::now() - Duration::from_secs(3);
+    let mut announced = false;
     while !crate::quitting() {
-        let devices = find_devices();
-        if devices.is_empty() {
+        // A silent node used to win the scan and be held forever, so the real
+        // pad behind it never got a turn. Every pad is sampled, and a new one
+        // can join without closing the one that is already open.
+        if open.is_empty() || next_scan.elapsed() >= Duration::from_secs(2) {
+            adopt_pads(&mut open);
+            next_scan = std::time::Instant::now();
+        }
+        if open.is_empty() {
+            if announced {
+                publish(&State::new(), false);
+                let _ = app.emit("orbit-gamepad", disconnected());
+                announced = false;
+            }
             std::thread::sleep(Duration::from_millis(1500));
             continue;
         }
-        let mut opened = false;
-        for (path, kind) in devices {
-            let Some(file) = open_input(&path) else {
+        let mut merged = State::new();
+        let mut live = false;
+        open.retain_mut(|pad| match pad.sample() {
+            Ok(()) => {
+                if too_many_buttons(&pad.state) {
+                    return false;
+                }
+                merge_state(&mut merged, &pad.state);
+                live = true;
+                true
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => true,
+            Err(error) => {
+                log::info!("controller stopped: {error}");
+                false
+            }
+        });
+        if !live {
+            publish(&State::new(), false);
+            let _ = app.emit("orbit-gamepad", disconnected());
+            announced = false;
+            std::thread::sleep(Duration::from_millis(400));
+            continue;
+        }
+        announced = true;
+        note(&app, &merged, &mut sent, &mut last_emit, false);
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    publish(&State::new(), false);
+}
+
+#[cfg(target_os = "linux")]
+struct OpenPad {
+    key: PathBuf,
+    file: File,
+    kind: DeviceKind,
+    state: State,
+    ranges: AxisRanges,
+    hid: Option<HidMap>,
+}
+
+#[cfg(target_os = "linux")]
+impl OpenPad {
+    fn sample(&mut self) -> io::Result<()> {
+        match self.kind {
+            DeviceKind::Evdev => sample_evdev(&self.file, &mut self.state, &self.ranges),
+            DeviceKind::Joystick => {
+                drain_stream(&mut self.file, self.kind, &mut self.state, &self.ranges)
+            }
+            DeviceKind::Hid => {
+                let Some(map) = self.hid.as_ref() else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "controller node is not a pad",
+                    ));
+                };
+                drain_hid(&mut self.file, map, &mut self.state)
+            }
+        }
+    }
+}
+
+/// Open every node that is actually a pad. A node already open stays open.
+#[cfg(target_os = "linux")]
+fn adopt_pads(open: &mut Vec<OpenPad>) {
+    let mut saw_translated = open.iter().any(|pad| !matches!(pad.kind, DeviceKind::Hid));
+    for (path, kind, named) in find_devices() {
+        // A raw report is only the fallback. Holding it beside the event node
+        // would publish a second, wrong reading of the same press.
+        if matches!(kind, DeviceKind::Hid) && saw_translated {
+            continue;
+        }
+        let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if open.iter().any(|pad| pad.key == key) {
+            continue;
+        }
+        let Some(file) = open_input(&path, named) else {
+            if named {
                 log::info!(
                     "a controller is at {} but Orbit cannot read it",
                     path.display()
                 );
-                continue;
-            };
-            opened = true;
-            log::info!("reading a controller from {}", path.display());
-            // Unplugging is ordinary. A node that is not a pad is skipped so
-            // the next one can be tried. The reader stays up either way: a
-            // background retry cannot freeze the window, and stopping for
-            // good is what made a plugged-in pad do nothing.
-            if let Err(error) = run_device(&app, file, kind, &path) {
-                let _ = app.emit("orbit-gamepad", disconnected());
-                publish(&State::new(), false);
-                log::info!("controller stopped: {error}");
-                // Not a pad. The next candidate is tried now, not after a
-                // pause: the pause was long enough that a real controller
-                // sitting behind a headset node never got a turn.
-                if error.kind() == io::ErrorKind::InvalidData {
+            }
+            continue;
+        };
+        match kind {
+            DeviceKind::Evdev => {
+                match gamepad_keys(&file) {
+                    Some(true) => {}
+                    Some(false) => continue,
+                    None if !named && !path_looks_like_pad(&path) => continue,
+                    None => {}
+                }
+                let ranges = read_ranges(&file);
+                let mut state = State::new();
+                if sample_evdev(&file, &mut state, &ranges).is_err() || too_many_buttons(&state) {
                     continue;
                 }
+                saw_translated = true;
+                log::info!("reading a controller from {}", path.display());
+                open.push(OpenPad {
+                    key,
+                    file,
+                    kind,
+                    state,
+                    ranges,
+                    hid: None,
+                });
             }
-            break;
+            DeviceKind::Joystick => {
+                saw_translated = true;
+                log::info!("reading a controller from {}", path.display());
+                open.push(OpenPad {
+                    key,
+                    file,
+                    kind,
+                    state: State::new(),
+                    ranges: AxisRanges::standard(),
+                    hid: None,
+                });
+            }
+            DeviceKind::Hid => {
+                let Some(desc) = read_hid_descriptor(&file) else {
+                    continue;
+                };
+                let Some(map) = parse_hid_descriptor(&desc) else {
+                    continue;
+                };
+                log::info!("reading a controller from {}", path.display());
+                open.push(OpenPad {
+                    key,
+                    file,
+                    kind,
+                    state: State::new(),
+                    ranges: AxisRanges::standard(),
+                    hid: Some(map),
+                });
+            }
         }
-        std::thread::sleep(Duration::from_millis(if opened { 400 } else { 1500 }));
     }
 }
 
 #[cfg(target_os = "linux")]
-fn run_device(app: &AppHandle, file: File, kind: DeviceKind, path: &Path) -> io::Result<()> {
-    match kind {
-        // The event stream is the wrong source. A mismatched event size shifts
-        // every button code, so a real pad looks like it never moved. The
-        // kernel's current state does not have that problem.
-        DeviceKind::Evdev => run_evdev(app, file, path),
-        DeviceKind::Hid => run_hid(app, file),
-        DeviceKind::Joystick => run_stream(app, file, kind),
+fn merge_state(into: &mut State, from: &State) {
+    for (slot, down) in from.buttons.iter().enumerate() {
+        if *down {
+            if let Some(button) = into.buttons.get_mut(slot) {
+                *button = true;
+            }
+        }
+    }
+    for (slot, value) in from.axes.iter().enumerate() {
+        if let Some(axis) = into.axes.get_mut(slot) {
+            if value.abs() > axis.abs() {
+                *axis = *value;
+            }
+        }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn run_evdev(app: &AppHandle, file: File, path: &Path) -> io::Result<()> {
-    match gamepad_keys(&file) {
-        Some(true) => {}
-        Some(false) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "controller node is not a pad",
-            ));
+fn drain_stream(
+    file: &mut File,
+    kind: DeviceKind,
+    state: &mut State,
+    ranges: &AxisRanges,
+) -> io::Result<()> {
+    for _ in 0..64 {
+        match read_event(file, kind, state, ranges) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+            Err(error) => return Err(error),
         }
-        None if !path_looks_like_pad(path) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "controller node is not a pad",
-            ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn drain_hid(file: &mut File, map: &HidMap, state: &mut State) -> io::Result<()> {
+    let mut buf = [0u8; 256];
+    for _ in 0..32 {
+        match file.read(&mut buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "controller went away",
+                ));
+            }
+            Ok(n) => *state = decode_hid_report(map, &buf[..n]),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+            Err(error) => return Err(error),
         }
-        None => {}
     }
-    let ranges = read_ranges(&file);
-    let mut state = State::new();
-    // A node that will not report its buttons is not the pad. The next one is
-    // tried now, including the raw device, instead of ending the scan.
-    if sample_evdev(&file, &mut state, &ranges).is_err() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "controller node is not a pad",
-        ));
-    }
-    let mut sent = State::new();
-    let mut last_emit = std::time::Instant::now();
-    note(app, &state, &mut sent, &mut last_emit, true);
-    loop {
-        if crate::quitting() {
-            return Ok(());
-        }
-        // The kernel state is read on a timer. Waiting for the node to become
-        // readable and then looping is a busy spin when a stick is noisy.
-        std::thread::sleep(Duration::from_millis(16));
-        sample_evdev(&file, &mut state, &ranges)?;
-        note(app, &state, &mut sent, &mut last_emit, false);
-    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -286,27 +413,32 @@ fn sample_evdev(file: &File, state: &mut State, ranges: &AxisRanges) -> io::Resu
     for button in &mut state.buttons {
         *button = false;
     }
-    for code in [0x130u16, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13d, 0x13e, 0x220, 0x221, 0x222, 0x223] {
+    for axis in &mut state.axes {
+        *axis = 0.0;
+    }
+    // Gamepad codes (0x130) and the older joystick codes (0x120). A pad that
+    // only has the second set used to count as connected and then never move.
+    for code in 0x120u16..0x140 {
         if key_bit(&bits, code) {
             if let Some(index) = evdev_button(code) {
                 state.buttons[index] = true;
             }
         }
     }
-    if let Some(info) = read_abs_info(file, 0) {
-        state.axes[0] = norm_range(info.value, (info.minimum, info.maximum));
-    } else {
-        let _ = ranges;
+    for code in [0x220u16, 0x221, 0x222, 0x223] {
+        if key_bit(&bits, code) {
+            if let Some(index) = evdev_button(code) {
+                state.buttons[index] = true;
+            }
+        }
     }
-    if let Some(info) = read_abs_info(file, 1) {
-        state.axes[1] = norm_range(info.value, (info.minimum, info.maximum));
-    }
-    if let Some(info) = read_abs_info(file, 3) {
-        state.axes[2] = norm_range(info.value, (info.minimum, info.maximum));
-    }
-    if let Some(info) = read_abs_info(file, 4) {
-        state.axes[3] = norm_range(info.value, (info.minimum, info.maximum));
-    }
+    let _ = ranges;
+    put_stick(file, state, 0, 0, 0);
+    put_stick(file, state, 1, 1, 1);
+    // Right stick is RX/RY on a modern pad. A generic joystick uses Z/RZ, and
+    // only when that axis actually crosses zero — a trigger starts at zero.
+    put_stick(file, state, 2, 3, 2);
+    put_stick(file, state, 3, 4, 5);
     if let Some(info) = read_abs_info(file, 16) {
         set_hat(state, true, hat_value(info.value));
     }
@@ -314,6 +446,25 @@ fn sample_evdev(file: &File, state: &mut State, ranges: &AxisRanges) -> io::Resu
         set_hat(state, false, hat_value(info.value));
     }
     Ok(())
+}
+
+/// Write one stick. `fallback` is used only when `primary` is not on the device
+/// and the substitute crosses zero. A trigger starts at zero and must not steer.
+#[cfg(target_os = "linux")]
+fn put_stick(file: &File, state: &mut State, slot: usize, primary: u16, fallback: u16) {
+    let info = if let Some(info) = read_abs_info(file, primary) {
+        info
+    } else if primary != fallback {
+        match read_abs_info(file, fallback) {
+            Some(info) if info.minimum < 0 => info,
+            _ => return,
+        }
+    } else {
+        return;
+    };
+    if let Some(axis) = state.axes.get_mut(slot) {
+        *axis = norm_range(info.value, (info.minimum, info.maximum));
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -367,50 +518,6 @@ fn note(
 }
 
 #[cfg(target_os = "linux")]
-fn run_hid(app: &AppHandle, mut file: File) -> io::Result<()> {
-    let Some(desc) = read_hid_descriptor(&file) else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "controller node is not a pad",
-        ));
-    };
-    let Some(map) = parse_hid_descriptor(&desc) else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "controller node is not a pad",
-        ));
-    };
-    let mut state = State::new();
-    let mut sent = State::new();
-    let mut last_emit = std::time::Instant::now();
-    note(app, &state, &mut sent, &mut last_emit, true);
-    let mut buf = [0u8; 256];
-    loop {
-        if crate::quitting() {
-            return Ok(());
-        }
-        if !wait_readable(&file, 16)? {
-            note(app, &state, &mut sent, &mut last_emit, false);
-            continue;
-        }
-        match file.read(&mut buf) {
-            Ok(0) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "controller went away",
-                ));
-            }
-            Ok(n) => {
-                state = decode_hid_report(&map, &buf[..n]);
-                note(app, &state, &mut sent, &mut last_emit, false);
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
 fn read_hid_descriptor(file: &File) -> Option<Vec<u8>> {
     let mut size: i32 = 0;
     let size_request = (2u64 << 30) | (4u64 << 16) | ((b'H' as u64) << 8) | 0x01;
@@ -431,71 +538,6 @@ fn read_hid_descriptor(file: &File) -> Option<Vec<u8>> {
 }
 
 #[cfg(target_os = "linux")]
-fn run_stream(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<()> {
-    let ranges = if matches!(kind, DeviceKind::Evdev) {
-        read_ranges(&file)
-    } else {
-        AxisRanges::standard()
-    };
-    let mut state = State::new();
-    let mut drained = 0u32;
-    loop {
-        match read_event(&mut file, kind, &mut state, &ranges) {
-            Ok(()) => {
-                drained += 1;
-                if drained > 512 {
-                    break;
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-            Err(error) => return Err(error),
-        }
-    }
-    if too_many_buttons(&state) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "controller state is not a pad",
-        ));
-    }
-    // The first report is the resting position. The page treats it as a
-    // baseline, not as a press.
-    let mut sent = State::new();
-    let mut last_emit = std::time::Instant::now();
-    note(app, &state, &mut sent, &mut last_emit, true);
-    let mut window_start = std::time::Instant::now();
-    let mut reads = 0u32;
-    loop {
-        if crate::quitting() {
-            return Ok(());
-        }
-        if !wait_readable(&file, 400)? {
-            continue;
-        }
-        read_event(&mut file, kind, &mut state, &ranges)?;
-        reads += 1;
-        if window_start.elapsed() >= Duration::from_secs(1) {
-            // A stick at a thousand reports a second is ordinary. Tens of
-            // thousands is a device that is not a pad, and that one is skipped.
-            if reads > 8000 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "controller is flooding",
-                ));
-            }
-            reads = 0;
-            window_start = std::time::Instant::now();
-        }
-        if too_many_buttons(&state) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "controller state is not a pad",
-            ));
-        }
-        note(app, &state, &mut sent, &mut last_emit, false);
-    }
-}
-
-#[cfg(target_os = "linux")]
 fn too_many_buttons(state: &State) -> bool {
     state.buttons.iter().filter(|down| **down).count() > 6
 }
@@ -512,7 +554,7 @@ enum DeviceKind {
 }
 
 #[cfg(target_os = "linux")]
-fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
+fn find_devices() -> Vec<(PathBuf, DeviceKind, bool)> {
     let mut best: std::collections::HashMap<PathBuf, (PathBuf, DeviceKind, i32)> =
         std::collections::HashMap::new();
     let mut consider = |path: PathBuf, kind: DeviceKind, score: i32| {
@@ -596,21 +638,34 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
     }
     let mut ranked: Vec<_> = best.into_values().collect();
     ranked.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
-    ranked.into_iter().map(|(path, kind, _)| (path, kind)).collect()
+    // Score 5 and up was named as a pad or is a `js*` node. Below that is an
+    // unclassified event node or a raw device, probed only when this process
+    // can already open it.
+    ranked
+        .into_iter()
+        .map(|(path, kind, score)| (path, kind, score >= 5))
+        .collect()
 }
 
 #[cfg(target_os = "linux")]
-fn open_input(path: &Path) -> Option<File> {
+fn open_input(path: &Path, session: bool) -> Option<File> {
     match open_nonblocking(path) {
         Ok(file) => Some(file),
         // The node exists, but the session did not grant this process access.
-        // logind can hand over an fd for a device on the user's seat.
+        // logind can hand over an fd for a device on the user's seat. That call
+        // pauses the device, so it is only made for a node already known to be
+        // a pad. Asking it of every event node pauses the mouse.
         Err(error)
-            if error.raw_os_error() == Some(libc::EACCES)
-                || error.raw_os_error() == Some(libc::EPERM) =>
+            if session
+                && (error.raw_os_error() == Some(libc::EACCES)
+                    || error.raw_os_error() == Some(libc::EPERM)) =>
         {
+            if crate::quitting() {
+                return None;
+            }
             // A fault in the session bus must not end the scan. The next node
-            // may be one this process can already open.
+            // may be one this process can already open. GTK is not safe to
+            // call from this thread once the window is going away.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_via_logind(path)))
                 .ok()
                 .flatten()
@@ -1012,6 +1067,11 @@ fn apply_evdev_ranged(state: &mut State, kind: u16, code: u16, value: i32, range
 }
 
 fn evdev_button(code: u16) -> Option<usize> {
+    // BTN_TRIGGER and the buttons after it are the joystick range. They use
+    // the same numbers the old joystick node does, so one mapping covers both.
+    if (0x120..0x130).contains(&code) {
+        return js_button((code - 0x120) as u8);
+    }
     Some(match code {
         0x130 => 0, // BTN_SOUTH
         0x131 => 1, // BTN_EAST
@@ -1473,6 +1533,19 @@ mod tests {
         apply_evdev(&mut state, 1, 0x131, 1);
         assert!(state.buttons[0]);
         assert!(state.buttons[1]);
+    }
+
+    #[test]
+    fn a_joystick_trigger_is_the_same_press_as_the_south_button() {
+        let mut state = State::new();
+        apply_evdev(&mut state, 1, 0x120, 1);
+        assert!(state.buttons[0]);
+        assert!(!state.buttons[1]);
+        // A mouse button is not a pad press, so a click cannot steer the page.
+        apply_evdev(&mut state, 1, 0x110, 0);
+        let mut mouse = State::new();
+        apply_evdev(&mut mouse, 1, 0x110, 1);
+        assert!(mouse.buttons.iter().all(|down| !down));
     }
 
     #[test]

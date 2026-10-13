@@ -33,7 +33,7 @@ import { GameLogView } from './GameLogView';
 import { AchievementsTab } from './AchievementsTab';
 import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
-import { padJustActivated } from '../../hooks/useGamepad';
+import { markPadFocus, padJustActivated } from '../../hooks/useGamepad';
 
 /** Matches `.drawer-out` in the stylesheet. */
 const DRAWER_MS = 300;
@@ -132,7 +132,12 @@ export function GameDetail({
   useLayoutEffect(() => {
     if (!document.documentElement.classList.contains('orbit-pad')) return;
     if (!padJustActivated()) return;
-    const focusPlay = () => playRef.current?.focus({ preventScroll: true });
+    const focusPlay = () => {
+      const play = playRef.current;
+      if (!play) return;
+      markPadFocus(play);
+      play.focus({ preventScroll: true });
+    };
     // The confirm press also focuses the cover. Take Play back after that
     // default action, so the ring is not left on the game that was just opened.
     focusPlay();

@@ -156,6 +156,12 @@ pub(crate) fn quitting() -> bool {
     QUITTING.load(Ordering::SeqCst)
 }
 
+/// An exit has started. The pad reader and the titlebar hooks leave before the
+/// window is torn down, so a close is not also a fault in one of those threads.
+pub(crate) fn begin_quit() {
+    QUITTING.store(true, Ordering::SeqCst);
+}
+
 /// Hide the window and take it off the taskbar. Unminimizing first is what
 /// makes a Wayland compositor drop the minimized entry instead of keeping it.
 fn withdraw_to_tray(window: &tauri::WebviewWindow) {
@@ -164,6 +170,25 @@ fn withdraw_to_tray(window: &tauri::WebviewWindow) {
     let _ = window.set_skip_taskbar(true);
     let _ = window.unminimize();
     let _ = window.hide();
+}
+
+/// End the Linux process without letting WebKit tear the page down.
+///
+/// Destroying the view makes the page process abort in Mesa, and the desktop
+/// shows that as a crash. The session is written first. The page process is
+/// killed, then this process ends without glib's exit handlers.
+#[cfg(target_os = "linux")]
+fn finish_linux_quit(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    begin_quit();
+    if let Some(orbit) = app.try_state::<Orbit>() {
+        orbit.runner.close_for_app_exit();
+    }
+    ambient::stop();
+    if let Some(window) = app.get_webview_window("main") {
+        linux_window::end_page(&window);
+    }
+    unsafe { libc::_exit(0) };
 }
 
 fn remember_minimize_policy(policy: &WindowPolicy) {
@@ -1611,6 +1636,9 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let tries = std::rc::Rc::new(std::cell::Cell::new(0u8));
                 glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+                    if quitting() || linux_window::closing() {
+                        return glib::ControlFlow::Break;
+                    }
                     let n = tries.get();
                     tries.set(n.saturating_add(1));
                     if let Some(window) = handle.get_webview_window("main") {
@@ -1643,6 +1671,14 @@ pub fn run() {
                                 api.prevent_close();
                                 if let Some(window) = handle.get_webview_window("main") {
                                     withdraw_to_tray(&window);
+                                }
+                            } else {
+                                // Leave before GTK destroys the view. On Linux that
+                                // destroy is what the desktop reports as a crash.
+                                #[cfg(target_os = "linux")]
+                                {
+                                    api.prevent_close();
+                                    finish_linux_quit(&handle);
                                 }
                             }
                         }
@@ -1753,21 +1789,25 @@ pub fn run() {
                     orbit.runner.close_for_app_exit();
                 }
                 // A system player started for the pad has to die with the app.
-                // process::exit below does not run destructors.
+                // process::exit below does not run destructors, and on Linux it
+                // also runs the handlers that abort. The page is killed first.
                 ambient::stop();
-                // WebKitGTK on Linux can keep the process up after the window
-                // has gone, which is the close that does not fully quit. Two
-                // seconds is long enough for a normal exit to finish, and then
-                // the process is ended whether the web view agreed or not.
-                // The swap also tells the minimise watcher to leave, and keeps
-                // a second exit event from starting a second watchdog.
+                // WebKitGTK's page process aborts in its own exit, which the
+                // desktop shows as a crash. Kill that process, then end this
+                // one without those handlers if the window path did not already.
+                // The swap keeps a second exit event from starting a second watchdog.
                 let first = !QUITTING.swap(true, Ordering::SeqCst);
                 if first && matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                     #[cfg(target_os = "linux")]
-                    std::thread::spawn(|| {
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        std::process::exit(0);
-                    });
+                    {
+                        if let Some(window) = app.get_webview_window("main") {
+                            linux_window::end_page(&window);
+                        }
+                        std::thread::spawn(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            unsafe { libc::_exit(0) };
+                        });
+                    }
                 }
             }
         });

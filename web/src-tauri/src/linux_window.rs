@@ -44,6 +44,7 @@ static SEARCHING: AtomicBool = AtomicBool::new(false);
 static ICON_HOOKED: AtomicBool = AtomicBool::new(false);
 static ICON_NOTIFY_HOOKED: AtomicBool = AtomicBool::new(false);
 static APPLYING_ICON: AtomicBool = AtomicBool::new(false);
+static PAGE_ENDED: AtomicBool = AtomicBool::new(false);
 
 /// Whether minimise should leave the taskbar. Updated when settings change.
 pub fn set_armed(on: bool) {
@@ -79,9 +80,29 @@ pub fn ready() -> bool {
     STATE_HOOKED.load(Ordering::SeqCst) && BUTTON_HOOKED.load(Ordering::SeqCst)
 }
 
+/// The window is going away. Titlebar hooks must not touch it again.
+pub fn closing() -> bool {
+    PAGE_ENDED.load(Ordering::SeqCst)
+}
+
+/// Kill the page process before the view is destroyed.
+///
+/// WebKitGTK's page process aborts inside its own exit handlers — Mesa freeing
+/// EGL — when the view is destroyed the ordinary way. The desktop reports that
+/// abort as a crash on close. This call is an instant kill, so that teardown
+/// never runs. Safe to call again.
+pub fn end_page(window: &tauri::WebviewWindow) {
+    if PAGE_ENDED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _ = window.with_webview(|webview| {
+        webview.inner().terminate_web_process();
+    });
+}
+
 /// Hook the real window. Safe to call again until the button has been found.
 pub fn install(window: &tauri::WebviewWindow) {
-    if ready() {
+    if closing() || ready() {
         return;
     }
     let _ = window.with_webview(|webview| {
@@ -126,9 +147,10 @@ fn hook_icon(view: &webkit2gtk::WebView) {
         apply_orbit_icon(&window);
         if !ICON_NOTIFY_HOOKED.swap(true, Ordering::SeqCst) {
             window.connect_notify_local(Some("icon"), |window, _| {
-                if !APPLYING_ICON.load(Ordering::SeqCst) {
-                    apply_orbit_icon(window);
+                if closing() || APPLYING_ICON.load(Ordering::SeqCst) {
+                    return;
                 }
+                apply_orbit_icon(window);
             });
         }
     }
@@ -143,7 +165,7 @@ fn hook_icon(view: &webkit2gtk::WebView) {
 }
 
 fn apply_orbit_icon(window: &gtk::Window) {
-    if APPLYING_ICON.swap(true, Ordering::SeqCst) {
+    if closing() || APPLYING_ICON.swap(true, Ordering::SeqCst) {
         return;
     }
     publish_session_icon();
@@ -339,6 +361,9 @@ fn schedule_button_search(window: gtk::Window) {
     }
     let tries = Rc::new(Cell::new(0u8));
     glib::timeout_add_local(Duration::from_millis(250), move || {
+        if closing() {
+            return ControlFlow::Break;
+        }
         let n = tries.get();
         tries.set(n.saturating_add(1));
         hook_button(&window);

@@ -158,7 +158,10 @@ html.orbit-linux .orbit-topbar {
   background-color: var(--c-bg) !important;
   background-image: none !important;
 }
-html.orbit-pad :focus {
+/* The ring is the pad's own mark, not every focused control. A mouse click
+   focuses too, and styling :focus painted the controller ring around whatever
+   was clicked, including when no pad was driving the page. */
+html.orbit-pad .orbit-pad-focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);
   /* A control with no radius of its own — a backlog cover, its title, a
@@ -166,23 +169,23 @@ html.orbit-pad :focus {
      A pill or a large card keeps the curve it already has. */
   border-radius: 1rem;
 }
-html.orbit-pad .rounded-full:focus {
+html.orbit-pad .orbit-pad-focus.rounded-full {
   border-radius: 999px;
 }
-html.orbit-pad .rounded-3xl:focus {
+html.orbit-pad .orbit-pad-focus.rounded-3xl {
   border-radius: 1.5rem;
 }
 /* The ring sits on the cover. The title under it is not part of the target.
    Outline, not the shared box-shadow: the cover's own transition would otherwise
    lag the ring behind the stick. */
-html.orbit-pad [data-orbit-pad="tile"]:focus {
+html.orbit-pad [data-orbit-pad="tile"].orbit-pad-focus {
   border-radius: 1rem;
   scroll-margin: 5.5rem;
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
   box-shadow: none;
 }
-html.orbit-pad .orbit-logo:focus {
+html.orbit-pad .orbit-logo.orbit-pad-focus {
   border-radius: 999px;
   box-shadow: 0 0 0 3px var(--c-bg), 0 0 0 5px var(--c-accent);
 }

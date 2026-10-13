@@ -128,20 +128,34 @@ function journalTarget(current: HTMLElement, direction: 'up' | 'down' | 'left' |
   return null;
 }
 
+/** The ring follows the pad, not whatever the mouse last clicked. */
+export function markPadFocus(el: HTMLElement | null) {
+  document.querySelectorAll('.orbit-pad-focus').forEach((node) => {
+    if (node !== el) node.classList.remove('orbit-pad-focus');
+  });
+  el?.classList.add('orbit-pad-focus');
+}
+
+function focusFromPad(el: HTMLElement) {
+  document.documentElement.classList.add('orbit-pad');
+  markPadFocus(el);
+  if (document.activeElement !== el) el.focus();
+}
+
 function move(direction: 'up' | 'down' | 'left' | 'right') {
   const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const list = focusables();
   if (list.length === 0) return;
   if (!current || !list.includes(current)) {
-    list[0].focus();
+    focusFromPad(list[0]);
     return;
   }
   const routed = journalTarget(current, direction);
   if (routed) {
-    routed.focus();
+    focusFromPad(routed);
     return;
   }
-  (neighbor(current, direction) ?? current).focus();
+  focusFromPad(neighbor(current, direction) ?? current);
 }
 
 let padActivateAt = 0;
@@ -200,8 +214,12 @@ function act(action: 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'p
 
 function ensureFocus() {
   const current = document.activeElement;
-  if (current instanceof HTMLElement && current !== document.body && focusables().includes(current)) return;
-  focusables()[0]?.focus();
+  if (current instanceof HTMLElement && current !== document.body && focusables().includes(current)) {
+    markPadFocus(current);
+    return;
+  }
+  const first = focusables()[0];
+  if (first) focusFromPad(first);
 }
 
 /**
@@ -258,6 +276,8 @@ export function useGamepad() {
         act(action);
         heldFor = 0;
       }
+      const current = document.activeElement;
+      if (current instanceof HTMLElement && current !== document.body) markPadFocus(current);
     };
     const tick = () => {
       if (nativeOn && native) {
@@ -292,8 +312,8 @@ export function useGamepad() {
     };
     const start = () => {
       if (timer) return;
-      document.documentElement.classList.add('orbit-pad');
-      ensureFocus();
+      // A device that only looks connected must not paint the ring. The ring
+      // is added when a press actually moves focus.
       startScroll();
       timer = window.setInterval(tick, 50);
     };
@@ -307,12 +327,19 @@ export function useGamepad() {
       latest = null;
       stopScroll();
       document.documentElement.classList.remove('orbit-pad');
+      document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
     };
     if (!linux) {
       window.addEventListener('gamepadconnected', start);
       window.addEventListener('gamepaddisconnected', stop);
       if (webConnected()) start();
     }
+    // A click is the mouse. It must not keep the controller ring on the control
+    // it focused, and it must not grow one around the thing under the pointer.
+    const clearPadRing = () => {
+      document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
+    };
+    window.addEventListener('pointerdown', clearPadRing, true);
 
     const onNative = (payload: NativePad | null) => {
       if (!payload?.connected) {
@@ -368,6 +395,7 @@ export function useGamepad() {
     return () => {
       alive = false;
       window.clearInterval(pullTimer);
+      window.removeEventListener('pointerdown', clearPadRing, true);
       if (!linux) {
         window.removeEventListener('gamepadconnected', start);
         window.removeEventListener('gamepaddisconnected', stop);
@@ -375,6 +403,7 @@ export function useGamepad() {
       window.clearInterval(timer);
       stopScroll();
       document.documentElement.classList.remove('orbit-pad');
+      document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
     };
   }, []);
 }
