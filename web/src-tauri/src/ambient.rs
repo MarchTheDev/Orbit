@@ -394,10 +394,17 @@ mod tests {
 
     #[test]
     fn a_playing_pad_is_not_a_flat_line() {
-        let a = sample(0.01, 0.5, true);
-        let b = sample(0.02, 0.5, true);
-        assert_ne!(a, b);
-        assert!(a.abs() < 8000, "the pad stays under a game, got {a}");
+        // A tenth of a second apart. Two samples a hundredth of a second apart
+        // can round to the same quiet number, which is not a stuck tone.
+        let heard = [0.2, 0.8, 1.7, 3.1].map(|t| sample(t, 0.5, true));
+        assert!(
+            heard.windows(2).any(|pair| pair[0] != pair[1]),
+            "the pad should move, got {heard:?}"
+        );
+        assert!(
+            heard.iter().all(|sample| sample.abs() < 8000),
+            "the pad stays under a game, got {heard:?}"
+        );
     }
 
     #[test]
