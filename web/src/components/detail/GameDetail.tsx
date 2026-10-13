@@ -293,17 +293,11 @@ export function GameDetail({
           the whole drawer after it had opened. */}
       <aside className={`${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)]`}>
       <div className="orbit-detail glass flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-3xl">
-        <div
-          className="relative h-44 shrink-0"
-          style={{
-            background: `linear-gradient(160deg, hsl(${game.hue} 62% 36%), hsl(${(game.hue + 36) % 360} 40% 14%))`,
-          }}
-        >
-          <div className="absolute inset-0 bg-gradient-to-t from-panel to-transparent" />
+        <div className="relative h-44 shrink-0 bg-panel">
           <button
             onClick={beginClose}
             aria-label="Close"
-            className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg bg-black/40 text-white hover:bg-black/60"
+            className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg text-muted hover:bg-panel2 hover:text-fg"
           >
             <X className="size-4" />
           </button>
