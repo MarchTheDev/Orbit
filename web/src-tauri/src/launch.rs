@@ -1112,13 +1112,3 @@ mod tests {
         }
     }
 }
- String) {
-        if cfg!(windows) {
-            let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
-            // Pings itself, because that is a sleep that ships with Windows.
-            (shell, "/c ping -n 60 127.0.0.1 > nul".to_string())
-        } else {
-            ("/bin/sh".to_string(), r#"-c "sleep 60""#.to_string())
-        }
-    }
-}
