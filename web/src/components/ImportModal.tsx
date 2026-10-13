@@ -6,6 +6,7 @@ import { pickFile, pickFolder } from '../services/desktop';
 import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
+import { launchForAddedProgram } from '../utils/platform';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 

@@ -162,16 +162,16 @@ export function GameDetail({
   // the drawer and leaves the pages alone; both are needed, because a listener
   // added on the window does not get to run first.
   useEffect(() => {
-    const tabs = backlog
-      ? (['overview', 'log', 'sessions'] as const)
-      : (['overview', 'achievements', 'log', 'sessions'] as const);
+    const tabs: Array<'overview' | 'achievements' | 'log' | 'sessions'> = backlog
+      ? ['overview', 'log', 'sessions']
+      : ['overview', 'achievements', 'log', 'sessions'];
     const onPage = (event: Event) => {
       // Both listeners sit on the window, so stopping the bubble is not enough.
       // The page listener is on this same node and would still run.
       event.stopImmediatePropagation();
       const direction = (event as CustomEvent<string>).detail === 'left' ? -1 : 1;
       setTab((current) => {
-        const index = Math.max(0, tabs.indexOf(current as (typeof tabs)[number]));
+        const index = Math.max(0, tabs.indexOf(current));
         const next = tabs[(index + direction + tabs.length) % tabs.length];
         window.setTimeout(() => {
           const button = document.querySelector(`[data-orbit-detail-tab="${next}"]`);
