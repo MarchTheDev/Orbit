@@ -32,10 +32,101 @@ const BUTTONS: usize = 16;
 const AXES: usize = 4;
 
 #[derive(Clone, Serialize)]
-struct PadEvent {
+pub struct PadEvent {
+    pub connected: bool,
+    pub buttons: Vec<bool>,
+    pub axes: Vec<f32>,
+}
+
+#[cfg(target_os = "linux")]
+struct Published {
     connected: bool,
     buttons: Vec<bool>,
     axes: Vec<f32>,
+    /// Presses since the page last asked. A tap shorter than the poll still counts.
+    latched: Vec<bool>,
+}
+
+#[cfg(target_os = "linux")]
+impl Published {
+    const fn empty() -> Self {
+        Self {
+            connected: false,
+            buttons: Vec::new(),
+            axes: Vec::new(),
+            latched: Vec::new(),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+static LATEST: std::sync::Mutex<Published> = std::sync::Mutex::new(Published::empty());
+
+/// The latest controller state. The page asks for this. Waiting for an event
+/// is what made a working read look like a dead pad: the event never arrived.
+pub fn poll() -> PadEvent {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(mut slot) = LATEST.lock() else {
+            return disconnected();
+        };
+        let mut buttons = if slot.buttons.is_empty() {
+            vec![false; BUTTONS]
+        } else {
+            slot.buttons.clone()
+        };
+        for (index, latched) in slot.latched.iter().enumerate() {
+            if *latched {
+                if let Some(button) = buttons.get_mut(index) {
+                    *button = true;
+                }
+            }
+        }
+        slot.latched.fill(false);
+        return PadEvent {
+            connected: slot.connected,
+            buttons,
+            axes: if slot.axes.is_empty() {
+                vec![0.0; AXES]
+            } else {
+                slot.axes.clone()
+            },
+        };
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        disconnected()
+    }
+}
+
+fn disconnected() -> PadEvent {
+    PadEvent {
+        connected: false,
+        buttons: vec![false; BUTTONS],
+        axes: vec![0.0; AXES],
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn publish(state: &State, connected: bool) {
+    let Ok(mut slot) = LATEST.lock() else {
+        return;
+    };
+    if !connected {
+        *slot = Published::empty();
+        return;
+    }
+    if slot.latched.len() != BUTTONS {
+        slot.latched = vec![false; BUTTONS];
+    }
+    for (index, down) in state.buttons.iter().enumerate() {
+        if *down {
+            slot.latched[index] = true;
+        }
+    }
+    slot.connected = true;
+    slot.buttons = state.buttons.clone();
+    slot.axes = state.axes.clone();
 }
 
 #[derive(Clone)]
@@ -66,11 +157,19 @@ pub fn start(app: AppHandle) {
     #[cfg(target_os = "linux")]
     {
         std::thread::spawn(move || {
-            let app_for_fault = app.clone();
-            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch(app)));
-            if ran.is_err() {
-                log::error!("controller reader stopped after a fault so the window can stay up");
-                let _ = app_for_fault.emit("orbit-gamepad", State::new().event(false));
+            // A fault used to end the reader for the rest of the process, so
+            // one bad node meant the pad never worked again until relaunch.
+            while !crate::quitting() {
+                let app_for_fault = app.clone();
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch(app.clone())));
+                if ran.is_err() {
+                    log::error!("controller reader faulted; trying again so the window can stay up");
+                    let _ = app_for_fault.emit("orbit-gamepad", disconnected());
+                    publish(&State::new(), false);
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                break;
             }
         });
     }
@@ -103,8 +202,9 @@ fn watch(app: AppHandle) {
             // the next one can be tried. The reader stays up either way: a
             // background retry cannot freeze the window, and stopping for
             // good is what made a plugged-in pad do nothing.
-            if let Err(error) = run_device(&app, file, kind) {
-                let _ = app.emit("orbit-gamepad", State::new().event(false));
+            if let Err(error) = run_device(&app, file, kind, &path) {
+                let _ = app.emit("orbit-gamepad", disconnected());
+                publish(&State::new(), false);
                 log::info!("controller stopped: {error}");
                 // Not a pad. The next candidate is tried now, not after a
                 // pause: the pause was long enough that a real controller
@@ -120,15 +220,218 @@ fn watch(app: AppHandle) {
 }
 
 #[cfg(target_os = "linux")]
-fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<()> {
-    // A headset or consumer-control node shares the controller's name and
-    // would otherwise be held forever, so the real pad never gets a turn.
-    if matches!(kind, DeviceKind::Evdev) && gamepad_keys(&file) == Some(false) {
+fn run_device(app: &AppHandle, file: File, kind: DeviceKind, path: &Path) -> io::Result<()> {
+    match kind {
+        // The event stream is the wrong source. A mismatched event size shifts
+        // every button code, so a real pad looks like it never moved. The
+        // kernel's current state does not have that problem.
+        DeviceKind::Evdev => run_evdev(app, file, path),
+        DeviceKind::Hid => run_hid(app, file),
+        DeviceKind::Joystick => run_stream(app, file, kind),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_evdev(app: &AppHandle, file: File, path: &Path) -> io::Result<()> {
+    match gamepad_keys(&file) {
+        Some(true) => {}
+        Some(false) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "controller node is not a pad",
+            ));
+        }
+        None if !path_looks_like_pad(path) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "controller node is not a pad",
+            ));
+        }
+        None => {}
+    }
+    let ranges = read_ranges(&file);
+    let mut state = State::new();
+    // A node that will not report its buttons is not the pad. The next one is
+    // tried now, including the raw device, instead of ending the scan.
+    if sample_evdev(&file, &mut state, &ranges).is_err() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "controller node is not a pad",
         ));
     }
+    let mut sent = State::new();
+    let mut last_emit = std::time::Instant::now();
+    note(app, &state, &mut sent, &mut last_emit, true);
+    loop {
+        if crate::quitting() {
+            return Ok(());
+        }
+        // The kernel state is read on a timer. Waiting for the node to become
+        // readable and then looping is a busy spin when a stick is noisy.
+        std::thread::sleep(Duration::from_millis(16));
+        sample_evdev(&file, &mut state, &ranges)?;
+        note(app, &state, &mut sent, &mut last_emit, false);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn path_looks_like_pad(path: &Path) -> bool {
+    let name = path.to_string_lossy().to_ascii_lowercase();
+    name.contains("joystick") || name.contains("gamepad") || name.contains("controller")
+}
+
+#[cfg(target_os = "linux")]
+fn sample_evdev(file: &File, state: &mut State, ranges: &AxisRanges) -> io::Result<()> {
+    let bits = read_key_state(file)?;
+    for button in &mut state.buttons {
+        *button = false;
+    }
+    for code in [0x130u16, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13d, 0x13e, 0x220, 0x221, 0x222, 0x223] {
+        if key_bit(&bits, code) {
+            if let Some(index) = evdev_button(code) {
+                state.buttons[index] = true;
+            }
+        }
+    }
+    if let Some(info) = read_abs_info(file, 0) {
+        state.axes[0] = norm_range(info.value, (info.minimum, info.maximum));
+    } else {
+        let _ = ranges;
+    }
+    if let Some(info) = read_abs_info(file, 1) {
+        state.axes[1] = norm_range(info.value, (info.minimum, info.maximum));
+    }
+    if let Some(info) = read_abs_info(file, 3) {
+        state.axes[2] = norm_range(info.value, (info.minimum, info.maximum));
+    }
+    if let Some(info) = read_abs_info(file, 4) {
+        state.axes[3] = norm_range(info.value, (info.minimum, info.maximum));
+    }
+    if let Some(info) = read_abs_info(file, 16) {
+        set_hat(state, true, hat_value(info.value));
+    }
+    if let Some(info) = read_abs_info(file, 17) {
+        set_hat(state, false, hat_value(info.value));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn hat_value(value: i32) -> i16 {
+    if value < 0 {
+        -32767
+    } else if value > 0 {
+        32767
+    } else {
+        0
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_key_state(file: &File) -> io::Result<[u8; 96]> {
+    let mut bits = [0u8; 96];
+    let size = bits.len() as u64;
+    // EVIOCGKEY(len) = _IOC(_IOC_READ, 'E', 0x18, len)
+    let request = (2u64 << 30) | (size << 16) | ((b'E' as u64) << 8) | 0x18;
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as libc::Ioctl, bits.as_mut_ptr()) };
+    if rc < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(bits)
+}
+
+#[cfg(target_os = "linux")]
+fn note(
+    app: &AppHandle,
+    state: &State,
+    sent: &mut State,
+    last_emit: &mut std::time::Instant,
+    force: bool,
+) {
+    publish(state, true);
+    let buttons_changed = state.buttons != sent.buttons;
+    let axes_changed = state
+        .axes
+        .iter()
+        .zip(sent.axes.iter())
+        .any(|(now, then)| (now - then).abs() > 0.12);
+    let due = force
+        || should_emit(buttons_changed, axes_changed, last_emit.elapsed())
+        || last_emit.elapsed() >= Duration::from_secs(2);
+    if !due {
+        return;
+    }
+    let _ = app.emit("orbit-gamepad", state.event(true));
+    *sent = state.clone();
+    *last_emit = std::time::Instant::now();
+}
+
+#[cfg(target_os = "linux")]
+fn run_hid(app: &AppHandle, mut file: File) -> io::Result<()> {
+    let Some(desc) = read_hid_descriptor(&file) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "controller node is not a pad",
+        ));
+    };
+    let Some(map) = parse_hid_descriptor(&desc) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "controller node is not a pad",
+        ));
+    };
+    let mut state = State::new();
+    let mut sent = State::new();
+    let mut last_emit = std::time::Instant::now();
+    note(app, &state, &mut sent, &mut last_emit, true);
+    let mut buf = [0u8; 256];
+    loop {
+        if crate::quitting() {
+            return Ok(());
+        }
+        if !wait_readable(&file, 16)? {
+            note(app, &state, &mut sent, &mut last_emit, false);
+            continue;
+        }
+        match file.read(&mut buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "controller went away",
+                ));
+            }
+            Ok(n) => {
+                state = decode_hid_report(&map, &buf[..n]);
+                note(app, &state, &mut sent, &mut last_emit, false);
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_hid_descriptor(file: &File) -> Option<Vec<u8>> {
+    let mut size: i32 = 0;
+    let size_request = (2u64 << 30) | (4u64 << 16) | ((b'H' as u64) << 8) | 0x01;
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), size_request as libc::Ioctl, &mut size) };
+    if rc < 0 || size <= 0 || size > 4096 {
+        return None;
+    }
+    let mut buf = vec![0u8; 4 + 4096];
+    buf[..4].copy_from_slice(&(size as u32).to_ne_bytes());
+    let request = (2u64 << 30) | ((buf.len() as u64) << 16) | ((b'H' as u64) << 8) | 0x02;
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as libc::Ioctl, buf.as_mut_ptr()) };
+    if rc < 0 {
+        return None;
+    }
+    let n = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let n = n.min(4096);
+    Some(buf[4..4 + n].to_vec())
+}
+
+#[cfg(target_os = "linux")]
+fn run_stream(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<()> {
     let ranges = if matches!(kind, DeviceKind::Evdev) {
         read_ranges(&file)
     } else {
@@ -156,9 +459,9 @@ fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<(
     }
     // The first report is the resting position. The page treats it as a
     // baseline, not as a press.
-    let _ = app.emit("orbit-gamepad", state.event(true));
-    let mut sent = state.clone();
+    let mut sent = State::new();
     let mut last_emit = std::time::Instant::now();
+    note(app, &state, &mut sent, &mut last_emit, true);
     let mut window_start = std::time::Instant::now();
     let mut reads = 0u32;
     loop {
@@ -188,24 +491,7 @@ fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<(
                 "controller state is not a pad",
             ));
         }
-        let buttons_changed = state.buttons != sent.buttons;
-        let axes_changed = state
-            .axes
-            .iter()
-            .zip(sent.axes.iter())
-            .any(|(now, then)| (now - then).abs() > 0.12);
-        // A stick can wait. A button cannot: a tap shorter than the stick
-        // interval would otherwise never reach the page. A quiet pad still
-        // checks in, so a report that arrived before the page was listening
-        // is not the only chance to say a controller is there.
-        let due = should_emit(buttons_changed, axes_changed, last_emit.elapsed())
-            || last_emit.elapsed() >= Duration::from_secs(2);
-        if !due {
-            continue;
-        }
-        let _ = app.emit("orbit-gamepad", state.event(true));
-        sent = state.clone();
-        last_emit = std::time::Instant::now();
+        note(app, &state, &mut sent, &mut last_emit, false);
     }
 }
 
@@ -221,6 +507,8 @@ enum DeviceKind {
     Joystick,
     /// `/dev/input/event*`. Button codes here are the same on every pad.
     Evdev,
+    /// `/dev/hidraw*`, for a pad the kernel never turned into an event node.
+    Hid,
 }
 
 #[cfg(target_os = "linux")]
@@ -283,6 +571,27 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
             consider(path, DeviceKind::Joystick, 5);
         }
     }
+    // An unclassified pad is still an event node. Opening it and asking what
+    // buttons it has is cheaper than missing it because the name did not match.
+    if let Ok(entries) = fs::read_dir("/dev/input") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Some(index) = name.strip_prefix("event") else {
+                continue;
+            };
+            if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
+                consider(entry.path(), DeviceKind::Evdev, 1);
+            }
+        }
+    }
+    if let Ok(entries) = fs::read_dir("/dev") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("hidraw") {
+                consider(entry.path(), DeviceKind::Hid, 40);
+            }
+        }
+    }
     let mut ranked: Vec<_> = best.into_values().collect();
     ranked.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
     ranked.into_iter().map(|(path, kind, _)| (path, kind)).collect()
@@ -298,7 +607,11 @@ fn open_input(path: &Path) -> Option<File> {
             if error.raw_os_error() == Some(libc::EACCES)
                 || error.raw_os_error() == Some(libc::EPERM) =>
         {
-            open_via_logind(path)
+            // A fault in the session bus must not end the scan. The next node
+            // may be one this process can already open.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_via_logind(path)))
+                .ok()
+                .flatten()
         }
         Err(_) => None,
     }
@@ -432,6 +745,12 @@ fn read_event(file: &mut File, kind: DeviceKind, state: &mut State, ranges: &Axi
             file.read_exact(&mut buf)?;
             let (kind, code, value) = parse_evdev_event(&buf);
             apply_evdev_ranged(state, kind, code, value, ranges);
+        }
+        DeviceKind::Hid => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "controller node is not a pad",
+            ));
         }
     }
     Ok(())
@@ -758,6 +1077,32 @@ fn read_ranges(file: &File) -> AxisRanges {
 }
 
 #[cfg(target_os = "linux")]
+fn read_abs_info(file: &File, code: u16) -> Option<libc::input_absinfo> {
+    let mut info = libc::input_absinfo {
+        value: 0,
+        minimum: 0,
+        maximum: 0,
+        fuzz: 0,
+        flat: 0,
+        resolution: 0,
+    };
+    let size = std::mem::size_of::<libc::input_absinfo>() as libc::c_ulong;
+    let request = (2u64 << 30)
+        | ((size as u64) << 16)
+        | ((b'E' as u64) << 8)
+        | (0x40 + code as u64);
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as libc::Ioctl, &mut info) };
+    if rc < 0 {
+        return None;
+    }
+    if info.maximum <= info.minimum {
+        info.minimum = -32767;
+        info.maximum = 32767;
+    }
+    Some(info)
+}
+
+#[cfg(target_os = "linux")]
 fn read_abs(file: &File, code: u16) -> (i32, i32) {
     let mut info = libc::input_absinfo {
         value: 0,
@@ -790,6 +1135,319 @@ fn norm_range(value: i32, range: (i32, i32)) -> f32 {
     let span = (max - min) as f32;
     let mid = (max as f32 + min as f32) / 2.0;
     ((value as f32 - mid) / (span / 2.0)).clamp(-1.0, 1.0)
+}
+
+#[derive(Clone, Copy)]
+enum HidKind {
+    Button(usize),
+    Axis(usize),
+    Hat,
+}
+
+struct HidField {
+    report_id: u8,
+    bit: u32,
+    size: u32,
+    min: i32,
+    max: i32,
+    kind: HidKind,
+}
+
+struct HidMap {
+    fields: Vec<HidField>,
+    has_report_id: bool,
+}
+
+/// A HID gamepad, the node left when the kernel never created an event device.
+fn parse_hid_descriptor(desc: &[u8]) -> Option<HidMap> {
+    #[derive(Clone, Copy)]
+    struct Globals {
+        usage_page: u16,
+        report_size: u32,
+        report_count: u32,
+        report_id: u8,
+        logical_min: i32,
+        logical_max: i32,
+    }
+    let mut globals = Globals {
+        usage_page: 0,
+        report_size: 0,
+        report_count: 0,
+        report_id: 0,
+        logical_min: 0,
+        logical_max: 0,
+    };
+    let mut stack = Vec::new();
+    let mut usages = Vec::new();
+    let mut usage_min = 0u32;
+    let mut usage_max = 0u32;
+    let mut bit_offset = 0u32;
+    let mut has_report_id = false;
+    let mut fields = Vec::new();
+    let mut application = 0u16;
+    let mut i = 0;
+    while i < desc.len() {
+        let prefix = desc[i];
+        i += 1;
+        if prefix == 0xfe {
+            if i + 1 >= desc.len() {
+                break;
+            }
+            let len = desc[i] as usize;
+            i += 2 + len;
+            continue;
+        }
+        let size = match prefix & 0x03 {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => 4,
+        };
+        if i + size > desc.len() {
+            break;
+        }
+        let mut raw = 0i32;
+        for byte in 0..size {
+            raw |= (desc[i + byte] as i32) << (8 * byte);
+        }
+        i += size;
+        let type_ = (prefix >> 2) & 0x03;
+        let tag = prefix >> 4;
+        match (type_, tag) {
+            (1, 0) => globals.usage_page = raw as u16,
+            (1, 1) => globals.logical_min = sign_extend(raw, size),
+            (1, 2) => globals.logical_max = sign_extend(raw, size),
+            (1, 7) => globals.report_size = raw as u32,
+            (1, 8) => {
+                globals.report_id = raw as u8;
+                has_report_id = true;
+                bit_offset = 0;
+            }
+            (1, 9) => globals.report_count = raw as u32,
+            (1, 10) => stack.push(globals),
+            (1, 11) => {
+                if let Some(saved) = stack.pop() {
+                    globals = saved;
+                }
+            }
+            (2, 0) => usages.push(raw as u32),
+            (2, 1) => usage_min = raw as u32,
+            (2, 2) => usage_max = raw as u32,
+            (0, 10) => {
+                if raw == 1 {
+                    let usage = usages.first().copied().unwrap_or(0);
+                    let page = if usage > 0xffff {
+                        (usage >> 16) as u16
+                    } else {
+                        globals.usage_page
+                    };
+                    let id = (usage & 0xffff) as u16;
+                    if page == 0x01 {
+                        application = id;
+                    }
+                }
+                usages.clear();
+                usage_min = 0;
+                usage_max = 0;
+            }
+            (0, 12) => {
+                usages.clear();
+                usage_min = 0;
+                usage_max = 0;
+            }
+            (0, 8) | (0, 9) | (0, 11) => {
+                let constant = raw & 1 != 0;
+                let count = globals.report_count;
+                let width = globals.report_size;
+                if type_ == 0 && tag == 8 && !constant {
+                    let local = if usage_min > 0 && usage_max >= usage_min {
+                        (usage_min..=usage_max).collect::<Vec<_>>()
+                    } else {
+                        usages.clone()
+                    };
+                    for n in 0..count {
+                        let usage = if local.len() == 1 {
+                            local[0]
+                        } else {
+                            local.get(n as usize).copied().unwrap_or(0)
+                        };
+                        let page = if usage > 0xffff {
+                            (usage >> 16) as u16
+                        } else {
+                            globals.usage_page
+                        };
+                        let id = (usage & 0xffff) as u16;
+                        if let Some(kind) = hid_kind(page, id) {
+                            let mut min = globals.logical_min;
+                            let mut max = globals.logical_max;
+                            // A one-byte 0xFF is 255 on the pads that write it
+                            // that way. It is -1 only when the minimum is negative.
+                            if max < min && min >= 0 {
+                                max = (max as u32 & 0xff) as i32;
+                            }
+                            if max < min {
+                                min = 0;
+                                max = 255;
+                            }
+                            fields.push(HidField {
+                                report_id: globals.report_id,
+                                bit: bit_offset,
+                                size: width,
+                                min,
+                                max,
+                                kind,
+                            });
+                        }
+                        bit_offset += width;
+                    }
+                } else {
+                    bit_offset += width * count;
+                }
+                usages.clear();
+                usage_min = 0;
+                usage_max = 0;
+            }
+            _ => {}
+        }
+    }
+    // A mouse also has buttons. Only a gamepad or joystick collection is a pad,
+    // or a click in another program would also move Orbit.
+    let gamepad = application == 0x04 || application == 0x05;
+    if !gamepad || fields.is_empty() {
+        return None;
+    }
+    Some(HidMap { fields, has_report_id })
+}
+
+fn sign_extend(value: i32, size: usize) -> i32 {
+    match size {
+        1 if value & 0x80 != 0 => value | !0xff,
+        2 if value & 0x8000 != 0 => value | !0xffff,
+        _ => value,
+    }
+}
+
+fn hid_kind(page: u16, usage: u16) -> Option<HidKind> {
+    match page {
+        0x09 => {
+            let index = usage.saturating_sub(1) as usize;
+            if index < 16 {
+                Some(HidKind::Button(hid_button_index(index)))
+            } else {
+                None
+            }
+        }
+        0x01 => match usage {
+            0x30 => Some(HidKind::Axis(0)),
+            0x31 => Some(HidKind::Axis(1)),
+            0x33 => Some(HidKind::Axis(2)),
+            0x34 => Some(HidKind::Axis(3)),
+            0x39 => Some(HidKind::Hat),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Generic HID face buttons are 1 south, 2 east, 3 west, 4 north, then the
+/// shoulders and start. The d-pad arrives as a hat, not as a later button.
+fn hid_button_index(index: usize) -> usize {
+    match index {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        5 => 5,
+        6 => 8,
+        7 => 9,
+        8 => 10,
+        9 => 11,
+        other => other.min(BUTTONS - 1),
+    }
+}
+
+fn decode_hid_report(map: &HidMap, report: &[u8]) -> State {
+    let mut state = State::new();
+    if report.is_empty() {
+        return state;
+    }
+    let id = if map.has_report_id { report[0] } else { 0 };
+    for field in &map.fields {
+        if map.has_report_id && field.report_id != id {
+            continue;
+        }
+        let bit = field.bit + if map.has_report_id { 8 } else { 0 };
+        let raw = hid_signed(hid_bits(report, bit, field.size), field.size, field.min);
+        match field.kind {
+            HidKind::Button(index) => {
+                if let Some(button) = state.buttons.get_mut(index) {
+                    *button = raw != 0;
+                }
+            }
+            HidKind::Axis(index) => {
+                if let Some(axis) = state.axes.get_mut(index) {
+                    *axis = norm_range(raw, (field.min, field.max));
+                }
+            }
+            HidKind::Hat => {
+                let dirs = hat_dirs(raw, field.min, field.max);
+                state.buttons[12] = dirs[0];
+                state.buttons[13] = dirs[1];
+                state.buttons[14] = dirs[2];
+                state.buttons[15] = dirs[3];
+            }
+        }
+    }
+    state
+}
+
+fn hid_bits(report: &[u8], bit: u32, size: u32) -> i32 {
+    if size == 0 || size > 32 {
+        return 0;
+    }
+    let mut value = 0i32;
+    for offset in 0..size {
+        let pos = bit + offset;
+        let byte = (pos / 8) as usize;
+        if byte >= report.len() {
+            break;
+        }
+        if report[byte] & (1 << (pos % 8)) != 0 {
+            value |= 1 << offset;
+        }
+    }
+    value
+}
+
+fn hid_signed(value: i32, size: u32, min: i32) -> i32 {
+    if min < 0 && (1..32).contains(&size) {
+        let sign = 1i32 << (size - 1);
+        if value & sign != 0 {
+            return value | (!0 << size);
+        }
+    }
+    value
+}
+
+/// Hat positions run clockwise from up. A range of 8 or more keeps a null at
+/// the low end; a range of 0..7 uses 0 as up.
+fn hat_dirs(value: i32, min: i32, max: i32) -> [bool; 4] {
+    if value < min || value > max {
+        return [false; 4];
+    }
+    let wide = max - min >= 8;
+    if wide && value == min {
+        return [false; 4];
+    }
+    let pos = if wide { value - min - 1 } else { value - min };
+    let pos = pos.rem_euclid(8);
+    [
+        pos == 7 || pos == 0 || pos == 1,
+        pos == 3 || pos == 4 || pos == 5,
+        pos == 5 || pos == 6 || pos == 7,
+        pos == 1 || pos == 2 || pos == 3,
+    ]
 }
 
 #[cfg(test)]
@@ -902,5 +1560,28 @@ B: KEY=e520 10000 0 0 0
         assert_eq!((kind, code, value), (1, 0x130, 1));
         assert!(!bitmap_has_bit("e520 10000 0 0 0", 0x130));
         assert_eq!(pad_score("AT Translated Set 2 keyboard", "", false), 0);
+    }
+
+    #[test]
+    fn a_hid_report_presses_the_south_button_and_moves_the_stick() {
+        let desc = [
+            0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00, 0x25, 0xff, 0x75,
+            0x08, 0x95, 0x02, 0x81, 0x02, 0x05, 0x09, 0x19, 0x01, 0x29, 0x04, 0x15, 0x00, 0x25, 0x01,
+            0x75, 0x01, 0x95, 0x04, 0x81, 0x02, 0xc0,
+        ];
+        let map = parse_hid_descriptor(&desc).expect("gamepad descriptor");
+        let state = decode_hid_report(&map, &[255, 128, 0x01]);
+        assert!(state.buttons[0]);
+        assert!(!state.buttons[1]);
+        assert!(state.axes[0] > 0.9);
+        assert!(state.axes[1].abs() < 0.05);
+        assert_eq!(hat_dirs(0, 0, 7), [true, false, false, false]);
+        assert_eq!(hat_dirs(0, 0, 8), [false, false, false, false]);
+        let mouse = [
+            0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00, 0x26, 0xff, 0x00,
+            0x75, 0x08, 0x95, 0x02, 0x81, 0x02, 0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25,
+            0x01, 0x75, 0x01, 0x95, 0x03, 0x81, 0x02, 0xc0,
+        ];
+        assert!(parse_hid_descriptor(&mouse).is_none());
     }
 }

@@ -7,10 +7,6 @@ interface NativePad {
   axes: number[];
 }
 
-function tauriEvent() {
-  return (window as Window & { __TAURI__?: { event: { listen: (name: string, handler: (e: { payload: unknown }) => void) => Promise<() => void> } } }).__TAURI__?.event;
-}
-
 const FOCUSABLE = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function snapshot(pad: Gamepad): PadSnapshot {
@@ -224,7 +220,6 @@ export function useGamepad() {
     let heldFor = 0;
     let native: PadSnapshot | null = null;
     let nativeOn = false;
-    let unlisten: (() => void) | undefined;
     let alive = true;
     let lastNative = 0;
     let latest: PadSnapshot | null = null;
@@ -319,51 +314,60 @@ export function useGamepad() {
       if (webConnected()) start();
     }
 
-    const api = tauriEvent();
-    if (api) {
-      void api.listen('orbit-gamepad', (event) => {
-        const payload = event.payload as NativePad;
-        if (!payload?.connected) {
-          nativeOn = false;
-          native = null;
-          stop();
-          return;
-        }
-        const buttons = payload.buttons ?? [];
-        // A mis-read device looks like every button going down at once. That
-        // is not a press, and acting on it is what made the window unusable.
-        if (buttons.filter(Boolean).length > 4) return;
-        const stamp = Date.now();
-        const buttonEdge = !nativeOn || buttons.some((down, index) => down !== (native?.buttons[index] === true));
-        // Stick reports can wait. A button cannot, or the press that arrived
-        // with a stick report is thrown away and the pad feels dead.
-        if (!buttonEdge && stamp - lastNative < 40) return;
-        lastNative = stamp;
-        const now = { buttons, axes: payload.axes ?? [] };
-        latest = now;
-        if (!nativeOn) {
-          nativeOn = true;
-          native = now;
-          // The first report the page hears may already be a press: the
-          // resting report can arrive before this listener exists. Treat
-          // released as the baseline so that press still counts.
-          previous = { buttons: buttons.map(() => false), axes: (payload.axes ?? []).map(() => 0) };
-          start();
-          apply(now);
-          return;
-        }
+    const onNative = (payload: NativePad | null) => {
+      if (!payload?.connected) {
+        if (!nativeOn) return;
+        nativeOn = false;
+        native = null;
+        stop();
+        return;
+      }
+      const buttons = payload.buttons ?? [];
+      // A mis-read device looks like every button going down at once. That
+      // is not a press, and acting on it is what made the window unusable.
+      if (buttons.filter(Boolean).length > 4) return;
+      const stamp = Date.now();
+      const buttonEdge = !nativeOn || buttons.some((down, index) => down !== (native?.buttons[index] === true));
+      // Stick reports can wait. A button cannot, or the press that arrived
+      // with a stick report is thrown away and the pad feels dead.
+      if (!buttonEdge && stamp - lastNative < 40) return;
+      lastNative = stamp;
+      const now = { buttons, axes: payload.axes ?? [] };
+      latest = now;
+      if (!nativeOn) {
+        nativeOn = true;
         native = now;
+        // The first report the page hears may already be a press: the
+        // resting report can arrive before this listener exists. Treat
+        // released as the baseline so that press still counts.
+        previous = { buttons: buttons.map(() => false), axes: (payload.axes ?? []).map(() => 0) };
+        start();
         apply(now);
-        if (!timer) start();
-      }).then((fn) => {
-        if (alive) unlisten = fn;
-        else fn();
-      });
+        return;
+      }
+      native = now;
+      apply(now);
+      if (!timer) start();
+    };
+
+    // Linux asks. The event is the path that never arrived, and applying both
+    // would press a button twice. Windows keeps the browser gamepad.
+    let pullTimer = 0;
+    if (linux) {
+      const pull = () => {
+        const core = (window as Window & { __TAURI__?: { core?: { invoke: (cmd: string) => Promise<NativePad> } } }).__TAURI__?.core;
+        if (!core || !alive) return;
+        void core.invoke('gamepad_poll').then((payload) => {
+          if (alive) onNative(payload);
+        }).catch(() => {});
+      };
+      pull();
+      pullTimer = window.setInterval(pull, 50);
     }
 
     return () => {
       alive = false;
-      unlisten?.();
+      window.clearInterval(pullTimer);
       if (!linux) {
         window.removeEventListener('gamepadconnected', start);
         window.removeEventListener('gamepaddisconnected', stop);

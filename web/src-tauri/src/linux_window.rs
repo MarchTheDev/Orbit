@@ -170,17 +170,23 @@ pub fn publish_session_icon() {
     let bytes: &[u8] = include_bytes!("../icons/128x128.png");
     let icon = icon_dir.join("com.orbit.launcher.png");
     let _ = write_if_changed(&icon, bytes);
-    // The menu entry says Icon=orbit. That name has to resolve too, or a
-    // compositor that matches the menu entry still draws the placeholder.
+    // The menu entry can name the icon either way. Both files have to exist.
     let _ = write_if_changed(&icon_dir.join("orbit.png"), bytes);
     let desktop = apps.join("com.orbit.launcher.desktop");
-    if write_if_changed(&desktop, session_desktop_entry().as_bytes()) {
-        let _ = std::process::Command::new("update-desktop-database")
-            .arg(&apps)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+    // The icon name needs a theme scan. A path does not, so a desktop that
+    // has not indexed the new file still draws Orbit instead of the orange W.
+    if write_if_changed(&desktop, session_desktop_entry(&icon).as_bytes()) {
+        for cmd in ["update-desktop-database", "kbuildsycoca6", "kbuildsycoca5"] {
+            let mut command = std::process::Command::new(cmd);
+            if cmd == "update-desktop-database" {
+                command.arg(&apps);
+            }
+            let _ = command
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
     }
 }
 
@@ -193,18 +199,20 @@ fn data_home() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share"))
 }
 
-fn session_desktop_entry() -> String {
-    "\
+fn session_desktop_entry(icon: &std::path::Path) -> String {
+    format!(
+        "\
 [Desktop Entry]
 Type=Application
 Name=Orbit
 Comment=A library for the games on your PC
 Exec=orbit
-Icon=com.orbit.launcher
+Icon={}
 NoDisplay=true
 StartupWMClass=com.orbit.launcher
-"
-    .to_string()
+",
+        icon.display()
+    )
 }
 
 fn write_if_changed(path: &std::path::Path, bytes: &[u8]) -> bool {

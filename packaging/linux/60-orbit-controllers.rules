@@ -1,0 +1,5 @@
+# The logged-in user can read a controller. Without this, the node exists and
+# a press still never reaches Orbit, because the file is root-only.
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", TAG+="uaccess", MODE="0660", GROUP="input"
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="js*", MODE="0664", GROUP="input"
+ACTION=="add", SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ENV{ID_INPUT_JOYSTICK}=="1", TAG+="uaccess", MODE="0660"

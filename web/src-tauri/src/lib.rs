@@ -798,6 +798,13 @@ async fn move_game(
     .map_err(|e| format!("The move could not be started: {e}"))?
 }
 
+/// The controller the page asks for. Linux does not wait for an event that
+/// the web view may never hear.
+#[tauri::command]
+fn gamepad_poll() -> gamepad::PadEvent {
+    gamepad::poll()
+}
+
 /// Free and total bytes on the drive holding a path.
 #[tauri::command]
 fn disk_space(path: String) -> Option<(u64, u64)> {
@@ -1718,6 +1725,7 @@ pub fn run() {
             data_dir_size,
             ambient_set,
             ambient_stop,
+            gamepad_poll,
             saves_status,
             saves_backup,
             saves_restore,
