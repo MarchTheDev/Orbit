@@ -757,6 +757,21 @@ export function SettingsView({
           </p>
         )}
 
+        <Setting
+          label="When the game closes"
+          value={settings.window.onClose}
+          onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
+          options={[
+            { value: 'nothing', label: 'Do nothing', hint: 'Whatever Orbit was doing, it carries on doing.' },
+            {
+              value: 'show',
+              label: 'Bring Orbit back',
+              hint: 'Minimized, hidden or behind the game, it comes to the front when the session ends.',
+            },
+            { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
+          ]}
+        />
+
         <SubHead>Closing Orbit itself</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Separate from what happens around a game. The minimise button is the usual one, and stays on the taskbar.
@@ -773,21 +788,6 @@ export function SettingsView({
               label: 'Hide to the tray',
               hint: 'The window leaves the taskbar. Left click the tray icon to bring it back.',
             },
-          ]}
-        />
-
-        <Setting
-          label="When the game closes"
-          value={settings.window.onClose}
-          onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
-          options={[
-            { value: 'nothing', label: 'Do nothing', hint: 'Whatever Orbit was doing, it carries on doing.' },
-            {
-              value: 'show',
-              label: 'Bring Orbit back',
-              hint: 'Minimized, hidden or behind the game, it comes to the front when the session ends.',
-            },
-            { value: 'quit', label: 'Close Orbit completely', hint: 'The session is counted and saved first, then Orbit quits.' },
           ]}
         />
 

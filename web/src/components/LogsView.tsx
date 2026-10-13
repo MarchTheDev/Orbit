@@ -199,7 +199,7 @@ export function LogsView({
 
           <ul
             ref={list}
-            className="space-y-1 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1"
+            className="space-y-1 p-1.5 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto"
           >
             {ordered.map((g) => {
               const counts = perGame.get(g.id);

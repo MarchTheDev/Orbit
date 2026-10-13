@@ -100,6 +100,12 @@ export function GameDetail({
   const playRef = useRef<HTMLButtonElement>(null);
   const [leaving, setLeaving] = useState(false);
   const leavingRef = useRef(false);
+  // Lay the drawer out off-screen, then slide. Starting the animation on the
+  // same frame as the first paint made the open stutter; the close never does
+  // that, because the panel is already drawn.
+  const [slideIn, setSlideIn] = useState(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
   const closeTimer = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -118,6 +124,12 @@ export function GameDetail({
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (slideIn) return;
+    const id = window.requestAnimationFrame(() => setSlideIn(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [slideIn]);
 
   const seenClose = useRef(closeRequest);
   useEffect(() => {
@@ -138,10 +150,10 @@ export function GameDetail({
       markPadFocus(play);
       play.focus({ preventScroll: true });
     };
-    // The confirm press also focuses the cover. Take Play back after that
-    // default action, so the ring is not left on the game that was just opened.
-    focusPlay();
-    const timer = window.setTimeout(focusPlay, 0);
+    // The confirm press also focuses the cover. Take Play back after the slide,
+    // so the ring is not left on the game that was just opened, and so that
+    // focus does not reflow the drawer while it is still moving.
+    const timer = window.setTimeout(focusPlay, DRAWER_MS);
     return () => window.clearTimeout(timer);
   }, [game.id]);
 
@@ -152,8 +164,14 @@ export function GameDetail({
 
   useEffect(() => {
     let alive = true;
+    const started = performance.now();
     void listGameLogs(game.id).then((r) => {
-      if (alive) setLogCount(r.length);
+      if (!alive) return;
+      // A count arriving mid-slide reflows the tab bar under the animation.
+      const wait = Math.max(0, DRAWER_MS - (performance.now() - started));
+      window.setTimeout(() => {
+        if (alive) setLogCount(r.length);
+      }, wait);
     });
     return () => {
       alive = false;
@@ -230,10 +248,10 @@ export function GameDetail({
   return (
     <>
       <div
-        className={`${leaving ? 'fade-out pointer-events-none' : 'fade-in'} fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]`}
+        className={`${leaving ? 'fade-out pointer-events-none' : slideIn ? 'fade-in' : 'opacity-0'} fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]`}
         onClick={beginClose}
       />
-      <aside className={`glass ${leaving ? 'drawer-out pointer-events-none' : 'drawer-in'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl`}>
+      <aside className={`glass ${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl`}>
         <div className="relative h-44 shrink-0">
           <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
           {/* The store's own backdrop sits over the cover art when there is one:
