@@ -131,6 +131,14 @@ export function GameDetail({
     return () => window.cancelAnimationFrame(id);
   }, [slideIn]);
 
+  // The page behind the drawer keeps moving otherwise: the mark turns, and a
+  // translucent scrim then has to blend that change over the whole window for
+  // as long as the details are open.
+  useEffect(() => {
+    document.documentElement.classList.add('orbit-detail-open');
+    return () => document.documentElement.classList.remove('orbit-detail-open');
+  }, []);
+
   const seenClose = useRef(closeRequest);
   useEffect(() => {
     if (seenClose.current === closeRequest) return;
@@ -277,26 +285,20 @@ export function GameDetail({
   return (
     <>
       <div
-        className={`orbit-detail-scrim ${leaving ? 'fade-out pointer-events-none' : slideIn ? 'fade-in' : 'opacity-0'} fixed inset-0 z-40 bg-black/40`}
+        className={`orbit-detail-scrim ${leaving ? 'fade-out pointer-events-none' : ''} fixed inset-0 z-40 bg-black/40`}
         onClick={beginClose}
       />
-      <aside className={`orbit-detail glass ${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl`}>
-        <div className="relative h-44 shrink-0">
-          <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
-          {/* The store's own backdrop sits over the cover art when there is one:
-              it is the picture the game's page is meant to be read against. */}
-          {game.meta?.backgroundUrl && (
-            <img
-              src={game.meta.backgroundUrl}
-              alt=""
-              aria-hidden
-              decoding="async"
-              className="absolute inset-0 size-full object-cover opacity-70"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          )}
+      {/* The slide is the shell. The scroller inside it never gets a transform,
+          which is what made scrolling and moving the controller ring repaint
+          the whole drawer after it had opened. */}
+      <aside className={`${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)]`}>
+      <div className="orbit-detail glass flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-3xl">
+        <div
+          className="relative h-44 shrink-0"
+          style={{
+            background: `linear-gradient(160deg, hsl(${game.hue} 62% 36%), hsl(${(game.hue + 36) % 360} 40% 14%))`,
+          }}
+        >
           <div className="absolute inset-0 bg-gradient-to-t from-panel to-transparent" />
           <button
             onClick={beginClose}
@@ -703,6 +705,7 @@ export function GameDetail({
             }}
           />
         )}
+      </div>
       </aside>
     </>
   );

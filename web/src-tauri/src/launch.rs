@@ -109,7 +109,7 @@ impl Sessions {
                 dirs.push(parent.to_path_buf());
             }
         }
-        let names = program_names(&dirs);
+        let names = watch_names(target, &dirs);
 
         match crate::launch_target::spawn(target)? {
             Some(child) => {
@@ -127,6 +127,7 @@ impl Sessions {
                             .and_then(|p| p.file_name())
                             .and_then(|n| n.to_str())
                             .map(|n| n.to_lowercase()),
+                        group: started_group(pid),
                         names,
                         seen: false,
                         misses: 0,
@@ -157,6 +158,7 @@ impl Sessions {
                         died_at: None,
                         handed_off: true,
                         image: None,
+                        group: None,
                         names,
                         seen: false,
                         misses: 0,
@@ -187,6 +189,13 @@ impl Sessions {
                 tracked.died_at = Some(Instant::now());
             }
             if tracked.died_at.is_none() {
+                // The group is created in the child, just before the program
+                // runs. The first look can be too early to see it, and a later
+                // one must not miss it: that group is how a Wine launch is
+                // followed after this process exits.
+                if tracked.group.is_none() {
+                    tracked.group = started_group(pid);
+                }
                 return Some(Verdict::Running);
             }
         } else {
@@ -201,15 +210,15 @@ impl Sessions {
         if tracked.child.is_some() && !tracked.handed_off {
             tracked.handed_off = true;
             let program = tracked.image.as_deref().unwrap_or("the program");
-            log::info!("{program} (pid {pid}) exited; watching the game's folder from here");
+            log::info!("{program} (pid {pid}) exited; watching what it handed off to");
         }
 
-        if !cfg!(windows) || tracked.names.is_empty() {
+        // A launch with no folder and no process group of its own has nothing
+        // left to ask. Wine is the case this used to get wrong: the process
+        // Orbit started exits, and the game carries on in the group beside it.
+        if tracked.group.is_none() && tracked.names.is_empty() {
             return Some(match tracked.child {
-                // A program that ran and died is over, whether or not anything
-                // can be said about the folder.
                 Some(_) => Verdict::Ended,
-                // Nothing was watched and nothing said: the player stops it.
                 None => Verdict::Unwatched,
             });
         }
@@ -222,7 +231,8 @@ impl Sessions {
         tracked.last_scan = Some(now);
 
         let names = std::mem::take(&mut tracked.names);
-        let running = any_running(&names);
+        let group = tracked.group;
+        let running = group_alive(group, pid) || (!names.is_empty() && any_running(&names));
         tracked.names = names;
 
         if running {
@@ -275,7 +285,11 @@ impl Sessions {
 
         #[cfg(windows)]
         kill_tree(pid);
-        // Belt and braces, and the only route on other platforms.
+        // The game is often no longer the process Orbit started. The group is
+        // the rest of it, and only when that group is the launch's own.
+        if let Some(pgid) = tracked.group {
+            signal_group(pgid, false);
+        }
         if let Some(child) = tracked.child.as_mut() {
             let _ = child.kill();
         }
@@ -283,20 +297,146 @@ impl Sessions {
         let deadline = Instant::now() + EXIT_WAIT;
         loop {
             match tracked.child.as_mut() {
-                None => return Ok(()),
+                None => {
+                    end_group(tracked.group);
+                    return Ok(());
+                }
                 Some(child) => match child.try_wait() {
-                    Ok(Some(_)) => return Ok(()),
+                    Ok(Some(_)) => {
+                        // The process Orbit started may already have handed the
+                        // game on. The group is what is still playing.
+                        end_group(tracked.group);
+                        return Ok(());
+                    }
                     Ok(None) if Instant::now() < deadline => {
                         std::thread::sleep(std::time::Duration::from_millis(50));
                     }
                     Ok(None) => {
                         log::warn!("pid {pid} was still running after {:?}", EXIT_WAIT);
+                        end_group(tracked.group);
                         return Ok(());
                     }
                     Err(e) => return Err(format!("Could not check whether the game closed: {e}")),
                 },
             }
         }
+    }
+}
+
+/// The names a running game can be recognised by.
+///
+/// The folder walk finds siblings a launcher starts under another file name.
+/// The program itself is always included, even when that walk cannot read the
+/// folder: a Wine `.exe` is still the name the running process carries.
+fn watch_names(target: &LaunchTarget, dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let mut names = program_names(dirs);
+    if let Some(name) = target
+        .primary_path()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+    {
+        let name = name.to_lowercase();
+        if name.is_empty() {
+            return names;
+        }
+        if !names.contains(&name) {
+            names.push(name.clone());
+        }
+        // Wine sometimes shows the exe with the extension and sometimes without.
+        if let Some(stem) = name.strip_suffix(".exe") {
+            if stem.len() >= 4 && !names.iter().any(|have| have == stem) {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    names
+}
+
+/// The process group of a launch, only when the child leads that group.
+///
+/// A child that stayed in Orbit's group must not be treated as one: signalling
+/// it would signal Orbit. Wine is started in a group of its own so the game it
+/// hands off to can be told apart from everything else.
+#[cfg(unix)]
+fn started_group(pid: u32) -> Option<u32> {
+    let pgid = unsafe { libc::getpgid(pid as i32) };
+    if pgid > 1 && pgid as u32 == pid {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(unix))]
+fn started_group(_pid: u32) -> Option<u32> {
+    None
+}
+
+/// Whether any live process other than the one Orbit started is still in the group.
+#[cfg(unix)]
+fn group_alive(group: Option<u32>, ignore: u32) -> bool {
+    let Some(group) = group else {
+        return false;
+    };
+    if group <= 1 {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == ignore {
+            continue;
+        }
+        let pgid = unsafe { libc::getpgid(pid as i32) };
+        if pgid <= 0 || pgid as u32 != group || is_zombie(pid) {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+#[cfg(not(unix))]
+fn group_alive(_group: Option<u32>, _ignore: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn is_zombie(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true;
+    };
+    // The command name sits in parentheses and can itself contain spaces and
+    // parentheses. The state letter is the first field after the last one.
+    let Some(end) = stat.rfind(')') else {
+        return false;
+    };
+    stat[end + 1..].trim_start().starts_with('Z')
+}
+
+/// Ask a launch's own process group to stop. `force` is the second try.
+fn signal_group(pgid: u32, force: bool) {
+    if pgid <= 1 {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+        unsafe {
+            libc::kill(-(pgid as i32), signal);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = force;
+}
+
+fn end_group(group: Option<u32>) {
+    if let Some(pgid) = group {
+        signal_group(pgid, true);
     }
 }
 
@@ -378,9 +518,82 @@ fn running_programs() -> Vec<String> {
         .collect()
 }
 
+/// Image names from `/proc`, which is where a Wine game shows up.
+///
+/// Wine writes the Windows exe name into the process's short name, cut off at
+/// 15 characters, and sometimes only into its command line while the short name
+/// stays `wine-preloader`. Both are collected. A machine without `/proc` has
+/// nothing to list, and the process group is the other signal.
 #[cfg(not(windows))]
 fn running_programs() -> Vec<String> {
-    Vec::new()
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else {
+            continue;
+        };
+        let comm = comm.trim().to_lowercase();
+        if comm.is_empty() {
+            continue;
+        }
+        if !out.contains(&comm) {
+            out.push(comm.clone());
+        }
+        if wine_loader(&comm) {
+            for name in cmdline_names(pid) {
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Wine's loader, including the 15-character cut of `wine64-preloader`.
+#[cfg(not(windows))]
+fn wine_loader(comm: &str) -> bool {
+    comm == "wine"
+        || comm == "wine64"
+        || comm.starts_with("wine-preloader")
+        || comm.starts_with("wine64-preloade")
+        || comm.starts_with("wine-preloade")
+}
+
+/// The last path piece, whether the separator is Unix or Windows.
+#[cfg(not(windows))]
+fn file_tail(arg: &str) -> &str {
+    let slash = arg.rfind('/');
+    let back = arg.rfind('\\');
+    let cut = match (slash, back) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+    cut.map(|index| &arg[index + 1..]).unwrap_or(arg)
+}
+
+/// File names from a process command line, so `wine-preloader` still names the exe.
+#[cfg(not(windows))]
+fn cmdline_names(pid: u32) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return Vec::new();
+    };
+    let bytes = &bytes[..bytes.len().min(1024)];
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .filter_map(|arg| std::str::from_utf8(arg).ok())
+        .map(file_tail)
+        .map(|name| name.trim().to_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 /// Whether a listed program is the one being looked for.
@@ -391,6 +604,11 @@ fn running_programs() -> Vec<String> {
 /// else is a different program that happens to begin with the same letters.
 fn same_program(listed: &str, wanted: &str) -> bool {
     if listed == wanted {
+        return true;
+    }
+    // Linux `comm` holds 15 characters. Wine puts the Windows exe name there,
+    // so `Game-Win64-Shipping.exe` is listed as `game-win64-shi`.
+    if listed.len() == 15 && wanted.starts_with(listed) {
         return true;
     }
     let stem = wanted.strip_suffix(".exe").unwrap_or(wanted);
@@ -787,26 +1005,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn a_cut_off_process_name_is_still_the_game() {
+        assert!(same_program("game-win64-shi", "game-win64-shipping.exe"));
+        assert!(!same_program("other-game.exe", "game-win64-shipping.exe"));
+        assert!(same_program("hades.exe", "hades.exe"));
+    }
+
     /// A real process, because the hand-off logic is about real process exits.
     ///
-    /// Windows only, because the hand-off is: the process Orbit started is gone
-    /// and the game is looked for by name in the folder, which is the watching
-    /// that only exists there. On Linux a program that ran and died is over.
-    #[cfg(windows)]
+    /// The process Orbit started can be a launcher. Wine is that launcher: it
+    /// exits, and the game keeps running. The session must not end on that exit.
     #[test]
     fn a_process_that_dies_quickly_is_treated_as_a_launcher() {
         let mut sessions = Sessions::default();
-        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        let (shell, args) = if cfg!(windows) {
+            (
+                std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string()),
+                "/c exit".to_string(),
+            )
+        } else {
+            ("/bin/sh".to_string(), "-c exit".to_string())
+        };
         let launched = sessions
             .launch_target(
                 &LaunchTarget::Executable {
                     path: PathBuf::from(&shell),
-                    args: "/c exit".to_string(),
+                    args,
                     working_dir: None,
                 },
                 None,
             )
-            .expect("cmd should start");
+            .unwrap_or_else(|e| panic!("{shell} should start: {e}"));
         assert!(!launched.manual, "there is a process to watch");
 
         // Long enough for `cmd /c exit` to be gone.
@@ -873,6 +1103,16 @@ mod tests {
 
     /// A program that stays up for a minute, and the arguments to make it do so.
     fn long_running_program() -> (String, String) {
+        if cfg!(windows) {
+            let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+            // Pings itself, because that is a sleep that ships with Windows.
+            (shell, "/c ping -n 60 127.0.0.1 > nul".to_string())
+        } else {
+            ("/bin/sh".to_string(), r#"-c "sleep 60""#.to_string())
+        }
+    }
+}
+ String) {
         if cfg!(windows) {
             let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
             // Pings itself, because that is a sleep that ships with Windows.

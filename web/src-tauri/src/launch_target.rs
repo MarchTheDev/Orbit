@@ -671,6 +671,13 @@ fn which(name: &str) -> Option<PathBuf> {
 }
 
 fn quiet(cmd: &mut Command) -> std::io::Result<Child> {
+    // A group of its own, so the game Wine hands off to is not mixed in with
+    // Orbit. The session watches that group after this process exits.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

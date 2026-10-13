@@ -50,7 +50,6 @@ body::before {
    hitch the close never had. It is laid out off-screen first, on its own layer. */
 .drawer-off {
   transform: translate3d(100%, 0, 0);
-  will-change: transform;
 }
 /* `backwards` only. `both` left a transform on the scrolling panel, and every
    scroll and every controller ring then repainted that layer. */
@@ -65,6 +64,11 @@ body::before {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
+  /* The slide lives on the shell. A transform here is a scrolling layer, and
+     that is the stall. */
+  transform: none !important;
+  will-change: auto !important;
+  overscroll-behavior: contain;
 }
 .orbit-detail-scrim {
   -webkit-backdrop-filter: none !important;
@@ -74,12 +78,12 @@ body::before {
   display: none !important;
 }
 @keyframes drawer {
-  from { transform: translate3d(100%, 0, 0); opacity: 0; }
-  to { transform: translate3d(0, 0, 0); opacity: 1; }
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: none; }
 }
 @keyframes drawer-out {
-  from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(100%); opacity: 0; }
+  from { transform: none; }
+  to { transform: translate3d(100%, 0, 0); }
 }
 .fade-in { animation: fade .25s ease both; }
 .fade-out { animation: fade-out .3s ease forwards; }
@@ -198,6 +202,17 @@ html.orbit-linux .orbit-detail-scrim {
 html.orbit-linux .orbit-detail {
   background: var(--c-panel) !important;
   background-image: none !important;
+}
+/* While details are open the page behind them is covered. Leave it still, or
+   the turning mark and the blurred covers keep the window repainting. */
+html.orbit-detail-open .orbit-spin-outer,
+html.orbit-detail-open .orbit-spin-inner,
+html.orbit-detail-open .orbit-twinkle,
+html.orbit-detail-open .orbit-bars i {
+  animation: none !important;
+}
+html.orbit-detail-open .blur-xl {
+  display: none !important;
 }
 /* The ring is the pad's own mark, not every focused control. A mouse click
    focuses too, and styling :focus painted the controller ring around whatever
