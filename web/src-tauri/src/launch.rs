@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn a_cut_off_process_name_is_still_the_game() {
-        assert!(same_program("game-win64-shi", "game-win64-shipping.exe"));
+        assert!(same_program("game-win64-ship", "game-win64-shipping.exe"));
         assert!(!same_program("other-game.exe", "game-win64-shipping.exe"));
         assert!(same_program("hades.exe", "hades.exe"));
     }
