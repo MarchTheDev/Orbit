@@ -123,15 +123,7 @@ function Tile({
 
   return (
     <div
-      tabIndex={0}
-      data-orbit-pad="tile"
       onClick={() => onSelect(game.id)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          onSelect(game.id);
-        }
-      }}
       onDoubleClick={() => onPlay(game)}
       // What the app's one right-click handler looks for, so the menu works
       // from anywhere on the tile, including the artwork and the title.
@@ -151,10 +143,24 @@ function Tile({
       )}
     >
       <div
+        tabIndex={0}
+        data-orbit-pad="tile"
+        aria-label={game.title}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(game.id);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onSelect(game.id);
+          }
+        }}
         className={cn(
           // A neutral shadow on hover, not an accent-coloured one: with the
           // tint set to follow the artwork, nothing from the theme should be
-          // drawn over a cover.
+          // drawn over a cover. The pad ring lives on this element, not on the
+          // title underneath.
           'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
         )}

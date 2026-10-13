@@ -495,5 +495,7 @@ export interface Settings {
     dirs?: Record<string, string>;
     /** Where copies are kept. Empty means Orbit's own backups folder. */
     backupRoot?: string;
+    /** The Saves list, in the order it was dragged. Games not listed wait at the end. */
+    order?: string[];
   };
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArchiveRestore, FolderOpen, HardDriveDownload, RefreshCw, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArchiveRestore, FolderOpen, GripVertical, HardDriveDownload, RefreshCw, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -20,6 +20,8 @@ import { Cover } from './ui/Cover';
 import { btnAccent } from './ui/buttons';
 import { say } from '../utils/toast';
 import { cn } from '../utils/cn';
+import { useDragReorder } from '../hooks/useDragReorder';
+import { moveInOrder } from '../utils/reorder';
 
 /**
  * Copies of the files a game writes while it is played.
@@ -41,7 +43,35 @@ export function SavesView({
   const [status, setStatus] = useState<SaveStatus | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [backingAll, setBackingAll] = useState(false);
-  const rows = [...games].sort((a, b) => a.title.localeCompare(b.title));
+  const savedOrder = settings.saves?.order;
+  const rows = useMemo(() => {
+    const list = [...games];
+    const order = savedOrder ?? [];
+    if (order.length === 0) return list.sort((a, b) => a.title.localeCompare(b.title));
+    return list.sort((a, b) => {
+      const ai = order.indexOf(a.id);
+      const bi = order.indexOf(b.id);
+      // A game that was never dragged waits at the end, rather than landing in
+      // the middle of an arrangement somebody made.
+      if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [games, savedOrder]);
+  const list = useRef<HTMLUListElement>(null);
+  const { bind, dragging, over } = useDragReorder(
+    (fromId, toId, after) => {
+      setSettings({
+        saves: {
+          ...settings.saves,
+          order: moveInOrder(rows.map((game) => game.id), fromId, toId, after),
+        },
+      });
+    },
+    // The row is itself a button, so the press has to be allowed to start there.
+    { container: list, fromButtons: true },
+  );
   const auto = settings.saves?.auto ?? [];
   const dirs = settings.saves?.dirs ?? {};
 
@@ -117,14 +147,27 @@ export function SavesView({
           Add a game first. A backup needs something to belong to.
         </p>
       ) : (
-        <ul className="space-y-2">
+        <>
+        {rows.length > 1 && (
+          <p className="mb-3 text-xs text-muted">Drag a game to change the order.</p>
+        )}
+        <ul ref={list} className="space-y-2">
           {rows.map((game) => (
-            <li key={game.id} className="rounded-xl border border-line bg-panel/60">
+            <li
+              key={game.id}
+              className={cn(
+                'rounded-xl border border-line bg-panel/60',
+                dragging === game.id && 'opacity-60',
+                over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent',
+              )}
+            >
               <button
                 onClick={() => setOpenId((current) => (current === game.id ? null : game.id))}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                {...bind(game.id)}
+                className="flex w-full cursor-grab items-center justify-between gap-3 px-4 py-3 text-left active:cursor-grabbing"
               >
                 <span className="flex min-w-0 items-center gap-3">
+                  <GripVertical className="size-4 shrink-0 text-muted" aria-hidden />
                   <Cover game={game} className="h-28 w-20 shrink-0 overflow-hidden rounded-xl shadow-sm [&_span]:text-sm" />
                   <span className="min-w-0">
                   <span className="block truncate font-medium">{game.title}</span>
@@ -151,6 +194,7 @@ export function SavesView({
             </li>
           ))}
         </ul>
+        </>
       )}
 
     </div>

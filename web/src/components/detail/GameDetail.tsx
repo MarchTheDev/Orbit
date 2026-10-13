@@ -15,7 +15,7 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActiveSession, Companion, Game, GameStatus, LaunchTarget, Session } from '../../types';
 import { fetchMetadata } from '../../services/metadata';
 import { openExternal } from '../../services/desktop';
@@ -33,6 +33,10 @@ import { GameLogView } from './GameLogView';
 import { AchievementsTab } from './AchievementsTab';
 import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
+import { padJustActivated } from '../../hooks/useGamepad';
+
+/** Matches `.drawer-out` in the stylesheet. */
+const DRAWER_MS = 300;
 
 interface Props {
   game: Game;
@@ -56,6 +60,11 @@ interface Props {
   onStop: () => void;
   onRemove: () => void;
   onClose: () => void;
+  /**
+   * Incremented when the pad asks this drawer to close. The drawer slides out
+   * before it unmounts; clearing the selection immediately would skip that.
+   */
+  closeRequest?: number;
 }
 
 export function GameDetail({
@@ -70,6 +79,7 @@ export function GameDetail({
   onStop,
   onRemove,
   onClose,
+  closeRequest = 0,
 }: Props) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
@@ -87,6 +97,48 @@ export function GameDetail({
   const [loggingSession, setLoggingSession] = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
   const running = session?.gameId === game.id;
+  const playRef = useRef<HTMLButtonElement>(null);
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  const closeTimer = useRef<number | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const beginClose = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onCloseRef.current();
+      return;
+    }
+    setLeaving(true);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), DRAWER_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+  }, []);
+
+  const seenClose = useRef(closeRequest);
+  useEffect(() => {
+    if (seenClose.current === closeRequest) return;
+    seenClose.current = closeRequest;
+    beginClose();
+  }, [closeRequest, beginClose]);
+
+  // A pad confirm on a cover opens this drawer. Land on Play, and only then:
+  // a mouse open, or a pad that is no longer the active input, keeps the
+  // focus where it was.
+  useLayoutEffect(() => {
+    if (!document.documentElement.classList.contains('orbit-pad')) return;
+    if (!padJustActivated()) return;
+    const focusPlay = () => playRef.current?.focus({ preventScroll: true });
+    // The confirm press also focuses the cover. Take Play back after that
+    // default action, so the ring is not left on the game that was just opened.
+    focusPlay();
+    const timer = window.setTimeout(focusPlay, 0);
+    return () => window.clearTimeout(timer);
+  }, [game.id]);
 
   // The tab bar shows how much has been written, so the count is worth keeping,
   // and the journal says when it has moved.
@@ -172,8 +224,11 @@ export function GameDetail({
 
   return (
     <>
-      <div className="fade-in fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <aside className="glass drawer-in fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl">
+      <div
+        className={`${leaving ? 'fade-out pointer-events-none' : 'fade-in'} fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]`}
+        onClick={beginClose}
+      />
+      <aside className={`glass ${leaving ? 'drawer-out pointer-events-none' : 'drawer-in'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl`}>
         <div className="relative h-44 shrink-0">
           <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
           {/* The store's own backdrop sits over the cover art when there is one:
@@ -191,7 +246,7 @@ export function GameDetail({
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-panel to-transparent" />
           <button
-            onClick={onClose}
+            onClick={beginClose}
             aria-label="Close"
             className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg bg-black/40 text-white hover:bg-black/60"
           >
@@ -303,7 +358,7 @@ export function GameDetail({
                 Stop session
               </button>
             ) : (
-              <button onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
+              <button ref={playRef} onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
                 <Play className="size-4" fill="currentColor" strokeWidth={0} />
                 Play
               </button>

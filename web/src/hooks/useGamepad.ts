@@ -77,9 +77,18 @@ function move(direction: 'up' | 'down' | 'left' | 'right') {
   (next ?? list[0]).focus();
 }
 
+let padActivateAt = 0;
+
+/** A confirm press on a game, recent enough that the details drawer should land on Play. */
+export function padJustActivated(withinMs = 800): boolean {
+  return padActivateAt > 0 && performance.now() - padActivateAt <= withinMs;
+}
+
 function activate() {
   const current = document.activeElement;
-  if (current instanceof HTMLElement) current.click();
+  if (!(current instanceof HTMLElement)) return;
+  if (current.matches('[data-orbit-pad="tile"]')) padActivateAt = performance.now();
+  current.click();
 }
 
 function back() {

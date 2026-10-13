@@ -485,9 +485,11 @@ fn copy_folder(
     // made the copy harder to find, and a new copy replaces the last one.
     clear_direct_copy(&dest)?;
     copy_tree(from, &dest, 0, false)?;
-    let when = when_text(at);
+    // `At:` stays the unix timestamp so a list can still be sorted. The line a
+    // person reads is the PC's own clock, not UTC.
+    let when = when_line(at);
     let note = format!(
-        "Game: {game}\nPublisher: {studio}\nCopied from: {}\nWhen (UTC): {when}\nAt: {at}\n",
+        "Game: {game}\nPublisher: {studio}\nCopied from: {}\n{when}\nAt: {at}\n",
         from.display()
     );
     fs::write(dest.join("note.txt"), &note).map_err(|e| format!("Could not write the note: {e}"))?;
@@ -786,10 +788,121 @@ fn stamp_folder(at: i64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}-{minute:02}-{second:02}")
 }
 
-/// The same moment, written for a person to read in the note.
+/// The same moment, written for a person to read, in the PC's own timezone.
+///
+/// UTC was the wrong clock: a backup taken in the evening could show the next
+/// morning. If the zone cannot be read, the UTC time is used and labelled as
+/// such, so a fallback is not presented as local.
 fn when_text(at: i64) -> String {
-    let (year, month, day, hour, minute, second) = civil_clock(at);
+    format_clock(local_clock(at).unwrap_or_else(|| civil_clock(at)))
+}
+
+/// The note's clock line. The label matches the clock that was actually read.
+fn when_line(at: i64) -> String {
+    if local_clock(at).is_some() {
+        format!("When: {}", when_text(at))
+    } else {
+        format!("When (UTC): {}", format_clock(civil_clock(at)))
+    }
+}
+
+fn format_clock((year, month, day, hour, minute, second): (i32, u32, u32, i64, i64, i64)) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}")
+}
+
+/// The PC timezone for a unix timestamp. `None` means it could not be read.
+#[cfg(target_os = "linux")]
+fn local_clock(at: i64) -> Option<(i32, u32, u32, i64, i64, i64)> {
+    let mut out: libc::tm = unsafe { std::mem::zeroed() };
+    let secs = at as libc::time_t;
+    if unsafe { libc::localtime_r(&secs, &mut out) }.is_null() {
+        return None;
+    }
+    let year = out.tm_year.checked_add(1900)?;
+    let month = u32::try_from(out.tm_mon.checked_add(1)?).ok()?;
+    let day = u32::try_from(out.tm_mday).ok()?;
+    Some((year as i32, month, day, out.tm_hour as i64, out.tm_min as i64, out.tm_sec as i64))
+}
+
+#[cfg(windows)]
+fn local_clock(at: i64) -> Option<(i32, u32, u32, i64, i64, i64)> {
+    #[repr(C)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        millis: u16,
+    }
+    #[repr(C)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn FileTimeToSystemTime(file: *const FileTime, system: *mut SystemTime) -> i32;
+        fn SystemTimeToTzSpecificLocalTime(
+            zone: *const core::ffi::c_void,
+            utc: *const SystemTime,
+            local: *mut SystemTime,
+        ) -> i32;
+    }
+
+    // 100-nanosecond ticks since 1601-01-01. 11_644_473_600s separate that
+    // from the unix epoch.
+    let secs = at.checked_add(11_644_473_600)?;
+    if secs < 0 {
+        return None;
+    }
+    let ticks = (secs as u64).checked_mul(10_000_000)?;
+    let file = FileTime {
+        low: ticks as u32,
+        high: (ticks >> 32) as u32,
+    };
+    let mut utc = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        millis: 0,
+    };
+    let mut local = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        millis: 0,
+    };
+    let ok = unsafe {
+        FileTimeToSystemTime(&file, &mut utc) != 0
+            && SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) != 0
+    };
+    if !ok {
+        return None;
+    }
+    Some((
+        i32::from(local.year),
+        u32::from(local.month),
+        u32::from(local.day),
+        i64::from(local.hour),
+        i64::from(local.minute),
+        i64::from(local.second),
+    ))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn local_clock(_at: i64) -> Option<(i32, u32, u32, i64, i64, i64)> {
+    None
 }
 
 fn civil_clock(at: i64) -> (i32, u32, u32, i64, i64, i64) {
@@ -1011,14 +1124,69 @@ mod tests {
     #[test]
     fn a_stamp_is_a_date_not_a_bare_number() {
         assert_eq!(stamp_folder(0), "1970-01-01 00-00-00");
-        assert_eq!(when_text(0), "1970-01-01 00:00:00");
+        // The note clock follows the PC zone, so the epoch is not always UTC.
+        assert!(looks_like_clock(&when_text(0)), "{}", when_text(0));
         assert!(looks_like_stamp("1970-01-01 00-00-00"));
         assert!(looks_like_stamp("1970-01-01 00-00-00-12"));
         assert!(!looks_like_stamp("Profiles"));
     }
 
+    /// Stops a zone test from changing the clock under another test.
+    fn clock_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    fn looks_like_clock(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.len() == 19
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[10] == b' '
+            && bytes[13] == b':'
+            && bytes[16] == b':'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_note_clock_follows_the_pc_zone() {
+        let _hold = clock_lock();
+        struct Restore(Option<std::ffi::OsString>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(value) => unsafe { std::env::set_var("TZ", value) },
+                    None => unsafe { std::env::remove_var("TZ") },
+                }
+                unsafe { libc::tzset() };
+            }
+        }
+        let _restore = Restore(std::env::var_os("TZ"));
+        unsafe {
+            std::env::set_var("TZ", "EAST-2");
+            libc::tzset();
+        }
+        let ahead = when_text(0);
+        let ahead_line = when_line(0);
+        unsafe {
+            std::env::set_var("TZ", "UTC0");
+            libc::tzset();
+        }
+        let utc_zone = when_line(0);
+        assert_eq!(ahead, "1970-01-01 02:00:00");
+        assert_eq!(ahead_line, "When: 1970-01-01 02:00:00");
+        // A PC whose zone happens to be UTC is still not labelled as if that
+        // were the only clock the note knows.
+        assert_eq!(utc_zone, "When: 1970-01-01 00:00:00");
+    }
+
     #[test]
     fn a_copy_puts_the_date_in_the_note_instead_of_a_folder() {
+        let _hold = clock_lock();
         let root = std::env::temp_dir().join(format!("orbit-backup-note-{}", std::process::id()));
         let save = root.join("live");
         fs::create_dir_all(save.join("Profiles")).unwrap();
@@ -1037,8 +1205,14 @@ mod tests {
         let game = data.join("backups").join("Rockstar Games").join("Red Dead Redemption 2");
         assert_eq!(std::path::PathBuf::from(&made.path), game);
         let note = fs::read_to_string(game.join("note.txt")).unwrap();
-        assert!(note.contains("When (UTC):"), "{note}");
+        let at = note
+            .lines()
+            .find_map(|line| line.strip_prefix("At: "))
+            .and_then(|text| text.trim().parse::<i64>().ok())
+            .expect("unix time");
+        assert!(note.contains(&when_line(at)), "{note}");
         assert!(note.contains("At: "), "{note}");
+        assert!(!note.contains("When (UTC)"), "{note}");
         assert!(game.join("Profiles").join("slot").is_file());
         let old = game.join("2020-01-02 03-04-05");
         fs::create_dir_all(&old).unwrap();

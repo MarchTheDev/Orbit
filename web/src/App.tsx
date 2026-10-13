@@ -101,6 +101,8 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
+  const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
@@ -898,7 +900,7 @@ export default function App() {
       if (picked) void startGame(picked);
     };
     const onBack = () => {
-      if (selectedId) setSelectedId(null);
+      if (selectedId) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
     };
     const onPage = (event: Event) => {
@@ -1274,6 +1276,7 @@ export default function App() {
           onPlay={() => void startGame(selected)}
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
+          closeRequest={detailClose}
           onClose={() => setSelectedId(null)}
         />
       )}

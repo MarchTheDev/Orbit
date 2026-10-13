@@ -45,10 +45,18 @@ body::before {
   border: 1px solid color-mix(in srgb, var(--c-border) 88%, transparent);
   backdrop-filter: blur(12px) saturate(1.05);
 }
+/* Open slides in from the right. Close slides back out that way, left to right. */
 .drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1); }
+.drawer-out { animation: drawer-out .3s cubic-bezier(.2,.8,.2,1) forwards; }
 @keyframes drawer { from { transform: translateX(100%); opacity: 0; } }
+@keyframes drawer-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
 .fade-in { animation: fade .25s ease; }
+.fade-out { animation: fade-out .3s ease forwards; }
 @keyframes fade { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
 
 /* Shared entrance motions: restrained enough to keep navigation quick, with a
  * reduced-motion fallback for players who prefer an immediate interface. */
@@ -154,9 +162,15 @@ html.orbit-pad :focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);
 }
+/* The ring sits on the cover. The title under it is not part of the target.
+   Outline, not the shared box-shadow: the cover's own transition would otherwise
+   lag the ring behind the stick. */
 html.orbit-pad [data-orbit-pad="tile"]:focus {
   border-radius: 1rem;
   scroll-margin: 5.5rem;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 html.orbit-pad .orbit-logo:focus {
   border-radius: 999px;
@@ -169,6 +183,8 @@ html.orbit-pad .orbit-logo:focus {
   .orbit-spin-outer,
   .orbit-twinkle,
   .drawer-in,
+  .drawer-out,
+  .fade-out,
   .save-tick,
   .save-manage-in,
   .fade-in { animation: none !important; }
