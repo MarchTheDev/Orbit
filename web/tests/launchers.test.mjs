@@ -2,7 +2,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { siHeroicgameslauncher } from 'simple-icons';
-import { LAUNCHERS, canScan, pathPromptFor } from '../src/data/launchers.ts';
+import { LAUNCHERS, canScan, launcherOn, pathPromptFor } from '../src/data/launchers.ts';
 import { LauncherIcon } from '../src/components/ui/LauncherIcon.tsx';
 
 let failures = 0;
@@ -66,6 +66,22 @@ check(
 check(
   'Heroic is scannable, so it needs no note',
   canScan(LAUNCHERS.find((launcher) => launcher.id === 'Heroic Games Library')),
+);
+console.log('which desktop sees which launcher');
+check(
+  'Windows does not offer Lutris or Heroic',
+  !launcherOn('Lutris', 'windows') && !launcherOn('Heroic Games Library', 'windows'),
+);
+check(
+  'Linux keeps Heroic and Lutris, and drops the Windows-only clients',
+  launcherOn('Heroic Games Library', 'linux') &&
+    launcherOn('Lutris', 'linux') &&
+    launcherOn('Steam', 'linux') &&
+    !launcherOn('GOG Galaxy', 'linux') &&
+    !launcherOn('Epic Games', 'linux') &&
+    !launcherOn('Ubisoft Connect', 'linux') &&
+    !launcherOn('EA app', 'linux') &&
+    !launcherOn('Xbox', 'linux'),
 );
 check(
   'every launcher on the list is scannable',

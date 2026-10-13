@@ -20,15 +20,35 @@ export function newLauncherGames(found: LauncherGame[], existing: Game[]): Launc
   });
 }
 
-/** A launcher record becomes a timer-only library entry until the player configures Play. */
+/**
+ * How an imported row should start.
+ *
+ * Most launchers only know a folder, so Play stays a timer until the player
+ * points at a program. Lutris already knows the slug, and often the Wine
+ * prefix, so the imported game can start without a second setup step.
+ */
+export function launchFromLauncher(row: LauncherGame): Game['launch'] {
+  if (row.launcher === 'Lutris' && (row.slug || row.exePath)) {
+    return {
+      kind: 'lutris',
+      slug: row.slug ?? '',
+      gameId: row.lutrisId ?? null,
+      exe: row.exePath,
+      prefix: row.winePrefix ?? null,
+    };
+  }
+  return { kind: 'none' };
+}
+
+/** A launcher record becomes a library entry. Play is a timer unless the row knows better. */
 export function gameFromLauncher(row: LauncherGame): Game {
   const drive = /^[a-z]:/i.test(row.installDir) ? row.installDir.slice(0, 2).toUpperCase() : '';
   return {
     id: uid(),
     title: row.name,
     inLibrary: true,
-    launch: { kind: 'none' },
-    exePath: null,
+    launch: launchFromLauncher(row),
+    exePath: row.exePath,
     installDir: row.installDir,
     drive,
     sizeBytes: row.sizeBytes,

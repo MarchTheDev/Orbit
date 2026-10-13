@@ -10,6 +10,8 @@
  * user gesture yet, playback waits quietly for the first click or key press.
  */
 
+import { ambientSet, isNative } from './native';
+
 /** C3 keeps the chimes warm while leaving room for game audio. */
 const ROOT = 130.8128;
 
@@ -89,17 +91,63 @@ export class Ambient {
   private wanted = false;
   private volume = 0.35;
   private resumeOn: (() => void) | null = null;
+  /**
+   * Linux WebKit's Web Audio graph often stays silent. When the system player
+   * took the pad, the oscillators stay off so two copies don't play.
+   */
+  private nativeHeld = false;
+  /** Whether the pad should be heard right now. A fake blur must not clear this. */
+  private audible = true;
+  /**
+   * WebKitGTK reports a blur at startup, before the window has ever been
+   * focused. That blur is ignored until a real focus has been seen.
+   */
+  private sawFocus = false;
 
   /** Turn the sound on, and keep it on. */
   start(volume: number): void {
     this.wanted = true;
     this.setVolume(volume);
-    this.ensure();
+    // Windows already has the chord the 1.0 release played. The system player
+    // is a Linux fallback for a web view that stays silent, and using it on
+    // Windows replaces that chord with a plain tone.
+    if (this.onLinux()) void this.tryNative();
+    else this.ensure();
+  }
+
+  /**
+   * Ask the system player first. It answers false when it has nothing to play
+   * through, and that is the cue to use the web view instead.
+   */
+  private async tryNative(): Promise<void> {
+    if (!isNative()) {
+      this.ensure();
+      return;
+    }
+    try {
+      const held = await ambientSet(true, this.volume, true);
+      if (!this.wanted) {
+        if (held) void ambientSet(false, 0, true).catch(() => undefined);
+        return;
+      }
+      this.nativeHeld = held;
+      if (held) this.stopOscillators();
+      else this.ensure();
+    } catch {
+      this.nativeHeld = false;
+      if (this.wanted) this.ensure();
+    }
   }
 
   /** Fade to silence, stop the notes, and suspend the audio graph shortly after. */
   stop(): void {
     this.wanted = false;
+    this.nativeHeld = false;
+    if (this.onLinux() && isNative()) void ambientSet(false, this.volume, true).catch(() => undefined);
+    this.stopOscillators();
+  }
+
+  private stopOscillators(): void {
     this.clearTimer();
     this.fadeVoices(this.voices);
     this.fadeVoices(this.padVoices);
@@ -128,6 +176,9 @@ export class Ambient {
   /** Volume, 0 to 1. Safe to call before anything is playing. */
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
+    if (this.nativeHeld) {
+      void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
+    }
     if (!this.master || !this.context || !this.wanted) return;
     try {
       this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.7);
@@ -138,6 +189,20 @@ export class Ambient {
 
   /** Whether the window is being looked at, and whether sound may continue away. */
   setFocused(focused: boolean, keepWhenUnfocused: boolean): void {
+    // The first reports are often a blur with no focus before it. Honouring
+    // that writes silence into the system player and the bars stay still.
+    // A blur only counts after the window has actually been focused once.
+    if (this.onLinux() && !this.sawFocus) {
+      if (focused) this.sawFocus = true;
+      else if (typeof document === 'undefined' || document.visibilityState !== 'hidden') focused = true;
+    } else if (focused) {
+      this.sawFocus = true;
+    }
+    this.audible = focused || keepWhenUnfocused;
+    if (this.nativeHeld) {
+      void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
+      return;
+    }
     if (!this.context || !this.master) return;
     const target = !focused && !keepWhenUnfocused ? 0 : this.volume;
     try {
@@ -148,6 +213,10 @@ export class Ambient {
   }
 
   // ------------------------------------------------------------------ private
+
+  private onLinux(): boolean {
+    return typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent);
+  }
 
   private ensure(): void {
     if (!this.context) {

@@ -19,11 +19,15 @@ import {
 import type { Game, LauncherGame, OtherLauncher, Page, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
+import { useGamepad } from './hooks/useGamepad';
 import {
+  backupSave,
   clearLibrary,
+  savePlaceOf,
   isNative,
   launcherGames,
   onOpenExeRequested,
+  saveHintsOf,
   setPlaytime,
   steamLibrary,
   takeOpenExePaths,
@@ -31,10 +35,11 @@ import {
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
+import { desktopOs } from './utils/platform';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
-import { TopNav } from './components/TopNav';
+import { TopNav, orderedTabs } from './components/TopNav';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Hero } from './components/Hero';
@@ -43,6 +48,7 @@ import { Logo } from './components/ui/Logo';
 import { GameGrid } from './components/GameGrid';
 import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
+import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
 import { SessionsView } from './components/SessionsView';
 import { BacklogView } from './components/BacklogView';
@@ -95,6 +101,8 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
   const [sort, setSort] = useState<SortKey>('title');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
+  const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
@@ -129,9 +137,7 @@ export default function App() {
    * stop then — the same way the music bars already do — so the webview has
    * nothing left to repaint and can hand the CPU and GPU back to the game.
    */
-  const [focused, setFocused] = useState(
-    () => typeof document === 'undefined' || (document.hasFocus() && !document.hidden),
-  );
+  const [focused, setFocused] = useState(true);
   /** Programs dragged onto the window, waiting to be added. */
   const [droppedPaths, setDroppedPaths] = useState<string[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -189,6 +195,28 @@ export default function App() {
       dispose?.();
     };
   }, [receiveOpenExePaths]);
+
+  // Linux takes long enough to map a hidden window that the opening has
+  // already finished by the time the usual reveal runs. Ask for the window as
+  // soon as this page exists, and let the opening wait until it is actually up.
+  useEffect(() => {
+    if (!isNative() || desktopOs() !== 'linux' || windowRevealDone.current) return;
+    // Two frames, so the opening mark has actually been painted before the
+    // window is mapped. Showing the empty first frame is what made the logo
+    // look as if it was still loading.
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        windowRevealDone.current = true;
+        windowRevealScheduled.current = true;
+        void windowReady();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, []);
 
   // Tauri keeps the window hidden until the app has loaded its saved theme and
   // painted the opening screen. Showing it on the first React frame exposed the
@@ -292,7 +320,19 @@ export default function App() {
    * elsewhere. Coming back is instant: nothing was moved, only paused.
    */
   useEffect(() => {
-    const sync = () => setFocused(document.hasFocus() && !document.hidden);
+    // Linux WebKit reports a blur before the window has ever been focused.
+    // Honouring that leaves the mark still for the whole session. A blur only
+    // counts after a real focus, which is also when a game has taken the window.
+    const linux = /linux|x11/i.test(navigator.userAgent);
+    let sawFocus = !linux && document.hasFocus();
+    const sync = () => {
+      const next = document.hasFocus() && !document.hidden;
+      if (linux && !sawFocus) {
+        if (next) sawFocus = true;
+        else return;
+      }
+      setFocused(document.hasFocus() && !document.hidden);
+    };
     window.addEventListener('focus', sync);
     window.addEventListener('blur', sync);
     document.addEventListener('visibilitychange', sync);
@@ -489,12 +529,38 @@ export default function App() {
     })().catch(() => undefined);
   }, [ready]);
 
-  /** A finished session changes one game's numbers, so re-read that game. */
-  const onSessionEnded = useCallback(() => {
+  /**
+   * A finished session changes one game's numbers, so re-read that game. If the
+   * player asked for an automatic copy, take it now, while the files are the
+   * ones the session just wrote.
+   */
+  const onSessionEnded = useCallback((gameId: string) => {
     void reload();
-  }, [reload]);
+    if (!settings?.saves?.auto?.includes(gameId)) return;
+    const game = games.find((item) => item.id === gameId);
+    if (!game) return;
+    void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings))
+      .then(() => toast({ text: `Backed up ${game.title}` }))
+      .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
+  }, [reload, settings, games, toast]);
 
-  const { session, play, stop, busy, error } = useSession(onSessionEnded);
+  const { session, play, stop, busy, notice, error } = useSession(onSessionEnded);
+
+  // A controller moves the real focus. It only polls after one is connected.
+  useGamepad();
+
+  // Linux WebKit keeps blurring and spinning forever if we leave those styles
+  // on, and the cost grows the longer the window is open. The class is the
+  // switch that turns them off. The window also starts treated as focused
+  // until a real blur, because WebKit often reports the opposite at startup
+  // and then the pad never starts.
+  useEffect(() => {
+    if (!isNative()) return;
+    const platform = navigator.userAgent.toLowerCase();
+    if (!platform.includes('linux') && !platform.includes('x11')) return;
+    document.documentElement.classList.add('orbit-linux');
+    return () => document.documentElement.classList.remove('orbit-linux');
+  }, []);
 
   // The clock in the tray and the detail page only tick while something runs.
   useEffect(() => {
@@ -825,6 +891,54 @@ export default function App() {
     byRecent.find((g) => !g.hidden) ??
     played.find((g) => !g.planned && !g.hidden) ??
     null;
+
+  // Start on a controller starts the selected game, or the hero game. Back
+  // clears a selection, then leaves the page. Escape, which the pad also
+  // sends, already closes a dialog that is open.
+  useEffect(() => {
+    const onPlay = () => {
+      if (session) {
+        void stop();
+        return;
+      }
+      const focused = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest('[data-orbit-game]')
+        : null;
+      const focusedId = focused?.getAttribute('data-orbit-game');
+      const picked =
+        (focusedId && games.find((item) => item.id === focusedId)) ||
+        (selectedId && games.find((item) => item.id === selectedId)) ||
+        heroGame;
+      if (picked) void startGame(picked);
+    };
+    const onBack = () => {
+      if (selectedId) setDetailClose((n) => n + 1);
+      else if (page !== 'library') setPage('library');
+    };
+    const onPage = (event: Event) => {
+      // The details drawer listens too, but both listeners are on the window, and
+      // a capture listener added later does not run first. While the drawer is
+      // open the shoulders belong to its tabs, not to these pages.
+      if (document.querySelector('.orbit-detail')) return;
+      const direction = (event as CustomEvent<string>).detail;
+      // Settings is not one of the rearrangable tabs, but it sits at the end of
+      // the bar. The shoulder buttons have to be able to land on it too.
+      const tabs: Page[] = [...orderedTabs(settings?.tabOrder).map((tab) => tab.id), 'settings'];
+      if (tabs.length === 0) return;
+      const index = tabs.indexOf(page);
+      const from = index >= 0 ? index : direction === 'right' ? -1 : tabs.length;
+      const next = direction === 'right' ? tabs[(from + 1) % tabs.length] : tabs[(from - 1 + tabs.length) % tabs.length];
+      if (next) setPage(next);
+    };
+    window.addEventListener('orbit-pad-play', onPlay);
+    window.addEventListener('orbit-pad-back', onBack);
+    window.addEventListener('orbit-pad-page', onPage);
+    return () => {
+      window.removeEventListener('orbit-pad-play', onPlay);
+      window.removeEventListener('orbit-pad-back', onBack);
+      window.removeEventListener('orbit-pad-page', onPage);
+    };
+  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -890,7 +1004,7 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
       <TopNav
@@ -976,6 +1090,8 @@ export default function App() {
               setShowImport(true);
             }}
           />
+        ) : page === 'saves' ? (
+          <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
             {showHome && settings.showHero !== false && heroGame && (
@@ -1066,8 +1182,8 @@ export default function App() {
         </p>
       )}
       {busy && !session && (
-        <p className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full bg-panel px-4 py-1.5 text-xs text-muted">
-          Starting…
+        <p className="fixed bottom-20 left-1/2 z-30 max-w-md -translate-x-1/2 rounded-full bg-panel px-4 py-1.5 text-center text-xs text-muted">
+          {notice ?? 'Starting…'}
         </p>
       )}
 
@@ -1178,6 +1294,7 @@ export default function App() {
           onPlay={() => void startGame(selected)}
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
+          closeRequest={detailClose}
           onClose={() => setSelectedId(null)}
         />
       )}

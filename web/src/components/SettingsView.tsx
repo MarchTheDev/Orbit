@@ -16,6 +16,7 @@ import {
   Palette,
   Piano,
   RefreshCw,
+  Save,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -26,12 +27,12 @@ import {
 } from 'lucide-react';
 import type { FontChoice, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
-import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../data/launchers';
+import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
+import { desktopOs } from '../utils/platform';
 import {
   dataDir,
   dataDirSize,
   isNative,
-  isWindows,
   listDrives,
   revealInExplorer,
   setExeContextMenu,
@@ -268,6 +269,7 @@ const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
   { id: 'orbit-playing', label: 'Playing' },
+  { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
@@ -291,11 +293,13 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
+  { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
+  { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
-  { label: 'Open in Orbit for .exe files', section: 'orbit-appearance', keywords: 'explorer windows context menu right click executable import' },
+  { label: 'Open in Orbit', section: 'orbit-appearance', keywords: 'explorer windows linux context menu right click executable import nautilus dolphin' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
@@ -339,24 +343,9 @@ export function SettingsView({
   const [settingsQuery, setSettingsQuery] = useState('');
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const [windows, setWindows] = useState(false);
   const [exeContextMenuBusy, setExeContextMenuBusy] = useState(false);
   const [exeContextMenuError, setExeContextMenuError] = useState<string | null>(null);
   const native = isNative();
-
-  useEffect(() => {
-    let alive = true;
-    if (!native) {
-      setWindows(false);
-      return () => { alive = false; };
-    }
-    void isWindows().then((supported) => {
-      if (alive) setWindows(supported);
-    }).catch(() => {
-      if (alive) setWindows(false);
-    });
-    return () => { alive = false; };
-  }, [native]);
 
   const setOpenExeInOrbit = async (enabled: boolean) => {
     setExeContextMenuBusy(true);
@@ -455,7 +444,7 @@ export function SettingsView({
   const searchResults = settingsQuery.trim()
     ? SETTINGS_SEARCH_ITEMS.filter(
         (item) =>
-          (windows || item.label !== 'Open in Orbit for .exe files') &&
+          (desktopOs() === 'windows' || desktopOs() === 'linux' || item.label !== 'Open in Orbit') &&
           `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
       )
     : [];
@@ -518,7 +507,7 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel/95 p-2 shadow-lg backdrop-blur-xl">
+      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel p-2 shadow-lg backdrop-blur-xl">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -617,18 +606,20 @@ export function SettingsView({
           className="ml-5"
         />
         {startupError && <p role="alert" className="text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
-        {windows && (
+        {(desktopOs() === 'windows' || desktopOs() === 'linux') && (
           <>
-            <SubHead>Windows Explorer</SubHead>
+            <SubHead>{desktopOs() === 'windows' ? 'Windows Explorer' : 'File manager'}</SubHead>
             <Checkbox
               checked={settings.openExeInOrbit !== false}
               onChange={(enabled) => void setOpenExeInOrbit(enabled)}
               disabled={exeContextMenuBusy}
-              label="Add “Open in Orbit” to .exe right-click menus"
-              hint="Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations."
+              label={desktopOs() === 'windows' ? 'Add “Open in Orbit” to .exe right-click menus' : 'Add “Open in Orbit” to right-click menus'}
+              hint={desktopOs() === 'windows'
+                ? 'Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations.'
+                : 'Enabled by default. Adds the action to KDE, Nemo and Thunar menus, to Nautilus and Caja under Scripts, and to Open With. It does not change which program opens a file. Close the file manager and open it again if the menu was already up.'}
             />
             {exeContextMenuError && (
-              <p role="alert" className="text-[11px] text-rose-300">Could not update the Explorer menu: {exeContextMenuError}</p>
+              <p role="alert" className="text-[11px] text-rose-300">Could not update the menu: {exeContextMenuError}</p>
             )}
           </>
         )}
@@ -781,6 +772,94 @@ export function SettingsView({
           ]}
         />
 
+        <SubHead>Closing Orbit itself</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          Separate from what happens around a game. The minimise button is the usual one, and stays on the taskbar.
+          Hiding only works when the tray icon is there; otherwise Orbit quits, so it cannot vanish with no way back.
+        </p>
+        <Setting
+          label="When the close button is pressed"
+          value={settings.window.onAppClose ?? 'quit'}
+          onChange={(v) => setSettings({ window: { ...settings.window, onAppClose: v } })}
+          options={[
+            { value: 'quit', label: 'Close completely', hint: 'The window goes, the clock is written down, and Orbit exits.' },
+            {
+              value: 'tray',
+              label: 'Hide to the tray',
+              hint: 'The window leaves the taskbar. Left click the tray icon to bring it back.',
+            },
+          ]}
+        />
+
+      </Section>
+
+      <Section
+        id="orbit-backups"
+        icon={Save}
+        title="Backups"
+        lead="Copies of save files stay on this machine. Choose the folder they are filed in."
+      >
+        <p className="text-xs leading-relaxed text-muted">
+          A copy is filed as the publisher, then the game, so it can be found again by those names.
+          Red Dead Redemption 2 from Rockstar Games is <span className="text-fg">Rockstar Games / Red Dead Redemption 2</span>,
+          not an id. The date and time are written in note.txt, not in another folder.
+          Leave the path blank and Orbit uses its own backups folder.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Where copies are kept</span>
+          <div className="flex gap-2">
+            <input
+              className={`${inputCls} min-w-0 flex-1 font-mono`}
+              value={settings.saves?.backupRoot ?? ''}
+              onChange={(e) =>
+                setSettings({ saves: { ...settings.saves, backupRoot: e.target.value } })
+              }
+              placeholder={where ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups` : 'Orbit’s own backups folder'}
+              spellCheck={false}
+            />
+            {isNative() && (
+              <button
+                type="button"
+                className={`${btnBrowse} flex items-center gap-2`}
+                onClick={() =>
+                  void pickFolder('Where should save copies be kept?', settings.saves?.backupRoot || undefined).then(
+                    (path) => path && setSettings({ saves: { ...settings.saves, backupRoot: path } }),
+                  )
+                }
+              >
+                <FolderOpen className="size-4" />
+                Browse…
+              </button>
+            )}
+          </div>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {settings.saves?.backupRoot && (
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+              onClick={() => setSettings({ saves: { ...settings.saves, backupRoot: '' } })}
+            >
+              Use Orbit’s folder
+            </button>
+          )}
+          {isNative() && (
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+              onClick={() => {
+                const custom = settings.saves?.backupRoot?.trim();
+                const fallback = where
+                  ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups`
+                  : '';
+                const target = custom || fallback;
+                if (target) void revealInExplorer(target);
+              }}
+            >
+              Open folder
+            </button>
+          )}
+        </div>
       </Section>
 
       <Section
@@ -791,7 +870,7 @@ export function SettingsView({
       >
         {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
-          {LAUNCHERS.map((launcher) => {
+          {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
               ? settings.steamOnLaunch

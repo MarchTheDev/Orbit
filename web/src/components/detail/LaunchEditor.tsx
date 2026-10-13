@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { AppWindow, FolderOpen, Plus, Timer, X } from 'lucide-react';
+import { AppWindow, FolderOpen, Plus, Timer, Wine, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
+import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
 import { SaveButton } from '../ui/SaveButton';
 import { say } from '../../utils/toast';
@@ -12,9 +13,21 @@ import { say } from '../../utils/toast';
 // should have to type an app id for, games imported from a Steam library carry
 // that with them.
 const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
-  { kind: 'executable', label: 'Program', hint: 'The game is a .exe on this machine.', icon: AppWindow },
+  { kind: 'executable', label: 'Program', hint: 'The game is a program on this machine.', icon: AppWindow },
+  {
+    kind: 'wine',
+    label: 'Wine',
+    hint: 'A Windows .exe, started through Wine. Name a prefix if the game has one.',
+    icon: Wine,
+  },
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
 ];
+
+/** Windows starts a program. Linux can start a native program, or a Windows .exe through Wine. */
+function kindsForThisMachine() {
+  const want = desktopOs() === 'linux' ? ['executable', 'wine', 'none'] : ['executable', 'none'];
+  return KINDS.filter((kind) => want.includes(kind.kind));
+}
 
 /** The folder a program lives in, which is where it expects to be started. */
 function parentOf(path: string): string | null {
@@ -30,8 +43,12 @@ function summarise(t: LaunchTarget, companions: Companion[]): string {
       // Chosen but not yet pointed at anything: say so rather than show a
       // blank line where the program should be.
       return t.path.trim() ? `${t.path}${extra}` : `No program chosen yet${extra}`;
+    case 'wine':
+      return t.path.trim() ? `Wine · ${t.path}${extra}` : `Wine, no program chosen yet${extra}`;
     case 'steam':
       return `Steam app ${t.appId}${extra}`;
+    case 'lutris':
+      return t.slug ? `Lutris · ${t.slug}${extra}` : `Lutris${extra}`;
     default:
       return `Timer only, nothing is launched${extra}`;
   }
@@ -53,9 +70,15 @@ export function LaunchEditor({
   onSave: (t: LaunchTarget, companions: Companion[]) => void;
 }) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
-  const [args, setArgs] = useState(target.kind === 'executable' ? (target.args ?? '') : '');
+  const [args, setArgs] = useState(
+    target.kind === 'executable' || target.kind === 'wine' ? (target.args ?? '') : '',
+  );
   const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
+  const offered = kindsForThisMachine();
+  const kinds = offered.some((kind) => kind.kind === target.kind)
+    ? offered
+    : [...offered, ...KINDS.filter((kind) => kind.kind === target.kind)];
 
   /**
    * Pick a way to start the game, and save it straight away.
@@ -89,6 +112,23 @@ export function LaunchEditor({
         );
         say(`${game.title} starts ${picked.path.split(/[\\/]/).pop()}`);
       }
+      return;
+    }
+    if (kind === 'wine') {
+      const picked: LaunchTarget = {
+        kind: 'wine',
+        path: game.exePath ?? '',
+        args: '',
+        // The install folder is not the bottle. Wine finds the bottle from the
+        // program when it sits in drive_c; otherwise the default bottle is used.
+        prefix: null,
+        wine: null,
+      };
+      setTarget(picked);
+      if (picked.path.trim()) {
+        onSave(picked, companions);
+        say(`${game.title} starts through Wine`);
+      }
     }
   };
 
@@ -96,8 +136,13 @@ export function LaunchEditor({
     if (target.kind === 'executable') {
       if (!target.path.trim()) return;
       onSave({ kind: 'executable', path: target.path, args, workingDir: parentOf(target.path) }, companions);
+    } else if (target.kind === 'wine') {
+      if (!target.path.trim()) return;
+      onSave({ ...target, args }, companions);
     } else if (target.kind === 'steam') {
       onSave({ kind: 'steam', appId: Number(target.appId) || 0 }, companions);
+    } else if (target.kind === 'lutris') {
+      onSave(target, companions);
     } else {
       onSave({ kind: 'none' }, companions);
     }
@@ -119,7 +164,7 @@ export function LaunchEditor({
         <h3 className="mb-2 text-sm font-semibold">Launching</h3>
 
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <button
               key={k.kind}
               onClick={() => switchKind(k.kind)}
@@ -133,7 +178,7 @@ export function LaunchEditor({
           ))}
         </div>
 
-        <p className="mb-3 text-xs text-muted">{KINDS.find((k) => k.kind === target.kind)?.hint}</p>
+        <p className="mb-3 text-xs text-muted">{kinds.find((k) => k.kind === target.kind)?.hint}</p>
 
         {target.kind === 'executable' && (
           <div className="space-y-3">
@@ -166,6 +211,70 @@ export function LaunchEditor({
               <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="-windowed" spellCheck={false} />
             </label>
           </div>
+        )}
+
+        {target.kind === 'wine' && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <label className="block flex-1">
+                <span className={labelCls}>Windows program</span>
+                <input
+                  className={inputCls}
+                  value={target.path}
+                  onChange={(e) => setTarget({ ...target, path: e.target.value })}
+                  spellCheck={false}
+                />
+              </label>
+              {native && (
+                <button
+                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
+                  onClick={() =>
+                    void pickFile('Choose the .exe', ['exe', 'bat'], target.path || undefined).then(
+                      (p) => p && setTarget({ ...target, path: p }),
+                    )
+                  }
+                >
+                  <FolderOpen className="size-4" />
+                  Browse…
+                </button>
+              )}
+            </div>
+            <label className="block">
+              <span className={labelCls}>Wine prefix</span>
+              <input
+                className={inputCls}
+                value={target.prefix ?? ''}
+                onChange={(e) => setTarget({ ...target, prefix: e.target.value || null })}
+                placeholder="Leave empty for Wine's default prefix"
+                spellCheck={false}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>Wine program for this game</span>
+              <input
+                className={inputCls}
+                value={target.wine ?? ''}
+                onChange={(e) => setTarget({ ...target, wine: e.target.value || null })}
+                placeholder="Leave blank. Orbit finds Wine, or gets a copy if it is missing"
+                spellCheck={false}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>Arguments</span>
+              <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
+            </label>
+          </div>
+        )}
+
+        {target.kind === 'lutris' && (
+          <p className="rounded-lg border border-line bg-panel px-3 py-2 text-xs text-muted">
+            Imported from Lutris{target.slug ? ` (${target.slug})` : ''}. Play asks Lutris to start it, and uses Wine
+            directly when the install recorded a program and a prefix. Pick{' '}
+            <button className="text-accent hover:underline" onClick={() => switchKind('wine')}>
+              Wine
+            </button>{' '}
+            to choose those yourself.
+          </p>
         )}
 
         {target.kind === 'steam' && (

@@ -238,7 +238,9 @@ jobs:
           cp packaging/linux/orbit.desktop "$portable/orbit.desktop"
           cp packaging/linux/orbit-x11 "$portable/orbit-x11"
           cp packaging/linux/orbit-x11.desktop "$portable/orbit-x11.desktop"
+          cp packaging/linux/com.orbit.launcher.desktop "$portable/com.orbit.launcher.desktop"
           cp web/src-tauri/icons/128x128.png "$portable/orbit.png"
+          cp web/src-tauri/icons/128x128.png "$portable/com.orbit.launcher.png"
           # A tarball cannot declare dependencies, so it says what it needs
           # instead. The packaged builds ask for the same things themselves.
           cp packaging/linux/portable-readme.txt "$portable/README.txt"
@@ -259,6 +261,8 @@ jobs:
           cp packaging/linux/orbit-x11 "$appdir/usr/bin/orbit-x11"
           cp web/src-tauri/icons/128x128.png "$appdir/orbit.png"
           cp web/src-tauri/icons/128x128.png "$appdir/usr/share/icons/hicolor/128x128/apps/orbit.png"
+          cp web/src-tauri/icons/128x128.png "$appdir/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png"
+          cp packaging/linux/com.orbit.launcher.desktop "$appdir/usr/share/applications/com.orbit.launcher.desktop"
           cp packaging/linux/appimage/AppRun "$appdir/AppRun"
           cp packaging/linux/appimage/README.txt "$appdir/README-appimage.txt"
           cp LICENSE "$appdir/usr/share/licenses/orbit/LICENSE"
@@ -555,6 +559,8 @@ jobs:
           cp packaging/linux/orbit.desktop "$work/orbit.desktop"
           cp packaging/linux/orbit-x11 "$work/orbit-x11"
           cp packaging/linux/orbit-x11.desktop "$work/orbit-x11.desktop"
+          cp packaging/linux/com.orbit.launcher.desktop "$work/com.orbit.launcher.desktop"
+          cp packaging/linux/60-orbit-controllers.rules "$work/60-orbit-controllers.rules"
           cp web/src-tauri/icons/128x128.png "$work/orbit.png"
           # The package installs the licence text, so it has to be beside the
           # PKGBUILD for makepkg to find it in the sources.

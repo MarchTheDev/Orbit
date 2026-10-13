@@ -1,6 +1,6 @@
 [package]
 name = "orbit"
-version = "1.0.2"
+version = "1.1.0"
 description = "Orbit - a modern game launcher and playtime tracker"
 authors = ["you"]
 license = "GPL-3.0-only"
@@ -36,6 +36,17 @@ reqwest = { version = "0.13.5", default-features = false, features = [
     "query",
     "rustls",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Already used by the web view. Named here so a minimise can reach the GTK
+# window, and so compositing can be turned off on that view.
+gdk = "0.18.2"
+glib = "0.18.5"
+gtk = "0.18.2"
+# A real `fcntl`, not a hand-declared variadic. The hand-declared one was
+# enough to take the process down when a controller was opened.
+libc = "0.2"
+webkit2gtk = { version = "2.0.2", features = ["v2_40"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

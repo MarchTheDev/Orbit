@@ -5,16 +5,23 @@
 //! reading folders, and fetching metadata the browser is not allowed to reach.
 
 mod achievements;
+mod ambient;
 mod db;
 #[cfg(windows)]
 mod explorer;
+#[cfg(target_os = "linux")]
+mod files_menu;
 mod format;
+mod gamepad;
 mod hltb;
 mod launch;
 mod launch_target;
 mod launchers;
+#[cfg(target_os = "linux")]
+mod linux_window;
 mod metadata;
 mod process;
+mod saves;
 mod session;
 mod sgdb;
 mod steam;
@@ -51,6 +58,14 @@ pub struct WindowPolicy {
     /// `nothing`, `show` or `quit`.
     #[serde(default)]
     pub on_close: String,
+    /// What the close button does. `quit` or `tray`. Empty means quit.
+    #[serde(default)]
+    pub on_app_close: String,
+    /// Kept so a library saved with the old minimise choice still opens.
+    /// The button itself is always the taskbar one now.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub on_minimize: String,
 }
 
 /// Everything the commands need, kept in one place by Tauri.
@@ -133,6 +148,63 @@ pub(crate) fn apply_policy(app: &tauri::AppHandle, on_launch: bool, policy: Wind
 /// anybody asked for.
 static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set once an exit has been asked for, so the minimise watcher can leave and
+/// a second exit event does not start a second watchdog.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn quitting() -> bool {
+    QUITTING.load(Ordering::SeqCst)
+}
+
+/// An exit has started. The pad reader and the titlebar hooks leave before the
+/// window is torn down, so a close is not also a fault in one of those threads.
+pub(crate) fn begin_quit() {
+    QUITTING.store(true, Ordering::SeqCst);
+}
+
+/// Hide the window and take it off the taskbar. Unminimizing first is what
+/// makes a Wayland compositor drop the minimized entry instead of keeping it.
+fn withdraw_to_tray(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    linux_window::note_parked();
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.unminimize();
+    let _ = window.hide();
+}
+
+/// End the Linux process without letting WebKit tear the page down.
+///
+/// Destroying the view makes the page process abort in Mesa, and the desktop
+/// shows that as a crash. The session is written first. The page process is
+/// killed, then this process ends without glib's exit handlers.
+#[cfg(target_os = "linux")]
+fn finish_linux_quit(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    begin_quit();
+    if let Some(orbit) = app.try_state::<Orbit>() {
+        orbit.runner.close_for_app_exit();
+    }
+    ambient::stop();
+    if let Some(window) = app.get_webview_window("main") {
+        linux_window::end_page(&window);
+    }
+    unsafe { libc::_exit(0) };
+}
+
+fn remember_minimize_policy(policy: &WindowPolicy) {
+    // The minimise button is the window's own. There is no setting that turns
+    // it into a hide, so the hook must not take the window off the taskbar.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = policy;
+        linux_window::set_armed(false);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = policy;
+    }
+}
+
 /// Put an icon in the notification area, with a way back to the window.
 ///
 /// This is what makes "step aside while I play" possible: Orbit leaves the
@@ -196,7 +268,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// Bring Orbit back to the front, wherever it went.
 pub(crate) fn reveal_window(app: &tauri::AppHandle) {
     use tauri::Manager;
+    #[cfg(target_os = "linux")]
+    linux_window::note_revealed();
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_skip_taskbar(false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -290,6 +365,8 @@ fn launch_info(launch: serde_json::Value) -> LaunchInfo {
             LaunchTarget::None => "none",
             LaunchTarget::Executable { .. } => "executable",
             LaunchTarget::Steam { .. } => "steam",
+            LaunchTarget::Wine { .. } => "wine",
+            LaunchTarget::Lutris { .. } => "lutris",
         }
         .to_string(),
         label: target.label(),
@@ -583,10 +660,14 @@ fn set_exe_context_menu(enabled: bool) -> Result<(), String> {
     {
         explorer::set_context_menu(enabled)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        files_menu::set_context_menu(enabled)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = enabled;
-        Err("The Explorer context-menu integration is only available on Windows".into())
+        Err("The right-click menu is only available on Windows and Linux".into())
     }
 }
 
@@ -619,16 +700,26 @@ fn open_exe_paths_from_args(args: &[String]) -> Vec<String> {
 /// failure than one that flashes.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
+    #[cfg(target_os = "linux")]
+    linux_window::note_shown();
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    if window.is_visible().unwrap_or(true) {
+    // A minimized window still counts as visible, so returning here left the
+    // open sitting in the taskbar. Tray Show unminimizes, which is why that
+    // one was immediate. Do the same here, and only skip the focus steal when
+    // the window is already up.
+    let minimized = window.is_minimized().unwrap_or(false);
+    let _ = window.unminimize();
+    let _ = window.set_skip_taskbar(false);
+    if window.is_visible().unwrap_or(false) && !minimized {
         return;
     }
     if let Err(e) = window.show() {
         log::warn!("could not show the window: {e}");
         return;
     }
+    let _ = window.unminimize();
     let _ = window.set_focus();
 }
 
@@ -730,6 +821,13 @@ async fn move_game(
     })
     .await
     .map_err(|e| format!("The move could not be started: {e}"))?
+}
+
+/// The controller the page asks for. Linux does not wait for an event that
+/// the web view may never hear.
+#[tauri::command]
+fn gamepad_poll() -> gamepad::PadEvent {
+    gamepad::poll()
 }
 
 /// Free and total bytes on the drive holding a path.
@@ -864,15 +962,32 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 
     // A game added from a folder has no store id of its own, so the title is
     // asked about. That is also the moment the id becomes worth keeping.
-    let known = steam_app_id(&game);
+    artwork_for(&orbit, &game.title, steam_app_id(&game)).await
+}
+
+/// Pictures for a game that has not been saved yet, so Add Game can offer
+/// another cover than the one the catalogue picked first.
+#[tauri::command]
+async fn artwork_choices(
+    orbit: State<'_, Orbit>,
+    title: String,
+    app_id: Option<u64>,
+) -> Result<Artwork, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Name the game before looking for covers.".into());
+    }
+    artwork_for(orbit.inner(), title, app_id).await
+}
+
+async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>) -> Result<Artwork, String> {
     let app_id = match known {
         Some(id) => Some(id),
-        None => metadata::app_id_for(&game.title).await,
+        None => metadata::app_id_for(title).await,
     };
     let Some(app_id) = app_id else {
         return Err(format!(
-            "Orbit could not find \"{}\" in the store. A cover can still be chosen by hand.",
-            game.title
+            "Orbit could not find \"{title}\" in the store. A cover can still be chosen by hand."
         ));
     };
 
@@ -1088,14 +1203,173 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
 fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), String> {
     if let Ok(mut policy) = orbit.policy.lock() {
         *policy = policy_from_settings(Some(&settings));
+        remember_minimize_policy(&policy);
     }
+    remember_wine(Some(&settings));
     orbit.store.save_settings(&settings)
+}
+
+fn remember_wine(_settings: Option<&Settings>) {
+    // The settings field is gone. A path saved from it must not override the
+    // lookup, because there is no longer a place to clear it.
+    launch_target::set_wine_fallback("");
 }
 
 /// Where Orbit keeps its files, so the settings screen can show it.
 #[tauri::command]
 fn data_dir(orbit: State<'_, Orbit>) -> String {
     orbit.store.root().to_string_lossy().to_string()
+}
+
+/// Play the background pad through the system. False means the web view should try.
+#[tauri::command]
+fn ambient_set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
+    // Windows and macOS already play through the web view. Feeding a second
+    // player there would be two copies of the same pad.
+    #[cfg(target_os = "linux")]
+    {
+        ambient::set(enabled, volume, audible)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (enabled, volume, audible);
+        Ok(false)
+    }
+}
+
+/// Stop the system player. The exit path calls this too, so a quit cannot
+/// leave `pw-cat` running after the window has gone.
+#[tauri::command]
+fn ambient_stop() {
+    ambient::stop();
+}
+
+#[tauri::command]
+fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::SaveStatus {
+    saves::status(orbit.store.root(), backup_root.as_deref())
+}
+
+#[tauri::command]
+fn saves_backup(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    save_dir: Option<String>,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
+    publisher: Option<String>,
+    backup_root: Option<String>,
+) -> Result<saves::SaveBackup, String> {
+    saves::backup(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        save_dir.as_deref(),
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+        publisher.as_deref(),
+        backup_root.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn saves_restore(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    save_dir: Option<String>,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
+    publisher: Option<String>,
+    backup_root: Option<String>,
+) -> Result<String, String> {
+    saves::restore(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        save_dir.as_deref(),
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+        publisher.as_deref(),
+        backup_root.as_deref(),
+    )
+}
+
+fn save_hints<'a>(
+    install_dir: Option<&'a str>,
+    prefix: Option<&'a str>,
+    steam_app_id: Option<u32>,
+) -> saves::Hints<'a> {
+    saves::Hints {
+        install_dir,
+        prefix,
+        steam_app_id,
+    }
+}
+
+/// Look for the save folder. Nothing extra is installed to do this.
+#[tauri::command]
+fn saves_find(
+    title: String,
+    install_dir: Option<String>,
+    prefix: Option<String>,
+    steam_app_id: Option<u32>,
+) -> Option<String> {
+    saves::detect(
+        &title,
+        &save_hints(install_dir.as_deref(), prefix.as_deref(), steam_app_id),
+    )
+    .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn saves_list(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    title: String,
+    publisher: Option<String>,
+    backup_root: Option<String>,
+) -> Vec<saves::SaveBackup> {
+    saves::list(
+        orbit.store.root(),
+        &game_id,
+        &title,
+        publisher.as_deref(),
+        backup_root.as_deref(),
+    )
+}
+
+/// Ask PCGamingWiki where a game usually keeps its saves. The API needs no key.
+#[tauri::command]
+async fn saves_suggest(title: String) -> Result<Vec<String>, String> {
+    let page = saves::wiki_title(&title);
+    if page.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!(
+        "https://www.pcgamingwiki.com/w/api.php?action=parse&page={page}&prop=wikitext&format=json&redirects=1"
+    );
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION"), " (save path lookup)"))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let value = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach PCGamingWiki: {e}"))?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("PCGamingWiki did not answer in a form Orbit can read: {e}"))?;
+    if value.get("error").is_some() {
+        return Ok(Vec::new());
+    }
+    let wikitext = value
+        .pointer("/parse/wikitext/*")
+        .and_then(|text| text.as_str())
+        .unwrap_or("");
+    Ok(saves::paths_from_wikitext(wikitext))
 }
 
 /// How much space Orbit's own files take.
@@ -1170,6 +1444,11 @@ fn open_game_folder(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before GTK starts. GTK 3 copies the program name into the Wayland app id,
+    // and KWin draws the orange W when that id matches no desktop file.
+    #[cfg(target_os = "linux")]
+    linux_window::prepare();
+
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
     let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));
@@ -1223,6 +1502,7 @@ pub fn run() {
             );
             let saved_settings = store.load_settings();
             let policy = Arc::new(Mutex::new(policy_from_settings(saved_settings.as_ref())));
+            remember_wine(saved_settings.as_ref());
             let start_in_background = started_by_autostart
                 && saved_settings.as_ref().is_some_and(|settings| {
                     settings.get("launchOnStartup").and_then(serde_json::Value::as_bool) == Some(true)
@@ -1232,18 +1512,22 @@ pub fn run() {
                             == Some(true)
                 });
 
-            // Keep the Explorer action in sync with the saved preference and
+            // Keep the right-click action in sync with the saved preference and
             // this install's path. Old settings did not have the field, so the
             // first launch opts in by default as the UI does.
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 let enabled = saved_settings
                     .as_ref()
                     .and_then(|settings| settings.get("openExeInOrbit"))
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(true);
-                if let Err(error) = explorer::set_context_menu(enabled) {
-                    log::warn!("could not update the Explorer context menu: {error}");
+                #[cfg(windows)]
+                let result = explorer::set_context_menu(enabled);
+                #[cfg(target_os = "linux")]
+                let result = files_menu::set_context_menu(enabled);
+                if let Err(error) = result {
+                    log::warn!("could not update the Open in Orbit menu: {error}");
                 }
             }
 
@@ -1325,14 +1609,95 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let show_requested = Arc::clone(&show_requested_for_setup);
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(6));
+                    // Linux often takes long enough to draw that a six-second
+                    // wait finishes the opening before the window is even up.
+                    let wait = if cfg!(target_os = "linux") {
+                        std::time::Duration::from_millis(800)
+                    } else {
+                        std::time::Duration::from_secs(6)
+                    };
+                    std::thread::sleep(wait);
                     if !start_in_background || show_requested.load(Ordering::SeqCst) {
                         show_main_window(&handle);
                     }
                 });
             }
 
-            app.manage(Orbit { db, runner, store, sizes, policy });
+            app.manage(Orbit { db, runner, store, sizes, policy: Arc::clone(&policy) });
+
+            if let Ok(current) = policy.lock() {
+                remember_minimize_policy(&current);
+            }
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                linux_window::install(&window);
+                // The titlebar button is not always built on the first visit.
+                // Retry on the GTK thread until it is, then stop.
+                let handle = app.handle().clone();
+                let tries = std::rc::Rc::new(std::cell::Cell::new(0u8));
+                glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+                    if quitting() || linux_window::closing() {
+                        return glib::ControlFlow::Break;
+                    }
+                    let n = tries.get();
+                    tries.set(n.saturating_add(1));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        linux_window::install(&window);
+                    }
+                    if linux_window::ready() || n > 40 {
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
+            }
+            gamepad::start(app.handle().clone());
+
+            // The close button. Hiding is only done when the player asked for
+            // the tray and the icon is actually there; otherwise the window
+            // closes and the exit path below finishes the process.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                let policy = Arc::clone(&policy);
+                window.on_window_event(move |event| {
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            let hide = policy
+                                .lock()
+                                .map(|current| current.on_app_close == "tray")
+                                .unwrap_or(false)
+                                && TRAY_READY.load(Ordering::SeqCst);
+                            if hide {
+                                api.prevent_close();
+                                if let Some(window) = handle.get_webview_window("main") {
+                                    withdraw_to_tray(&window);
+                                }
+                            } else {
+                                // Leave before GTK destroys the view. On Linux that
+                                // destroy is what the desktop reports as a crash.
+                                #[cfg(target_os = "linux")]
+                                {
+                                    api.prevent_close();
+                                    finish_linux_quit(&handle);
+                                }
+                            }
+                        }
+                        // Some compositors report a minimise as a zero size
+                        // instead of an iconified state. Same destination.
+                        #[cfg(target_os = "linux")]
+                        tauri::WindowEvent::Resized(size)
+                            if size.width == 0 && size.height == 0 && !linux_window::is_parked() =>
+                        {
+                            // A zero-size report is a minimise on some compositors.
+                            // Leave it on the taskbar. The close button is what
+                            // can hide to the tray.
+                            let _ = size;
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1385,6 +1750,7 @@ pub fn run() {
             metadata_cards,
             achievements_fetch,
             artwork_candidates,
+            artwork_choices,
             reorder_game_logs,
             steam_library,
             launcher_games,
@@ -1393,6 +1759,15 @@ pub fn run() {
             save_settings,
             data_dir,
             data_dir_size,
+            ambient_set,
+            ambient_stop,
+            gamepad_poll,
+            saves_status,
+            saves_backup,
+            saves_restore,
+            saves_list,
+            saves_find,
+            saves_suggest,
             reveal_in_explorer,
             open_game_folder,
         ])
@@ -1412,6 +1787,27 @@ pub fn run() {
             ) {
                 if let Some(orbit) = app.try_state::<Orbit>() {
                     orbit.runner.close_for_app_exit();
+                }
+                // A system player started for the pad has to die with the app.
+                // process::exit below does not run destructors, and on Linux it
+                // also runs the handlers that abort. The page is killed first.
+                ambient::stop();
+                // WebKitGTK's page process aborts in its own exit, which the
+                // desktop shows as a crash. Kill that process, then end this
+                // one without those handlers if the window path did not already.
+                // The swap keeps a second exit event from starting a second watchdog.
+                let first = !QUITTING.swap(true, Ordering::SeqCst);
+                if first && matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                    #[cfg(target_os = "linux")]
+                    {
+                        if let Some(window) = app.get_webview_window("main") {
+                            linux_window::end_page(&window);
+                        }
+                        std::thread::spawn(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            unsafe { libc::_exit(0) };
+                        });
+                    }
                 }
             }
         });

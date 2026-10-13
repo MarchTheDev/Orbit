@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Piano, Volume2, VolumeX } from 'lucide-react';
 import type { Settings } from '../types';
+import { isNative } from '../services/native';
 import { cn } from '../utils/cn';
 import { CheckboxInline } from './ui/Checkbox';
 
@@ -31,7 +32,9 @@ export function MusicButton({
   onOpenSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [focused, setFocused] = useState(() => typeof document === 'undefined' || document.hasFocus());
+  const linux = isNative() && typeof navigator !== 'undefined' && /linux|x11/i.test(navigator.userAgent);
+  const sawFocus = useRef(!linux && (typeof document === 'undefined' || document.hasFocus()));
+  const [focused, setFocused] = useState(() => linux || typeof document === 'undefined' || document.hasFocus());
   const box = useRef<HTMLDivElement | null>(null);
   const playing = sound?.enabled !== false;
   const volume = sound?.volume ?? 0.35;
@@ -40,7 +43,16 @@ export function MusicButton({
 
   /** Keep the bars still when Orbit is out of focus, along with its sound. */
   useEffect(() => {
-    const syncFocus = () => setFocused(document.hasFocus() && !document.hidden);
+    const syncFocus = () => {
+      const now = document.hasFocus() && !document.hidden;
+      if (now) sawFocus.current = true;
+      // Same lie as the pad: a blur before any focus is not the window leaving.
+      if (!sawFocus.current && !document.hidden) {
+        setFocused(true);
+        return;
+      }
+      setFocused(now);
+    };
     window.addEventListener('focus', syncFocus);
     window.addEventListener('blur', syncFocus);
     document.addEventListener('visibilitychange', syncFocus);

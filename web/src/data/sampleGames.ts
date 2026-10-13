@@ -84,6 +84,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // is not something to do uninvited.
     onLaunch: 'nothing',
     onClose: 'nothing',
+    onAppClose: 'quit',
+    onMinimize: 'taskbar',
   },
   fetchMetadata: true,
   autoFetchMetadata: true,

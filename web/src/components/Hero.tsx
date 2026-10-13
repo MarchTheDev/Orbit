@@ -14,7 +14,7 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
   const pct = game.hltb ? Math.min(100, Math.round((game.playSecs / 3600 / game.hltb.main) * 100)) : null;
   return (
     <section className="orbit-hero-enter relative mx-6 mt-5 overflow-hidden rounded-3xl border border-line">
-      <Cover game={game} className="absolute inset-0 size-full scale-110 blur-2xl opacity-70 [&_span]:hidden" />
+      <Cover game={game} className="orbit-hero-wash absolute inset-0 size-full opacity-70 [&_span]:hidden" />
       <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/80 to-transparent" />
       <div className="relative flex items-center gap-8 p-8">
         <Cover game={game} className="hidden h-56 w-40 shrink-0 rounded-2xl shadow-2xl sm:flex [&_span]:text-4xl" />

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { windowReady } from '../services/native';
+import { desktopOs } from '../utils/platform';
 import { Logo } from './ui/Logo';
 
 /**
@@ -18,9 +20,27 @@ export function Startup({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
-    const fade = window.setTimeout(() => setLeaving(true), 1150);
-    const done = window.setTimeout(onDone, 1650);
+    let alive = true;
+    let fade = 0;
+    let done = 0;
+    const start = () => {
+      if (!alive) return;
+      fade = window.setTimeout(() => setLeaving(true), 1150);
+      done = window.setTimeout(onDone, 1650);
+    };
+    // On Linux the window stays hidden until this page asks for it. Starting
+    // the clock before that means the opening has already finished by the time
+    // the window appears.
+    if (desktopOs() === 'linux') {
+      void windowReady().finally(() => {
+        if (!alive) return;
+        window.requestAnimationFrame(() => window.requestAnimationFrame(start));
+      });
+    } else {
+      start();
+    }
     return () => {
+      alive = false;
       window.clearTimeout(fade);
       window.clearTimeout(done);
     };
@@ -37,7 +57,10 @@ export function Startup({ onDone }: { onDone: () => void }) {
       <span className="orbit-ring orbit-ring-late" />
 
       <div className="relative flex flex-col items-center">
-        <Logo className="orbit-startup-mark size-28 text-accent drop-shadow-[0_0_45px_var(--c-accent)]" />
+        <span className="orbit-startup-glow" aria-hidden />
+        {/* No filter and no transform on the mark. Both make WebKitGTK skip
+            painting it until something else finishes loading. */}
+        <Logo className="orbit-startup-mark relative size-28 text-accent" animated={false} />
         <p className="orbit-startup-name mt-6 text-2xl font-black tracking-[0.5em] text-fg">ORBIT</p>
         <p className="orbit-startup-name mt-2 text-[11px] uppercase tracking-[0.35em] text-muted">
           your games, in one place

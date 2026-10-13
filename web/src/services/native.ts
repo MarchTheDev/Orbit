@@ -495,6 +495,10 @@ export function fetchAchievements(gameId: string): Promise<Achievement[]> {
  * Every picture the store has for a game, so a cover that crops badly can be
  * swapped for a better one.
  */
+export function findArtworkChoices(title: string, appId?: number | null): Promise<ArtworkFound> {
+  return call('artwork_choices', { title, appId: appId ?? null }, async () => ({ appId: null, picks: [] }));
+}
+
 export function findArtwork(gameId: string): Promise<ArtworkFound> {
   return call(
     'artwork_candidates',
@@ -634,4 +638,103 @@ export function dataDir(): Promise<string | null> {
 /** How much space Orbit's own files take. */
 export function dataDirSize(): Promise<number> {
   return call('data_dir_size', {}, async () => 0);
+}
+
+// ------------------------------------------------------------------- the pad
+
+/**
+ * Play the background pad through the system, on Linux.
+ *
+ * Returns false when no system player is available, which is the web view's
+ * cue to try its own audio instead. Anywhere else this is a no-op that says
+ * the web view should play.
+ */
+export function ambientSet(enabled: boolean, volume: number, audible: boolean): Promise<boolean> {
+  return call('ambient_set', { enabled, volume, audible }, () => false);
+}
+
+// ----------------------------------------------------------------- save copies
+
+export interface SaveBackup {
+  at: number;
+  path: string;
+  kind: string;
+  note: string;
+}
+
+export interface SaveStatus {
+  root: string;
+}
+
+/** Where a game is installed, so a save search can look in that prefix. */
+export interface SaveHints {
+  installDir?: string | null;
+  prefix?: string | null;
+  steamAppId?: number | null;
+}
+
+export function saveHintsOf(game: { installDir: string | null; launch: { kind: string; prefix?: string | null; appId?: number } }): SaveHints {
+  const launch = game.launch;
+  return {
+    installDir: game.installDir,
+    prefix: launch.kind === 'wine' || launch.kind === 'lutris' ? launch.prefix ?? null : null,
+    steamAppId: launch.kind === 'steam' ? launch.appId ?? null : null,
+  };
+}
+
+export interface SavePlace {
+  publisher?: string | null;
+  backupRoot?: string | null;
+}
+
+export function savePlaceOf(
+  game: { meta?: { developer?: string } | null },
+  settings?: { saves?: { backupRoot?: string } } | null,
+): SavePlace {
+  return {
+    publisher: game.meta?.developer?.trim() || null,
+    backupRoot: settings?.saves?.backupRoot?.trim() || null,
+  };
+}
+
+export function savesStatus(backupRoot?: string | null): Promise<SaveStatus> {
+  return call('saves_status', { backupRoot: backupRoot || null }, () => ({ root: '' }));
+}
+
+export function backupSave(
+  gameId: string,
+  title: string,
+  saveDir: string | null,
+  hints?: SaveHints,
+  place?: SavePlace,
+): Promise<SaveBackup> {
+  return call('saves_backup', { gameId, title, saveDir, ...hints, ...place }, async () => {
+    throw new Error('Backups need the desktop app.');
+  });
+}
+
+export function restoreSave(
+  gameId: string,
+  title: string,
+  saveDir: string | null,
+  hints?: SaveHints,
+  place?: SavePlace,
+): Promise<string> {
+  return call('saves_restore', { gameId, title, saveDir, ...hints, ...place }, async () => {
+    throw new Error('Restoring needs the desktop app.');
+  });
+}
+
+export function findSave(title: string, hints?: SaveHints): Promise<string | null> {
+  return call('saves_find', { title, ...hints }, async () => null);
+}
+
+export function listSaves(gameId: string, title: string, place?: SavePlace): Promise<SaveBackup[]> {
+  return call('saves_list', { gameId, title, ...place }, () => []);
+}
+
+export function suggestSaves(title: string): Promise<string[]> {
+  return call('saves_suggest', { title }, async () => {
+    throw new Error('Looking up save paths needs the desktop app.');
+  });
 }

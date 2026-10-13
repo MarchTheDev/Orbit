@@ -45,10 +45,50 @@ body::before {
   border: 1px solid color-mix(in srgb, var(--c-border) 88%, transparent);
   backdrop-filter: blur(12px) saturate(1.05);
 }
-.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1); }
-@keyframes drawer { from { transform: translateX(100%); opacity: 0; } }
-.fade-in { animation: fade .25s ease; }
+/* Open slides in from the right. Close slides back out that way, left to right.
+   The open used to paint the drawer in place and then slide it, which is the
+   hitch the close never had. It is laid out off-screen first, on its own layer. */
+.drawer-off {
+  transform: translate3d(100%, 0, 0);
+}
+/* `backwards` only. `both` left a transform on the scrolling panel, and every
+   scroll and every controller ring then repainted that layer. */
+.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1) backwards; }
+.drawer-out { animation: drawer-out .3s cubic-bezier(.2,.8,.2,1) forwards; }
+/* A see-through, blurred, shadowed panel over the library is repainted on every
+   scroll and every time the controller ring moves. The drawer is a flat colour.
+   The wide-art blur in the header is the same kind of cost, so it stays out. */
+.orbit-detail {
+  background: var(--c-panel) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  /* The slide lives on the shell. A transform here is a scrolling layer, and
+     that is the stall. */
+  transform: none !important;
+  will-change: auto !important;
+  overscroll-behavior: contain;
+}
+.orbit-detail-scrim {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.orbit-detail .blur-xl {
+  display: none !important;
+}
+@keyframes drawer {
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: none; }
+}
+@keyframes drawer-out {
+  from { transform: none; }
+  to { transform: translate3d(100%, 0, 0); }
+}
+.fade-in { animation: fade .25s ease both; }
+.fade-out { animation: fade-out .3s ease forwards; }
 @keyframes fade { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
 
 /* Shared entrance motions: restrained enough to keep navigation quick, with a
  * reduced-motion fallback for players who prefer an immediate interface. */
@@ -109,13 +149,144 @@ body::before {
   animation: none !important;
 }
 
+/* WebKitGTK keeps a texture for every blurred panel, and that set grows until
+   tabs and hovers stall. The glass is a flat colour on Linux. The mark, the
+   short transitions and the loops stay; they stop only when the window is not
+   in front. A controller, when one is connected, gets a ring that does not
+   depend on the mouse. */
+html.orbit-linux .glass,
+html.orbit-linux .backdrop-blur,
+html.orbit-linux .backdrop-blur-xl,
+html.orbit-linux .backdrop-blur-sm {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* A blurred hero cover is a full-window layer. Scrolling the library while it
+   is open made WebKit repaint that blur every frame. The wash stays; the blur
+   does not. */
+html.orbit-linux .orbit-hero-wash {
+  transform: none !important;
+  filter: none !important;
+}
+
+/* Glass blur is the part that stalls: WebKit keeps a texture for every panel,
+   and a translucent sticky bar paints over the top bar as it scrolls. The
+   short animations and the mark stay. The star field is a fixed layer over
+   the whole window, so it stays off. */
+html.orbit-linux body {
+  background: var(--c-bg);
+}
+html.orbit-linux body::before {
+  display: none;
+}
+html.orbit-linux .sticky,
+html.orbit-linux .orbit-sticky {
+  background-color: var(--c-panel) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.orbit-linux .orbit-topbar {
+  background-color: var(--c-bg) !important;
+  background-image: none !important;
+}
+/* The details drawer sits over the library. A see-through panel, a full-window
+   blur, or a huge shadow makes WebKit repaint all of that on every scroll and
+   every time the controller ring moves. Flat and opaque is the same window. */
+html.orbit-linux .orbit-detail,
+html.orbit-linux .orbit-detail-scrim {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+html.orbit-linux .orbit-detail {
+  background: var(--c-panel) !important;
+  background-image: none !important;
+}
+/* While details are open the page behind them is covered. Leave it still, or
+   the turning mark and the blurred covers keep the window repainting. */
+html.orbit-detail-open .orbit-spin-outer,
+html.orbit-detail-open .orbit-spin-inner,
+html.orbit-detail-open .orbit-twinkle,
+html.orbit-detail-open .orbit-bars i {
+  animation: none !important;
+}
+html.orbit-detail-open .blur-xl {
+  display: none !important;
+}
+/* The ring is the pad's own mark, not every focused control. A mouse click
+   focuses too, and styling :focus painted the controller ring around whatever
+   was clicked, including when no pad was driving the page. */
+/* A box-shadow ring inside the details drawer invalidates the whole panel.
+   Outline is the same mark and does not make a scroll or a move repaint it. */
+html.orbit-pad .orbit-detail .orbit-pad-focus {
+  box-shadow: none;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+html.orbit-pad .orbit-pad-focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--c-accent);
+  /* A control with no radius of its own — a backlog cover, its title, a
+     session row — still gets a rounded ring, the same curve as a cover.
+     A pill or a large card keeps the curve it already has. */
+  border-radius: 1rem;
+}
+html.orbit-pad .orbit-pad-focus.rounded-full {
+  border-radius: 999px;
+}
+html.orbit-pad .orbit-pad-focus.rounded-3xl {
+  border-radius: 1.5rem;
+}
+/* The ring sits on the cover. The title under it is not part of the target.
+   Outline, not the shared box-shadow: the cover's own transition would otherwise
+   lag the ring behind the stick. */
+html.orbit-pad [data-orbit-pad="tile"].orbit-pad-focus {
+  border-radius: 1rem;
+  scroll-margin: 5.5rem;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+html.orbit-pad .orbit-logo.orbit-pad-focus {
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--c-bg), 0 0 0 5px var(--c-accent);
+}
+/* A log row is only as tall as its text. The shared 1rem curve swung through
+   the words. The ring sits on the card, outside the padding, so the note is
+   clear of it. Outline, not the card's box-shadow, so a transition cannot
+   lag it or let overflow eat it. */
+html.orbit-pad [data-orbit-pad="journal-entry"].orbit-pad-focus {
+  border-radius: 0.5rem;
+  box-shadow: none;
+  outline: none;
+}
+html.orbit-pad li:has([data-orbit-pad="journal-entry"].orbit-pad-focus) {
+  border-radius: 0.75rem;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  scroll-margin: 8px;
+}
+/* The game list scrolls. A ring drawn outside the button was clipped by that
+   scroller, so the left and top of the selection never showed. */
+html.orbit-pad [data-orbit-journal-game].orbit-pad-focus {
+  border-radius: 0.75rem;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+  scroll-margin: 8px;
+}
+
 /* Nobody who has asked for less motion gets a spinning anything. */
 @media (prefers-reduced-motion: reduce) {
   .orbit-spin-inner,
   .orbit-spin-outer,
   .orbit-twinkle,
   .drawer-in,
+  .drawer-out,
+  .fade-out,
   .save-tick,
+  .save-manage-in,
   .fade-in { animation: none !important; }
 }
 
@@ -246,18 +417,22 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-startup-mark {
-  animation: orbit-startup-mark 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* Visible on the first frame. A scale or a fade on the svg itself makes
+     WebKitGTK drop the masked mark until the animation ends, so the opening
+     plays while the logo looks as if it is still loading. */
+  opacity: 1;
 }
 
-@keyframes orbit-startup-mark {
-  from {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+.orbit-startup-glow {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8rem;
+  height: 8rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c-accent) 32%, transparent), transparent 68%);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .orbit-startup-name {
@@ -305,7 +480,6 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .orbit-startup-mark,
   .orbit-startup-name,
   .orbit-ring {
     animation: none;
@@ -417,36 +591,78 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   opacity: 0.28;
   transition: transform 220ms ease, opacity 220ms ease;
 }
-.orbit-bars-active i {
-  animation: orbit-bar 1.1s ease-in-out infinite;
+/* Each bar has its own shape and its own clock. One shared animation makes
+   all four rise and fall together, which is not a visualizer. */
+.orbit-bars-active i:nth-child(1) {
+  animation: orbit-bar-1 1.05s ease-in-out infinite;
 }
-
-.orbit-bars i:nth-child(2) {
-  animation-duration: 0.85s;
-  animation-delay: 0.12s;
+.orbit-bars-active i:nth-child(2) {
+  animation: orbit-bar-2 0.68s ease-in-out infinite;
+  animation-delay: -0.22s;
 }
-.orbit-bars i:nth-child(3) {
-  animation-duration: 1.35s;
-  animation-delay: 0.26s;
+.orbit-bars-active i:nth-child(3) {
+  animation: orbit-bar-3 1.42s ease-in-out infinite;
+  animation-delay: -0.58s;
 }
-.orbit-bars i:nth-child(4) {
-  animation-duration: 0.95s;
-  animation-delay: 0.05s;
+.orbit-bars-active i:nth-child(4) {
+  animation: orbit-bar-4 0.84s ease-in-out infinite;
+  animation-delay: -0.36s;
 }
 @media (prefers-reduced-motion: reduce) {
   .orbit-bars i { animation: none !important; transition: none !important; }
 }
 
-@keyframes orbit-bar {
-  0%,
-  100% {
-    transform: scaleY(0.3);
-    opacity: 0.6;
+@keyframes save-manage-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
   }
-  50% {
-    transform: scaleY(1);
+  to {
     opacity: 1;
+    transform: none;
   }
+}
+.save-manage-in {
+  animation: save-manage-in 200ms ease-out;
+}
+
+.orbit-hero-wash {
+  transform: scale(1.1);
+  filter: blur(40px);
+}
+
+@keyframes orbit-bar-1 {
+  0%,
+  100% { transform: scaleY(0.22); opacity: 0.45; }
+  40% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes orbit-bar-2 {
+  0%,
+  100% { transform: scaleY(0.7); opacity: 0.8; }
+  55% { transform: scaleY(0.18); opacity: 0.4; }
+}
+@keyframes orbit-bar-3 {
+  0%,
+  100% { transform: scaleY(0.35); opacity: 0.5; }
+  30% { transform: scaleY(0.85); opacity: 0.95; }
+  70% { transform: scaleY(0.45); opacity: 0.6; }
+}
+@keyframes orbit-bar-4 {
+  0%,
+  100% { transform: scaleY(0.9); opacity: 1; }
+  60% { transform: scaleY(0.2); opacity: 0.4; }
+}
+
+/* Number fields are the engine's own spinner. The time and playtime boxes use
+ * the same plain field as every other input, without the system arrows. */
+input[type='number'] {
+  appearance: textfield;
+  color-scheme: dark;
+}
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 /* The volume slider: the engine's own range input is a system widget, and this

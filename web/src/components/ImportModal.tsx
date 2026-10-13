@@ -6,6 +6,7 @@ import { pickFile, pickFolder } from '../services/desktop';
 import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
+import { launchForAddedProgram } from '../utils/platform';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 
@@ -157,7 +158,7 @@ export function ImportModal({
       const games: Game[] = included.map((c) => ({
         id: uid(),
         title: c.title,
-        launch: { kind: 'executable', path: c.exePath, args: '', workingDir: c.installDir },
+        launch: launchForAddedProgram(c.exePath, c.installDir),
         exePath: c.exePath,
         installDir: c.installDir,
         drive: c.drive,

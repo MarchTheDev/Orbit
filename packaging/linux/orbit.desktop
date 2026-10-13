@@ -7,4 +7,4 @@ Icon=orbit
 Terminal=false
 Categories=Game;Utility;
 Keywords=games;library;launcher;playtime;steam;
-StartupWMClass=orbit
+StartupWMClass=com.orbit.launcher

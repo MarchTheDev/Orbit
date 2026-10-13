@@ -15,7 +15,7 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActiveSession, Companion, Game, GameStatus, LaunchTarget, Session } from '../../types';
 import { fetchMetadata } from '../../services/metadata';
 import { openExternal } from '../../services/desktop';
@@ -33,6 +33,10 @@ import { GameLogView } from './GameLogView';
 import { AchievementsTab } from './AchievementsTab';
 import { EditSession, LogSession } from '../SessionsView';
 import { TimeTracker } from './TimeTracker';
+import { markPadFocus, padJustActivated } from '../../hooks/useGamepad';
+
+/** Matches `.drawer-out` in the stylesheet. */
+const DRAWER_MS = 300;
 
 interface Props {
   game: Game;
@@ -56,6 +60,11 @@ interface Props {
   onStop: () => void;
   onRemove: () => void;
   onClose: () => void;
+  /**
+   * Incremented when the pad asks this drawer to close. The drawer slides out
+   * before it unmounts; clearing the selection immediately would skip that.
+   */
+  closeRequest?: number;
 }
 
 export function GameDetail({
@@ -70,6 +79,7 @@ export function GameDetail({
   onStop,
   onRemove,
   onClose,
+  closeRequest = 0,
 }: Props) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
@@ -87,6 +97,102 @@ export function GameDetail({
   const [loggingSession, setLoggingSession] = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
   const running = session?.gameId === game.id;
+  const playRef = useRef<HTMLButtonElement>(null);
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  // Lay the drawer out off-screen, then slide. Starting the animation on the
+  // same frame as the first paint made the open stutter; the close never does
+  // that, because the panel is already drawn.
+  const [slideIn, setSlideIn] = useState(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  const closeTimer = useRef<number | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const beginClose = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onCloseRef.current();
+      return;
+    }
+    setLeaving(true);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), DRAWER_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (slideIn) return;
+    const id = window.requestAnimationFrame(() => setSlideIn(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [slideIn]);
+
+  // The page behind the drawer keeps moving otherwise: the mark turns, and a
+  // translucent scrim then has to blend that change over the whole window for
+  // as long as the details are open.
+  useEffect(() => {
+    document.documentElement.classList.add('orbit-detail-open');
+    return () => document.documentElement.classList.remove('orbit-detail-open');
+  }, []);
+
+  const seenClose = useRef(closeRequest);
+  useEffect(() => {
+    if (seenClose.current === closeRequest) return;
+    seenClose.current = closeRequest;
+    beginClose();
+  }, [closeRequest, beginClose]);
+
+  // A pad confirm on a cover opens this drawer. Land on Play, and only then:
+  // a mouse open, or a pad that is no longer the active input, keeps the
+  // focus where it was.
+  useLayoutEffect(() => {
+    if (!document.documentElement.classList.contains('orbit-pad')) return;
+    if (!padJustActivated()) return;
+    const focusPlay = () => {
+      const play = playRef.current;
+      if (!play) return;
+      markPadFocus(play);
+      play.focus({ preventScroll: true });
+    };
+    // The confirm press also focuses the cover. Take Play back after the slide,
+    // so the ring is not left on the game that was just opened, and so that
+    // focus does not reflow the drawer while it is still moving.
+    const timer = window.setTimeout(focusPlay, DRAWER_MS);
+    return () => window.clearTimeout(timer);
+  }, [game.id]);
+
+  // Shoulder buttons change the app's pages. While this drawer is open they
+  // stay here and move between its tabs instead. The page listener also sees
+  // the drawer and leaves the pages alone; both are needed, because a listener
+  // added on the window does not get to run first.
+  useEffect(() => {
+    const tabs: Array<'overview' | 'achievements' | 'log' | 'sessions'> = backlog
+      ? ['overview', 'log', 'sessions']
+      : ['overview', 'achievements', 'log', 'sessions'];
+    const onPage = (event: Event) => {
+      // Both listeners sit on the window, so stopping the bubble is not enough.
+      // The page listener is on this same node and would still run.
+      event.stopImmediatePropagation();
+      const direction = (event as CustomEvent<string>).detail === 'left' ? -1 : 1;
+      setTab((current) => {
+        const index = Math.max(0, tabs.indexOf(current));
+        const next = tabs[(index + direction + tabs.length) % tabs.length];
+        window.setTimeout(() => {
+          const button = document.querySelector(`[data-orbit-detail-tab="${next}"]`);
+          if (!(button instanceof HTMLElement)) return;
+          markPadFocus(button);
+          button.focus({ preventScroll: true });
+        }, 0);
+        return next;
+      });
+    };
+    window.addEventListener('orbit-pad-page', onPage, true);
+    return () => window.removeEventListener('orbit-pad-page', onPage, true);
+  }, [backlog]);
 
   // The tab bar shows how much has been written, so the count is worth keeping,
   // and the journal says when it has moved.
@@ -95,8 +201,14 @@ export function GameDetail({
 
   useEffect(() => {
     let alive = true;
+    const started = performance.now();
     void listGameLogs(game.id).then((r) => {
-      if (alive) setLogCount(r.length);
+      if (!alive) return;
+      // A count arriving mid-slide reflows the tab bar under the animation.
+      const wait = Math.max(0, DRAWER_MS - (performance.now() - started));
+      window.setTimeout(() => {
+        if (alive) setLogCount(r.length);
+      }, wait);
     });
     return () => {
       alive = false;
@@ -172,33 +284,25 @@ export function GameDetail({
 
   return (
     <>
-      <div className="fade-in fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <aside className="glass drawer-in fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl">
-        <div className="relative h-44 shrink-0">
-          <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
-          {/* The store's own backdrop sits over the cover art when there is one:
-              it is the picture the game's page is meant to be read against. */}
-          {game.meta?.backgroundUrl && (
-            <img
-              src={game.meta.backgroundUrl}
-              alt=""
-              aria-hidden
-              className="absolute inset-0 size-full object-cover opacity-70"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-panel to-transparent" />
+      <div
+        className={`orbit-detail-scrim ${leaving ? 'fade-out pointer-events-none' : ''} fixed inset-0 z-40 bg-black/40`}
+        onClick={beginClose}
+      />
+      {/* The slide is the shell. The scroller inside it never gets a transform,
+          which is what made scrolling and moving the controller ring repaint
+          the whole drawer after it had opened. */}
+      <aside className={`${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)]`}>
+      <div className="orbit-detail glass flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-3xl">
+        <div className="relative h-44 shrink-0 bg-panel">
           <button
-            onClick={onClose}
+            onClick={beginClose}
             aria-label="Close"
-            className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg bg-black/40 text-white hover:bg-black/60"
+            className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg text-muted hover:bg-panel2 hover:text-fg"
           >
             <X className="size-4" />
           </button>
           <div className="absolute bottom-0 left-0 flex items-end gap-4 p-5">
-            <Cover game={game} className="h-28 w-20 rounded-lg shadow-xl [&_span]:text-lg" />
+            <Cover game={game} className="h-28 w-20 rounded-lg [&_span]:text-lg" />
             <div className="pb-1">
               <input
                 value={titleDraft}
@@ -221,7 +325,7 @@ export function GameDetail({
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel/95 px-5 py-2 pr-4 backdrop-blur">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel px-5 py-2 pr-4">
           {(
             [
               ['overview', 'Overview', Info],
@@ -234,6 +338,8 @@ export function GameDetail({
             .map(([id, label, Icon]) => (
             <button
               key={id}
+              type="button"
+              data-orbit-detail-tab={id}
               onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
                 tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'
@@ -303,7 +409,7 @@ export function GameDetail({
                 Stop session
               </button>
             ) : (
-              <button onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
+              <button ref={playRef} onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
                 <Play className="size-4" fill="currentColor" strokeWidth={0} />
                 Play
               </button>
@@ -545,7 +651,7 @@ export function GameDetail({
                 <h3 className="text-sm font-semibold">Session history</h3>
                 <button
                   onClick={() => setLoggingSession(true)}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-panel2 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-accent hover:text-accent"
+                  className="btn-accent flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs"
                 >
                   <Clock className="size-3.5" />
                   Log time by hand
@@ -593,6 +699,7 @@ export function GameDetail({
             }}
           />
         )}
+      </div>
       </aside>
     </>
   );

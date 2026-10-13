@@ -33,6 +33,18 @@ check(
 );
 const imported = gameFromLauncher(row('Epic Games', 'Timer-only game', 'C:\\Games\\Timer'));
 check('keeps imported games timer-only until the player chooses a launch target', imported.launch.kind === 'none' && imported.exePath === null);
+const lutris = gameFromLauncher({
+  launcher: 'Lutris',
+  name: 'Hades',
+  installDir: '/home/games/hades',
+  exePath: '/home/games/hades/drive_c/Hades.exe',
+  sizeBytes: 0,
+  slug: 'hades',
+  lutrisId: 4,
+  winePrefix: '/home/games/hades',
+});
+check('a Lutris row keeps the slug so Play can ask Lutris, or Wine, to start it',
+  lutris.launch.kind === 'lutris' && lutris.launch.slug === 'hades' && lutris.launch.gameId === 4);
 check('puts the imported game in the Library and keeps its install folder', imported.inLibrary === true && imported.installDir === 'C:\\Games\\Timer');
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

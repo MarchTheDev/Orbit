@@ -28,6 +28,10 @@ export const LAUNCHERS: {
   // nothing to find, and an empty list is the honest answer for them.
   { id: 'Amazon Luna', color: '#c2a3ff',
     pathPrompt: 'Where is Nile\u2019s config folder?' },
+  // Lutris keeps a SQLite library and one YAML file per game. A player who
+  // moved that folder, or runs the Flatpak, can point Orbit at it.
+  { id: 'Lutris', color: '#ff8a4c',
+    pathPrompt: 'Where is Lutris\u2019s data folder?' },
 ];
 
 /**
@@ -43,6 +47,23 @@ export function canScan(launcher: { scannable?: boolean }): boolean {
 /** The question to ask for this launcher's folder, if it has one to name. */
 export function pathPromptFor(launcherId: LauncherId): string | undefined {
   return LAUNCHERS.find((launcher) => launcher.id === launcherId)?.pathPrompt;
+}
+
+/**
+ * Whether this launcher's own client exists on that desktop.
+ *
+ * The official Epic, GOG Galaxy, Ubisoft, EA and Xbox apps are Windows programs.
+ * They are not ported to Linux, so a scan there would be looking in a registry
+ * that does not exist. Heroic is the Linux client for Epic and GOG, and Lutris
+ * is Linux-only, so those two stay on Linux and stay out of the Windows list.
+ * Steam and Amazon's client exist on both.
+ */
+export function launcherOn(id: LauncherId, os: 'windows' | 'linux' | 'other'): boolean {
+  const windowsClient = id === 'Epic Games' || id === 'Ubisoft Connect' || id === 'GOG Galaxy' || id === 'EA app' || id === 'Xbox';
+  const linuxClient = id === 'Lutris' || id === 'Heroic Games Library';
+  if (os === 'windows') return !linuxClient;
+  if (os === 'linux') return !windowsClient;
+  return true;
 }
 
 /** The line shown under a launcher that has nothing on disk to find. */
