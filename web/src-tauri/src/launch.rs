@@ -59,6 +59,13 @@ struct Tracked {
     image: Option<String>,
     /// Every program name in the game's folder, lowercased.
     names: Vec<String>,
+    /// The process group the launch was given, when it is its own leader.
+    ///
+    /// Wine often exits as soon as it has handed the game to another process in
+    /// that group. The session follows the group, not the one process Orbit
+    /// happened to start. `None` when the child stayed in Orbit's own group,
+    /// which must never be signalled.
+    group: Option<u32>,
     /// Whether the game itself has been seen running at least once.
     seen: bool,
     /// Polls in a row that found nothing, so one hiccup is not an ending.
