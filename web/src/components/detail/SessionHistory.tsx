@@ -62,7 +62,7 @@ export function SessionHistory({
               {onEdit && (
                 <button
                   onClick={() => onEdit(s)}
-                  className="shrink-0 rounded-md p-1 text-muted hover:bg-panel2 hover:text-accent"
+                  className="shrink-0 rounded-lg p-1 text-muted hover:bg-panel2 hover:text-accent"
                   title="Correct when it started and how long it ran"
                   aria-label={`Edit the ${fmtClock(s.durationSecs)} session`}
                 >
@@ -77,7 +77,7 @@ export function SessionHistory({
                     onChanged?.();
                   });
                 }}
-                className="shrink-0 rounded-md p-1 text-muted hover:bg-panel2 hover:text-rose-400"
+                className="shrink-0 rounded-lg p-1 text-muted hover:bg-panel2 hover:text-rose-400"
                 title="Remove this session"
                 aria-label={`Remove the ${fmtClock(s.durationSecs)} session`}
               >
@@ -89,7 +89,7 @@ export function SessionHistory({
       )}
 
       {game.sessionCount > rows.length && (
-        <button onClick={() => setLimit((n) => n + 5)} className="mt-2 text-xs text-accent hover:underline">
+        <button onClick={() => setLimit((n) => n + 5)} className="mt-2 rounded-lg text-xs text-accent hover:underline">
           Show more
         </button>
       )}

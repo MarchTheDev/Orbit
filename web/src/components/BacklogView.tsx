@@ -589,13 +589,13 @@ function Section({
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
                 {movable && <GripVertical className="size-4 shrink-0 text-muted" />}
-                <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0" title={`Open ${g.title}`}>
+                <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
                   <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button
                     onClick={() => onSelect(g.id, readOnlyMoves === true)}
-                    className="block max-w-full truncate text-left text-sm font-semibold hover:text-accent"
+                    className="block max-w-full truncate rounded-lg text-left text-sm font-semibold hover:text-accent"
                   >
                     {g.title}
                   </button>

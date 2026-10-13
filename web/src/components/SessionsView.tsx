@@ -249,7 +249,7 @@ export function SessionsView({
                   <button
                     type="button"
                     onClick={() => onOpenGame(row.gameId)}
-                    className="flex min-w-0 items-center gap-3 text-left"
+                    className="flex min-w-0 items-center gap-3 rounded-xl text-left"
                     title={`Open ${row.gameTitle}`}
                   >
                     {game ? <Cover game={game} className="size-14 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}

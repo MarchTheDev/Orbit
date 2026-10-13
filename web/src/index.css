@@ -161,6 +161,16 @@ html.orbit-linux .orbit-topbar {
 html.orbit-pad :focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);
+  /* A control with no radius of its own — a backlog cover, its title, a
+     session row — still gets a rounded ring, the same curve as a cover.
+     A pill or a large card keeps the curve it already has. */
+  border-radius: 1rem;
+}
+html.orbit-pad .rounded-full:focus {
+  border-radius: 999px;
+}
+html.orbit-pad .rounded-3xl:focus {
+  border-radius: 1.5rem;
 }
 /* The ring sits on the cover. The title under it is not part of the target.
    Outline, not the shared box-shadow: the cover's own transition would otherwise

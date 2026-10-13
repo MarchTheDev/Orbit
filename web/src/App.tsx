@@ -905,7 +905,9 @@ export default function App() {
     };
     const onPage = (event: Event) => {
       const direction = (event as CustomEvent<string>).detail;
-      const tabs = orderedTabs(settings?.tabOrder).map((tab) => tab.id);
+      // Settings is not one of the rearrangable tabs, but it sits at the end of
+      // the bar. The shoulder buttons have to be able to land on it too.
+      const tabs: Page[] = [...orderedTabs(settings?.tabOrder).map((tab) => tab.id), 'settings'];
       if (tabs.length === 0) return;
       const index = tabs.indexOf(page);
       const from = index >= 0 ? index : direction === 'right' ? -1 : tabs.length;
