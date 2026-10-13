@@ -29,6 +29,8 @@ static BUTTON_HOOKED: AtomicBool = AtomicBool::new(false);
 static REALIZE_HOOKED: AtomicBool = AtomicBool::new(false);
 static SEARCHING: AtomicBool = AtomicBool::new(false);
 static ICON_HOOKED: AtomicBool = AtomicBool::new(false);
+static ICON_NOTIFY_HOOKED: AtomicBool = AtomicBool::new(false);
+static APPLYING_ICON: AtomicBool = AtomicBool::new(false);
 
 /// Whether minimise should leave the taskbar. Updated when settings change.
 pub fn set_armed(on: bool) {
@@ -101,13 +103,22 @@ fn gtk_window_of(view: &webkit2gtk::WebView) -> Option<gtk::Window> {
     view.toplevel()?.downcast::<gtk::Window>().ok()
 }
 
-/// The titlebar icon. Without one, WebKit puts its own mark there: an orange
-/// and white W. Setting it once is not enough, because the page load writes
-/// that mark back, so the search that is already walking the titlebar puts
-/// Orbit's icon back until the load has finished doing that.
+/// The orange and white W is the desktop's placeholder. Wayland has no
+/// per-window icon, so the compositor looks the mark up by the application id
+/// (`com.orbit.launcher`, set in the config) against a desktop entry of that
+/// name. Painting the GTK window is only the X11 half, and the page load can
+/// write the placeholder back, so that half is put back whenever the icon changes.
 fn hook_icon(view: &webkit2gtk::WebView) {
+    publish_session_icon();
     if let Some(window) = gtk_window_of(view) {
         apply_orbit_icon(&window);
+        if !ICON_NOTIFY_HOOKED.swap(true, Ordering::SeqCst) {
+            window.connect_notify_local(Some("icon"), |window, _| {
+                if !APPLYING_ICON.load(Ordering::SeqCst) {
+                    apply_orbit_icon(window);
+                }
+            });
+        }
     }
     if ICON_HOOKED.swap(true, Ordering::SeqCst) {
         return;
@@ -120,29 +131,96 @@ fn hook_icon(view: &webkit2gtk::WebView) {
 }
 
 fn apply_orbit_icon(window: &gtk::Window) {
+    if APPLYING_ICON.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    publish_session_icon();
     let Some(path) = orbit_icon_file() else {
+        APPLYING_ICON.store(false, Ordering::SeqCst);
         return;
     };
-    // The name is what a panel looks up. The file is what the titlebar draws
-    // when that lookup misses, which is every run that did not install a deb.
+    // The name is what a panel looks up once the desktop entry exists. The
+    // file is what an X11 titlebar draws when that lookup misses.
+    if let Some(theme) = gtk::IconTheme::default() {
+        let _ = theme.rescan_if_needed();
+    }
     window.set_icon_name(Some("com.orbit.launcher"));
+    gtk::Window::set_default_icon_name("com.orbit.launcher");
     if let Err(error) = window.set_icon_from_file(&path) {
         log::warn!("could not set the window icon: {error}");
     }
     let _ = gtk::Window::set_default_icon_from_file(&path);
+    APPLYING_ICON.store(false, Ordering::SeqCst);
+}
+
+/// Drop a desktop entry the compositor can match to the application id.
+///
+/// An installed package already has one. A binary, an AppImage, or a dev run
+/// does not, and that is the case that keeps the orange W. User data dirs are
+/// searched before the system ones, so this entry wins when both exist.
+pub fn publish_session_icon() {
+    let Some(data) = data_home() else {
+        return;
+    };
+    let icon_dir = data.join("icons/hicolor/128x128/apps");
+    let apps = data.join("applications");
+    if std::fs::create_dir_all(&icon_dir).is_err() || std::fs::create_dir_all(&apps).is_err() {
+        return;
+    }
+    let bytes: &[u8] = include_bytes!("../icons/128x128.png");
+    let icon = icon_dir.join("com.orbit.launcher.png");
+    let _ = write_if_changed(&icon, bytes);
+    // The menu entry says Icon=orbit. That name has to resolve too, or a
+    // compositor that matches the menu entry still draws the placeholder.
+    let _ = write_if_changed(&icon_dir.join("orbit.png"), bytes);
+    let desktop = apps.join("com.orbit.launcher.desktop");
+    if write_if_changed(&desktop, session_desktop_entry().as_bytes()) {
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(&apps)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
+fn data_home() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_DATA_HOME") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share"))
+}
+
+fn session_desktop_entry() -> String {
+    "\
+[Desktop Entry]
+Type=Application
+Name=Orbit
+Comment=A library for the games on your PC
+Exec=orbit
+Icon=com.orbit.launcher
+NoDisplay=true
+StartupWMClass=com.orbit.launcher
+"
+    .to_string()
+}
+
+fn write_if_changed(path: &std::path::Path, bytes: &[u8]) -> bool {
+    if std::fs::read(path).ok().as_deref() == Some(bytes) {
+        return false;
+    }
+    std::fs::write(path, bytes).is_ok()
 }
 
 fn orbit_icon_file() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let path = PathBuf::from(home).join(".local/share/icons/hicolor/128x128/apps/com.orbit.launcher.png");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
+    let path = data_home()?.join("icons/hicolor/128x128/apps/com.orbit.launcher.png");
+    if path.is_file() {
+        return Some(path);
     }
-    let bytes: &[u8] = include_bytes!("../icons/128x128.png");
-    if std::fs::read(&path).ok().as_deref() != Some(bytes) {
-        std::fs::write(&path, bytes).ok()?;
-    }
-    Some(path)
+    publish_session_icon();
+    path.is_file().then_some(path)
 }
 
 fn arm(window: &gtk::Window) {

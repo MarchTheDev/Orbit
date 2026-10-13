@@ -1412,6 +1412,11 @@ fn open_game_folder(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the window exists, so a Wayland compositor can match the app id
+    // to a desktop entry instead of drawing the orange W.
+    #[cfg(target_os = "linux")]
+    linux_window::publish_session_icon();
+
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
     let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));

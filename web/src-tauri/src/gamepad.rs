@@ -2,12 +2,12 @@
 //!
 //! WebKitGTK often never fires `gamepadconnected`, and asking it
 //! (`getGamepads`) can freeze the window the moment a pad is plugged in. This
-//! thread reads the event node the session is allowed to open. The old
-//! `/dev/input/js*` node is only a fallback: it usually exists, but the
-//! desktop does not grant the logged-in user access to it, so a pad that was
-//! plugged in never produced a single event. It does not use a hand-declared
-//! `fcntl` (that call was undefined and could take the process down), and a
-//! device that floods or looks broken is skipped so the window stays up.
+//! thread reads the event node the session is allowed to open. A modern
+//! desktop often has no `js*` node at all — joydev is not loaded — so a pad
+//! is recognised by its button bits, not by that sibling. The old joystick
+//! node is only a fallback. It does not use a hand-declared `fcntl` (that
+//! call was undefined and could take the process down), and a device that
+//! floods or looks broken is skipped so the window stays up.
 
 use serde::Serialize;
 
@@ -106,8 +106,10 @@ fn watch(app: AppHandle) {
             if let Err(error) = run_device(&app, file, kind) {
                 let _ = app.emit("orbit-gamepad", State::new().event(false));
                 log::info!("controller stopped: {error}");
+                // Not a pad. The next candidate is tried now, not after a
+                // pause: the pause was long enough that a real controller
+                // sitting behind a headset node never got a turn.
                 if error.kind() == io::ErrorKind::InvalidData {
-                    std::thread::sleep(Duration::from_secs(2));
                     continue;
                 }
             }
@@ -119,6 +121,14 @@ fn watch(app: AppHandle) {
 
 #[cfg(target_os = "linux")]
 fn run_device(app: &AppHandle, mut file: File, kind: DeviceKind) -> io::Result<()> {
+    // A headset or consumer-control node shares the controller's name and
+    // would otherwise be held forever, so the real pad never gets a turn.
+    if matches!(kind, DeviceKind::Evdev) && gamepad_keys(&file) == Some(false) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "controller node is not a pad",
+        ));
+    }
     let ranges = if matches!(kind, DeviceKind::Evdev) {
         read_ranges(&file)
     } else {
@@ -209,75 +219,99 @@ fn too_many_buttons(state: &State) -> bool {
 enum DeviceKind {
     /// `/dev/input/js*`, a fixed 8-byte `js_event`.
     Joystick,
-    /// `/dev/input/event*`, only when no joystick node exists.
+    /// `/dev/input/event*`. Button codes here are the same on every pad.
     Evdev,
 }
 
 #[cfg(target_os = "linux")]
 fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
-    let mut evdev = Vec::new();
-    let mut joy = Vec::new();
-    // udev's stable name. This is the node logind lets the logged-in user
-    // read. `js*` is often mode 0660 and is not.
+    let mut best: std::collections::HashMap<PathBuf, (PathBuf, DeviceKind, i32)> =
+        std::collections::HashMap::new();
+    let mut consider = |path: PathBuf, kind: DeviceKind, score: i32| {
+        if score <= 0 {
+            return;
+        }
+        let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        match best.get(&key) {
+            Some(slot) if slot.2 >= score => {}
+            _ => {
+                best.insert(key, (path, kind, score));
+            }
+        }
+    };
+    // udev's stable name. This is the node logind lets the logged-in user read.
     for dir in ["/dev/input/by-id", "/dev/input/by-path"] {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
         for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with("-event-joystick") {
-                evdev.push(entry.path());
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if !(name.contains("joystick") || name.contains("gamepad")) {
+                continue;
             }
+            let evdev = name.contains("event");
+            consider(
+                entry.path(),
+                if evdev {
+                    DeviceKind::Evdev
+                } else {
+                    DeviceKind::Joystick
+                },
+                if evdev { 60 } else { 20 },
+            );
         }
     }
     if let Ok(text) = fs::read_to_string("/proc/bus/input/devices") {
-        for (path, event_node) in pads_in_proc(&text) {
-            if event_node {
-                evdev.push(PathBuf::from(path));
-            } else {
-                joy.push(PathBuf::from(path));
-            }
+        for (path, event_node, score) in pads_in_proc(&text) {
+            consider(
+                PathBuf::from(path),
+                if event_node {
+                    DeviceKind::Evdev
+                } else {
+                    DeviceKind::Joystick
+                },
+                score,
+            );
         }
+    }
+    for (path, score) in pads_in_sys() {
+        consider(path, DeviceKind::Evdev, score);
     }
     for index in 0..8 {
         let path = PathBuf::from(format!("/dev/input/js{index}"));
         if path.exists() {
-            joy.push(path);
+            consider(path, DeviceKind::Joystick, 5);
         }
     }
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for path in evdev {
-        push_device(&mut out, &mut seen, path, DeviceKind::Evdev);
-    }
-    for path in joy {
-        push_device(&mut out, &mut seen, path, DeviceKind::Joystick);
-    }
-    out
-}
-
-#[cfg(target_os = "linux")]
-fn push_device(
-    out: &mut Vec<(PathBuf, DeviceKind)>,
-    seen: &mut std::collections::HashSet<PathBuf>,
-    path: PathBuf,
-    kind: DeviceKind,
-) {
-    let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-    if seen.insert(key) {
-        out.push((path, kind));
-    }
+    let mut ranked: Vec<_> = best.into_values().collect();
+    ranked.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    ranked.into_iter().map(|(path, kind, _)| (path, kind)).collect()
 }
 
 #[cfg(target_os = "linux")]
 fn open_input(path: &Path) -> Option<File> {
+    match open_nonblocking(path) {
+        Ok(file) => Some(file),
+        // The node exists, but the session did not grant this process access.
+        // logind can hand over an fd for a device on the user's seat.
+        Err(error)
+            if error.raw_os_error() == Some(libc::EACCES)
+                || error.raw_os_error() == Some(libc::EPERM) =>
+        {
+            open_via_logind(path)
+        }
+        Err(_) => None,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_nonblocking(path: &Path) -> io::Result<File> {
     // Read only, and non-blocking from the start. `O_NONBLOCK` is passed to
     // `open` so nothing has to call `fcntl` afterwards. Opening for write can
     // take the device away from the desktop.
     let bytes = path.as_os_str().as_bytes();
-    let Ok(c_path) = std::ffi::CString::new(bytes) else {
-        return None;
-    };
+    let c_path = std::ffi::CString::new(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let fd = unsafe {
         libc::open(
             c_path.as_ptr(),
@@ -285,9 +319,69 @@ fn open_input(path: &Path) -> Option<File> {
         )
     };
     if fd < 0 {
-        return None;
+        return Err(io::Error::last_os_error());
     }
-    Some(unsafe { File::from_raw_fd(fd) })
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+/// `org.freedesktop.login1.Session.TakeDevice` for a node this user cannot open.
+#[cfg(target_os = "linux")]
+fn open_via_logind(path: &Path) -> Option<File> {
+    let meta = fs::metadata(path).ok()?;
+    let rdev = std::os::unix::fs::MetadataExt::rdev(&meta);
+    let major = linux_dev_major(rdev);
+    let minor = linux_dev_minor(rdev);
+    let conn = gtk::gio::bus_get_sync(
+        gtk::gio::BusType::System,
+        None::<&gtk::gio::Cancellable>,
+    )
+    .ok()?;
+    let reply_type = gtk::glib::VariantTy::new("(hb)").ok()?;
+    let params = gtk::glib::prelude::ToVariant::to_variant(&(major, minor));
+    let (variant, fds) = conn
+        .call_with_unix_fd_list_sync(
+            Some("org.freedesktop.login1"),
+            "/org/freedesktop/login1/session/auto",
+            "org.freedesktop.login1.Session",
+            "TakeDevice",
+            Some(&params),
+            Some(reply_type),
+            gtk::gio::DBusCallFlags::NONE,
+            800,
+            None::<&gtk::gio::UnixFDList>,
+            None::<&gtk::gio::Cancellable>,
+        )
+        .ok()?;
+    let index = variant
+        .child_value(0)
+        .get::<gtk::glib::variant::Handle>()?
+        .0;
+    let raw = gtk::gio::prelude::UnixFDListExtManual::get(&fds, index).ok()?;
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFL) };
+    if flags >= 0 {
+        unsafe {
+            libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+    let fd_flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
+    if fd_flags >= 0 {
+        unsafe {
+            libc::fcntl(raw, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC);
+        }
+    }
+    Some(unsafe { File::from_raw_fd(raw) })
+}
+
+/// glibc's `major()` / `minor()` for a Linux dev_t. Done here so a libc that
+/// does not export the macros still builds.
+#[cfg(target_os = "linux")]
+fn linux_dev_major(dev: u64) -> u32 {
+    (((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff)) as u32
+}
+
+#[cfg(target_os = "linux")]
+fn linux_dev_minor(dev: u64) -> u32 {
+    ((dev & 0xff) | ((dev >> 12) & !0xff)) as u32
 }
 
 #[cfg(target_os = "linux")]
@@ -330,19 +424,13 @@ fn read_event(file: &mut File, kind: DeviceKind, state: &mut State, ranges: &Axi
             );
         }
         DeviceKind::Evdev => {
-            let size = std::mem::size_of::<libc::input_event>();
-            let mut buf = vec![0u8; size];
+            // The kernel event is 24 bytes on the 64-bit builds Orbit ships.
+            // `size_of::<input_event>()` follows the libc struct, which is not
+            // the same layout on every toolchain, and a mismatch shifts every
+            // button code so a real pad looks like it never moved.
+            let mut buf = [0u8; 24];
             file.read_exact(&mut buf)?;
-            let n = buf.len();
-            if n < 8 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "controller event is too short",
-                ));
-            }
-            let value = i32::from_le_bytes([buf[n - 4], buf[n - 3], buf[n - 2], buf[n - 1]]);
-            let code = u16::from_le_bytes([buf[n - 6], buf[n - 5]]);
-            let kind = u16::from_le_bytes([buf[n - 8], buf[n - 7]]);
+            let (kind, code, value) = parse_evdev_event(&buf);
             apply_evdev_ranged(state, kind, code, value, ranges);
         }
     }
@@ -424,42 +512,163 @@ fn should_emit(buttons_changed: bool, axes_changed: bool, elapsed: std::time::Du
 
 /// Joysticks listed in `/proc/bus/input/devices`.
 ///
-/// The bool is true for an event node. Those are listed first by the caller:
-/// the session can read them, and their button codes are the same on every pad.
-fn pads_in_proc(text: &str) -> Vec<(String, bool)> {
+/// The bool is true for an event node. A pad is a block with gamepad button
+/// bits, a controller-like name, or a `js*` handler. Requiring the `js*`
+/// sibling missed every pad on a desktop where joydev is not loaded, which is
+/// the usual desktop now.
+fn pads_in_proc(text: &str) -> Vec<(String, bool, i32)> {
     let mut found = Vec::new();
     for block in text.split("\n\n") {
+        let mut name = String::new();
+        let mut key_bits = String::new();
         let mut events = Vec::new();
         let mut joys = Vec::new();
         for line in block.lines() {
-            let Some(rest) = line.strip_prefix("H: Handlers=") else {
-                continue;
-            };
-            for token in rest.split_whitespace() {
-                if let Some(index) = token.strip_prefix("event") {
-                    if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
-                        events.push(token.to_string());
-                    }
-                } else if let Some(index) = token.strip_prefix("js") {
-                    if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
-                        joys.push(token.to_string());
+            if let Some(rest) = line.strip_prefix("N: Name=") {
+                name = rest.trim_matches('"').to_string();
+            } else if let Some(rest) = line.strip_prefix("B: KEY=") {
+                key_bits = rest.to_string();
+            } else if let Some(rest) = line.strip_prefix("H: Handlers=") {
+                for token in rest.split_whitespace() {
+                    if let Some(index) = token.strip_prefix("event") {
+                        if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
+                            events.push(token.to_string());
+                        }
+                    } else if let Some(index) = token.strip_prefix("js") {
+                        if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
+                            joys.push(token.to_string());
+                        }
                     }
                 }
             }
         }
-        // A keyboard has an event node and no joystick. Only a block that
-        // actually has a `js*` handler is a pad.
-        if joys.is_empty() {
+        let score = pad_score(&name, &key_bits, !joys.is_empty());
+        if score <= 0 {
             continue;
         }
         for token in events {
-            found.push((format!("/dev/input/{token}"), true));
+            found.push((format!("/dev/input/{token}"), true, score + 15));
         }
         for token in joys {
-            found.push((format!("/dev/input/{token}"), false));
+            found.push((format!("/dev/input/{token}"), false, score));
         }
     }
     found
+}
+
+/// Event nodes `/proc` did not describe, read from sysfs. Same button-bit test.
+#[cfg(target_os = "linux")]
+fn pads_in_sys() -> Vec<(PathBuf, i32)> {
+    let mut found = Vec::new();
+    let Ok(entries) = fs::read_dir("/sys/class/input") else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("event") {
+            continue;
+        }
+        let device = entry.path().join("device");
+        let key = fs::read_to_string(device.join("capabilities/key")).unwrap_or_default();
+        let dev_name = fs::read_to_string(device.join("name")).unwrap_or_default();
+        let score = pad_score(&dev_name, &key, false);
+        if score > 0 {
+            found.push((PathBuf::from(format!("/dev/input/{name}")), score));
+        }
+    }
+    found
+}
+
+/// Higher is a more likely pad. Zero is not a pad: keyboards and touchpads stay
+/// closed so a keypress is not also a navigation.
+fn pad_score(name: &str, key_bits: &str, has_js: bool) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("touchpad")
+        || lower.contains("mouse")
+        || lower.contains("keyboard")
+        || lower.contains("trackpoint")
+    {
+        return 0;
+    }
+    let gamepad_bits = bitmap_has_bit(key_bits, 0x130)
+        || bitmap_has_bit(key_bits, 0x131)
+        || bitmap_has_bit(key_bits, 0x120)
+        || bitmap_has_bit(key_bits, 0x220);
+    let named = lower.contains("controller")
+        || lower.contains("gamepad")
+        || lower.contains("joystick")
+        || lower.contains("xbox")
+        || lower.contains("dualshock")
+        || lower.contains("dualsense")
+        || lower.contains("nintendo")
+        || lower.contains("8bitdo");
+    if !gamepad_bits && !named && !has_js {
+        return 0;
+    }
+    let mut score = 0;
+    if gamepad_bits {
+        score += 80;
+    }
+    if named {
+        score += 20;
+    }
+    if has_js {
+        score += 10;
+    }
+    score
+}
+
+/// `/proc` prints the capability bitmap most-significant word first, and skips
+/// empty high words. Counting from the right is the low bits.
+fn bitmap_has_bit(text: &str, bit: u32) -> bool {
+    let words: Vec<&str> = text.split_whitespace().filter(|word| !word.is_empty()).collect();
+    if words.is_empty() {
+        return false;
+    }
+    let width = (std::mem::size_of::<usize>() * 8) as u32;
+    let from_low = (bit / width) as usize;
+    if from_low >= words.len() {
+        return false;
+    }
+    let word = words[words.len() - 1 - from_low];
+    let value = u64::from_str_radix(word, 16).unwrap_or(0);
+    let shift = bit % width;
+    if shift >= 64 {
+        return false;
+    }
+    value & (1u64 << shift) != 0
+}
+
+/// `EVIOCGBIT(EV_KEY)`. `Some(false)` is a node that is positively not a pad.
+/// `None` means the ioctl failed, so the caller still tries to read it.
+#[cfg(target_os = "linux")]
+fn gamepad_keys(file: &File) -> Option<bool> {
+    let mut bits = [0u8; 96];
+    let size = bits.len() as u64;
+    let request = (2u64 << 30) | (size << 16) | ((b'E' as u64) << 8) | (0x20 + 1);
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as libc::Ioctl, bits.as_mut_ptr()) };
+    if rc <= 0 {
+        return None;
+    }
+    Some(key_bit(&bits, 0x130) || key_bit(&bits, 0x120) || key_bit(&bits, 0x220))
+}
+
+/// Type, code, and value of a 64-bit kernel `input_event`.
+fn parse_evdev_event(buf: &[u8]) -> (u16, u16, i32) {
+    (
+        u16::from_le_bytes([buf[16], buf[17]]),
+        u16::from_le_bytes([buf[18], buf[19]]),
+        i32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]),
+    )
+}
+
+fn key_bit(bits: &[u8], code: u16) -> bool {
+    let index = code as usize;
+    let byte = index / 8;
+    if byte >= bits.len() {
+        return false;
+    }
+    bits[byte] & (1 << (index % 8)) != 0
 }
 
 /// evdev codes. These are stable across pads; joydev's button numbers are not.
@@ -662,7 +871,36 @@ H: Handlers=event5 js0
 ";
         let pads = pads_in_proc(text);
         assert_eq!(pads.len(), 2);
-        assert_eq!(pads[0], ("/dev/input/event5".to_string(), true));
-        assert_eq!(pads[1], ("/dev/input/js0".to_string(), false));
+        assert_eq!(pads[0].0, "/dev/input/event5");
+        assert!(pads[0].1);
+        assert_eq!(pads[1].0, "/dev/input/js0");
+        assert!(!pads[1].1);
+        assert!(pads[0].2 > pads[1].2);
+    }
+
+    #[test]
+    fn a_pad_without_a_joystick_node_is_still_a_pad() {
+        let text = "\
+N: Name=\"Wireless Controller\"
+H: Handlers=event3
+B: KEY=7cdb000000000000 0 0 0 0
+
+N: Name=\"Synaptics TouchPad\"
+H: Handlers=event2 mouse0
+B: KEY=e520 10000 0 0 0
+";
+        let pads = pads_in_proc(text);
+        assert_eq!(pads.len(), 1);
+        assert_eq!(pads[0].0, "/dev/input/event3");
+        assert!(bitmap_has_bit("7cdb000000000000 0 0 0 0", 0x130));
+        let mut event = [0u8; 24];
+        event[16] = 1;
+        event[18] = 0x30;
+        event[19] = 0x01;
+        event[20] = 1;
+        let (kind, code, value) = parse_evdev_event(&event);
+        assert_eq!((kind, code, value), (1, 0x130, 1));
+        assert!(!bitmap_has_bit("e520 10000 0 0 0", 0x130));
+        assert_eq!(pad_score("AT Translated Set 2 keyboard", "", false), 0);
     }
 }

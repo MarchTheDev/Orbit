@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "enableGTKAppId": true,
     "windows": [
       {
         "title": "Orbit",
@@ -61,7 +62,8 @@
           "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
           "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop",
           "/usr/share/applications/com.orbit.launcher.desktop": "../../packaging/linux/com.orbit.launcher.desktop",
-          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png"
+          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png",
+          "/usr/share/icons/hicolor/128x128/apps/orbit.png": "icons/128x128.png"
         }
       },
       "rpm": {
@@ -74,7 +76,8 @@
           "/usr/bin/orbit-x11": "../../packaging/linux/orbit-x11",
           "/usr/share/applications/orbit-x11.desktop": "../../packaging/linux/orbit-x11.desktop",
           "/usr/share/applications/com.orbit.launcher.desktop": "../../packaging/linux/com.orbit.launcher.desktop",
-          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png"
+          "/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png": "icons/128x128.png",
+          "/usr/share/icons/hicolor/128x128/apps/orbit.png": "icons/128x128.png"
         }
       }
     },

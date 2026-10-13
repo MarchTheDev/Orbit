@@ -10,4 +10,4 @@ Icon=orbit
 Terminal=false
 Categories=Game;Utility;
 Keywords=games;library;launcher;playtime;steam;x11;xwayland;
-StartupWMClass=orbit
+StartupWMClass=com.orbit.launcher
