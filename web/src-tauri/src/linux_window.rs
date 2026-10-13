@@ -178,10 +178,7 @@ fn publish_wayland_app_id(window: &gtk::Window) {
         return;
     };
     unsafe {
-        gdk_wayland_window_set_application_id(
-            ToGlibPtr::to_glib_none(&gdk_window).0 as *mut libc::c_void,
-            id.as_ptr(),
-        );
+        gdk_wayland_window_set_application_id(gdk_window.as_ptr() as *mut libc::c_void, id.as_ptr());
     }
 }
 
