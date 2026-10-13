@@ -1155,6 +1155,11 @@ mod tests {
     #[test]
     fn the_note_clock_follows_the_pc_zone() {
         let _hold = clock_lock();
+        // The crate's `libc` does not re-export this. It is still the call that
+        // makes a changed `TZ` visible to `localtime_r`.
+        extern "C" {
+            fn tzset();
+        }
         struct Restore(Option<std::ffi::OsString>);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -1162,19 +1167,19 @@ mod tests {
                     Some(value) => unsafe { std::env::set_var("TZ", value) },
                     None => unsafe { std::env::remove_var("TZ") },
                 }
-                unsafe { libc::tzset() };
+                unsafe { tzset() };
             }
         }
         let _restore = Restore(std::env::var_os("TZ"));
         unsafe {
             std::env::set_var("TZ", "EAST-2");
-            libc::tzset();
+            tzset();
         }
         let ahead = when_text(0);
         let ahead_line = when_line(0);
         unsafe {
             std::env::set_var("TZ", "UTC0");
-            libc::tzset();
+            tzset();
         }
         let utc_zone = when_line(0);
         assert_eq!(ahead, "1970-01-01 02:00:00");
