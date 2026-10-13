@@ -1037,7 +1037,7 @@ mod tests {
         let game = data.join("backups").join("Rockstar Games").join("Red Dead Redemption 2");
         assert_eq!(std::path::PathBuf::from(&made.path), game);
         let note = fs::read_to_string(game.join("note.txt")).unwrap();
-        assert!(note.contains("When: "), "{note}");
+        assert!(note.contains("When (UTC):"), "{note}");
         assert!(note.contains("At: "), "{note}");
         assert!(game.join("Profiles").join("slot").is_file());
         let old = game.join("2020-01-02 03-04-05");

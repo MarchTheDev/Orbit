@@ -33,7 +33,6 @@ import {
   dataDir,
   dataDirSize,
   isNative,
-  isWindows,
   listDrives,
   revealInExplorer,
   setExeContextMenu,
@@ -344,24 +343,9 @@ export function SettingsView({
   const [settingsQuery, setSettingsQuery] = useState('');
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const [windows, setWindows] = useState(false);
   const [exeContextMenuBusy, setExeContextMenuBusy] = useState(false);
   const [exeContextMenuError, setExeContextMenuError] = useState<string | null>(null);
   const native = isNative();
-
-  useEffect(() => {
-    let alive = true;
-    if (!native) {
-      setWindows(false);
-      return () => { alive = false; };
-    }
-    void isWindows().then((supported) => {
-      if (alive) setWindows(supported);
-    }).catch(() => {
-      if (alive) setWindows(false);
-    });
-    return () => { alive = false; };
-  }, [native]);
 
   const setOpenExeInOrbit = async (enabled: boolean) => {
     setExeContextMenuBusy(true);
