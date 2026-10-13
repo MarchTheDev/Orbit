@@ -916,6 +916,10 @@ export default function App() {
       else if (page !== 'library') setPage('library');
     };
     const onPage = (event: Event) => {
+      // The details drawer listens too, but both listeners are on the window, and
+      // a capture listener added later does not run first. While the drawer is
+      // open the shoulders belong to its tabs, not to these pages.
+      if (document.querySelector('.orbit-detail')) return;
       const direction = (event as CustomEvent<string>).detail;
       // Settings is not one of the rearrangable tabs, but it sits at the end of
       // the bar. The shoulder buttons have to be able to land on it too.

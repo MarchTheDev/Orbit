@@ -52,8 +52,27 @@ body::before {
   transform: translate3d(100%, 0, 0);
   will-change: transform;
 }
-.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1) both; }
+/* `backwards` only. `both` left a transform on the scrolling panel, and every
+   scroll and every controller ring then repainted that layer. */
+.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1) backwards; }
 .drawer-out { animation: drawer-out .3s cubic-bezier(.2,.8,.2,1) forwards; }
+/* A see-through, blurred, shadowed panel over the library is repainted on every
+   scroll and every time the controller ring moves. The drawer is a flat colour.
+   The wide-art blur in the header is the same kind of cost, so it stays out. */
+.orbit-detail {
+  background: var(--c-panel) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+.orbit-detail-scrim {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.orbit-detail .blur-xl {
+  display: none !important;
+}
 @keyframes drawer {
   from { transform: translate3d(100%, 0, 0); opacity: 0; }
   to { transform: translate3d(0, 0, 0); opacity: 1; }
@@ -167,9 +186,29 @@ html.orbit-linux .orbit-topbar {
   background-color: var(--c-bg) !important;
   background-image: none !important;
 }
+/* The details drawer sits over the library. A see-through panel, a full-window
+   blur, or a huge shadow makes WebKit repaint all of that on every scroll and
+   every time the controller ring moves. Flat and opaque is the same window. */
+html.orbit-linux .orbit-detail,
+html.orbit-linux .orbit-detail-scrim {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+html.orbit-linux .orbit-detail {
+  background: var(--c-panel) !important;
+  background-image: none !important;
+}
 /* The ring is the pad's own mark, not every focused control. A mouse click
    focuses too, and styling :focus painted the controller ring around whatever
    was clicked, including when no pad was driving the page. */
+/* A box-shadow ring inside the details drawer invalidates the whole panel.
+   Outline is the same mark and does not make a scroll or a move repaint it. */
+html.orbit-pad .orbit-detail .orbit-pad-focus {
+  box-shadow: none;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
 html.orbit-pad .orbit-pad-focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);

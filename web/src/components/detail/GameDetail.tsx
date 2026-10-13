@@ -157,6 +157,35 @@ export function GameDetail({
     return () => window.clearTimeout(timer);
   }, [game.id]);
 
+  // Shoulder buttons change the app's pages. While this drawer is open they
+  // stay here and move between its tabs instead. The page listener also sees
+  // the drawer and leaves the pages alone; both are needed, because a listener
+  // added on the window does not get to run first.
+  useEffect(() => {
+    const tabs = backlog
+      ? (['overview', 'log', 'sessions'] as const)
+      : (['overview', 'achievements', 'log', 'sessions'] as const);
+    const onPage = (event: Event) => {
+      // Both listeners sit on the window, so stopping the bubble is not enough.
+      // The page listener is on this same node and would still run.
+      event.stopImmediatePropagation();
+      const direction = (event as CustomEvent<string>).detail === 'left' ? -1 : 1;
+      setTab((current) => {
+        const index = Math.max(0, tabs.indexOf(current as (typeof tabs)[number]));
+        const next = tabs[(index + direction + tabs.length) % tabs.length];
+        window.setTimeout(() => {
+          const button = document.querySelector(`[data-orbit-detail-tab="${next}"]`);
+          if (!(button instanceof HTMLElement)) return;
+          markPadFocus(button);
+          button.focus({ preventScroll: true });
+        }, 0);
+        return next;
+      });
+    };
+    window.addEventListener('orbit-pad-page', onPage, true);
+    return () => window.removeEventListener('orbit-pad-page', onPage, true);
+  }, [backlog]);
+
   // The tab bar shows how much has been written, so the count is worth keeping,
   // and the journal says when it has moved.
   const [logVersion, setLogVersion] = useState(0);
@@ -248,10 +277,10 @@ export function GameDetail({
   return (
     <>
       <div
-        className={`${leaving ? 'fade-out pointer-events-none' : slideIn ? 'fade-in' : 'opacity-0'} fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]`}
+        className={`orbit-detail-scrim ${leaving ? 'fade-out pointer-events-none' : slideIn ? 'fade-in' : 'opacity-0'} fixed inset-0 z-40 bg-black/40`}
         onClick={beginClose}
       />
-      <aside className={`glass ${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl shadow-2xl`}>
+      <aside className={`orbit-detail glass ${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)] flex-col overflow-y-auto rounded-3xl`}>
         <div className="relative h-44 shrink-0">
           <Cover game={game} className="size-full opacity-60 [&_span]:hidden" />
           {/* The store's own backdrop sits over the cover art when there is one:
@@ -261,6 +290,7 @@ export function GameDetail({
               src={game.meta.backgroundUrl}
               alt=""
               aria-hidden
+              decoding="async"
               className="absolute inset-0 size-full object-cover opacity-70"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
@@ -276,7 +306,7 @@ export function GameDetail({
             <X className="size-4" />
           </button>
           <div className="absolute bottom-0 left-0 flex items-end gap-4 p-5">
-            <Cover game={game} className="h-28 w-20 rounded-lg shadow-xl [&_span]:text-lg" />
+            <Cover game={game} className="h-28 w-20 rounded-lg [&_span]:text-lg" />
             <div className="pb-1">
               <input
                 value={titleDraft}
@@ -299,7 +329,7 @@ export function GameDetail({
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel/95 px-5 py-2 pr-4 backdrop-blur">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel px-5 py-2 pr-4">
           {(
             [
               ['overview', 'Overview', Info],
@@ -312,6 +342,8 @@ export function GameDetail({
             .map(([id, label, Icon]) => (
             <button
               key={id}
+              type="button"
+              data-orbit-detail-tab={id}
               onClick={() => setTab(id)}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
                 tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'

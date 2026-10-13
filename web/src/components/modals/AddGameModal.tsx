@@ -6,6 +6,7 @@ import { exeInfo, findArtworkChoices, folderPrograms, isNative, type ArtworkPick
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
+import { launchForAddedProgram } from '../../utils/platform';
 import { gameFolderFromExecutable, gameTitleFromExecutable, gameTitleFromPath } from '../../utils/gameTitle';
 import type { FolderProgram } from '../../types';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
@@ -870,9 +871,7 @@ function metadataForReview(
  * is what the achievements and the artwork picker read later.
  */
 export function buildGame(d: Draft, meta: MetaData | null, appId: number | null): Game {
-  const launch: LaunchTarget = d.exePath
-    ? { kind: 'executable', path: d.exePath, args: '', workingDir: d.installDir || null }
-    : { kind: 'none' };
+  const launch: LaunchTarget = launchForAddedProgram(d.exePath, d.installDir || null);
 
   return {
     id: uid(),

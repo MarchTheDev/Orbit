@@ -125,6 +125,7 @@ function Artwork({
           src={src}
           alt=""
           aria-hidden
+          decoding="async"
           className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-xl"
         />
       )}
@@ -138,6 +139,7 @@ function Artwork({
           // anything squarer than a poster is fitted whole instead.
           setWide(w > 0 && h > 0 && w / h > 0.72);
         }}
+        decoding="async"
         onError={onFail}
         className={cn('relative size-full', fitted ? 'object-contain' : 'object-cover')}
       />

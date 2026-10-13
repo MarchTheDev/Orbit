@@ -198,7 +198,13 @@ function scrollByStick(pad: PadSnapshot, dt: number) {
   const x = stickSpeed(pad.axes[2] ?? 0);
   const y = stickSpeed(pad.axes[3] ?? 0);
   if (x === 0 && y === 0) return;
-  const scroller = document.querySelector('.orbit-scroll');
+  // Details, when open, are the page being read. Scrolling the library behind
+  // them repaints that whole grid under the drawer.
+  const drawer = document.querySelector('.orbit-detail');
+  const scroller =
+    drawer instanceof HTMLElement && drawer.scrollHeight > drawer.clientHeight + 1
+      ? drawer
+      : document.querySelector('.orbit-scroll');
   if (!(scroller instanceof HTMLElement)) return;
   scroller.scrollBy({ left: x * dt, top: y * dt });
 }

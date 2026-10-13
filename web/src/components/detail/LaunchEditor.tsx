@@ -23,9 +23,9 @@ const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: ty
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
 ];
 
-/** Windows starts a program. Linux starts that program through Wine. */
+/** Windows starts a program. Linux can start a native program, or a Windows .exe through Wine. */
 function kindsForThisMachine() {
-  const want = desktopOs() === 'linux' ? ['wine', 'none'] : ['executable', 'none'];
+  const want = desktopOs() === 'linux' ? ['executable', 'wine', 'none'] : ['executable', 'none'];
   return KINDS.filter((kind) => want.includes(kind.kind));
 }
 

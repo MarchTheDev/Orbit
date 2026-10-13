@@ -157,7 +157,7 @@ export function ImportModal({
       const games: Game[] = included.map((c) => ({
         id: uid(),
         title: c.title,
-        launch: { kind: 'executable', path: c.exePath, args: '', workingDir: c.installDir },
+        launch: launchForAddedProgram(c.exePath, c.installDir),
         exePath: c.exePath,
         installDir: c.installDir,
         drive: c.drive,
