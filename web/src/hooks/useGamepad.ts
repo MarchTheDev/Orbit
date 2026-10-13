@@ -355,9 +355,9 @@ export function useGamepad() {
     let pullTimer = 0;
     if (linux) {
       const pull = () => {
-        const core = (window as Window & { __TAURI__?: { core?: { invoke: (cmd: string) => Promise<NativePad> } } }).__TAURI__?.core;
+        const core = window.__TAURI__?.core;
         if (!core || !alive) return;
-        void core.invoke('gamepad_poll').then((payload) => {
+        void core.invoke<NativePad>('gamepad_poll').then((payload) => {
           if (alive) onNative(payload);
         }).catch(() => {});
       };

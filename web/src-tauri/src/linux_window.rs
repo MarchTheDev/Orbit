@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gdk::WindowState;
-use glib::translate::ToGlibPtr;
+use glib::prelude::ObjectType;
 use glib::{ControlFlow, Propagation};
 use gtk::prelude::*;
 
