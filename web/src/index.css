@@ -154,6 +154,10 @@ html.orbit-pad :focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);
 }
+html.orbit-pad [data-orbit-pad="tile"]:focus {
+  border-radius: 1rem;
+  scroll-margin: 5.5rem;
+}
 html.orbit-pad .orbit-logo:focus {
   border-radius: 999px;
   box-shadow: 0 0 0 3px var(--c-bg), 0 0 0 5px var(--c-accent);

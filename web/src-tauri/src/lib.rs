@@ -9,6 +9,8 @@ mod ambient;
 mod db;
 #[cfg(windows)]
 mod explorer;
+#[cfg(target_os = "linux")]
+mod files_menu;
 mod format;
 mod gamepad;
 mod hltb;
@@ -633,10 +635,14 @@ fn set_exe_context_menu(enabled: bool) -> Result<(), String> {
     {
         explorer::set_context_menu(enabled)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        files_menu::set_context_menu(enabled)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = enabled;
-        Err("The Explorer context-menu integration is only available on Windows".into())
+        Err("The right-click menu is only available on Windows and Linux".into())
     }
 }
 
@@ -924,15 +930,32 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 
     // A game added from a folder has no store id of its own, so the title is
     // asked about. That is also the moment the id becomes worth keeping.
-    let known = steam_app_id(&game);
+    artwork_for(&orbit, &game.title, steam_app_id(&game)).await
+}
+
+/// Pictures for a game that has not been saved yet, so Add Game can offer
+/// another cover than the one the catalogue picked first.
+#[tauri::command]
+async fn artwork_choices(
+    orbit: State<'_, Orbit>,
+    title: String,
+    app_id: Option<u64>,
+) -> Result<Artwork, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Name the game before looking for covers.".into());
+    }
+    artwork_for(orbit.inner(), title, app_id).await
+}
+
+async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>) -> Result<Artwork, String> {
     let app_id = match known {
         Some(id) => Some(id),
-        None => metadata::app_id_for(&game.title).await,
+        None => metadata::app_id_for(title).await,
     };
     let Some(app_id) = app_id else {
         return Err(format!(
-            "Orbit could not find \"{}\" in the store. A cover can still be chosen by hand.",
-            game.title
+            "Orbit could not find \"{title}\" in the store. A cover can still be chosen by hand."
         ));
     };
 
@@ -1452,18 +1475,22 @@ pub fn run() {
                             == Some(true)
                 });
 
-            // Keep the Explorer action in sync with the saved preference and
+            // Keep the right-click action in sync with the saved preference and
             // this install's path. Old settings did not have the field, so the
             // first launch opts in by default as the UI does.
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 let enabled = saved_settings
                     .as_ref()
                     .and_then(|settings| settings.get("openExeInOrbit"))
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(true);
-                if let Err(error) = explorer::set_context_menu(enabled) {
-                    log::warn!("could not update the Explorer context menu: {error}");
+                #[cfg(windows)]
+                let result = explorer::set_context_menu(enabled);
+                #[cfg(target_os = "linux")]
+                let result = files_menu::set_context_menu(enabled);
+                if let Err(error) = result {
+                    log::warn!("could not update the Open in Orbit menu: {error}");
                 }
             }
 
@@ -1545,7 +1572,14 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let show_requested = Arc::clone(&show_requested_for_setup);
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(6));
+                    // Linux often takes long enough to draw that a six-second
+                    // wait finishes the opening before the window is even up.
+                    let wait = if cfg!(target_os = "linux") {
+                        std::time::Duration::from_millis(800)
+                    } else {
+                        std::time::Duration::from_secs(6)
+                    };
+                    std::thread::sleep(wait);
                     if !start_in_background || show_requested.load(Ordering::SeqCst) {
                         show_main_window(&handle);
                     }
@@ -1668,6 +1702,7 @@ pub fn run() {
             metadata_cards,
             achievements_fetch,
             artwork_candidates,
+            artwork_choices,
             reorder_game_logs,
             steam_library,
             launcher_games,

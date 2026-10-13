@@ -284,8 +284,7 @@ function SaveRow({
         <ul className="space-y-1 text-xs text-muted">
           {backups.slice(0, 5).map((backup) => (
             <li key={backup.path} className="truncate">
-              {backup.kind} · {new Date(backup.at * 1000).toLocaleString()}
-              {backup.note ? ` · ${backup.note}` : ''}
+              {new Date(backup.at * 1000).toLocaleString()}
             </li>
           ))}
         </ul>

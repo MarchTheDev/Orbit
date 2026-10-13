@@ -83,7 +83,7 @@ pub fn restore(
         return Err("There is no backup to restore.".into());
     };
     let dest = resolve(title, save_dir, hints)?;
-    copy_tree(&PathBuf::from(&latest.path), &dest, 0)?;
+    copy_tree(&PathBuf::from(&latest.path), &dest, 0, true)?;
     Ok(format!("Restored the copy into {}.", dest.display()))
 }
 
@@ -480,14 +480,14 @@ fn copy_folder(
     }
     let at = now();
     let (studio, game) = place_names(title, publisher, from);
-    let game_dir = root.join(&studio).join(&game);
-    let mut dest = game_dir.join(stamp_folder(at));
-    if dest.exists() {
-        dest = game_dir.join(format!("{}-{}", stamp_folder(at), at));
-    }
-    copy_tree(from, &dest, 0)?;
+    let dest = root.join(&studio).join(&game);
+    // The date lives in the note. Another folder named after the clock only
+    // made the copy harder to find, and a new copy replaces the last one.
+    clear_direct_copy(&dest)?;
+    copy_tree(from, &dest, 0, false)?;
+    let when = when_text(at);
     let note = format!(
-        "Game: {game}\nPublisher: {studio}\nCopied from: {}\nAt: {at}\n",
+        "Game: {game}\nPublisher: {studio}\nCopied from: {}\nWhen (UTC): {when}\nAt: {at}\n",
         from.display()
     );
     fs::write(dest.join("note.txt"), &note).map_err(|e| format!("Could not write the note: {e}"))?;
@@ -500,31 +500,115 @@ fn copy_folder(
 }
 
 fn list_folder_backups(dir: &Path) -> Vec<SaveBackup> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
     let mut found = Vec::new();
+    // A copy now sits in the game folder itself, with the date in note.txt.
+    if has_note(dir) {
+        found.push(backup_record(dir));
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return found;
+    };
     for entry in entries.flatten() {
-        if !entry.path().is_dir() {
-            continue;
+        // Older copies are still a dated folder, or a numbered one, beside it.
+        if legacy_child(&entry.path()) {
+            found.push(backup_record(&entry.path()));
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let note = fs::read_to_string(entry.path().join("note.txt"))
-            .or_else(|_| fs::read_to_string(entry.path().join(".orbit-note")))
-            .unwrap_or_default();
-        let at = note
-            .lines()
-            .find_map(|line| line.strip_prefix("At: ").and_then(|rest| rest.trim().parse().ok()))
-            .or_else(|| name.parse().ok())
-            .unwrap_or_else(|| mtime(&entry.path()));
-        found.push(SaveBackup {
-            at,
-            path: entry.path().to_string_lossy().to_string(),
-            kind: "folder".into(),
-            note: note.trim().to_string(),
-        });
     }
     found
+}
+
+fn backup_record(dir: &Path) -> SaveBackup {
+    let name = dir.file_name().map(|part| part.to_string_lossy().into_owned()).unwrap_or_default();
+    let note = fs::read_to_string(dir.join("note.txt"))
+        .or_else(|_| fs::read_to_string(dir.join(".orbit-note")))
+        .unwrap_or_default();
+    let at = note
+        .lines()
+        .find_map(|line| line.strip_prefix("At: ").and_then(|rest| rest.trim().parse().ok()))
+        .or_else(|| name.parse().ok())
+        .unwrap_or_else(|| mtime(dir));
+    SaveBackup {
+        at,
+        path: dir.to_string_lossy().to_string(),
+        kind: "folder".into(),
+        note: note.trim().to_string(),
+    }
+}
+
+fn has_note(dir: &Path) -> bool {
+    dir.join("note.txt").is_file() || dir.join(".orbit-note").is_file()
+}
+
+/// A previous copy, not a folder the game itself saved.
+fn kept_aside(path: &Path) -> bool {
+    path.is_dir()
+        && (has_note(path)
+            || path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(looks_like_stamp))
+}
+
+fn legacy_child(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    if kept_aside(path) {
+        return true;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn looks_like_stamp(name: &str) -> bool {
+    let Some((date, rest)) = name.split_once(' ') else {
+        return false;
+    };
+    let date: Vec<&str> = date.split('-').collect();
+    if date.len() != 3 || date[0].len() != 4 || date[1].len() != 2 || date[2].len() != 2 {
+        return false;
+    }
+    if !date.iter().all(|part| part.bytes().all(|byte| byte.is_ascii_digit())) {
+        return false;
+    }
+    let mut clock = rest.split('-');
+    let pair = |part: Option<&str>| {
+        part.is_some_and(|value| value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_digit()))
+    };
+    let hour = clock.next();
+    let minute = clock.next();
+    let second = clock.next();
+    let extra = clock.next();
+    pair(hour)
+        && pair(minute)
+        && pair(second)
+        && extra
+            .map(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .unwrap_or(true)
+        && clock.next().is_none()
+}
+
+/// Drop the previous direct copy, and leave an older dated folder where it is.
+fn clear_direct_copy(dest: &Path) -> Result<(), String> {
+    if !dest.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dest).map_err(|e| format!("Could not read {}: {e}", dest.display()))? {
+        let entry = entry.map_err(|e| format!("Could not read {}: {e}", dest.display()))?;
+        let name = entry.file_name();
+        if name == "note.txt" || name == ".orbit-note" || kept_aside(&entry.path()) {
+            continue;
+        }
+        let path = entry.path();
+        let result = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        result.map_err(|e| format!("Could not replace {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Publisher, then the game. A copy made from `Documents/Rockstar Games/Red
@@ -605,7 +689,7 @@ fn generic_folder(name: &str) -> bool {
     )
 }
 
-fn copy_tree(from: &Path, to: &Path, depth: i32) -> Result<(), String> {
+fn copy_tree(from: &Path, to: &Path, depth: i32, skip_snapshots: bool) -> Result<(), String> {
     if depth > 16 {
         return Ok(());
     }
@@ -625,8 +709,13 @@ fn copy_tree(from: &Path, to: &Path, depth: i32) -> Result<(), String> {
         if kind.is_symlink() {
             continue;
         }
+        // An older dated copy can sit beside the current files. Restoring must
+        // not carry that folder back into the game.
+        if skip_snapshots && kind.is_dir() && kept_aside(&entry.path()) {
+            continue;
+        }
         if kind.is_dir() {
-            copy_tree(&entry.path(), &dest, depth + 1)?;
+            copy_tree(&entry.path(), &dest, depth + 1, skip_snapshots)?;
         } else if kind.is_file() {
             fs::copy(entry.path(), &dest).map_err(|e| {
                 format!(
@@ -693,13 +782,24 @@ fn is_reserved(name: &str) -> bool {
 }
 
 fn stamp_folder(at: i64) -> String {
+    let (year, month, day, hour, minute, second) = civil_clock(at);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}-{minute:02}-{second:02}")
+}
+
+/// The same moment, written for a person to read in the note.
+fn when_text(at: i64) -> String {
+    let (year, month, day, hour, minute, second) = civil_clock(at);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}")
+}
+
+fn civil_clock(at: i64) -> (i32, u32, u32, i64, i64, i64) {
     let days = at.div_euclid(86_400);
     let tod = at.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
     let hour = tod / 3600;
     let minute = (tod % 3600) / 60;
     let second = tod % 60;
-    format!("{year:04}-{month:02}-{day:02} {hour:02}-{minute:02}-{second:02}")
+    (year, month, day, hour, minute, second)
 }
 
 /// Howard Hinnant's civil_from_days, with the Unix epoch.
@@ -911,6 +1011,54 @@ mod tests {
     #[test]
     fn a_stamp_is_a_date_not_a_bare_number() {
         assert_eq!(stamp_folder(0), "1970-01-01 00-00-00");
+        assert_eq!(when_text(0), "1970-01-01 00:00:00");
+        assert!(looks_like_stamp("1970-01-01 00-00-00"));
+        assert!(looks_like_stamp("1970-01-01 00-00-00-12"));
+        assert!(!looks_like_stamp("Profiles"));
+    }
+
+    #[test]
+    fn a_copy_puts_the_date_in_the_note_instead_of_a_folder() {
+        let root = std::env::temp_dir().join(format!("orbit-backup-note-{}", std::process::id()));
+        let save = root.join("live");
+        fs::create_dir_all(save.join("Profiles")).unwrap();
+        fs::write(save.join("Profiles").join("slot"), b"1").unwrap();
+        let data = root.join("data");
+        let made = backup(
+            &data,
+            "id",
+            "Red Dead Redemption 2",
+            Some(save.to_str().unwrap()),
+            &Hints::default(),
+            Some("Rockstar Games"),
+            None,
+        )
+        .unwrap();
+        let game = data.join("backups").join("Rockstar Games").join("Red Dead Redemption 2");
+        assert_eq!(std::path::PathBuf::from(&made.path), game);
+        let note = fs::read_to_string(game.join("note.txt")).unwrap();
+        assert!(note.contains("When: "), "{note}");
+        assert!(note.contains("At: "), "{note}");
+        assert!(game.join("Profiles").join("slot").is_file());
+        let old = game.join("2020-01-02 03-04-05");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("note.txt"), "At: 10\n").unwrap();
+        fs::write(save.join("Profiles").join("slot"), b"2").unwrap();
+        backup(
+            &data,
+            "id",
+            "Red Dead Redemption 2",
+            Some(save.to_str().unwrap()),
+            &Hints::default(),
+            Some("Rockstar Games"),
+            None,
+        )
+        .unwrap();
+        assert!(old.join("note.txt").is_file(), "an older dated copy is left alone");
+        let listed = list(&data, "id", "Red Dead Redemption 2", Some("Rockstar Games"), None);
+        assert!(listed.iter().any(|item| item.path == game.to_string_lossy()));
+        assert!(listed.iter().any(|item| item.path.ends_with("2020-01-02 03-04-05")));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

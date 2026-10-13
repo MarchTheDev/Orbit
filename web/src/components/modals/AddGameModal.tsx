@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
+import { Download, FolderOpen, LoaderCircle, Plus, Search, Sparkles, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../../data/launchers';
-import { exeInfo, folderPrograms, isNative } from '../../services/native';
+import { exeInfo, findArtworkChoices, folderPrograms, isNative, type ArtworkPick } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
@@ -99,6 +99,10 @@ export function AddGameModal({
   const [details, setDetails] = useState<DetailsDraft>(EMPTY_DETAILS);
   const [detailsEdited, setDetailsEdited] = useState(false);
   const [coverUrlEdited, setCoverUrlEdited] = useState(false);
+  const [covers, setCovers] = useState<ArtworkPick[]>([]);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const [findingCovers, setFindingCovers] = useState(false);
+  const [coverAppId, setCoverAppId] = useState<number | null>(null);
   const [fetchMeta, setFetchMeta] = useState(true);
   const [dropped, setDropped] = useState<string[]>([]);
   const [programs, setPrograms] = useState<FolderProgram[]>([]);
@@ -290,7 +294,7 @@ export function AddGameModal({
     if (!title) return;
     setBusy(true);
     try {
-      const appId = match?.appId ?? null;
+      const appId = match?.appId ?? coverAppId;
       const reviewedCover = coverUrlEdited
         ? details.coverUrl.trim()
         : details.coverUrl.trim() || meta?.coverUrl || match?.coverUrl || (match ? portraitOf(match.appId) : '');
@@ -500,6 +504,68 @@ export function AddGameModal({
             {looking ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
             {match ? 'Find another match' : 'Search catalogue'}
           </button>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={`${btnGhost} flex items-center gap-2 text-xs disabled:opacity-50`}
+              disabled={findingCovers || title.length < 2}
+              onClick={() => {
+                setFindingCovers(true);
+                setCoverError(null);
+                void findArtworkChoices(title, match?.appId ?? coverAppId)
+                  .then((found) => {
+                    const rank = (kind: string) => (kind === 'portrait' ? 0 : kind === 'capsule' || kind === 'header' ? 1 : 2);
+                    setCovers([...found.picks].sort((a, b) => rank(a.kind) - rank(b.kind)));
+                    if (found.appId) setCoverAppId(found.appId);
+                    if (found.picks.length === 0) {
+                      setCoverError('The store has no other covers for this name. A file can still be chosen.');
+                    }
+                  })
+                  .catch((error) => setCoverError(error instanceof Error ? error.message : String(error)))
+                  .finally(() => setFindingCovers(false));
+              }}
+            >
+              {findingCovers ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+              {findingCovers ? 'Looking…' : 'Find other covers'}
+            </button>
+            <span className="text-[11px] text-muted">The automatic cover, or one of the other pictures the store has.</span>
+          </div>
+          {coverError && <p className="text-[11px] text-rose-300">{coverError}</p>}
+          {covers.length > 0 && (
+            <ul className="flex gap-2 overflow-x-auto pb-1">
+              {covers.map((pick) => (
+                <li key={pick.url} className="shrink-0">
+                  <button
+                    type="button"
+                    title={pick.label}
+                    onClick={() => {
+                      if (pick.kind === 'hero' || pick.kind === 'logo' || pick.kind === 'screenshot') {
+                        editDetails('backgroundUrl', pick.url);
+                      } else {
+                        editDetails('coverUrl', pick.url);
+                        set('coverPath', null);
+                      }
+                    }}
+                    className={`block overflow-hidden rounded-lg border-2 ${
+                      pick.url === details.coverUrl || pick.url === details.backgroundUrl
+                        ? 'border-accent'
+                        : 'border-line hover:border-muted'
+                    }`}
+                  >
+                    <img
+                      src={pick.url}
+                      alt={pick.label}
+                      loading="lazy"
+                      className={pick.kind === 'portrait' ? 'h-24 w-16 object-cover' : 'h-16 w-28 object-cover'}
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {!d.exePath.trim() && (

@@ -495,6 +495,10 @@ export function fetchAchievements(gameId: string): Promise<Achievement[]> {
  * Every picture the store has for a game, so a cover that crops badly can be
  * swapped for a better one.
  */
+export function findArtworkChoices(title: string, appId?: number | null): Promise<ArtworkFound> {
+  return call('artwork_choices', { title, appId: appId ?? null }, async () => ({ appId: null, picks: [] }));
+}
+
 export function findArtwork(gameId: string): Promise<ArtworkFound> {
   return call(
     'artwork_candidates',

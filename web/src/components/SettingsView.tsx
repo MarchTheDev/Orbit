@@ -300,7 +300,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
-  { label: 'Open in Orbit for .exe files', section: 'orbit-appearance', keywords: 'explorer windows context menu right click executable import' },
+  { label: 'Open in Orbit', section: 'orbit-appearance', keywords: 'explorer windows linux context menu right click executable import nautilus dolphin' },
   { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
@@ -460,7 +460,7 @@ export function SettingsView({
   const searchResults = settingsQuery.trim()
     ? SETTINGS_SEARCH_ITEMS.filter(
         (item) =>
-          (windows || item.label !== 'Open in Orbit for .exe files') &&
+          (desktopOs() === 'windows' || desktopOs() === 'linux' || item.label !== 'Open in Orbit') &&
           `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
       )
     : [];
@@ -622,18 +622,20 @@ export function SettingsView({
           className="ml-5"
         />
         {startupError && <p role="alert" className="text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
-        {windows && (
+        {(desktopOs() === 'windows' || desktopOs() === 'linux') && (
           <>
-            <SubHead>Windows Explorer</SubHead>
+            <SubHead>{desktopOs() === 'windows' ? 'Windows Explorer' : 'File manager'}</SubHead>
             <Checkbox
               checked={settings.openExeInOrbit !== false}
               onChange={(enabled) => void setOpenExeInOrbit(enabled)}
               disabled={exeContextMenuBusy}
-              label="Add “Open in Orbit” to .exe right-click menus"
-              hint="Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations."
+              label={desktopOs() === 'windows' ? 'Add “Open in Orbit” to .exe right-click menus' : 'Add “Open in Orbit” to right-click menus'}
+              hint={desktopOs() === 'windows'
+                ? 'Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations.'
+                : 'Enabled by default. Adds the action to KDE, Nemo and Thunar menus, to Nautilus and Caja under Scripts, and to Open With. It does not change which program opens a file. Close the file manager and open it again if the menu was already up.'}
             />
             {exeContextMenuError && (
-              <p role="alert" className="text-[11px] text-rose-300">Could not update the Explorer menu: {exeContextMenuError}</p>
+              <p role="alert" className="text-[11px] text-rose-300">Could not update the menu: {exeContextMenuError}</p>
             )}
           </>
         )}
@@ -816,7 +818,8 @@ export function SettingsView({
         <p className="text-xs leading-relaxed text-muted">
           A copy is filed as the publisher, then the game, so it can be found again by those names.
           Red Dead Redemption 2 from Rockstar Games is <span className="text-fg">Rockstar Games / Red Dead Redemption 2</span>,
-          not an id. Leave the path blank and Orbit uses its own backups folder.
+          not an id. The date and time are written in note.txt, not in another folder.
+          Leave the path blank and Orbit uses its own backups folder.
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">Where copies are kept</span>

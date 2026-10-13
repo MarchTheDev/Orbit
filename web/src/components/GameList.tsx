@@ -85,7 +85,15 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
         {games.map((g) => (
           <div
             key={g.id}
+            tabIndex={0}
+            data-orbit-pad="tile"
             onClick={() => onSelect(g.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                onSelect(g.id);
+              }
+            }}
             onPointerLeave={() => restoreFavorite(g.id)}
             onDoubleClick={() => onPlay(g)}
             // What the app's one right-click handler looks for.
@@ -115,6 +123,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                       else restoreFavorite(g.id);
                       onToggleFavorite(g.id);
                     }}
+                    data-orbit-pad-skip=""
                     aria-label={g.favorite ? `Remove ${g.title} from favorites` : `Add ${g.title} to favorites`}
                     aria-pressed={g.favorite}
                     title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -141,6 +150,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                   e.stopPropagation();
                   onEdit(g.id);
                 }}
+                data-orbit-pad-skip=""
                 title={`Edit ${g.title}`}
                 aria-label={`Edit ${g.title}`}
                 className="grid size-8 place-items-center rounded-lg border border-line text-muted opacity-100 transition hover:border-accent hover:text-accent sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
@@ -152,6 +162,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                   e.stopPropagation();
                   onPlay(g);
                 }}
+                data-orbit-pad-skip=""
                 title={`Play ${g.title}`}
                 className="btn-accent flex items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm"
               >

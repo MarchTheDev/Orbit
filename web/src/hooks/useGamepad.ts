@@ -27,7 +27,14 @@ function visible(el: HTMLElement): boolean {
 }
 
 function focusables(): HTMLElement[] {
-  return Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(visible);
+  return Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => {
+    if (!visible(el)) return false;
+    // The star and the edit button sit on the tile. A stick should land on the
+    // game, not on a control that only appears when the pointer is over it.
+    if (el.closest('[data-orbit-pad-skip]')) return false;
+    const tile = el.closest('[data-orbit-pad="tile"]');
+    return !tile || tile === el;
+  });
 }
 
 /**
@@ -88,13 +95,22 @@ function page(direction: 'left' | 'right') {
   window.dispatchEvent(new CustomEvent('orbit-pad-page', { detail: direction }));
 }
 
-function scrollByStick(pad: PadSnapshot) {
-  const x = pad.axes[2] ?? 0;
-  const y = pad.axes[3] ?? 0;
-  if (Math.abs(x) < 0.2 && Math.abs(y) < 0.2) return;
+/** Pixels per second from a stick axis. A light tilt stays slow; full tilt moves. */
+function stickSpeed(value: number): number {
+  const dead = 0.12;
+  const abs = Math.abs(value);
+  if (abs <= dead) return 0;
+  const span = Math.min(1, (abs - dead) / (1 - dead));
+  return Math.sign(value) * span * span * 780;
+}
+
+function scrollByStick(pad: PadSnapshot, dt: number) {
+  const x = stickSpeed(pad.axes[2] ?? 0);
+  const y = stickSpeed(pad.axes[3] ?? 0);
+  if (x === 0 && y === 0) return;
   const scroller = document.querySelector('.orbit-scroll');
   if (!(scroller instanceof HTMLElement)) return;
-  scroller.scrollBy({ left: x * 22, top: y * 28 });
+  scroller.scrollBy({ left: x * dt, top: y * dt });
 }
 
 function act(action: 'up' | 'down' | 'left' | 'right' | 'activate' | 'back' | 'play' | 'page-left' | 'page-right') {
@@ -131,6 +147,30 @@ export function useGamepad() {
     let unlisten: (() => void) | undefined;
     let alive = true;
     let lastNative = 0;
+    let latest: PadSnapshot | null = null;
+    let frame = 0;
+    let lastScroll = 0;
+    let scrolling = false;
+    const pump = (time: number) => {
+      if (!scrolling) return;
+      frame = window.requestAnimationFrame(pump);
+      if (!latest) return;
+      const dt = lastScroll ? Math.min(0.05, (time - lastScroll) / 1000) : 0.016;
+      lastScroll = time;
+      scrollByStick(latest, dt);
+    };
+    const startScroll = () => {
+      if (scrolling) return;
+      scrolling = true;
+      lastScroll = 0;
+      frame = window.requestAnimationFrame(pump);
+    };
+    const stopScroll = () => {
+      scrolling = false;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      lastScroll = 0;
+    };
     const linux = /linux|x11/i.test(navigator.userAgent);
 
     const apply = (now: PadSnapshot) => {
@@ -146,7 +186,7 @@ export function useGamepad() {
     };
     const tick = () => {
       if (nativeOn && native) {
-        scrollByStick(native);
+        latest = native;
         const held = heldDirection(native);
         if (held) {
           heldFor += 1;
@@ -165,7 +205,7 @@ export function useGamepad() {
         return;
       }
       const now = snapshot(pad);
-      scrollByStick(now);
+      latest = now;
       apply(now);
       const held = heldDirection(now);
       if (held) {
@@ -179,6 +219,7 @@ export function useGamepad() {
       if (timer) return;
       document.documentElement.classList.add('orbit-pad');
       ensureFocus();
+      startScroll();
       timer = window.setInterval(tick, 50);
     };
     const webConnected = () => Array.from(navigator.getGamepads?.() ?? []).some((item) => item && item.connected);
@@ -188,6 +229,8 @@ export function useGamepad() {
       timer = 0;
       previous = null;
       heldFor = 0;
+      latest = null;
+      stopScroll();
       document.documentElement.classList.remove('orbit-pad');
     };
     if (!linux) {
@@ -214,6 +257,7 @@ export function useGamepad() {
         if (stamp - lastNative < 40) return;
         lastNative = stamp;
         const now = { buttons, axes: payload.axes ?? [] };
+        latest = now;
         if (!nativeOn) {
           nativeOn = true;
           native = now;
@@ -238,6 +282,7 @@ export function useGamepad() {
         window.removeEventListener('gamepaddisconnected', stop);
       }
       window.clearInterval(timer);
+      stopScroll();
       document.documentElement.classList.remove('orbit-pad');
     };
   }, []);

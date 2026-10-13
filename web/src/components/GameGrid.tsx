@@ -123,7 +123,15 @@ function Tile({
 
   return (
     <div
+      tabIndex={0}
+      data-orbit-pad="tile"
       onClick={() => onSelect(game.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onSelect(game.id);
+        }
+      }}
       onDoubleClick={() => onPlay(game)}
       // What the app's one right-click handler looks for, so the menu works
       // from anywhere on the tile, including the artwork and the title.
@@ -161,6 +169,7 @@ function Tile({
             e.stopPropagation();
             onEdit(game.id);
           }}
+          data-orbit-pad-skip=""
           aria-label={`Edit ${game.title}`}
           title={`Edit ${game.title}`}
           className="absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full border border-white/20 bg-black/60 text-white opacity-100 shadow-lg backdrop-blur transition hover:bg-black/80 sm:-translate-y-2 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100 focus:translate-y-0 focus:opacity-100"
@@ -176,6 +185,7 @@ function Tile({
               else setDismissedUnfilledStar(false);
               onToggleFavorite(game.id);
             }}
+            data-orbit-pad-skip=""
             aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
             aria-pressed={game.favorite}
             title={game.favorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -192,6 +202,7 @@ function Tile({
             e.stopPropagation();
             onPlay(game);
           }}
+          data-orbit-pad-skip=""
           aria-label={`Play ${game.title}`}
           className="absolute bottom-3 right-3 grid size-11 translate-y-3 place-items-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
         >

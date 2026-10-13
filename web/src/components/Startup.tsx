@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { windowReady } from '../services/native';
+import { desktopOs } from '../utils/platform';
 import { Logo } from './ui/Logo';
 
 /**
@@ -18,9 +20,27 @@ export function Startup({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
-    const fade = window.setTimeout(() => setLeaving(true), 1150);
-    const done = window.setTimeout(onDone, 1650);
+    let alive = true;
+    let fade = 0;
+    let done = 0;
+    const start = () => {
+      if (!alive) return;
+      fade = window.setTimeout(() => setLeaving(true), 1150);
+      done = window.setTimeout(onDone, 1650);
+    };
+    // On Linux the window stays hidden until this page asks for it. Starting
+    // the clock before that means the opening has already finished by the time
+    // the window appears.
+    if (desktopOs() === 'linux') {
+      void windowReady().finally(() => {
+        if (!alive) return;
+        window.requestAnimationFrame(() => window.requestAnimationFrame(start));
+      });
+    } else {
+      start();
+    }
     return () => {
+      alive = false;
       window.clearTimeout(fade);
       window.clearTimeout(done);
     };

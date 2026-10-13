@@ -35,6 +35,7 @@ import {
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
+import { desktopOs } from './utils/platform';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
@@ -192,6 +193,16 @@ export default function App() {
       dispose?.();
     };
   }, [receiveOpenExePaths]);
+
+  // Linux takes long enough to map a hidden window that the opening has
+  // already finished by the time the usual reveal runs. Ask for the window as
+  // soon as this page exists, and let the opening wait until it is actually up.
+  useEffect(() => {
+    if (!isNative() || desktopOs() !== 'linux' || windowRevealDone.current) return;
+    windowRevealDone.current = true;
+    windowRevealScheduled.current = true;
+    void windowReady();
+  }, []);
 
   // Tauri keeps the window hidden until the app has loaded its saved theme and
   // painted the opening screen. Showing it on the first React frame exposed the
@@ -876,7 +887,14 @@ export default function App() {
         void stop();
         return;
       }
-      const picked = (selectedId && games.find((item) => item.id === selectedId)) || heroGame;
+      const focused = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest('[data-orbit-game]')
+        : null;
+      const focusedId = focused?.getAttribute('data-orbit-game');
+      const picked =
+        (focusedId && games.find((item) => item.id === focusedId)) ||
+        (selectedId && games.find((item) => item.id === selectedId)) ||
+        heroGame;
       if (picked) void startGame(picked);
     };
     const onBack = () => {
@@ -946,7 +964,7 @@ export default function App() {
   if (!settings) {
     return (
       <>
-        {!booted && <Startup onDone={() => setBooted(true)} />}
+        {desktopOs() !== 'linux' && !booted && <Startup onDone={() => setBooted(true)} />}
         <div className="h-full bg-bg" />
       </>
     );
