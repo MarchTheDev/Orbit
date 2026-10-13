@@ -17,8 +17,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gdk::WindowState;
+use glib::translate::ToGlibPtr;
 use glib::{ControlFlow, Propagation};
 use gtk::prelude::*;
+
+// GTK 3 sets the Wayland app id from the program name at the moment the
+// toplevel is created (`gdk_wayland_window_create_xdg_toplevel`). This is the
+// call that changes it afterwards. KWin listens for that change and looks the
+// new id up as a desktop file. The symbol has been in GDK since 3.24.22.
+#[link(name = "gdk-3")]
+extern "C" {
+    fn gdk_wayland_window_set_application_id(
+        window: *mut libc::c_void,
+        application_id: *const libc::c_char,
+    );
+}
 use webkit2gtk::{SettingsExt, WebViewExt};
 
 static ARMED: AtomicBool = AtomicBool::new(false);
@@ -103,11 +116,10 @@ fn gtk_window_of(view: &webkit2gtk::WebView) -> Option<gtk::Window> {
     view.toplevel()?.downcast::<gtk::Window>().ok()
 }
 
-/// The orange and white W is the desktop's placeholder. Wayland has no
-/// per-window icon, so the compositor looks the mark up by the application id
-/// (`com.orbit.launcher`, set in the config) against a desktop entry of that
-/// name. Painting the GTK window is only the X11 half, and the page load can
-/// write the placeholder back, so that half is put back whenever the icon changes.
+/// The orange and white W is the icon theme entry named `wayland`. KWin draws
+/// it when the window's Wayland app id matches no desktop file. The page icon
+/// never reaches that corner: WebKit stores a favicon and does not paint the
+/// decoration. Painting the GTK window is only the X11 half.
 fn hook_icon(view: &webkit2gtk::WebView) {
     publish_session_icon();
     if let Some(window) = gtk_window_of(view) {
@@ -150,69 +162,144 @@ fn apply_orbit_icon(window: &gtk::Window) {
         log::warn!("could not set the window icon: {error}");
     }
     let _ = gtk::Window::set_default_icon_from_file(&path);
+    // X11 uses the file above. Wayland ignores it and uses the app id.
+    publish_wayland_app_id(window);
     APPLYING_ICON.store(false, Ordering::SeqCst);
+}
+
+fn publish_wayland_app_id(window: &gtk::Window) {
+    if !window.display().backend().is_wayland() {
+        return;
+    }
+    let Some(gdk_window) = window.window() else {
+        return;
+    };
+    let Ok(id) = std::ffi::CString::new("com.orbit.launcher") else {
+        return;
+    };
+    unsafe {
+        gdk_wayland_window_set_application_id(
+            ToGlibPtr::to_glib_none(&gdk_window).0 as *mut libc::c_void,
+            id.as_ptr(),
+        );
+    }
+}
+
+/// Set the name KWin will look up, then make sure that lookup has a file.
+///
+/// Call this before GTK is initialised. `gtk_init` only fills the program
+/// name when it is still empty, so a later call is too late for the first
+/// window.
+pub fn prepare() {
+    glib::set_prgname(Some("com.orbit.launcher"));
+    publish_session_icon();
 }
 
 /// Drop a desktop entry the compositor can match to the application id.
 ///
-/// An installed package already has one. A binary, an AppImage, or a dev run
-/// does not, and that is the case that keeps the orange W. User data dirs are
-/// searched before the system ones, so this entry wins when both exist.
+/// KWin reads the Wayland app id and looks for `{id}.desktop` under the
+/// applications directories. It then passes `Icon=` to `QIcon::fromTheme`.
+/// An absolute path is not a theme name, so it does not draw. A missing file
+/// draws the theme icon `wayland`, which is the orange W.
 pub fn publish_session_icon() {
-    let Some(data) = data_home() else {
-        return;
-    };
-    let icon_dir = data.join("icons/hicolor/128x128/apps");
+    for data in data_homes() {
+        publish_one(&data);
+    }
+}
+
+fn publish_one(data: &std::path::Path) {
+    install_theme_icons(data);
     let apps = data.join("applications");
-    if std::fs::create_dir_all(&icon_dir).is_err() || std::fs::create_dir_all(&apps).is_err() {
+    if std::fs::create_dir_all(&apps).is_err() {
         return;
     }
-    let bytes: &[u8] = include_bytes!("../icons/128x128.png");
-    let icon = icon_dir.join("com.orbit.launcher.png");
-    let _ = write_if_changed(&icon, bytes);
-    // The menu entry can name the icon either way. Both files have to exist.
-    let _ = write_if_changed(&icon_dir.join("orbit.png"), bytes);
     let desktop = apps.join("com.orbit.launcher.desktop");
-    // The icon name needs a theme scan. A path does not, so a desktop that
-    // has not indexed the new file still draws Orbit instead of the orange W.
-    if write_if_changed(&desktop, session_desktop_entry(&icon).as_bytes()) {
-        for cmd in ["update-desktop-database", "kbuildsycoca6", "kbuildsycoca5"] {
-            let mut command = std::process::Command::new(cmd);
-            if cmd == "update-desktop-database" {
-                command.arg(&apps);
-            }
-            let _ = command
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
+    if write_if_changed(&desktop, session_desktop_entry().as_bytes()) {
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(&apps)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
+fn install_theme_icons(data: &std::path::Path) {
+    let theme = data.join("icons/hicolor");
+    let sizes: [(&str, &[u8]); 3] = [
+        ("32x32", include_bytes!("../icons/32x32.png")),
+        ("64x64", include_bytes!("../icons/64x64.png")),
+        ("128x128", include_bytes!("../icons/128x128.png")),
+    ];
+    let mut wrote = false;
+    for (size, bytes) in sizes {
+        let dir = theme.join(size).join("apps");
+        if std::fs::create_dir_all(&dir).is_err() {
+            continue;
+        }
+        // Same picture under both names. The desktop file asks for the app id.
+        // A package menu entry asks for `orbit`.
+        wrote |= write_if_changed(&dir.join("com.orbit.launcher.png"), bytes);
+        wrote |= write_if_changed(&dir.join("orbit.png"), bytes);
+    }
+    if !wrote {
+        return;
+    }
+    // A cache that was built before this file existed hides it. Rebuild, and
+    // if that tool is not installed, drop the cache so the lookup scans.
+    let cache = theme.join("icon-theme.cache");
+    let updated = std::process::Command::new("gtk-update-icon-cache")
+        .args(["-f", "-t"])
+        .arg(&theme)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !updated {
+        let _ = std::fs::remove_file(cache);
+    }
+}
+
+/// Directories a compositor actually searches. An AppImage can point
+/// `XDG_DATA_HOME` at its mount; the desktop, which is a different process,
+/// still looks in the login user's `~/.local/share`. Write both when they differ.
+fn data_homes() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        if !home.is_empty() {
+            homes.push(PathBuf::from(home).join(".local/share"));
         }
     }
+    if let Some(dir) = std::env::var_os("XDG_DATA_HOME") {
+        if !dir.is_empty() {
+            let path = PathBuf::from(dir);
+            if !homes.contains(&path) {
+                homes.push(path);
+            }
+        }
+    }
+    homes
 }
 
 fn data_home() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("XDG_DATA_HOME") {
-        if !dir.is_empty() {
-            return Some(PathBuf::from(dir));
-        }
-    }
-    Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share"))
+    data_homes().into_iter().next()
 }
 
-fn session_desktop_entry(icon: &std::path::Path) -> String {
-    format!(
-        "\
+fn session_desktop_entry() -> String {
+    // Icon= is a theme name. KWin passes it to QIcon::fromTheme and ignores a path.
+    "\
 [Desktop Entry]
 Type=Application
 Name=Orbit
 Comment=A library for the games on your PC
 Exec=orbit
-Icon={}
+Icon=com.orbit.launcher
 NoDisplay=true
 StartupWMClass=com.orbit.launcher
-",
-        icon.display()
-    )
+"
+    .to_string()
 }
 
 fn write_if_changed(path: &std::path::Path, bytes: &[u8]) -> bool {
@@ -344,4 +431,16 @@ fn park(window: &gtk::Window) {
     window.set_skip_taskbar_hint(true);
     window.deiconify();
     window.hide();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_desktop_entry;
+
+    #[test]
+    fn the_titlebar_icon_is_a_theme_name() {
+        let text = session_desktop_entry();
+        assert!(text.contains("Icon=com.orbit.launcher\n"), "{text}");
+        assert!(!text.contains("Icon=/"), "{text}");
+    }
 }

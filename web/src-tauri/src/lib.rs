@@ -1419,10 +1419,10 @@ fn open_game_folder(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Before the window exists, so a Wayland compositor can match the app id
-    // to a desktop entry instead of drawing the orange W.
+    // Before GTK starts. GTK 3 copies the program name into the Wayland app id,
+    // and KWin draws the orange W when that id matches no desktop file.
     #[cfg(target_os = "linux")]
-    linux_window::publish_session_icon();
+    linux_window::prepare();
 
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");

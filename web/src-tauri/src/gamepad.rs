@@ -580,15 +580,17 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind)> {
                 continue;
             };
             if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) {
-                consider(entry.path(), DeviceKind::Evdev, 1);
+                consider(entry.path(), DeviceKind::Evdev, 3);
             }
         }
     }
     if let Ok(entries) = fs::read_dir("/dev") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
+            // Below every event node the kernel already translated. A raw
+            // report we misread would otherwise be held instead of that node.
             if name.starts_with("hidraw") {
-                consider(entry.path(), DeviceKind::Hid, 40);
+                consider(entry.path(), DeviceKind::Hid, 1);
             }
         }
     }
@@ -966,7 +968,9 @@ fn gamepad_keys(file: &File) -> Option<bool> {
     let size = bits.len() as u64;
     let request = (2u64 << 30) | (size << 16) | ((b'E' as u64) << 8) | (0x20 + 1);
     let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as libc::Ioctl, bits.as_mut_ptr()) };
-    if rc <= 0 {
+    // Success is 0. Treating that as failure skipped every real pad whose
+    // path was `/dev/input/eventN`, which is the node most controllers have.
+    if rc < 0 {
         return None;
     }
     Some(key_bit(&bits, 0x130) || key_bit(&bits, 0x120) || key_bit(&bits, 0x220))
