@@ -57,7 +57,10 @@ export function Startup({ onDone }: { onDone: () => void }) {
       <span className="orbit-ring orbit-ring-late" />
 
       <div className="relative flex flex-col items-center">
-        <Logo className="orbit-startup-mark size-28 text-accent drop-shadow-[0_0_45px_var(--c-accent)]" />
+        <span className="orbit-startup-glow" aria-hidden />
+        {/* No filter and no transform on the mark. Both make WebKitGTK skip
+            painting it until something else finishes loading. */}
+        <Logo className="orbit-startup-mark relative size-28 text-accent" animated={false} />
         <p className="orbit-startup-name mt-6 text-2xl font-black tracking-[0.5em] text-fg">ORBIT</p>
         <p className="orbit-startup-name mt-2 text-[11px] uppercase tracking-[0.35em] text-muted">
           your games, in one place

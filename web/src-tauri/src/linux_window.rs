@@ -11,6 +11,7 @@
 //! unminimizes — feels immediate.
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -27,6 +28,7 @@ static STATE_HOOKED: AtomicBool = AtomicBool::new(false);
 static BUTTON_HOOKED: AtomicBool = AtomicBool::new(false);
 static REALIZE_HOOKED: AtomicBool = AtomicBool::new(false);
 static SEARCHING: AtomicBool = AtomicBool::new(false);
+static ICON_HOOKED: AtomicBool = AtomicBool::new(false);
 
 /// Whether minimise should leave the taskbar. Updated when settings change.
 pub fn set_armed(on: bool) {
@@ -75,6 +77,7 @@ pub fn install(window: &tauri::WebviewWindow) {
         if let Some(settings) = WebViewExt::settings(&view) {
             settings.set_enable_page_cache(false);
         }
+        hook_icon(&view);
         if let Some(gtk_window) = gtk_window_of(&view) {
             arm(&gtk_window);
             schedule_button_search(gtk_window);
@@ -85,6 +88,7 @@ pub fn install(window: &tauri::WebviewWindow) {
         }
         let view = view.clone();
         view.connect_realize(move |view| {
+            hook_icon(view);
             if let Some(gtk_window) = gtk_window_of(view) {
                 arm(&gtk_window);
                 schedule_button_search(gtk_window);
@@ -95,6 +99,50 @@ pub fn install(window: &tauri::WebviewWindow) {
 
 fn gtk_window_of(view: &webkit2gtk::WebView) -> Option<gtk::Window> {
     view.toplevel()?.downcast::<gtk::Window>().ok()
+}
+
+/// The titlebar icon. Without one, WebKit puts its own mark there: an orange
+/// and white W. Setting it once is not enough, because the page load writes
+/// that mark back, so the search that is already walking the titlebar puts
+/// Orbit's icon back until the load has finished doing that.
+fn hook_icon(view: &webkit2gtk::WebView) {
+    if let Some(window) = gtk_window_of(view) {
+        apply_orbit_icon(&window);
+    }
+    if ICON_HOOKED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    view.connect_load_changed(|view, _event| {
+        if let Some(window) = gtk_window_of(view) {
+            apply_orbit_icon(&window);
+        }
+    });
+}
+
+fn apply_orbit_icon(window: &gtk::Window) {
+    let Some(path) = orbit_icon_file() else {
+        return;
+    };
+    // The name is what a panel looks up. The file is what the titlebar draws
+    // when that lookup misses, which is every run that did not install a deb.
+    window.set_icon_name(Some("com.orbit.launcher"));
+    if let Err(error) = window.set_icon_from_file(&path) {
+        log::warn!("could not set the window icon: {error}");
+    }
+    let _ = gtk::Window::set_default_icon_from_file(&path);
+}
+
+fn orbit_icon_file() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home).join(".local/share/icons/hicolor/128x128/apps/com.orbit.launcher.png");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    let bytes: &[u8] = include_bytes!("../icons/128x128.png");
+    if std::fs::read(&path).ok().as_deref() != Some(bytes) {
+        std::fs::write(&path, bytes).ok()?;
+    }
+    Some(path)
 }
 
 fn arm(window: &gtk::Window) {
@@ -124,6 +172,7 @@ fn schedule_button_search(window: gtk::Window) {
         let n = tries.get();
         tries.set(n.saturating_add(1));
         hook_button(&window);
+        apply_orbit_icon(&window);
         if BUTTON_HOOKED.load(Ordering::SeqCst) || n > 40 {
             ControlFlow::Break
         } else {

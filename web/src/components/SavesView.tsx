@@ -3,6 +3,7 @@ import { ArchiveRestore, FolderOpen, GripVertical, HardDriveDownload, RefreshCw,
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
+  revealInExplorer,
   backupSave,
   findSave,
   isNative,
@@ -137,8 +138,18 @@ export function SavesView({
       </div>
 
       {status?.root && (
-        <p className="mb-4 text-xs text-muted">
-          Copies are kept in <span className="text-fg">{status.root}</span>.
+        <p className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>
+            Copies are kept in <span className="text-fg">{status.root}</span>.
+          </span>
+          <button
+            type="button"
+            onClick={() => void revealInExplorer(status.root)}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-fg"
+          >
+            <FolderOpen className="size-3" />
+            Open
+          </button>
         </p>
       )}
 

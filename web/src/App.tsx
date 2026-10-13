@@ -201,9 +201,21 @@ export default function App() {
   // soon as this page exists, and let the opening wait until it is actually up.
   useEffect(() => {
     if (!isNative() || desktopOs() !== 'linux' || windowRevealDone.current) return;
-    windowRevealDone.current = true;
-    windowRevealScheduled.current = true;
-    void windowReady();
+    // Two frames, so the opening mark has actually been painted before the
+    // window is mapped. Showing the empty first frame is what made the logo
+    // look as if it was still loading.
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        windowRevealDone.current = true;
+        windowRevealScheduled.current = true;
+        void windowReady();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
   }, []);
 
   // Tauri keeps the window hidden until the app has loaded its saved theme and
@@ -968,7 +980,7 @@ export default function App() {
   if (!settings) {
     return (
       <>
-        {desktopOs() !== 'linux' && !booted && <Startup onDone={() => setBooted(true)} />}
+        {!booted && <Startup onDone={() => setBooted(true)} />}
         <div className="h-full bg-bg" />
       </>
     );

@@ -34,6 +34,8 @@ export function Logo({
   return (
     <svg
       viewBox="0 0 512 512"
+      width="512"
+      height="512"
       role="img"
       aria-label={title}
       className={className}

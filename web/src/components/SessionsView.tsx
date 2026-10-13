@@ -17,7 +17,6 @@ import {
   fmtDateTime,
   fmtEndedBy,
   fromLocalInput,
-  parseDuration,
   playtimeToSeconds,
   splitPlaytime,
   toLocalInput,
@@ -182,7 +181,7 @@ export function SessionsView({
           <p className="mt-0.5 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
         </div>
         <button
-          className={`${btnGhost} ml-auto flex shrink-0 items-center gap-2`}
+          className={`${btnPrimary} ml-auto flex shrink-0 items-center gap-2`}
           onClick={() => {
             setLoggingGameId(null);
             setLogging(true);
@@ -524,15 +523,16 @@ export function LogSession({
 }) {
   const [gameId, setGameId] = useState(initialGameId ?? games[0]?.id ?? '');
   const [at, setAt] = useState(() => toLocalInput(Math.floor(Date.now() / 1000)));
-  const [duration, setDuration] = useState('1h');
+  const [hours, setHours] = useState(1);
+  const [minutes, setMinutes] = useState(0);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    const secs = parseDuration(duration);
-    if (secs === null || secs <= 0) {
-      setError('That is not a length of time. Try 1h, 45m, or 90.');
+    const secs = hours * 3600 + minutes * 60;
+    if (!Number.isFinite(secs) || secs <= 0 || minutes < 0 || minutes > 59 || hours < 0) {
+      setError('A session has to be longer than zero.');
       return;
     }
     const startedAt = fromLocalInput(at);
@@ -565,18 +565,29 @@ export function LogSession({
             />
           </label>
         )}
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">When</span>
+          <DateTimePicker value={at} onChange={setAt} />
+        </label>
         <div className="flex gap-3">
           <label className="block flex-1 text-sm">
-            <span className="mb-1 block text-muted">When</span>
-            <DateTimePicker value={at} onChange={setAt} />
+            <span className="mb-1 block text-muted">Hours</span>
+            <input
+              type="number"
+              min={0}
+              value={hours}
+              onChange={(e) => setHours(Number(e.target.value))}
+              className={inputCls}
+            />
           </label>
           <label className="block flex-1 text-sm">
-            <span className="mb-1 block text-muted">How long</span>
+            <span className="mb-1 block text-muted">Minutes</span>
             <input
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              placeholder="1h 30m"
-              spellCheck={false}
+              type="number"
+              min={0}
+              max={59}
+              value={minutes}
+              onChange={(e) => setMinutes(Number(e.target.value))}
               className={inputCls}
             />
           </label>

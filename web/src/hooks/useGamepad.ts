@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { heldDirection, padEdges, type PadSnapshot } from '../utils/gamepad';
+import { heldDirection, journalMove, padDistance, padEdges, type JournalZone, type PadBox, type PadSnapshot } from '../utils/gamepad';
 
 interface NativePad {
   connected: boolean;
@@ -44,37 +44,108 @@ function focusables(): HTMLElement[] {
  * the right, not the next button in the markup. The nearest edge in that
  * direction wins, and a tie goes to the closer one.
  */
-function neighbor(from: HTMLElement, direction: 'up' | 'down' | 'left' | 'right'): HTMLElement | null {
-  const origin = from.getBoundingClientRect();
-  const cx = origin.left + origin.width / 2;
-  const cy = origin.top + origin.height / 2;
+function boxOf(el: HTMLElement): PadBox {
+  const box = el.getBoundingClientRect();
+  return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+}
+
+function inTopbar(el: HTMLElement): boolean {
+  return el.closest('.orbit-topbar') !== null;
+}
+
+/** The sticky bar is only a step away when you are already at the top of the page. */
+function topbarAllowed(from: HTMLElement, direction: 'up' | 'down' | 'left' | 'right'): boolean {
+  if (inTopbar(from)) return true;
+  if (direction !== 'up') return false;
+  const bar = document.querySelector('.orbit-topbar');
+  if (!(bar instanceof HTMLElement)) return true;
+  return from.getBoundingClientRect().top - bar.getBoundingClientRect().bottom < 140;
+}
+
+function neighbor(
+  from: HTMLElement,
+  direction: 'up' | 'down' | 'left' | 'right',
+  root?: HTMLElement | null,
+): HTMLElement | null {
+  const origin = boxOf(from);
+  const allowBar = !root && topbarAllowed(from, direction);
   let best: { el: HTMLElement; score: number } | null = null;
   for (const el of focusables()) {
     if (el === from) continue;
-    const box = el.getBoundingClientRect();
-    const x = box.left + box.width / 2;
-    const y = box.top + box.height / 2;
-    const dx = x - cx;
-    const dy = y - cy;
-    const forward =
-      direction === 'right' ? dx :
-      direction === 'left' ? -dx :
-      direction === 'down' ? dy :
-      -dy;
-    if (forward < 8) continue;
-    const sideways = direction === 'left' || direction === 'right' ? Math.abs(dy) : Math.abs(dx);
-    const score = forward + sideways * 1.6;
+    if (root && !root.contains(el)) continue;
+    if (!allowBar && inTopbar(el)) continue;
+    const score = padDistance(origin, boxOf(el), direction);
+    if (score == null) continue;
     if (!best || score < best.score) best = { el, score };
   }
   return best?.el ?? null;
+}
+
+function zoneRoot(name: string): HTMLElement | null {
+  const root = document.querySelector(`[data-orbit-pad-zone="${name}"]`);
+  return root instanceof HTMLElement ? root : null;
+}
+
+function zoneName(el: HTMLElement): JournalZone | null {
+  if (el.hasAttribute('data-orbit-journal-game')) return 'journal-game';
+  const name = el.closest('[data-orbit-pad-zone]')?.getAttribute('data-orbit-pad-zone');
+  if (name === 'journal-logs' || name === 'journal-notes') return name;
+  return null;
+}
+
+function firstInZone(name: string): HTMLElement | null {
+  const root = zoneRoot(name);
+  if (!root) return null;
+  const entry = root.querySelector('[data-orbit-pad="journal-entry"]');
+  if (entry instanceof HTMLElement && visible(entry)) return entry;
+  return focusables().find((el) => root.contains(el)) ?? null;
+}
+
+function lastInZone(name: string): HTMLElement | null {
+  const root = zoneRoot(name);
+  if (!root) return null;
+  const entries = Array.from(root.querySelectorAll<HTMLElement>('[data-orbit-pad="journal-entry"]')).filter(visible);
+  if (entries.length > 0) return entries[entries.length - 1];
+  const items = focusables().filter((el) => root.contains(el));
+  return items[items.length - 1] ?? null;
+}
+
+function selectedJournalGame(): HTMLElement | null {
+  const id = zoneRoot('journal-logs')?.getAttribute('data-orbit-pad-game');
+  if (!id || typeof CSS === 'undefined' || !CSS.escape) return null;
+  const el = document.querySelector(`[data-orbit-journal-game="${CSS.escape(id)}"]`);
+  return el instanceof HTMLElement && visible(el) ? el : null;
+}
+
+function journalTarget(current: HTMLElement, direction: 'up' | 'down' | 'left' | 'right'): HTMLElement | null {
+  const zone = zoneName(current);
+  if (!zone) return null;
+  const root = zone === 'journal-game' ? null : zoneRoot(zone);
+  const inside = root ? neighbor(current, direction, root) : null;
+  const hop = journalMove(zone, direction, inside !== null);
+  if (hop === 'inside') return inside;
+  if (hop === 'logs') return firstInZone('journal-logs') ?? firstInZone('journal-notes');
+  if (hop === 'logs-last') return lastInZone('journal-logs') ?? firstInZone('journal-logs');
+  if (hop === 'notes') return firstInZone('journal-notes');
+  if (hop === 'game') return selectedJournalGame();
+  if (hop === 'stay') return current;
+  return null;
 }
 
 function move(direction: 'up' | 'down' | 'left' | 'right') {
   const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const list = focusables();
   if (list.length === 0) return;
-  const next = current && list.includes(current) ? neighbor(current, direction) : list[0];
-  (next ?? list[0]).focus();
+  if (!current || !list.includes(current)) {
+    list[0].focus();
+    return;
+  }
+  const routed = journalTarget(current, direction);
+  if (routed) {
+    routed.focus();
+    return;
+  }
+  (neighbor(current, direction) ?? current).focus();
 }
 
 let padActivateAt = 0;
@@ -263,15 +334,22 @@ export function useGamepad() {
         // is not a press, and acting on it is what made the window unusable.
         if (buttons.filter(Boolean).length > 4) return;
         const stamp = Date.now();
-        if (stamp - lastNative < 40) return;
+        const buttonEdge = !nativeOn || buttons.some((down, index) => down !== (native?.buttons[index] === true));
+        // Stick reports can wait. A button cannot, or the press that arrived
+        // with a stick report is thrown away and the pad feels dead.
+        if (!buttonEdge && stamp - lastNative < 40) return;
         lastNative = stamp;
         const now = { buttons, axes: payload.axes ?? [] };
         latest = now;
         if (!nativeOn) {
           nativeOn = true;
           native = now;
-          previous = now;
+          // The first report the page hears may already be a press: the
+          // resting report can arrive before this listener exists. Treat
+          // released as the baseline so that press still counts.
+          previous = { buttons: buttons.map(() => false), axes: (payload.axes ?? []).map(() => 0) };
           start();
+          apply(now);
           return;
         }
         native = now;

@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { toLocalInput } from '../../utils/format';
@@ -12,6 +12,53 @@ interface Props {
   title?: string;
   clearable?: boolean;
   className?: string;
+}
+
+function TimeStep({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const wrap = (next: number) => onChange((next + max + 1) % (max + 1));
+  return (
+    <span className="flex items-center gap-0.5">
+      <span className="sr-only">{label}</span>
+      <button
+        type="button"
+        aria-label={`Earlier ${label.toLowerCase()}`}
+        onClick={() => wrap(value - 1)}
+        className="grid size-6 place-items-center rounded-md text-muted hover:bg-panel hover:text-fg"
+      >
+        <ChevronDown className="size-3.5" />
+      </button>
+      <input
+        inputMode="numeric"
+        aria-label={label}
+        value={pad(value)}
+        onChange={(event) => {
+          const digits = event.target.value.replace(/\D/g, '').slice(-2);
+          if (!digits) return;
+          const next = Number(digits);
+          if (next <= max) onChange(next);
+        }}
+        className="w-7 bg-transparent text-center font-mono text-sm tabular-nums text-fg outline-none"
+      />
+      <button
+        type="button"
+        aria-label={`Later ${label.toLowerCase()}`}
+        onClick={() => wrap(value + 1)}
+        className="grid size-6 place-items-center rounded-md text-muted hover:bg-panel hover:text-fg"
+      >
+        <ChevronUp className="size-3.5" />
+      </button>
+    </span>
+  );
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -228,17 +275,22 @@ export function DateTimePicker({
           </div>
 
           <div className="mt-3 flex items-center gap-2 border-t border-line/70 pt-3">
-            <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-xs text-muted focus-within:border-accent">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-line bg-panel2 px-2 py-1 text-fg">
               <Clock3 className="size-3.5 shrink-0 text-accent" aria-hidden />
-              <span className="sr-only">Time</span>
-              <input
-                type="time"
-                value={`${pad(pickerDate.getHours())}:${pad(pickerDate.getMinutes())}`}
-                onChange={(event) => chooseTime(event.target.value)}
-                aria-label="Time"
-                className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none"
+              <TimeStep
+                label="Hour"
+                value={pickerDate.getHours()}
+                max={23}
+                onChange={(hours) => chooseTime(`${pad(hours)}:${pad(pickerDate.getMinutes())}`)}
               />
-            </label>
+              <span className="text-muted" aria-hidden>:</span>
+              <TimeStep
+                label="Minute"
+                value={pickerDate.getMinutes()}
+                max={59}
+                onChange={(minutes) => chooseTime(`${pad(pickerDate.getHours())}:${pad(minutes)}`)}
+              />
+            </div>
             <button
               type="button"
               onClick={() => chooseDay(new Date())}

@@ -600,7 +600,7 @@ export function GameDetail({
                 <h3 className="text-sm font-semibold">Session history</h3>
                 <button
                   onClick={() => setLoggingSession(true)}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-panel2 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-accent hover:text-accent"
+                  className="btn-accent flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs"
                 >
                   <Clock className="size-3.5" />
                   Log time by hand

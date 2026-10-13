@@ -53,6 +53,78 @@ export function padEdges(previous: PadSnapshot | null, next: PadSnapshot): PadAc
   return actions;
 }
 
+export interface PadBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * How far `to` is from `from` in one direction, or null when it is not that way.
+ *
+ * The gap is measured edge to edge, and a control that shares the cross axis
+ * beats one that merely has a closer centre. A sticky tab at the top of the
+ * window would otherwise win every upward press once the page has scrolled.
+ */
+export function padDistance(from: PadBox, to: PadBox, direction: 'up' | 'down' | 'left' | 'right'): number | null {
+  const horizontal = direction === 'left' || direction === 'right';
+  const forward = direction === 'right' || direction === 'down';
+  const fromStart = horizontal ? from.left : from.top;
+  const fromEnd = horizontal ? from.right : from.bottom;
+  const toStart = horizontal ? to.left : to.top;
+  const toEnd = horizontal ? to.right : to.bottom;
+  const gap = forward ? toStart - fromEnd : fromStart - toEnd;
+  if (gap < -8) {
+    const fromCenter = (fromStart + fromEnd) / 2;
+    const toCenter = (toStart + toEnd) / 2;
+    const centerDelta = forward ? toCenter - fromCenter : fromCenter - toCenter;
+    if (centerDelta < 8) return null;
+  }
+  const fromCrossStart = horizontal ? from.top : from.left;
+  const fromCrossEnd = horizontal ? from.bottom : from.right;
+  const toCrossStart = horizontal ? to.top : to.left;
+  const toCrossEnd = horizontal ? to.bottom : to.right;
+  const overlap = Math.min(fromCrossEnd, toCrossEnd) - Math.max(fromCrossStart, toCrossStart);
+  const crossGap = overlap > 0
+    ? 0
+    : Math.min(Math.abs(toCrossStart - fromCrossEnd), Math.abs(fromCrossStart - toCrossEnd));
+  // A miss has to be almost touching to beat a control that actually lines up.
+  const align = overlap > 0 ? 0 : crossGap + 240;
+  return Math.max(0, gap) + align;
+}
+
+export type JournalZone = 'journal-game' | 'journal-logs' | 'journal-notes';
+
+/**
+ * Where a Journal press should land, before the generic search.
+ *
+ * Right from a game is the log, not the notes underneath it. Up from the notes
+ * is the log, not the Journal tab stuck to the top of the window.
+ */
+export function journalMove(
+  zone: JournalZone | null,
+  direction: 'up' | 'down' | 'left' | 'right',
+  hasInside: boolean,
+): 'logs' | 'logs-last' | 'notes' | 'game' | 'inside' | 'leave' | 'stay' {
+  if (zone === 'journal-game' && direction === 'right') return 'logs';
+  if (zone === 'journal-logs') {
+    if (hasInside) return 'inside';
+    if (direction === 'left') return 'game';
+    if (direction === 'down') return 'notes';
+    if (direction === 'right') return 'stay';
+    return 'leave';
+  }
+  if (zone === 'journal-notes') {
+    if (direction === 'up') return 'logs-last';
+    if (direction === 'left') return hasInside ? 'inside' : 'game';
+    if (hasInside && (direction === 'down' || direction === 'right')) return 'inside';
+    if (direction === 'down' || direction === 'right') return 'stay';
+    return 'leave';
+  }
+  return 'leave';
+}
+
 /** Whether a direction is still held, so a grid can keep stepping. */
 export function heldDirection(pad: PadSnapshot): 'up' | 'down' | 'left' | 'right' | null {
   if (pad.buttons[12] || (pad.axes[1] ?? 0) < -DEAD) return 'up';

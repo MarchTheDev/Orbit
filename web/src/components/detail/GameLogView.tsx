@@ -261,6 +261,10 @@ export function GameLogView({
         </p>
       </div>
 
+      <div
+        data-orbit-pad-zone={withClock ? 'journal-logs' : undefined}
+        data-orbit-pad-game={withClock ? gameId : undefined}
+      >
       {draft ? (
         <div className="mb-4 space-y-2 rounded-xl border border-accent/40 bg-accent/5 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
@@ -400,7 +404,8 @@ export function GameLogView({
                     type="button"
                     onClick={() => toggleDetails(r)}
                     disabled={draft?.id === r.id}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                    data-orbit-pad={withClock ? 'journal-entry' : undefined}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left disabled:cursor-default"
                     aria-expanded={expanded}
                     title={draft?.id === r.id ? 'This entry is being edited above' : expanded ? 'Close this entry' : 'Open this entry'}
                   >
@@ -495,11 +500,16 @@ export function GameLogView({
         </ul>
       )}
 
+      </div>
+
       {/* The game's own notes, underneath the entries: what the player wants to
           remember about playing it, as opposed to what happened when. Write in
           ordinary Markdown, then switch to View to see how it will read. */}
       {onNotes && (
-        <div className="mt-5 border-t border-line pt-4">
+        <div
+          className="mt-5 border-t border-line pt-4"
+          data-orbit-pad-zone={withClock ? 'journal-notes' : undefined}
+        >
           <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
             <span className="text-[11px] uppercase tracking-widest text-muted">Notes on {gameTitle}</span>
             <span className="text-[11px] text-muted/70">
