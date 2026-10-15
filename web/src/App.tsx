@@ -307,9 +307,9 @@ export default function App() {
     }
     // A library with no sound settings at all is the usual case, and it means
     // "nobody has said anything", not "somebody said no".
-    ambient.start(sound?.volume ?? 0.35);
+    ambient.start(sound?.volume ?? 0.35, sound?.file || null);
     ambient.setFocused(document.hasFocus(), sound?.unfocused === true);
-  }, [settings?.sound?.enabled, settings?.sound?.volume, settings?.sound?.unfocused]);
+  }, [settings?.sound?.enabled, settings?.sound?.volume, settings?.sound?.unfocused, settings?.sound?.file]);
 
   /**
    * Stop the decorative loops whenever something else has the window.
@@ -1042,6 +1042,7 @@ export default function App() {
                 void clearLibrary().then(() => location.reload());
               }}
               onReset={resetEverything}
+              onLibraryChanged={() => void reload()}
               update={update}
               onFoundUpdate={setUpdate}
             />

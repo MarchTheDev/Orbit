@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Game, MetaData, Settings } from '../types';
 
-import { deleteGame as removeFromDb, listGames, saveGame, clearLibrary } from '../services/native';
+import { deleteGame as removeFromDb, listGames, saveGame, clearLibrary, writePlaythroughNotes } from '../services/native';
+import { rememberedPlaythrough } from '../services/playthroughs';
 import { loadSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyFont, applyTheme } from '../data/themes';
@@ -112,6 +113,16 @@ export function useLibrary() {
       gamesRef.current = current.map((g) => (g.id === id ? updated : g));
       setGames(gamesRef.current);
       save(updated);
+      // Notes belong to the run that was open when they were typed. The id is
+      // captured now, so a switch that happens while this save is queued cannot
+      // move the words onto the other run.
+      if (typeof next.notes === 'string') {
+        const notes = next.notes;
+        const playthroughId = rememberedPlaythrough(id);
+        queue.current = queue.current
+          .then(() => writePlaythroughNotes(id, notes, playthroughId))
+          .catch(console.error);
+      }
     },
     [save],
   );

@@ -19,7 +19,9 @@ use serde_json::Value;
 /// 5, a game can be on the library's shelf before it has a program to start.
 /// 6, a game can be hidden from the library without being removed from it.
 /// 7, a log entry can keep extra details apart from its short summary.
-const SCHEMA_VERSION: i64 = 7;
+/// 8, a game can have more than one playthrough, each with its own journal
+///    and its own notes. Time already counted stays on the game.
+const SCHEMA_VERSION: i64 = 8;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -131,6 +133,11 @@ pub struct SessionRow {
     /// True when the player typed the time in rather than playing.
     pub manual: bool,
     pub ended_by: Option<String>,
+    /// Which run this time belongs to. The total on the game is unchanged.
+    #[serde(default)]
+    pub playthrough_id: Option<String>,
+    #[serde(default)]
+    pub playthrough_name: String,
 }
 
 /// A player's own note about a game.
@@ -153,6 +160,25 @@ pub struct GameLogRow {
     /// A longer free-text note about this entry, apart from what happened.
     pub details: String,
     pub created_at: i64,
+    /// Which run this entry belongs to. Empty only on a row the migration missed.
+    #[serde(default)]
+    pub playthrough_id: Option<String>,
+    #[serde(default)]
+    pub playthrough_name: String,
+}
+
+/// One run of a game: its journal entries and the notes that belong with them.
+///
+/// Time already counted stays on the game. A playthrough is a separate record,
+/// not a second copy of the playtime.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaythroughRow {
+    pub id: String,
+    pub game_id: String,
+    pub name: String,
+    pub notes: String,
+    pub current: bool,
 }
 
 /// Library-wide figures for the statistics row.
@@ -342,6 +368,10 @@ impl Db {
         // Version 7 separates the short event label from the player's longer
         // free-text note about that log entry.
         Self::upgrade_to_7(conn)?;
+
+        // Version 8 gives a game more than one run. Each playthrough keeps its
+        // own journal and its own notes. Time already counted stays on the game.
+        Self::upgrade_to_8(conn)?;
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
@@ -539,7 +569,98 @@ impl Db {
         Ok(())
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+    /// One playthrough per game that does not have one yet, and a column so a
+    /// journal entry or a session can say which run it belongs to.
+    ///
+    /// Existing notes and entries move onto a playthrough called Main. Nothing
+    /// about playtime is rewritten: a session keeps its duration, and only gains
+    /// a name for the run it was played on.
+    fn upgrade_to_8(conn: &Connection) -> Result<(), String> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS playthroughs (
+                id         TEXT    PRIMARY KEY,
+                game_id    TEXT    NOT NULL,
+                name       TEXT    NOT NULL,
+                notes      TEXT    NOT NULL DEFAULT '',
+                position   INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                current    INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_playthroughs_game ON playthroughs(game_id, position);",
+        )
+        .map_err(|e| format!("Could not add playthroughs: {e}"))?;
+
+        add_column(
+            conn,
+            "game_logs",
+            "playthrough_id",
+            "ALTER TABLE game_logs ADD COLUMN playthrough_id TEXT",
+        )?;
+        add_column(
+            conn,
+            "sessions",
+            "playthrough_id",
+            "ALTER TABLE sessions ADD COLUMN playthrough_id TEXT",
+        )?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_game_logs_playthrough ON game_logs(playthrough_id);
+             CREATE INDEX IF NOT EXISTS idx_sessions_playthrough ON sessions(playthrough_id);",
+        )
+        .map_err(|e| format!("Could not index playthroughs: {e}"))?;
+
+        let games: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, COALESCE(notes, '') FROM games")
+                .map_err(|e| format!("Could not read games for playthroughs: {e}"))?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(|e| format!("Could not read games for playthroughs: {e}"))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Could not read games for playthroughs: {e}"))?
+        };
+        for (game_id, notes) in games {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM playthroughs WHERE game_id = ?1",
+                    params![game_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| format!("Could not read playthroughs: {e}"))?;
+            if count > 0 {
+                continue;
+            }
+            let id = fresh_playthrough_id();
+            conn.execute(
+                "INSERT INTO playthroughs (id, game_id, name, notes, position, created_at, current)
+                 VALUES (?1, ?2, 'Main', ?3, 0, ?4, 1)",
+                params![id, game_id, notes, now()],
+            )
+            .map_err(|e| format!("Could not keep the existing notes: {e}"))?;
+        }
+        // Anything written before this version has no run yet. It belongs to
+        // Main, which is the run that was already there.
+        conn.execute_batch(
+            "UPDATE game_logs
+                SET playthrough_id = (
+                    SELECT id FROM playthroughs
+                     WHERE game_id = game_logs.game_id AND current = 1
+                     LIMIT 1
+                )
+              WHERE playthrough_id IS NULL;
+             UPDATE sessions
+                SET playthrough_id = (
+                    SELECT id FROM playthroughs
+                     WHERE game_id = sessions.game_id AND current = 1
+                     LIMIT 1
+                )
+              WHERE playthrough_id IS NULL;",
+        )
+        .map_err(|e| format!("Could not attach existing notes to a playthrough: {e}"))?;
+        log::info!("playthroughs are in place");
+        Ok(())
+    }
+
+    pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
         self.conn
             .lock()
             .map_err(|_| "The library is not usable.".to_string())
@@ -716,12 +837,18 @@ impl Db {
             ],
         )
         .map_err(|e| format!("Could not save {}: {e}", game.title))?;
+        // A new game needs a run for its notes. An existing game already has
+        // one, and a save of its other fields must not rewrite that run.
+        ensure_playthrough(&conn, game.id.trim(), &game.notes)?;
         Ok(())
     }
 
     pub fn delete_game(&self, id: &str) -> Result<(), String> {
         let conn = self.lock()?;
-        // Sessions go with it, through `ON DELETE CASCADE`.
+        // Sessions go with it, through `ON DELETE CASCADE`. Playthroughs are
+        // not a child of that constraint, so they go explicitly.
+        conn.execute("DELETE FROM playthroughs WHERE game_id = ?1", params![id])
+            .map_err(|e| format!("Could not remove that game: {e}"))?;
         conn.execute("DELETE FROM games WHERE id = ?1", params![id])
             .map_err(|e| format!("Could not remove that game: {e}"))?;
         Ok(())
@@ -835,14 +962,16 @@ impl Db {
             .map_err(|e| format!("Could not close the previous session: {e}"))?;
             log::info!("closed a session left open elsewhere, {secs}s counted");
         }
+        ensure_playthrough(&conn, game_id, "")?;
         let category = if category.trim().is_empty() {
             "Main story"
         } else {
             category.trim()
         };
         conn.execute(
-            "INSERT INTO sessions (game_id, started_at, last_seen, category)
-             VALUES (?1, ?2, ?2, ?3)",
+            "INSERT INTO sessions (game_id, started_at, last_seen, category, playthrough_id)
+             VALUES (?1, ?2, ?2, ?3,
+                     (SELECT id FROM playthroughs WHERE game_id = ?1 AND current = 1 LIMIT 1))",
             params![game_id, started_at, category],
         )
         .map_err(|e| format!("Could not start the session: {e}"))?;
@@ -885,9 +1014,11 @@ impl Db {
         conn.query_row(
             r#"
                 SELECT s.id, s.game_id, COALESCE(g.title, ''), s.started_at, s.ended_at,
-                       s.duration_secs, s.category, s.note, s.manual, s.ended_by
+                       s.duration_secs, s.category, s.note, s.manual, s.ended_by,
+                       s.playthrough_id, COALESCE(p.name, '')
                   FROM sessions s
                   LEFT JOIN games g ON g.id = s.game_id
+                  LEFT JOIN playthroughs p ON p.id = s.playthrough_id
                  WHERE s.ended_at IS NULL
                  ORDER BY s.id DESC LIMIT 1
                 "#,
@@ -912,9 +1043,11 @@ impl Db {
             .prepare(
                 r#"
                 SELECT s.id, s.game_id, COALESCE(g.title, ''), s.started_at, s.ended_at,
-                       s.duration_secs, s.category, s.note, s.manual, s.ended_by
+                       s.duration_secs, s.category, s.note, s.manual, s.ended_by,
+                       s.playthrough_id, COALESCE(p.name, '')
                   FROM sessions s
                   LEFT JOIN games g ON g.id = s.game_id
+                  LEFT JOIN playthroughs p ON p.id = s.playthrough_id
                  WHERE (?1 IS NULL OR s.game_id = ?1)
                  ORDER BY s.started_at DESC, s.id DESC
                  LIMIT ?2 OFFSET ?3
@@ -992,26 +1125,17 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, '')
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, ''),
+                        l.playthrough_id, COALESCE(p.name, '')
                    FROM game_logs l
                    LEFT JOIN games g ON g.id = l.game_id
+                   LEFT JOIN playthroughs p ON p.id = l.playthrough_id
                   WHERE l.game_id = ?1
                   ORDER BY l.position ASC, l.at DESC, l.id DESC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![game_id], |r| {
-                Ok(GameLogRow {
-                    id: r.get(0)?,
-                    game_id: r.get(1)?,
-                    game_title: r.get(7)?,
-                    at: r.get(2)?,
-                    secs: r.get(3)?,
-                    note: r.get(4)?,
-                    details: r.get(5)?,
-                    created_at: r.get(6)?,
-                })
-            })
+            .query_map(params![game_id], log_from_row)
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -1031,11 +1155,20 @@ impl Db {
             return Err("That game is not in the library.".into());
         }
         let conn = self.lock()?;
+        ensure_playthrough(&conn, game_id, "")?;
+        let playthrough_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM playthroughs WHERE game_id = ?1 AND current = 1 LIMIT 1",
+                params![game_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("Could not save that note: {e}"))?;
         conn.execute(
-            "INSERT INTO game_logs (game_id, at, secs, note, details, created_at, position) \
+            "INSERT INTO game_logs (game_id, at, secs, note, details, created_at, position, playthrough_id) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, \
-                     (SELECT COALESCE(MIN(position), 0) - 1 FROM game_logs WHERE game_id = ?1))",
-            params![game_id, at, secs.max(0), note.trim(), details.trim(), now()],
+                     (SELECT COALESCE(MIN(position), 0) - 1 FROM game_logs WHERE game_id = ?1), ?7)",
+            params![game_id, at, secs.max(0), note.trim(), details.trim(), now(), playthrough_id],
         )
         .map_err(|e| format!("Could not save that note: {e}"))?;
         let id = conn.last_insert_rowid();
@@ -1049,6 +1182,8 @@ impl Db {
             note: note.trim().to_string(),
             details: details.trim().to_string(),
             created_at: now(),
+            playthrough_id,
+            playthrough_name: String::new(),
         })
     }
 
@@ -1060,26 +1195,17 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, '')
+                "SELECT l.id, l.game_id, l.at, l.secs, l.note, l.details, l.created_at, COALESCE(g.title, ''),
+                        l.playthrough_id, COALESCE(p.name, '')
                    FROM game_logs l
                    LEFT JOIN games g ON g.id = l.game_id
+                   LEFT JOIN playthroughs p ON p.id = l.playthrough_id
                   ORDER BY l.at DESC, l.id DESC
                   LIMIT ?1 OFFSET ?2",
             )
             .map_err(|e| format!("Could not read the logs: {e}"))?;
         let rows = stmt
-            .query_map(params![limit.clamp(1, 5_000), offset.max(0)], |r| {
-                Ok(GameLogRow {
-                    id: r.get(0)?,
-                    game_id: r.get(1)?,
-                    game_title: r.get(7)?,
-                    at: r.get(2)?,
-                    secs: r.get(3)?,
-                    note: r.get(4)?,
-                    details: r.get(5)?,
-                    created_at: r.get(6)?,
-                })
-            })
+            .query_map(params![limit.clamp(1, 5_000), offset.max(0)], log_from_row)
             .map_err(|e| format!("Could not read the logs: {e}"))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Could not read the logs: {e}"))
@@ -1100,10 +1226,12 @@ impl Db {
     /// caller logs it and carries on.
     pub fn add_started_log_if_first(&self, game_id: &str, at: i64) -> Result<bool, String> {
         let conn = self.lock()?;
+        ensure_playthrough(&conn, game_id, "")?;
         let written = conn
             .execute(
-                "INSERT INTO game_logs (game_id, at, secs, note, created_at, position)
-                 SELECT ?1, ?2, 0, 'Started playing', ?2, 0
+                "INSERT INTO game_logs (game_id, at, secs, note, created_at, position, playthrough_id)
+                 SELECT ?1, ?2, 0, 'Started playing', ?2, 0,
+                        (SELECT id FROM playthroughs WHERE game_id = ?1 AND current = 1 LIMIT 1)
                   WHERE NOT EXISTS (SELECT 1 FROM game_logs WHERE game_id = ?1)
                     AND NOT EXISTS (SELECT 1 FROM sessions WHERE game_id = ?1)",
                 params![game_id, at],
@@ -1171,6 +1299,229 @@ impl Db {
         Ok(())
     }
 
+    // --------------------------------------------------------- playthroughs
+
+    /// Every run of one game, oldest first. The current one is the journal
+    /// the editor is writing into.
+    pub fn list_playthroughs(&self, game_id: &str) -> Result<Vec<PlaythroughRow>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, game_id, name, notes, current
+                   FROM playthroughs
+                  WHERE game_id = ?1
+                  ORDER BY position ASC, created_at ASC, name COLLATE NOCASE ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![game_id], playthrough_from_row)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Start another run and switch to it. Its notes begin empty, so the new
+    /// run does not inherit what was written about the previous one.
+    pub fn add_playthrough(&self, game_id: &str, name: &str) -> Result<PlaythroughRow, String> {
+        let name = clean_playthrough_name(name)?;
+        if self.game(game_id)?.is_none() {
+            return Err("That game is not in the library.".into());
+        }
+        let conn = self.lock()?;
+        ensure_playthrough(&conn, game_id, "")?;
+        if playthrough_name_taken(&conn, game_id, &name, None)? {
+            return Err("This game already has a playthrough with that name.".into());
+        }
+        let id = fresh_playthrough_id();
+        let position: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM playthroughs WHERE game_id = ?1",
+                params![game_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE playthroughs SET current = 0 WHERE game_id = ?1",
+            params![game_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO playthroughs (id, game_id, name, notes, position, created_at, current)
+             VALUES (?1, ?2, ?3, '', ?4, ?5, 1)",
+            params![id, game_id, name, position, now()],
+        )
+        .map_err(|e| format!("Could not add that playthrough: {e}"))?;
+        // The edit screen reads the game's notes. Those now belong to this run.
+        conn.execute("UPDATE games SET notes = '' WHERE id = ?1", params![game_id])
+            .map_err(|e| e.to_string())?;
+        Ok(PlaythroughRow {
+            id,
+            game_id: game_id.to_string(),
+            name,
+            notes: String::new(),
+            current: true,
+        })
+    }
+
+    pub fn rename_playthrough(&self, id: &str, name: &str) -> Result<(), String> {
+        let name = clean_playthrough_name(name)?;
+        let conn = self.lock()?;
+        let game_id: String = conn
+            .query_row(
+                "SELECT game_id FROM playthroughs WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "That playthrough is not there.".to_string())?;
+        if playthrough_name_taken(&conn, &game_id, &name, Some(id))? {
+            return Err("This game already has a playthrough with that name.".into());
+        }
+        conn.execute(
+            "UPDATE playthroughs SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )
+        .map_err(|e| format!("Could not rename that playthrough: {e}"))?;
+        Ok(())
+    }
+
+    /// Remove a run, its journal entries, and its notes.
+    ///
+    /// Sessions are moved to the run that remains, so deleting a playthrough
+    /// never throws away time that was already counted. The last run cannot
+    /// be removed: a game always has somewhere for notes to live.
+    pub fn delete_playthrough(&self, id: &str) -> Result<PlaythroughRow, String> {
+        let conn = self.lock()?;
+        let (game_id, was_current): (String, i64) = conn
+            .query_row(
+                "SELECT game_id, current FROM playthroughs WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "That playthrough is not there.".to_string())?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playthroughs WHERE game_id = ?1",
+                params![game_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if count <= 1 {
+            return Err("A game keeps at least one playthrough.".into());
+        }
+        let keep: String = conn
+            .query_row(
+                "SELECT id FROM playthroughs
+                  WHERE game_id = ?1 AND id != ?2
+                  ORDER BY current DESC, position ASC, created_at ASC
+                  LIMIT 1",
+                params![game_id, id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE sessions SET playthrough_id = ?1 WHERE playthrough_id = ?2",
+            params![keep, id],
+        )
+        .map_err(|e| format!("Could not keep that playtime: {e}"))?;
+        conn.execute("DELETE FROM game_logs WHERE playthrough_id = ?1", params![id])
+            .map_err(|e| format!("Could not remove that playthrough: {e}"))?;
+        conn.execute("DELETE FROM playthroughs WHERE id = ?1", params![id])
+            .map_err(|e| format!("Could not remove that playthrough: {e}"))?;
+        if was_current != 0 {
+            conn.execute(
+                "UPDATE playthroughs SET current = 1 WHERE id = ?1",
+                params![keep],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE games SET notes = (SELECT notes FROM playthroughs WHERE id = ?1) WHERE id = ?2",
+                params![keep, game_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        read_playthrough(&conn, &keep)
+    }
+
+    /// Make this the run the journal and the notes box are writing into.
+    pub fn set_current_playthrough(&self, id: &str) -> Result<PlaythroughRow, String> {
+        let conn = self.lock()?;
+        let row = read_playthrough(&conn, id)?;
+        conn.execute(
+            "UPDATE playthroughs SET current = 0 WHERE game_id = ?1",
+            params![row.game_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE playthroughs SET current = 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE games SET notes = ?1 WHERE id = ?2",
+            params![row.notes, row.game_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(PlaythroughRow { current: true, ..row })
+    }
+
+    /// Write notes onto one run.
+    ///
+    /// `playthrough_id` is the run the editor had open when the words were
+    /// typed. Writing them onto "whatever is current now" would put one run's
+    /// notes onto another if the player switched while a save was still going
+    /// out. When the id is missing, the current run is the one the edit screen
+    /// is looking at.
+    pub fn write_playthrough_notes(
+        &self,
+        game_id: &str,
+        playthrough_id: Option<&str>,
+        notes: &str,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        if let Some(id) = playthrough_id {
+            let (owner, current): (String, i64) = conn
+                .query_row(
+                    "SELECT game_id, current FROM playthroughs WHERE id = ?1",
+                    params![id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "That playthrough is not there.".to_string())?;
+            if owner != game_id {
+                return Err("That playthrough is not for this game.".into());
+            }
+            conn.execute(
+                "UPDATE playthroughs SET notes = ?1 WHERE id = ?2",
+                params![notes, id],
+            )
+            .map_err(|e| format!("Could not save those notes: {e}"))?;
+            if current != 0 {
+                conn.execute(
+                    "UPDATE games SET notes = ?1 WHERE id = ?2",
+                    params![notes, game_id],
+                )
+                .map_err(|e| format!("Could not save those notes: {e}"))?;
+            }
+            return Ok(());
+        }
+        ensure_playthrough(&conn, game_id, notes)?;
+        conn.execute(
+            "UPDATE playthroughs SET notes = ?1 WHERE game_id = ?2 AND current = 1",
+            params![notes, game_id],
+        )
+        .map_err(|e| format!("Could not save those notes: {e}"))?;
+        conn.execute(
+            "UPDATE games SET notes = ?1 WHERE id = ?2",
+            params![notes, game_id],
+        )
+        .map_err(|e| format!("Could not save those notes: {e}"))?;
+        Ok(())
+    }
+
     /// Record time by hand, for playing on a console or a handheld.
     pub fn log_manual_session(
         &self,
@@ -1184,10 +1535,12 @@ impl Db {
             return Err("Enter a duration greater than zero.".into());
         }
         let conn = self.lock()?;
+        ensure_playthrough(&conn, game_id, "")?;
         conn.execute(
             "INSERT INTO sessions
-                 (game_id, started_at, ended_at, duration_secs, category, note, manual)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                 (game_id, started_at, ended_at, duration_secs, category, note, manual, playthrough_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1,
+                     (SELECT id FROM playthroughs WHERE game_id = ?1 AND current = 1 LIMIT 1))",
             params![
                 game_id,
                 started_at,
@@ -1290,6 +1643,121 @@ pub struct GameWrite {
     pub achievements: Vec<Value>,
 }
 
+fn add_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|e| format!("Could not read the library layout: {e}"))?;
+    let names = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .map_err(|e| format!("Could not read the library layout: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Could not read the library layout: {e}"))?;
+    if names.iter().any(|name| name == column) {
+        return Ok(());
+    }
+    conn.execute(ddl, [])
+        .map_err(|e| format!("Could not add {table}.{column}: {e}"))?;
+    Ok(())
+}
+
+fn fresh_playthrough_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(1);
+    format!("pt-{}-{}", now(), N.fetch_add(1, Ordering::Relaxed))
+}
+
+fn clean_playthrough_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("A playthrough needs a name.".into());
+    }
+    if name.chars().count() > 80 {
+        return Err("That name is too long.".into());
+    }
+    Ok(name.to_string())
+}
+
+fn ensure_playthrough(conn: &Connection, game_id: &str, notes: &str) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM playthroughs WHERE game_id = ?1",
+            params![game_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if count > 0 {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO playthroughs (id, game_id, name, notes, position, created_at, current)
+         VALUES (?1, ?2, 'Main', ?3, 0, ?4, 1)",
+        params![fresh_playthrough_id(), game_id, notes, now()],
+    )
+    .map_err(|e| format!("Could not start a playthrough: {e}"))?;
+    Ok(())
+}
+
+fn playthrough_name_taken(
+    conn: &Connection,
+    game_id: &str,
+    name: &str,
+    except: Option<&str>,
+) -> Result<bool, String> {
+    // Compared in Rust so a name with an accent matches regardless of SQLite's
+    // ASCII-only lower().
+    let wanted = name.trim().to_lowercase();
+    let except = except.unwrap_or("");
+    let mut stmt = conn
+        .prepare("SELECT id, name FROM playthroughs WHERE game_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![game_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (id, existing) = row.map_err(|e| e.to_string())?;
+        if id != except && existing.trim().to_lowercase() == wanted {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_playthrough(conn: &Connection, id: &str) -> Result<PlaythroughRow, String> {
+    conn.query_row(
+        "SELECT id, game_id, name, notes, current FROM playthroughs WHERE id = ?1",
+        params![id],
+        playthrough_from_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "That playthrough is not there.".to_string())
+}
+
+fn playthrough_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PlaythroughRow> {
+    Ok(PlaythroughRow {
+        id: r.get(0)?,
+        game_id: r.get(1)?,
+        name: r.get(2)?,
+        notes: r.get(3)?,
+        current: r.get::<_, i64>(4)? != 0,
+    })
+}
+
+fn log_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<GameLogRow> {
+    Ok(GameLogRow {
+        id: r.get(0)?,
+        game_id: r.get(1)?,
+        at: r.get(2)?,
+        secs: r.get(3)?,
+        note: r.get(4)?,
+        details: r.get(5)?,
+        created_at: r.get(6)?,
+        game_title: r.get(7)?,
+        playthrough_id: r.get(8)?,
+        playthrough_name: r.get(9)?,
+    })
+}
+
 fn session_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
         id: r.get(0)?,
@@ -1302,6 +1770,8 @@ fn session_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         note: r.get(7)?,
         manual: r.get::<_, i64>(8)? != 0,
         ended_by: r.get(9)?,
+        playthrough_id: r.get(10)?,
+        playthrough_name: r.get(11)?,
     })
 }
 
@@ -1733,5 +2203,76 @@ mod tests {
         let db = Db::open_memory().unwrap();
         assert!(db.upsert_game(&game("", "Hades")).is_err());
         assert!(db.upsert_game(&game("g1", "   ")).is_err());
+    }
+
+    #[test]
+    fn a_second_playthrough_keeps_its_own_notes_and_journal() {
+        let db = Db::open_memory().unwrap();
+        let mut first = game("g1", "Hades");
+        first.notes = "Ares build".into();
+        db.upsert_game(&first).unwrap();
+
+        let runs = db.list_playthroughs("g1").unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].name, "Main");
+        assert_eq!(runs[0].notes, "Ares build");
+        assert!(runs[0].current);
+
+        let log = db
+            .add_game_log("g1", 1_700_000_000, 0, "beat Hades", "")
+            .unwrap();
+        assert_eq!(log.playthrough_id.as_deref(), Some(runs[0].id.as_str()));
+
+        let second = db.add_playthrough("g1", "Fresh file").unwrap();
+        assert!(second.current);
+        assert!(second.notes.is_empty());
+        assert_eq!(db.game("g1").unwrap().unwrap().notes, "");
+
+        db.write_playthrough_notes("g1", Some(&second.id), "no heat")
+            .unwrap();
+        db.add_game_log("g1", 1_700_000_100, 0, "first clear", "")
+            .unwrap();
+        let sid = db.open_session("g1", 5_000, "Main story").unwrap();
+        db.close_session(sid, 5_600, ENDED_MANUAL).unwrap();
+
+        let logs = db.list_game_logs("g1").unwrap();
+        let main_logs: Vec<_> = logs
+            .iter()
+            .filter(|row| row.playthrough_id.as_deref() == Some(runs[0].id.as_str()))
+            .collect();
+        let fresh_logs: Vec<_> = logs
+            .iter()
+            .filter(|row| row.playthrough_id.as_deref() == Some(second.id.as_str()))
+            .collect();
+        assert_eq!(main_logs.len(), 1);
+        assert_eq!(fresh_logs.len(), 1);
+        assert_eq!(fresh_logs[0].note, "first clear");
+        let main = db
+            .list_playthroughs("g1")
+            .unwrap()
+            .into_iter()
+            .find(|row| row.name == "Main")
+            .unwrap();
+        assert_eq!(main.notes, "Ares build");
+        let session = db
+            .list_sessions(10, 0, Some("g1"))
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == sid)
+            .unwrap();
+        assert_eq!(session.playthrough_id.as_deref(), Some(second.id.as_str()));
+
+        let kept = db.delete_playthrough(&second.id).unwrap();
+        assert_eq!(kept.name, "Main");
+        assert_eq!(db.list_playthroughs("g1").unwrap().len(), 1);
+        assert_eq!(db.list_game_logs("g1").unwrap().len(), 1);
+        let session = db
+            .list_sessions(10, 0, Some("g1"))
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == sid)
+            .unwrap();
+        assert_eq!(session.playthrough_id.as_deref(), Some(kept.id.as_str()));
+        assert!(db.delete_playthrough(&kept.id).is_err());
     }
 }

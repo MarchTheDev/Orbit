@@ -10,7 +10,8 @@
  * user gesture yet, playback waits quietly for the first click or key press.
  */
 
-import { ambientSet, isNative } from './native';
+import { fileSrc } from './desktop';
+import { ambientFile, ambientSet, isNative } from './native';
 
 /** C3 keeps the chimes warm while leaving room for game audio. */
 const ROOT = 130.8128;
@@ -96,6 +97,20 @@ export class Ambient {
    * took the pad, the oscillators stay off so two copies don't play.
    */
   private nativeHeld = false;
+  /** A file the player picked. Empty means the chord. */
+  private file: string | null = null;
+  /** The system player has the file, so the web view must stay quiet. */
+  private fileNative = false;
+  /** The file could not be played. The chord is used until a different file is chosen. */
+  private fileFailed = false;
+  private fileAudio: HTMLAudioElement | null = null;
+  private fileSrc = '';
+  /** play() was refused until the window is clicked. Not the same as a bad file. */
+  private fileBlocked = false;
+  /** play() has either started or refused. Until then the system player stays out. */
+  private fileSettled = false;
+  /** Drops a start that was overtaken by a newer one, so a stop cannot land late. */
+  private applyGen = 0;
   /** Whether the pad should be heard right now. A fake blur must not clear this. */
   private audible = true;
   /**
@@ -104,15 +119,194 @@ export class Ambient {
    */
   private sawFocus = false;
 
-  /** Turn the sound on, and keep it on. */
-  start(volume: number): void {
+  /**
+   * Turn the sound on, and keep it on.
+   *
+   * `file` replaces the chord. An empty file is the chord again: the same one
+   * a fresh install plays, not a leftover of the file that was just removed.
+   */
+  start(volume: number, file?: string | null): void {
     this.wanted = true;
-    this.setVolume(volume);
-    // Windows already has the chord the 1.0 release played. The system player
-    // is a Linux fallback for a web view that stays silent, and using it on
-    // Windows replaces that chord with a plain tone.
+    this.volume = Math.max(0, Math.min(1, volume));
+    const next = file?.trim() ? file.trim() : null;
+    const changed = next !== this.file;
+    if (changed) {
+      this.file = next;
+      this.fileFailed = false;
+      this.fileNative = false;
+      this.stopFileElement();
+    }
+    const gen = ++this.applyGen;
+    void this.apply(gen, changed);
+  }
+
+  /**
+   * A file and the chord never play at once. Leaving a file waits until the
+   * system player has actually stopped, then the chord starts.
+   */
+  private async apply(gen: number, changed: boolean): Promise<void> {
+    if (this.file && !this.fileFailed) {
+      await this.playCustom(gen);
+      return;
+    }
+    this.stopFileElement();
+    if ((changed || this.fileNative) && this.onLinux() && isNative()) {
+      this.fileNative = false;
+      this.nativeHeld = false;
+      try {
+        await ambientSet(false, 0, true);
+      } catch {
+        // The chord is next either way.
+      }
+    }
+    this.fileNative = false;
+    if (!this.wanted || gen !== this.applyGen) return;
     if (this.onLinux()) void this.tryNative();
     else this.ensure();
+  }
+
+  private async playCustom(gen: number): Promise<void> {
+    const file = this.file;
+    if (!file || !this.wanted || gen !== this.applyGen) return;
+    this.stopOscillators();
+    this.nativeHeld = false;
+    // A file already moving in the web view only needs its volume changed.
+    // Restarting it on every slider tick would throw the song back to the start.
+    const audio = this.fileAudio;
+    if (audio && !this.fileFailed && !this.fileNative && this.fileSrc === fileSrc(file) && !audio.paused && audio.currentTime > 0) {
+      audio.volume = this.audible ? this.volume : 0;
+      return;
+    }
+    // The media element is tried first so the slider can ride a file that is
+    // actually playing. Linux Web Audio is often silent; a media element is a
+    // different path. If it does not advance, the system player takes the file.
+    this.fileBlocked = false;
+    this.fileNative = false;
+    const started = await this.tryFileElement(file, gen);
+    if (gen !== this.applyGen || this.file !== file || !this.wanted) return;
+    // A refusal is waiting on a click. Starting the system player as well would
+    // be two copies once that click arrives.
+    if (started || this.fileBlocked) return;
+    await this.fileViaSystem(file);
+  }
+
+  /** True when the media element has actually started, not merely accepted play(). */
+  private async tryFileElement(file: string, gen: number): Promise<boolean> {
+    this.startFileElement(file);
+    const deadline = Date.now() + 1500;
+    while (!this.fileSettled && Date.now() < deadline) {
+      if (gen !== this.applyGen || this.file !== file) return false;
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    if (gen !== this.applyGen || this.file !== file || this.fileBlocked || !this.fileSettled) return false;
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    if (gen !== this.applyGen || this.file !== file) return false;
+    const audio = this.fileAudio;
+    if (!audio || audio.error) return false;
+    return !audio.paused && audio.currentTime > 0.05;
+  }
+
+  private startFileElement(file: string): void {
+    if (!this.fileAudio) {
+      const audio = new Audio();
+      audio.loop = true;
+      audio.preload = 'auto';
+      audio.addEventListener('error', () => {
+        if (!this.file || this.fileAudio !== audio) return;
+        this.fileFailed = true;
+        this.stopFileElement();
+        if (this.wanted) {
+          if (this.onLinux()) void this.tryNative();
+          else this.ensure();
+        }
+      });
+      this.fileAudio = audio;
+    }
+    const audio = this.fileAudio;
+    const src = fileSrc(file);
+    if (this.fileSrc !== src) {
+      this.fileSrc = src;
+      audio.src = src;
+    }
+    audio.volume = this.audible ? this.volume : 0;
+    this.fileSettled = false;
+    this.fileBlocked = false;
+    void audio.play().then(
+      () => {
+        this.fileBlocked = false;
+        this.fileSettled = true;
+        if (this.fileNative) this.stopFileElement();
+      },
+      () => {
+        this.fileBlocked = true;
+        this.fileSettled = true;
+        this.waitForFile();
+      },
+    );
+  }
+
+  private waitForFile(): void {
+    if (this.resumeOn) return;
+    const go = () => {
+      this.removeGesture();
+      if (!this.wanted || !this.file || this.fileFailed || this.fileNative) return;
+      const file = this.file;
+      void this.fileAudio?.play().then(
+        async () => {
+          this.fileBlocked = false;
+          await new Promise((resolve) => window.setTimeout(resolve, 450));
+          if (this.file !== file || !this.wanted || this.fileNative) return;
+          const audio = this.fileAudio;
+          if (audio && !audio.error && audio.currentTime > 0.05) return;
+          await this.fileViaSystem(file);
+        },
+        () => undefined,
+      );
+    };
+    this.resumeOn = go;
+    window.addEventListener('pointerdown', go, { once: true });
+    window.addEventListener('keydown', go, { once: true });
+  }
+
+  /** The system player, when the web view accepted the file and then stayed silent. */
+  private async fileViaSystem(file: string): Promise<void> {
+    if (!this.onLinux() || !isNative()) {
+      this.fileFailed = true;
+      this.stopFileElement();
+      this.ensure();
+      return;
+    }
+    try {
+      const held = await ambientFile(file, this.volume, this.audible);
+      if (this.file !== file || !this.wanted) {
+        if (held) void ambientSet(false, 0, true).catch(() => undefined);
+        return;
+      }
+      if (held) {
+        this.fileNative = true;
+        this.fileBlocked = false;
+        this.stopFileElement();
+        return;
+      }
+    } catch {
+      // Chord below.
+    }
+    this.fileFailed = true;
+    this.stopFileElement();
+    if (this.wanted) void this.tryNative();
+  }
+
+  private stopFileElement(): void {
+    const audio = this.fileAudio;
+    if (!audio) return;
+    audio.pause();
+    audio.removeAttribute('src');
+    this.fileSrc = '';
+    try {
+      audio.load();
+    } catch {
+      // Already stopped.
+    }
   }
 
   /**
@@ -142,7 +336,10 @@ export class Ambient {
   /** Fade to silence, stop the notes, and suspend the audio graph shortly after. */
   stop(): void {
     this.wanted = false;
+    this.applyGen += 1;
     this.nativeHeld = false;
+    this.fileNative = false;
+    this.stopFileElement();
     if (this.onLinux() && isNative()) void ambientSet(false, this.volume, true).catch(() => undefined);
     this.stopOscillators();
   }
@@ -176,6 +373,14 @@ export class Ambient {
   /** Volume, 0 to 1. Safe to call before anything is playing. */
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
+    if (this.file && this.fileNative && !this.fileFailed) {
+      void ambientFile(this.file, this.volume, this.audible).catch(() => undefined);
+      return;
+    }
+    if (this.file && this.fileAudio && !this.fileFailed) {
+      this.fileAudio.volume = this.audible ? this.volume : 0;
+      return;
+    }
     if (this.nativeHeld) {
       void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
     }
@@ -198,7 +403,18 @@ export class Ambient {
     } else if (focused) {
       this.sawFocus = true;
     }
-    this.audible = focused || keepWhenUnfocused;
+    const audible = focused || keepWhenUnfocused;
+    const changed = audible !== this.audible;
+    this.audible = audible;
+    if (this.file && this.fileNative && !this.fileFailed) {
+      if (changed) void ambientFile(this.file, this.volume, this.audible).catch(() => undefined);
+      return;
+    }
+    if (this.file && this.fileAudio && !this.fileFailed) {
+      this.fileAudio.volume = this.audible ? this.volume : 0;
+      if (this.audible && this.fileAudio.paused) void this.fileAudio.play().catch(() => this.waitForFile());
+      return;
+    }
     if (this.nativeHeld) {
       void ambientSet(this.wanted, this.audible ? this.volume : 0, this.audible).catch(() => undefined);
       return;

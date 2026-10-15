@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
-import type { Game, GameLog } from '../../types';
-import { addGameLog, deleteGameLog, listGameLogs, reorderGameLogs, updateGameLog } from '../../services/native';
+import type { Game, GameLog, Playthrough } from '../../types';
+import { addGameLog, addPlaythrough, deleteGameLog, deletePlaythrough, listGameLogs, listPlaythroughs, renamePlaythrough, reorderGameLogs, setCurrentPlaythrough, updateGameLog } from '../../services/native';
+import { rememberPlaythrough } from '../../services/playthroughs';
 import { useDragReorder } from '../../hooks/useDragReorder';
 import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
@@ -87,11 +88,25 @@ export function GameLogView({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detailsDraft, setDetailsDraft] = useState('');
   const [detailsSaving, setDetailsSaving] = useState(false);
+  const [runs, setRuns] = useState<Playthrough[]>([]);
+  const [runBusy, setRunBusy] = useState(false);
+  const currentId = useRef<string | null>(null);
 
   const load = useCallback(() => {
     let alive = true;
-    void listGameLogs(gameId).then((r) => {
-      if (alive) setRows(r);
+    void (async () => {
+      const [list, logs] = await Promise.all([listPlaythroughs(gameId), listGameLogs(gameId)]);
+      if (!alive) return;
+      setRuns(list);
+      const current =
+        list.find((run) => run.id === currentId.current) ?? list.find((run) => run.current) ?? list[0];
+      if (current) {
+        currentId.current = current.id;
+        rememberPlaythrough(gameId, current.id);
+      }
+      setRows(logs.filter((row) => belongsToRun(row, current, list)));
+    })().catch((e) => {
+      if (alive) setError(e instanceof Error ? e.message : String(e));
     });
     return () => {
       alive = false;
@@ -99,6 +114,12 @@ export function GameLogView({
   }, [gameId]);
 
   useEffect(() => load(), [load]);
+
+  useEffect(() => {
+    const onImport = () => load();
+    window.addEventListener('orbit-imported', onImport);
+    return () => window.removeEventListener('orbit-imported', onImport);
+  }, [load]);
 
   useEffect(() => {
     if (addRequest === undefined) return;
@@ -237,8 +258,90 @@ export function GameLogView({
 
   const drag = useDragReorder((fromId, toId, after) => move(Number(fromId), Number(toId), after));
 
+  const current = runs.find((run) => run.id === currentId.current) ?? runs.find((run) => run.current) ?? runs[0];
+
+  const unsavedEntry = () =>
+    Boolean(draft && (draft.note.trim() || draft.details.trim() || draft.at.trim() || draft.secs.trim()));
+
+  const chooseRun = async (run: Playthrough) => {
+    if (runBusy || run.id === current?.id) return;
+    if (unsavedEntry() && !confirm('Discard the entry you have not saved?')) return;
+    setDraft(null);
+    currentId.current = run.id;
+    rememberPlaythrough(gameId, run.id);
+    setRunBusy(true);
+    setError(null);
+    try {
+      const next = await setCurrentPlaythrough(run.id);
+      onNotes?.(next.notes);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
+  const addRun = async (name: string) => {
+    if (unsavedEntry() && !confirm('Discard the entry you have not saved?')) return;
+    setDraft(null);
+    setRunBusy(true);
+    setError(null);
+    try {
+      const next = await addPlaythrough(gameId, name);
+      currentId.current = next.id;
+      rememberPlaythrough(gameId, next.id);
+      onNotes?.(next.notes);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
+  const renameRun = async (id: string, name: string) => {
+    setError(null);
+    try {
+      await renamePlaythrough(id, name);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const removeRun = async (run: Playthrough) => {
+    if (runs.length <= 1) return;
+    if (unsavedEntry() && !confirm('Discard the entry you have not saved?')) return;
+    if (!confirm(`Remove “${run.name}”? Its journal entries and notes go with it. Time already counted stays on the game.`)) return;
+    setDraft(null);
+    setRunBusy(true);
+    setError(null);
+    try {
+      const kept = await deletePlaythrough(run.id);
+      currentId.current = kept.id;
+      rememberPlaythrough(gameId, kept.id);
+      onNotes?.(kept.notes);
+      load();
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
   return (
     <section className="rounded-xl border border-line bg-panel2 p-4">
+      <PlaythroughBar
+        runs={runs}
+        currentId={current?.id ?? null}
+        busy={runBusy}
+        onChoose={(run) => void chooseRun(run)}
+        onAdd={(name) => void addRun(name)}
+        onRename={(id, name) => void renameRun(id, name)}
+        onDelete={(run) => void removeRun(run)}
+      />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -511,7 +614,9 @@ export function GameLogView({
           data-orbit-pad-zone={withClock ? 'journal-notes' : undefined}
         >
           <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-            <span className="text-[11px] uppercase tracking-widest text-muted">Notes on {gameTitle}</span>
+            <span className="text-[11px] uppercase tracking-widest text-muted">
+              Notes{current ? ` for ${current.name}` : ` on ${gameTitle}`}
+            </span>
             <span className="text-[11px] text-muted/70">
               Markdown source, with a rendered View when you need it
             </span>
@@ -535,6 +640,179 @@ export function GameLogView({
  * the row is left alone in the sorted views, where the order is not the
  * player's to change.
  */
+/**
+ * A journal entry belongs to one run. A row with no run yet is shown on Main,
+ * which is where the migration put everything that was already written.
+ */
+function belongsToRun(row: GameLog, current: Playthrough | undefined, runs: Playthrough[]): boolean {
+  if (!current) return true;
+  if (row.playthroughId) return row.playthroughId === current.id;
+  return current.name === 'Main' || runs.length <= 1;
+}
+
+/**
+ * The runs of this game.
+ *
+ * Entries and notes stay with the run that is selected. Time already counted
+ * stays on the game, which is why removing a run does not change the hours.
+ */
+function PlaythroughBar({
+  runs,
+  currentId,
+  busy,
+  onChoose,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  runs: Playthrough[];
+  currentId: string | null;
+  busy: boolean;
+  onChoose: (run: Playthrough) => void;
+  onAdd: (name: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (run: Playthrough) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [rename, setRename] = useState('');
+  const sent = useRef(false);
+  const cancel = useRef(false);
+  const current = runs.find((run) => run.id === currentId) ?? null;
+
+  const commitAdd = () => {
+    if (sent.current || cancel.current) return;
+    const name = draft.trim();
+    if (!name) {
+      setAdding(false);
+      return;
+    }
+    sent.current = true;
+    setAdding(false);
+    setDraft('');
+    onAdd(name);
+  };
+
+  const commitRename = () => {
+    if (sent.current || cancel.current) return;
+    const name = rename.trim();
+    sent.current = true;
+    setRenaming(false);
+    if (!current || !name || name === current.name) return;
+    onRename(current.id, name);
+  };
+
+  return (
+    <div className="mb-4 border-b border-line pb-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-widest text-muted">Playthrough</span>
+        <span className="text-[11px] text-muted/80">Entries and notes stay with this run. Time stays with the game.</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {runs.map((run) => (
+          <button
+            key={run.id}
+            type="button"
+            disabled={busy}
+            onClick={() => onChoose(run)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs transition disabled:opacity-50',
+              run.id === currentId
+                ? 'border-accent/60 bg-accent/10 text-fg'
+                : 'border-line text-muted hover:border-accent/40 hover:text-fg',
+            )}
+          >
+            {run.name}
+          </button>
+        ))}
+        {adding ? (
+          <input
+            className={`${inputCls} w-36 py-1 text-xs`}
+            value={draft}
+            autoFocus
+            placeholder="New game+"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitAdd();
+              if (e.key === 'Escape') {
+                cancel.current = true;
+                setAdding(false);
+                setDraft('');
+              }
+            }}
+            onBlur={commitAdd}
+            aria-label="Name this playthrough"
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              sent.current = false;
+              cancel.current = false;
+              setRenaming(false);
+              setAdding(true);
+              setDraft('');
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted transition hover:border-accent/50 hover:text-fg disabled:opacity-50"
+          >
+            <Plus className="size-3" />
+            New
+          </button>
+        )}
+        {current && !renaming && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              sent.current = false;
+              cancel.current = false;
+              setAdding(false);
+              setRenaming(true);
+              setRename(current.name);
+            }}
+            className="rounded-lg p-1 text-muted hover:bg-panel hover:text-fg disabled:opacity-50"
+            title="Rename this playthrough"
+            aria-label={`Rename ${current.name}`}
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        )}
+        {current && renaming && (
+          <input
+            className={`${inputCls} w-36 py-1 text-xs`}
+            value={rename}
+            autoFocus
+            onChange={(e) => setRename(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') {
+                cancel.current = true;
+                setRenaming(false);
+              }
+            }}
+            onBlur={commitRename}
+            aria-label="New name"
+          />
+        )}
+        {current && (
+          <button
+            type="button"
+            disabled={busy || runs.length <= 1}
+            onClick={() => onDelete(current)}
+            className="rounded-lg p-1 text-muted hover:bg-panel hover:text-rose-300 disabled:opacity-40"
+            title={runs.length <= 1 ? 'A game keeps one playthrough' : `Remove ${current.name}`}
+            aria-label={`Remove ${current.name}`}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function bindLogRow(
   id: number,
   movable: boolean,

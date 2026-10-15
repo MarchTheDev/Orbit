@@ -10,7 +10,7 @@
 
 use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -27,6 +27,11 @@ static LAUNCHED: AtomicU32 = AtomicU32::new(0);
 
 const KIND_GST: u8 = 1;
 const KIND_PCM: u8 = 2;
+#[cfg(target_os = "linux")]
+const KIND_FILE: u8 = 3;
+/// Bumped whenever the player is stopped, so a file loop from the previous
+/// track cannot restart itself over the new one.
+static FILE_GEN: AtomicU64 = AtomicU64::new(0);
 
 struct Running {
     child: Child,
@@ -87,11 +92,141 @@ pub fn stop() {
 fn stop_locked() {
     RUN.store(false, Ordering::SeqCst);
     KIND.store(0, Ordering::SeqCst);
+    FILE_GEN.fetch_add(1, Ordering::SeqCst);
     let child = PLAYER.lock().ok().and_then(|mut slot| slot.take());
     if let Some(mut running) = child {
         let _ = running.child.kill();
         let _ = running.child.wait();
     }
+}
+
+/// Play a file the player picked, looping it, through the same system sink as
+/// the chord. `Ok(false)` means this machine should try the web view instead.
+///
+/// The chord is stopped first. The two are never played together.
+pub fn play_file(path: &str, volume: f32, audible: bool) -> Result<bool, String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (path, volume, audible);
+        Ok(false)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        play_file_linux(path, volume, audible)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn play_file_linux(path: &str, volume: f32, audible: bool) -> Result<bool, String> {
+    let _guard = BUSY.lock().unwrap_or_else(|poison| poison.into_inner());
+    let volume = volume.clamp(0.0, 1.0);
+    if !audible || volume <= 0.0 {
+        stop_locked();
+        return Ok(true);
+    }
+    let path = path.trim();
+    if path.is_empty() || path.contains("://") || path.contains('\0') {
+        return Err("Choose a music file on this computer.".into());
+    }
+    if !std::path::Path::new(path).is_file() {
+        return Err("That music file is not there.".into());
+    }
+    // Stopping first also retires any loop that was restarting the previous file.
+    stop_locked();
+    let Some(child) = spawn_file(path, volume) else {
+        return Ok(false);
+    };
+    let gen = FILE_GEN.load(Ordering::SeqCst);
+    RUN.store(true, Ordering::SeqCst);
+    KIND.store(KIND_FILE, Ordering::SeqCst);
+    remember(child, KIND_FILE, volume);
+    let owned = path.to_string();
+    std::thread::spawn(move || file_loop(owned, volume, gen));
+    Ok(true)
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_file(path: &str, volume: f32) -> Option<Child> {
+    let program = find_program("gst-launch-1.0")?;
+    let uri = file_uri(path);
+    let vol = format!("{:.3}", sink_volume(volume));
+    let mut cmd = process::command(program);
+    cmd.args(["-q", "playbin", &format!("uri={uri}"), &format!("volume={vol}")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().ok()?;
+    // A file the plugins cannot decode exits immediately. A real track is still
+    // going after this, which is the only signal gst-launch gives us.
+    std::thread::sleep(Duration::from_millis(280));
+    if child.try_wait().ok().flatten().is_some() {
+        let _ = child.wait();
+        return None;
+    }
+    Some(child)
+}
+
+#[cfg(target_os = "linux")]
+fn file_loop(path: String, volume: f32, gen: u64) {
+    loop {
+        if FILE_GEN.load(Ordering::SeqCst) != gen || !RUN.load(Ordering::SeqCst) || KIND.load(Ordering::SeqCst) != KIND_FILE {
+            break;
+        }
+        let finished = {
+            let mut slot = match PLAYER.lock() {
+                Ok(slot) => slot,
+                Err(_) => break,
+            };
+            let Some(running) = slot.as_mut() else {
+                break;
+            };
+            match running.child.try_wait() {
+                Ok(Some(_)) => {
+                    slot.take();
+                    true
+                }
+                Ok(None) => false,
+                Err(_) => {
+                    slot.take();
+                    true
+                }
+            }
+        };
+        if !finished {
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
+        if FILE_GEN.load(Ordering::SeqCst) != gen || !RUN.load(Ordering::SeqCst) {
+            break;
+        }
+        let Some(child) = spawn_file(&path, volume) else {
+            break;
+        };
+        if FILE_GEN.load(Ordering::SeqCst) != gen || !RUN.load(Ordering::SeqCst) {
+            let mut child = child;
+            let _ = child.kill();
+            let _ = child.wait();
+            break;
+        }
+        remember(child, KIND_FILE, volume);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn file_uri(path: &str) -> String {
+    let mut out = String::from("file://");
+    for ch in path.chars() {
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '/' | '-' | '_' | '.' | '~' => out.push(ch),
+            _ => {
+                let mut buf = [0u8; 4];
+                for byte in ch.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A quiet chord through the plugins the packages already ask for. No file.

@@ -39,6 +39,7 @@ export function MusicButton({
   const playing = sound?.enabled !== false;
   const volume = sound?.volume ?? 0.35;
   const unfocused = sound?.unfocused === true;
+  const file = sound?.file ?? null;
   const animateBars = playing && volume > 0 && (focused || unfocused);
 
   /** Keep the bars still when Orbit is out of focus, along with its sound. */
@@ -105,7 +106,7 @@ export function MusicButton({
               Background music
             </span>
             <button
-              onClick={() => onChange({ enabled: !playing, volume, unfocused })}
+              onClick={() => onChange({ enabled: !playing, volume, unfocused, file })}
               className={cn(
                 'rounded-full border px-3 py-1 text-xs transition',
                 playing ? 'border-accent/60 text-accent' : 'border-line text-muted hover:border-accent/60 hover:text-fg',
@@ -126,7 +127,7 @@ export function MusicButton({
               max={100}
               value={Math.round(volume * 100)}
               disabled={!playing}
-              onChange={(e) => onChange({ enabled: true, volume: Number(e.target.value) / 100, unfocused })}
+              onChange={(e) => onChange({ enabled: true, volume: Number(e.target.value) / 100, unfocused, file })}
               className="orbit-range w-full"
               aria-label="Music volume"
             />
@@ -134,7 +135,7 @@ export function MusicButton({
 
           <CheckboxInline
             checked={unfocused}
-            onChange={(v) => onChange({ enabled: playing, volume, unfocused: v })}
+            onChange={(v) => onChange({ enabled: playing, volume, unfocused: v, file })}
             label="Keep playing when Orbit is not in front"
           />
 

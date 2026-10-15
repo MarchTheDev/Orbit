@@ -10,6 +10,7 @@ import type {
   ActiveSession,
   Game,
   GameLog,
+  Playthrough,
   LaunchInfo,
   LaunchTarget,
   Session,
@@ -195,6 +196,49 @@ export function deleteGameLog(id: number): Promise<void> {
 /** Remove one game's Journal entries without changing its general notes. */
 export function clearGameLogs(gameId: string): Promise<void> {
   return call('clear_game_logs', { gameId }, () => undefined);
+}
+
+/** The runs of one game. A browser preview gets a single Main run. */
+export function listPlaythroughs(gameId: string): Promise<Playthrough[]> {
+  return call('list_playthroughs', { gameId }, () => [
+    { id: `main-${gameId}`, gameId, name: 'Main', notes: '', current: true },
+  ]);
+}
+
+export function addPlaythrough(gameId: string, name: string): Promise<Playthrough> {
+  return call('add_playthrough', { gameId, name }, () => ({
+    id: `pt-${Date.now()}`,
+    gameId,
+    name,
+    notes: '',
+    current: true,
+  }));
+}
+
+export function renamePlaythrough(id: string, name: string): Promise<void> {
+  return call('rename_playthrough', { id, name }, () => undefined);
+}
+
+export function deletePlaythrough(id: string): Promise<Playthrough> {
+  return call('delete_playthrough', { id }, async () => {
+    throw new Error('Playthroughs need the desktop app.');
+  });
+}
+
+export function setCurrentPlaythrough(id: string): Promise<Playthrough> {
+  return call('set_current_playthrough', { id }, async () => {
+    throw new Error('Playthroughs need the desktop app.');
+  });
+}
+
+/**
+ * Save notes onto the run they were typed for.
+ *
+ * `playthroughId` is omitted only when the edit screen has not been told which
+ * run is open, in which case the current run is the right one.
+ */
+export function writePlaythroughNotes(gameId: string, notes: string, playthroughId?: string | null): Promise<void> {
+  return call('write_playthrough_notes', { gameId, playthroughId: playthroughId ?? null, notes }, () => undefined);
 }
 
 /**
@@ -651,6 +695,62 @@ export function dataDirSize(): Promise<number> {
  */
 export function ambientSet(enabled: boolean, volume: number, audible: boolean): Promise<boolean> {
   return call('ambient_set', { enabled, volume, audible }, () => false);
+}
+
+/** Play a picked file through the system. False means the web view should try. */
+export function ambientFile(path: string, volume: number, audible: boolean): Promise<boolean> {
+  return call('ambient_file', { path, volume, audible }, () => false);
+}
+
+export interface CopyPreview {
+  version: number;
+  exportedAt: string;
+  hasSettings: boolean;
+  playthroughs: number;
+  logs: number;
+  sessions: number;
+}
+
+export interface ExportInfo {
+  playthroughs: number;
+  logs: number;
+  sessions: number;
+}
+
+export interface CopyResult {
+  settingsApplied: boolean;
+  settings: Record<string, unknown> | null;
+  playthroughsAdded: number;
+  logsAdded: number;
+  sessionsAdded: number;
+  notesFilled: number;
+  skipped: number;
+  unmatched: string[];
+  unmatchedCount: number;
+  notesUpdated: { gameId: string; notes: string }[];
+}
+
+export function previewCopy(path: string): Promise<CopyPreview> {
+  return call('preview_copy', { path }, async () => {
+    throw new Error('A copy needs the desktop app.');
+  });
+}
+
+export function exportCopy(path: string, settings: unknown, journal: boolean, sessions: boolean): Promise<ExportInfo> {
+  return call('export_copy', { path, settings, journal, sessions }, async () => {
+    throw new Error('A copy needs the desktop app.');
+  });
+}
+
+export function importCopy(path: string, journal: boolean, sessions: boolean): Promise<CopyResult> {
+  return call('import_copy', { path, journal, sessions }, async () => {
+    throw new Error('A copy needs the desktop app.');
+  });
+}
+
+/** Keep a picked music file with Orbit and return the path that should be saved. */
+export function rememberMusic(source: string): Promise<string> {
+  return call('remember_music', { source }, async () => source);
 }
 
 // ----------------------------------------------------------------- save copies

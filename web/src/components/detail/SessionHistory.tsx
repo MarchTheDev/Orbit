@@ -57,7 +57,10 @@ export function SessionHistory({
             // ending the wrong session.
             <li key={s.id} className="group flex items-center gap-2 rounded-lg bg-bg/60 py-2 pl-3 pr-2 text-sm">
               <span className="font-mono font-semibold text-accent">{fmtClock(s.durationSecs)}</span>
-              <span className="flex-1 truncate text-xs text-muted">{s.note || 'Played'}</span>
+              <span className="flex-1 truncate text-xs text-muted">
+                {s.playthroughName ? `${s.playthroughName} · ` : ''}
+                {s.note || 'Played'}
+              </span>
               <span className="text-[10px] text-muted">{fmtDateTime(s.startedAt)}</span>
               {onEdit && (
                 <button

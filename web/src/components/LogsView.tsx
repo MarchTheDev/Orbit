@@ -245,14 +245,14 @@ export function LogsView({
                 <Cover game={selected} className="size-12 shrink-0 rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-sm font-semibold">{selected.title}</h2>
-                  <p className="text-[11px] text-muted">Reset logs and game notes separately.</p>
+                  <p className="text-[11px] text-muted">Entries clear for every playthrough. Notes clear for the current run.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setClearTarget({ game: selected, kind: 'logs' })}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
-                    title="Remove every Journal entry for this game"
+                    title="Remove every Journal entry for this game, on every playthrough"
                   >
                     <Trash2 className="size-3.5" />
                     Clear log entries
@@ -261,7 +261,7 @@ export function LogsView({
                     type="button"
                     onClick={() => setClearTarget({ game: selected, kind: 'notes' })}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
-                    title="Clear the game's separate general notes"
+                    title="Clear notes for the current playthrough"
                   >
                     <RotateCcw className="size-3.5" />
                     Clear notes
@@ -294,8 +294,8 @@ export function LogsView({
         <ConfirmDialog
           title={clearTarget.kind === 'logs' ? `Reset ${clearTarget.game.title}'s log entries?` : `Reset ${clearTarget.game.title}'s notes?`}
           description={clearTarget.kind === 'logs'
-            ? 'This permanently removes every Journal entry for this game. Its separate general notes, play sessions, and all other games’ entries stay untouched.'
-            : 'This permanently clears only the game’s general notes. Journal entries, play sessions, and all other game data stay untouched.'}
+            ? 'This removes every Journal entry for this game, on every playthrough. Notes, play sessions, and other games stay untouched.'
+            : 'This clears the notes for the current playthrough. Journal entries, play sessions, and other playthroughs stay untouched.'}
           confirmLabel={clearTarget.kind === 'logs' ? 'Reset log entries' : 'Reset notes'}
           onCancel={() => setClearTarget(null)}
           onConfirm={clearSelected}

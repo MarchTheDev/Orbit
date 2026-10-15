@@ -28,6 +28,7 @@ mod steam;
 mod steam_stats;
 mod storage;
 mod store;
+mod transfer;
 mod update;
 
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
-use db::{GameLogRow, GameRow, GameWrite, SessionRow, Stats};
+use db::{GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
 use launch::FoundGame;
 use launch_target::LaunchTarget;
 use session::{ActiveView, Runner};
@@ -457,6 +458,44 @@ fn update_game_log(
 #[tauri::command]
 fn delete_game_log(orbit: State<'_, Orbit>, id: i64) -> Result<(), String> {
     orbit.db.delete_game_log(id)
+}
+
+/// The runs of one game. Each one has its own journal and its own notes.
+#[tauri::command]
+fn list_playthroughs(orbit: State<'_, Orbit>, game_id: String) -> Result<Vec<PlaythroughRow>, String> {
+    orbit.db.list_playthroughs(&game_id)
+}
+
+#[tauri::command]
+fn add_playthrough(orbit: State<'_, Orbit>, game_id: String, name: String) -> Result<PlaythroughRow, String> {
+    orbit.db.add_playthrough(&game_id, &name)
+}
+
+#[tauri::command]
+fn rename_playthrough(orbit: State<'_, Orbit>, id: String, name: String) -> Result<(), String> {
+    orbit.db.rename_playthrough(&id, &name)
+}
+
+#[tauri::command]
+fn delete_playthrough(orbit: State<'_, Orbit>, id: String) -> Result<PlaythroughRow, String> {
+    orbit.db.delete_playthrough(&id)
+}
+
+#[tauri::command]
+fn set_current_playthrough(orbit: State<'_, Orbit>, id: String) -> Result<PlaythroughRow, String> {
+    orbit.db.set_current_playthrough(&id)
+}
+
+#[tauri::command]
+fn write_playthrough_notes(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    playthrough_id: Option<String>,
+    notes: String,
+) -> Result<(), String> {
+    orbit
+        .db
+        .write_playthrough_notes(&game_id, playthrough_id.as_deref(), &notes)
 }
 
 /// The same object the type serialises to, as a `Value` for the database.
@@ -1244,6 +1283,48 @@ fn ambient_stop() {
     ambient::stop();
 }
 
+/// Play a file the player picked. False means the web view should try.
+#[tauri::command]
+fn ambient_file(path: String, volume: f32, audible: bool) -> Result<bool, String> {
+    ambient::play_file(&path, volume, audible)
+}
+
+/// What is in a copy, before anything is changed.
+#[tauri::command]
+fn preview_copy(path: String) -> Result<transfer::CopyPreview, String> {
+    transfer::preview(&path)
+}
+
+/// Write a copy. Settings always. Journal and sessions only when asked.
+#[tauri::command]
+fn export_copy(
+    orbit: State<'_, Orbit>,
+    path: String,
+    settings: Settings,
+    journal: bool,
+    sessions: bool,
+) -> Result<transfer::ExportInfo, String> {
+    transfer::export_file(&orbit.db, &path, settings, journal, sessions)
+}
+
+/// Bring a copy in. Settings are applied by the caller after a confirm, so
+/// this command never replaces them on its own.
+#[tauri::command]
+fn import_copy(
+    orbit: State<'_, Orbit>,
+    path: String,
+    journal: bool,
+    sessions: bool,
+) -> Result<transfer::CopyResult, String> {
+    transfer::import_file(&orbit.db, &path, journal, sessions)
+}
+
+/// Copy a picked music file into Orbit's own folder and return that path.
+#[tauri::command]
+fn remember_music(orbit: State<'_, Orbit>, source: String) -> Result<String, String> {
+    transfer::remember_music(orbit.store.root(), &source)
+}
+
 #[tauri::command]
 fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::SaveStatus {
     saves::status(orbit.store.root(), backup_root.as_deref())
@@ -1715,6 +1796,12 @@ pub fn run() {
             add_game_log,
             update_game_log,
             delete_game_log,
+            list_playthroughs,
+            add_playthrough,
+            rename_playthrough,
+            delete_playthrough,
+            set_current_playthrough,
+            write_playthrough_notes,
             launch_info,
             exe_info,
             find_cover,
@@ -1761,6 +1848,11 @@ pub fn run() {
             data_dir_size,
             ambient_set,
             ambient_stop,
+            ambient_file,
+            preview_copy,
+            export_copy,
+            import_copy,
+            remember_music,
             gamepad_poll,
             saves_status,
             saves_backup,

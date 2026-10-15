@@ -121,6 +121,8 @@ export function fmtEndedBy(endedBy: string | null, manual: boolean): string {
       return 'Recovered after a crash';
     case 'failed':
       return 'Could not start';
+    case 'imported':
+      return 'Brought in from a copy';
     case null:
       return 'Running';
     default:

@@ -245,6 +245,9 @@ export interface Session {
   /** True when the time was typed in rather than played. */
   manual: boolean;
   endedBy: string | null;
+  /** Which run this time was played on. The game's total is still the whole game. */
+  playthroughId?: string | null;
+  playthroughName?: string;
 }
 
 /**
@@ -267,6 +270,23 @@ export interface GameLog {
   /** Longer free text about this entry, separate from what happened. */
   details: string;
   createdAt: number;
+  /** Which run this entry belongs to. */
+  playthroughId?: string | null;
+  playthroughName?: string;
+}
+
+/**
+ * One run of a game.
+ *
+ * Journal entries and notes belong to the run. Time already counted stays on
+ * the game, so two playthroughs do not split the hours in half.
+ */
+export interface Playthrough {
+  id: string;
+  gameId: string;
+  name: string;
+  notes: string;
+  current: boolean;
 }
 
 /** The session in progress, if there is one. */
@@ -431,6 +451,11 @@ export interface Settings {
     volume: number;
     /** Keep playing while another window has the focus. */
     unfocused: boolean;
+    /**
+     * A music file kept in Orbit's own folder. Empty means the chord the app
+     * makes itself, which is the sound a fresh install plays.
+     */
+    file?: string | null;
   };
   /**
    * Whether the library's own "Jump back in" panel is drawn.

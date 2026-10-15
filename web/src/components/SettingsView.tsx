@@ -34,13 +34,14 @@ import {
   dataDirSize,
   isNative,
   listDrives,
+  rememberMusic,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
   type DriveInfo,
 } from '../services/native';
-import { openExternal } from '../services/desktop';
-import { pickFolder } from '../services/desktop';
+import { openExternal, pickFile, pickFolder } from '../services/desktop';
+import { CopySettings } from './CopySettings';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
@@ -274,6 +275,7 @@ const SECTIONS = [
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
   { id: 'orbit-sound', label: 'Sound' },
+  { id: 'orbit-copy', label: 'A copy' },
   { id: 'orbit-tools', label: 'Tools' },
   { id: 'orbit-updates', label: 'Updates' },
   { id: 'orbit-about', label: 'About' },
@@ -306,10 +308,30 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
+  { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
+  { label: 'Save or bring in a copy', section: 'orbit-copy', keywords: 'export import backup settings journal sessions playthrough copy' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
+
+function withSound(
+  settings: Settings,
+  patch: Partial<NonNullable<Settings['sound']>>,
+): NonNullable<Settings['sound']> {
+  return {
+    enabled: settings.sound?.enabled !== false,
+    volume: settings.sound?.volume ?? 0.35,
+    unfocused: settings.sound?.unfocused === true,
+    file: settings.sound?.file ?? null,
+    ...patch,
+  };
+}
+
+function fileName(path: string): string {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut >= 0 ? path.slice(cut + 1) : path;
+}
 
 export function SettingsView({
   settings,
@@ -317,6 +339,7 @@ export function SettingsView({
   onImportLauncher,
   onClearLibrary,
   onReset,
+  onLibraryChanged,
   update,
   onFoundUpdate,
 }: {
@@ -328,6 +351,8 @@ export function SettingsView({
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
+  /** Re-read the library after a copy brings journal or sessions in. */
+  onLibraryChanged?: () => void;
   /** The newer release the app already found when it opened, if there was one. */
   update: ReleaseInfo | null;
   /** Reports what a check from in here found, so the offer travels with the app. */
@@ -345,7 +370,24 @@ export function SettingsView({
   const [startupError, setStartupError] = useState<string | null>(null);
   const [exeContextMenuBusy, setExeContextMenuBusy] = useState(false);
   const [exeContextMenuError, setExeContextMenuError] = useState<string | null>(null);
+  const [musicError, setMusicError] = useState<string | null>(null);
+  const [musicBusy, setMusicBusy] = useState(false);
   const native = isNative();
+
+  const chooseMusic = async () => {
+    setMusicError(null);
+    const picked = await pickFile('Choose music', ['mp3', 'ogg', 'oga', 'wav', 'flac', 'm4a', 'aac', 'opus']);
+    if (!picked) return;
+    setMusicBusy(true);
+    try {
+      const kept = await rememberMusic(picked);
+      setSettings({ sound: withSound(settings, { file: kept, enabled: true }) });
+    } catch (reason) {
+      setMusicError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setMusicBusy(false);
+    }
+  };
 
   const setOpenExeInOrbit = async (enabled: boolean) => {
     setExeContextMenuBusy(true);
@@ -983,16 +1025,14 @@ export function SettingsView({
         id="orbit-sound"
         icon={Piano}
         title="Sound"
-        lead="A composed, gentle background phrase - made locally, with no audio downloads."
+        lead="A quiet chord, made in the app. Nothing is downloaded. A file you pick replaces it, and Restore brings the chord back."
       >
         <Group>
           <Checkbox
             checked={settings.sound?.enabled !== false}
-            onChange={(v) =>
-              setSettings({ sound: { enabled: v, volume: settings.sound?.volume ?? 0.35, unfocused: settings.sound?.unfocused === true } })
-            }
+            onChange={(v) => setSettings({ sound: withSound(settings, { enabled: v }) })}
             label="Play something quiet in the background"
-            hint="A slow, repeating major-pentatonic melody over one steady soft chord. No random notes or chord changes."
+            hint="A slow melody over one soft chord, unless a file is chosen below. No random notes or chord changes."
           />
 
           <label className={cn('block space-y-1', settings.sound?.enabled === false && 'opacity-50')}>
@@ -1008,13 +1048,7 @@ export function SettingsView({
                 value={Math.round((settings.sound?.volume ?? 0.35) * 100)}
                 disabled={settings.sound?.enabled === false}
                 onChange={(e) =>
-                  setSettings({
-                    sound: {
-                      enabled: true,
-                      volume: Number(e.target.value) / 100,
-                      unfocused: settings.sound?.unfocused === true,
-                    },
-                  })
+                  setSettings({ sound: withSound(settings, { enabled: true, volume: Number(e.target.value) / 100 }) })
                 }
                 className="orbit-range flex-1"
                 aria-label="Volume"
@@ -1027,12 +1061,44 @@ export function SettingsView({
 
           <Checkbox
             checked={settings.sound?.unfocused === true}
-            onChange={(v) =>
-              setSettings({ sound: { enabled: settings.sound?.enabled !== false, volume: settings.sound?.volume ?? 0.35, unfocused: v } })
-            }
+            onChange={(v) => setSettings({ sound: withSound(settings, { unfocused: v }) })}
             label="Keep playing while Orbit is not the window in front"
             hint="Off: the music steps aside when you click away, and comes back when you do. On: it carries on, which is what a second monitor wants."
           />
+
+          <SubHead>Your own music</SubHead>
+          <p className="text-xs leading-relaxed text-muted">
+            {settings.sound?.file
+              ? `Playing ${fileName(settings.sound.file)}. Restore the default to hear the chord again.`
+              : 'The default chord is what plays. ogg, wav, and flac are the surest files. If a file will not play, the chord is used.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!native || musicBusy}
+              onClick={() => void chooseMusic()}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition hover:border-accent/50 hover:text-fg disabled:opacity-50"
+            >
+              Choose a file
+            </button>
+            <button
+              type="button"
+              disabled={!settings.sound?.file || musicBusy}
+              onClick={() => {
+                setMusicError(null);
+                setSettings({ sound: withSound(settings, { file: null }) });
+              }}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition hover:border-accent/50 hover:text-fg disabled:opacity-50"
+            >
+              Restore the default
+            </button>
+          </div>
+          {musicError && (
+            <p role="alert" className="text-xs text-rose-300">
+              {musicError}
+            </p>
+          )}
+          {!native && <p className="text-xs text-muted">Choosing a file needs the desktop app.</p>}
 
           <SubHead>In the top bar</SubHead>
 
@@ -1049,6 +1115,15 @@ export function SettingsView({
             hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
           />
         </Group>
+      </Section>
+
+      <Section
+        id="orbit-copy"
+        icon={Save}
+        title="A copy"
+        lead="Save your settings to a file you keep. Journal and sessions are included only if you ask."
+      >
+        <CopySettings settings={settings} setSettings={setSettings} onLibraryChanged={onLibraryChanged} />
       </Section>
 
       <Section id="orbit-tools" icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">

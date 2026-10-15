@@ -7,7 +7,7 @@
  * and the UI falls back to typing paths, so the app is still usable for design
  * work.
  */
-import { message, open } from '@tauri-apps/plugin-dialog';
+import { message, open, save } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -66,6 +66,17 @@ export async function pickFile(
 /** Ask for any file, such as a ROM or a cover image. */
 export function pickAnyFile(title: string, startAt?: string): Promise<string | null> {
   return pickFile(title, [], startAt);
+}
+
+/** Ask where to save a file. `null` means the player cancelled. */
+export async function pickSaveFile(title: string, defaultPath: string, extensions: string[]): Promise<string | null> {
+  if (!isNative()) return null;
+  const picked = await save({
+    title,
+    defaultPath,
+    filters: [{ name: 'Orbit copy', extensions }],
+  });
+  return picked ?? null;
 }
 
 /**

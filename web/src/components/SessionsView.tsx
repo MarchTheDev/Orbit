@@ -254,7 +254,10 @@ export function SessionsView({
                     {game ? <Cover game={game} className="size-14 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-semibold">{row.gameTitle}</span>
-                      <span className="mt-1 block text-xs text-muted">{fmtDateTime(row.startedAt)}</span>
+                      <span className="mt-1 block text-xs text-muted">
+                        {fmtDateTime(row.startedAt)}
+                        {row.playthroughName ? ` · ${row.playthroughName}` : ''}
+                      </span>
                     </span>
                   </button>
                   <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">

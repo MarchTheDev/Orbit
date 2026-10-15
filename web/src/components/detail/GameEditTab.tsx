@@ -521,7 +521,7 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
-            Markdown source, with a rendered View when you need it
+            For the current playthrough. Markdown, with a rendered View when you need it
           </span>
         </span>
         <MarkdownEditor
