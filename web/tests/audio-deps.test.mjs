@@ -29,16 +29,20 @@ function check(name, ok, detail = '') {
   }
 }
 
-console.log('the sound is synthesized, so no decoder is needed');
+console.log('the chord is still synthesized; a chosen track is not a shipped file');
 
 const ambient = read('web', 'src', 'services', 'ambient.ts');
 check('the music comes from an AudioContext', /new Ctor\(\)|AudioContext/.test(ambient));
 const frontEnd = ['web/src/services/ambient.ts', 'web/src/App.tsx', 'web/src/components/MusicButton.tsx']
   .map((file) => read(...file.split('/')))
   .join('\n');
-// If a media file is ever added, base and good will no longer be enough: it
-// would need a decoder, and the silence would come back looking identical.
-check('nothing plays a media file', !/<audio|new Audio\(|<video|\.src\s*=\s*['"][^'"]*\.(mp3|ogg|wav|m4a)/.test(frontEnd));
+// A file shipped inside the page would need a decoder in every package, and a
+// silent one would look exactly like the old Linux failure. A track the player
+// picks is not in the package. If it will not move, the chord comes back.
+check('no media file is shipped in the page',
+  !/<audio[\s>]|<video[\s>]|\.src\s*=\s*['"][^'"]*\.(mp3|ogg|wav|flac|m4a)/.test(frontEnd));
+check('a chosen file that will not play returns to the chord',
+  /new Audio\(/.test(ambient) && /fileFailed/.test(ambient) && /this\.ensure\(\)/.test(ambient) && /tryNative\(\)/.test(ambient));
 
 console.log('every package asks for the plugins');
 
