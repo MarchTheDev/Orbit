@@ -275,10 +275,12 @@ fn authorize(bin: &Path, provider: &str) -> Result<String, String> {
     let text = Arc::new(Mutex::new(String::new()));
     let link = Arc::new(Mutex::new(None));
     let mut readers = Vec::new();
-    for stream in [stdout, stderr].into_iter().flatten() {
-        let text = Arc::clone(&text);
-        let link = Arc::clone(&link);
-        readers.push(std::thread::spawn(move || collect_auth(stream, &text, &link)));
+    // stdout and stderr are different types, so each reader is started on its own.
+    if let Some(stdout) = stdout {
+        readers.push(read_auth(stdout, &text, &link));
+    }
+    if let Some(stderr) = stderr {
+        readers.push(read_auth(stderr, &text, &link));
     }
     let opened = AtomicBool::new(false);
     let started = Instant::now();
@@ -326,6 +328,16 @@ fn authorize(bin: &Path, provider: &str) -> Result<String, String> {
         return Err("The sign-in was cancelled.".into());
     }
     token_from(&collected).ok_or_else(|| "rclone did not return a sign-in.".into())
+}
+
+fn read_auth(
+    stream: impl Read + Send + 'static,
+    text: &Arc<Mutex<String>>,
+    link: &Arc<Mutex<Option<String>>>,
+) -> std::thread::JoinHandle<()> {
+    let text = Arc::clone(text);
+    let link = Arc::clone(link);
+    std::thread::spawn(move || collect_auth(stream, &text, &link))
 }
 
 fn collect_auth(stream: impl Read, text: &Mutex<String>, link: &Mutex<Option<String>>) {
@@ -523,23 +535,28 @@ async fn download(url: &str, dest: &Path) -> Result<(), String> {
 
 fn unpack(archive: &Path, dest: &Path) -> Result<(), String> {
     fs::create_dir_all(dest).map_err(|e| format!("Could not unpack rclone: {e}"))?;
-    if ran(process::command("unzip").args(["-o", "-q"]).arg(archive).arg("-d").arg(dest)) {
+    let mut unzip = process::command("unzip");
+    unzip.args(["-o", "-q"]).arg(archive).arg("-d").arg(dest);
+    if ran(&mut unzip) {
         return Ok(());
     }
-    if ran(process::command("python3")
+    let mut python = process::command("python3");
+    python
         .args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
         .arg(archive)
-        .arg(dest))
-    {
+        .arg(dest);
+    if ran(&mut python) {
         return Ok(());
     }
-    if ran(process::command("tar").args(["-xf"]).arg(archive).arg("-C").arg(dest)) {
+    let mut tar = process::command("tar");
+    tar.args(["-xf"]).arg(archive).arg("-C").arg(dest);
+    if ran(&mut tar) {
         return Ok(());
     }
     Err("Could not unpack rclone. unzip, python3, or tar is needed.".into())
 }
 
-fn ran(mut cmd: std::process::Command) -> bool {
+fn ran(cmd: &mut std::process::Command) -> bool {
     cmd.stdin(Stdio::null())
         .output()
         .map(|out| out.status.success())
