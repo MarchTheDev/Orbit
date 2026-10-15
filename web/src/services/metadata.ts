@@ -1,10 +1,9 @@
 /**
  * Game details.
  *
- * Nothing here needs setting up, and there is no second provider: the Steam
- * catalogue answers with a description, genres, developer, release year and
- * artwork and asks for no key at all. That is what makes a dropped-in game fill
- * itself out.
+ * Steam answers with a description, genres, developer, release year and artwork
+ * and asks for no key. A cover from SteamGridDB or IGDB is added only when
+ * those keys are in Settings, and only when Steam has no portrait.
  */
 import type { GameSuggestion, MetaData } from '../types';
 import { gameSuggestions, metadataLookup, metadataSuggest } from './native';

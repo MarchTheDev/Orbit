@@ -486,7 +486,8 @@ export async function httpJson<T>(url: string, init?: RequestInit): Promise<T> {
 /**
  * Details and artwork for a title.
  *
- * Rust asks the Steam catalogue, which needs no key at all. A browser preview
+ * Rust asks the Steam catalogue, which needs no key. A cover from SteamGridDB
+ * or IGDB is added only when those keys are in Settings. A browser preview
  * has no stores to ask, so it answers with something deterministic and says it
  * is only an estimate.
  */
@@ -849,6 +850,12 @@ export function findSave(title: string, hints?: SaveHints): Promise<string | nul
 
 export function listSaves(gameId: string, title: string, place?: SavePlace): Promise<SaveBackup[]> {
   return call('saves_list', { gameId, title, ...place }, () => []);
+}
+
+export function syncSaves(destination: string, backupRoot?: string | null): Promise<string> {
+  return call('saves_sync', { destination, backupRoot: backupRoot || null }, async () => {
+    throw new Error('Syncing copies needs the desktop app.');
+  });
 }
 
 export function suggestSaves(title: string): Promise<string[]> {

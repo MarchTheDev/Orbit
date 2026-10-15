@@ -8,9 +8,11 @@
 //! ships one and never invents one. No key in Settings means this module is
 //! never called at all.
 //!
-//! The endpoints are the same for every picture, differing only in the noun:
-//! `/grids/steam/<app>` for covers and `/heroes/steam/<app>` for backdrops. Both
-//! answer `{ "success": true, "data": [ { "url": ... } ] }`.
+//! A Steam id is asked first: `/grids/steam/<app>` and `/heroes/steam/<app>`.
+//! Sizes are not filtered. Asking only for two exact crops used to hide the
+//! usual 600×900 grids, which looked like the site had nothing. A title is
+//! searched only when that id has no cover, and only an exact name is used.
+//! Both endpoints answer `{ "success": true, "data": [ { "url": ... } ] }`.
 
 use serde::Deserialize;
 
@@ -46,10 +48,14 @@ struct Answer {
 /// An empty list is a normal answer: SteamGridDB simply may not have anything
 /// for that game, and the caller falls back to what the store had.
 ///
-/// The answer is in the same shape as the store's own artwork, so a grid and a
-/// Steam capsule are interchangeable as far as the picker is concerned.
+/// Sizes are not filtered. The old request asked only for two exact crops, and
+/// a game whose grids were the usual 600×900 came back empty, which looked like
+/// the site had nothing. A Steam id is tried first. A title is used only when
+/// that id has no cover, and only an exact name is accepted, so a nearby game
+/// does not lend its art.
 pub async fn art(
-    app_id: u64,
+    app_id: Option<u64>,
+    title: &str,
     api_key: &str,
 ) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
     let key = api_key.trim();
@@ -58,22 +64,48 @@ pub async fn art(
     }
 
     let mut out = Vec::new();
-    // Portrait grids are the covers; heroes are the wide backdrops. The two are
-    // asked for separately because the API has no endpoint that returns both.
-    out.extend(pictures(app_id, key, "grids", "portrait", "342x482,660x930").await?);
-    out.extend(pictures(app_id, key, "heroes", "hero", "1920x620,3840x1240").await?);
-    Ok(out)
+    if let Some(app_id) = app_id {
+        // A missing page is not a bad key. Name search still gets a turn.
+        out.extend(pictures_or_empty(&format!("{API}/grids/steam/{app_id}"), key, "portrait").await?);
+        out.extend(pictures_or_empty(&format!("{API}/heroes/steam/{app_id}"), key, "hero").await?);
+    }
+    if out.iter().any(|pick| pick.kind == "portrait") {
+        return Ok(out);
+    }
+    if let Some(id) = find_game(title, key).await? {
+        let mut named = pictures_or_empty(&format!("{API}/grids/game/{id}"), key, "portrait").await?;
+        named.extend(pictures_or_empty(&format!("{API}/heroes/game/{id}"), key, "hero").await?);
+        named.append(&mut out);
+        out = named;
+    }
+    Ok(deduped(out))
+}
+
+/// Pictures, or nothing when the page is simply missing.
+///
+/// A refused key and a network failure still stop the lookup. A 404 does not,
+/// or a game SteamGridDB has under a different id would never be searched by name.
+async fn pictures_or_empty(
+    url: &str,
+    key: &str,
+    kind: &str,
+) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
+    match pictures(url, key, kind).await {
+        Ok(found) => Ok(found),
+        Err(reason) if reason.contains("refused") || reason.contains("could not be reached") => Err(reason),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 /// One endpoint's worth of pictures.
 async fn pictures(
-    app_id: u64,
+    url: &str,
     key: &str,
-    noun: &str,
     kind: &str,
-    dimensions: &str,
 ) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
-    let url = format!("{API}/{noun}/steam/{app_id}?dimensions={dimensions}&limit=24");
+    // Adult and humor pictures are left out by the API unless asked for. Sizes
+    // are not filtered: a game whose grids are not one of two crops still has art.
+    let url = format!("{url}?limit=24");
     let client = crate::metadata::client()?;
     let answer = client
         .get(&url)
@@ -127,4 +159,91 @@ async fn pictures(
             ),
         })
         .collect())
+}
+
+#[derive(Debug, Deserialize)]
+struct Hit {
+    id: u64,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Hits {
+    #[serde(default)]
+    success: bool,
+    #[serde(default)]
+    data: Vec<Hit>,
+}
+
+/// The SteamGridDB id of a game whose name is this title, ignoring case.
+async fn find_game(title: &str, key: &str) -> Result<Option<u64>, String> {
+    let wanted = title.trim();
+    if wanted.chars().count() < 2 {
+        return Ok(None);
+    }
+    let url = format!("{API}/search/autocomplete/{}", path_term(wanted));
+    let client = crate::metadata::client()?;
+    let answer = client
+        .get(url)
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("SteamGridDB could not be reached: {e}"))?;
+    let status = answer.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err("SteamGridDB refused that key. Check it in Settings → Artwork.".into());
+    }
+    if !status.is_success() {
+        return Ok(None);
+    }
+    let body = answer.text().await.map_err(|e| e.to_string())?;
+    let parsed: Hits = match serde_json::from_str(&body) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(None),
+    };
+    if !parsed.success {
+        return Ok(None);
+    }
+    let wanted = wanted.to_lowercase();
+    Ok(parsed
+        .data
+        .into_iter()
+        .find(|hit| hit.name.trim().to_lowercase() == wanted)
+        .map(|hit| hit.id))
+}
+
+fn deduped(picks: Vec<crate::metadata::ArtworkPick>) -> Vec<crate::metadata::ArtworkPick> {
+    let mut seen = std::collections::HashSet::new();
+    picks
+        .into_iter()
+        .filter(|pick| seen.insert(pick.url.clone()))
+        .collect()
+}
+
+/// A path segment. Spaces and anything outside a URL name are escaped, so a
+/// title with a colon or an apostrophe still reaches the search.
+fn path_term(title: &str) -> String {
+    let mut out = String::new();
+    for byte in title.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_term;
+
+    #[test]
+    fn a_title_with_punctuation_is_safe_in_a_path() {
+        assert_eq!(path_term("Hades"), "Hades");
+        assert_eq!(path_term("The Witcher 3"), "The%20Witcher%203");
+        assert_eq!(path_term("Don't Starve"), "Don%27t%20Starve");
+    }
 }

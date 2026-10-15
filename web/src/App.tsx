@@ -371,7 +371,15 @@ export default function App() {
   const asked = useRef(new Set<string>());
 
   /** True for a game still carrying the store's wide banner as its cover. */
-  const artIsWide = (g: Game) => !!g.meta?.steamAppId && !g.meta.coverUrl?.includes('library_600x900');
+  const artIsWide = (g: Game) => {
+    if (!g.meta?.steamAppId) return false;
+    const cover = g.meta.coverUrl ?? '';
+    if (cover.includes('library_600x900')) return false;
+    // A portrait from another catalogue is already the tile shape. Treating it
+    // as the old wide banner would ask for artwork again on every launch.
+    if (cover.includes('steamgriddb.com') || cover.includes('images.igdb.com')) return false;
+    return true;
+  };
 
   /**
    * Fill in the gaps in the background.

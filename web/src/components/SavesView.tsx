@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, RefreshCw, Search } from 'lucide-react';
+import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -14,6 +14,7 @@ import {
   savePlaceOf,
   savesStatus,
   suggestSaves,
+  syncSaves,
   type SaveBackup,
   type SaveStatus,
 } from '../services/native';
@@ -26,14 +27,15 @@ import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { btnBrowse, inputCls, Modal } from './ui/Modal';
 
 /**
  * Copies of the files a game writes while it is played.
  *
  * Orbit looks in the usual places — Documents, Saved Games, the game's own
  * folder, a Wine prefix, a Steam prefix — and copies what it finds. Nothing
- * else has to be installed. A folder the player names is used instead. A
- * backup never leaves the machine.
+ * else has to be installed. A folder the player names is used instead. Those
+ * copies can be sent on from this page. Nothing is installed to do that.
  */
 export function SavesView({
   games,
@@ -52,6 +54,11 @@ export function SavesView({
   const [restoreTarget, setRestoreTarget] = useState<Game | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [savedTick, setSavedTick] = useState(0);
+  const [browsing, setBrowsing] = useState(false);
+  const [browseQuery, setBrowseQuery] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const savedOrder = settings.saves?.order;
   const hiddenIds = (settings.saves?.hidden ?? []).filter((id) => games.some((game) => game.id === id));
   const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
@@ -93,6 +100,13 @@ export function SavesView({
   );
   const auto = settings.saves?.auto ?? [];
   const dirs = settings.saves?.dirs ?? {};
+  const syncTo = settings.saves?.syncTo ?? '';
+  const browseGames = useMemo(() => {
+    const query = browseQuery.trim().toLowerCase();
+    return [...games]
+      .filter((game) => !query || game.title.toLowerCase().includes(query))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [games, browseQuery]);
 
   useEffect(() => {
     if (!isNative()) return;
@@ -105,6 +119,24 @@ export function SavesView({
   };
   const setDir = (id: string, dir: string) => {
     setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
+  };
+  const setSyncTo = (value: string) => {
+    setSyncNote(null);
+    setSyncError(null);
+    setSettings({ saves: { ...settings.saves, syncTo: value } });
+  };
+  const syncCopies = async () => {
+    if (!isNative() || syncing || !syncTo.trim()) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncNote(null);
+    try {
+      setSyncNote(await syncSaves(syncTo, settings.saves?.backupRoot));
+    } catch (e) {
+      setSyncError(String(e).replace(/^Error:\s*/, ''));
+    } finally {
+      setSyncing(false);
+    }
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
@@ -224,11 +256,24 @@ export function SavesView({
         <div>
           <h1 className="text-xl font-semibold">Saves</h1>
           <p className="mt-1 max-w-xl text-sm text-muted">
-            A copy of each game's save files, made here and kept on this machine. Turn auto on and
-            Orbit takes one when a session ends. Nothing else has to be installed.
+            A copy of each game's save files, made here. Turn auto on and Orbit takes one when a
+            session ends. Nothing else has to be installed.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {rows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setBrowseQuery('');
+                setBrowsing(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
+            >
+              <List className="size-4" />
+              All games
+            </button>
+          )}
           {hiddenIds.length > 0 && (
             <button
               type="button"
@@ -251,6 +296,50 @@ export function SavesView({
             </button>
           )}
         </div>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-line bg-panel/40 p-3">
+        <p className="text-sm font-medium">Sync copies</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
+          Send the copies already made to a folder, or to <span className="text-fg">name@computer:folder</span> if
+          rsync is installed. Nothing there is deleted, and nothing extra is installed for a folder on this machine.
+        </p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <input
+            value={syncTo}
+            onChange={(event) => setSyncTo(event.target.value)}
+            placeholder="Folder, or name@computer:folder"
+            spellCheck={false}
+            className={`${inputCls} min-w-0 flex-1 font-mono`}
+          />
+          {isNative() && (
+            <button
+              type="button"
+              className={`${btnBrowse} flex items-center gap-2`}
+              onClick={() =>
+                void pickFolder('Where should the copies be sent?', syncTo || undefined).then(
+                  (path) => path && setSyncTo(path),
+                )
+              }
+            >
+              <FolderOpen className="size-4" />
+              Browse…
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!isNative() || syncing || !syncTo.trim()}
+            onClick={() => void syncCopies()}
+            className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-3 py-2 text-sm disabled:opacity-50')}
+          >
+            <CloudUpload className="size-4" />
+            {syncing ? 'Syncing…' : 'Sync'}
+          </button>
+        </div>
+        {syncError && (
+          <p role="alert" className="mt-2 text-xs text-rose-300">{syncError}</p>
+        )}
+        {syncNote && <p className="mt-2 text-xs text-muted">{syncNote}</p>}
       </div>
 
       {status?.root && (
@@ -294,10 +383,10 @@ export function SavesView({
       ) : (
         <>
         {listed.length > 1 && (
-          <p className="mb-3 text-xs text-muted">Drag a game to change the order. Right-click one to back it up, restore it, or hide it from this list.</p>
+          <p className="mb-3 text-xs text-muted">Drag a game to change the order. Right-click one, or use All games, to hide it from this list.</p>
         )}
         {listed.length === 1 && (
-          <p className="mb-3 text-xs text-muted">Right-click a game to back it up, restore it, or hide it from this list.</p>
+          <p className="mb-3 text-xs text-muted">Right-click a game, or use All games, to hide it from this list.</p>
         )}
         <ul ref={list} className="space-y-2">
           {listed.map((game) => (
@@ -361,6 +450,45 @@ export function SavesView({
         </>
       )}
 
+      {browsing && (
+        <Modal
+          title="All games"
+          subtitle="Hide a game from Saves, or show it again. It stays in the library."
+          size="lg"
+          onClose={() => setBrowsing(false)}
+        >
+          <input
+            value={browseQuery}
+            onChange={(event) => setBrowseQuery(event.target.value)}
+            placeholder="Search games"
+            className={inputCls}
+            autoFocus
+          />
+          <ul className="mt-3 max-h-[60vh] space-y-1 overflow-auto">
+            {browseGames.map((game) => {
+              const gone = hidden.has(game.id);
+              return (
+                <li key={game.id} className="flex items-center gap-3 rounded-xl border border-line px-3 py-2">
+                  <Cover game={game} className="h-12 w-9 shrink-0 overflow-hidden rounded-lg [&_span]:text-[10px]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{game.title}</span>
+                    <span className="block text-[11px] text-muted">{gone ? 'Hidden from Saves' : 'In the Saves list'}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setHidden(game.id, !gone)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+                  >
+                    {gone ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                    {gone ? 'Show' : 'Hide'}
+                  </button>
+                </li>
+              );
+            })}
+            {browseGames.length === 0 && <li className="px-2 py-4 text-sm text-muted">No games match that.</li>}
+          </ul>
+        </Modal>
+      )}
       {menu && menuGame && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
       {restoreTarget && (
         <ConfirmDialog

@@ -19,9 +19,11 @@ mod launch_target;
 mod launchers;
 #[cfg(target_os = "linux")]
 mod linux_window;
+mod igdb;
 mod metadata;
 mod process;
 mod saves;
+mod sync;
 mod session;
 mod sgdb;
 mod steam;
@@ -951,15 +953,26 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
 
 /// Everything Orbit can find out about a game with no setup at all.
 ///
-/// The Steam store needs no key and nothing to configure: there is no second
-/// provider, and so nothing that can expire or need a login.
+/// The Steam store needs no key. SteamGridDB and IGDB are asked for a cover
+/// only when the store has no portrait and the player has put a key in Settings.
 ///
 /// An app id is passed when the caller has one, an import by Steam id, say,
 /// in which case the store page is read directly and the title can be blank,
 /// because the page carries its own name.
 #[tauri::command]
-async fn metadata_lookup(title: String, app_id: Option<u64>) -> Result<metadata::Meta, String> {
-    metadata::lookup_or_app(&title, app_id).await
+async fn metadata_lookup(
+    orbit: State<'_, Orbit>,
+    title: String,
+    app_id: Option<u64>,
+) -> Result<metadata::Meta, String> {
+    let mut meta = metadata::lookup_or_app(&title, app_id).await?;
+    if meta.cover_url.is_none() {
+        let name = meta.name.clone().unwrap_or_else(|| title.clone());
+        if let Some(url) = first_portrait(&orbit, &name, meta.steam_app_id.or(app_id)).await {
+            meta.cover_url = Some(url);
+        }
+    }
+    Ok(meta)
 }
 
 /// Every program in a folder, so an import can ask which one is the game.
@@ -1040,37 +1053,74 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>) -> Result<A
         Some(id) => Some(id),
         None => metadata::app_id_for(title).await,
     };
-    let Some(app_id) = app_id else {
-        return Err(format!(
-            "Orbit could not find \"{title}\" in the store. A cover can still be chosen by hand."
-        ));
-    };
+    // Steam is asked when there is an id, and a miss is not the end of the
+    // lookup: a game the store does not know can still have a cover elsewhere.
+    let mut picks = Vec::new();
+    if let Some(id) = app_id {
+        if let Ok(found) = metadata::artwork(id).await {
+            picks.extend(found);
+        }
+    }
 
-    let mut picks = metadata::artwork(app_id).await?;
-
-    // The key is read here rather than passed in, because the settings file is
-    // the one place it is written and this is the only place it is used.
-    //
-    // SteamGridDB goes in front when there is a key and is skipped entirely when
-    // there is not: the store's own art is free and needs no account, so it
-    // stays the default rather than the fallback. A failure here must not lose
-    // the store's pictures, which is why it is a log line and not an error.
     let settings = orbit.store.load_settings();
-    let sgdb_key = setting_text(&settings, "sgdbApiKey");
-    if let Some(key) = sgdb_key {
-        match sgdb::art(app_id, &key).await {
+    let mut cover_error = None;
+    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+        match sgdb::art(app_id, title, &key).await {
             Ok(mut found) => {
                 found.append(&mut picks);
                 picks = found;
             }
-            Err(e) => log::warn!("SteamGridDB offered nothing: {e}"),
+            Err(e) => {
+                log::warn!("SteamGridDB offered nothing: {e}");
+                cover_error = Some(e);
+            }
+        }
+    }
+    if let (Some(id), Some(secret)) = (
+        setting_text(&settings, "igdbClientId"),
+        setting_text(&settings, "igdbClientSecret"),
+    ) {
+        match igdb::covers(title, &id, &secret, false).await {
+            Ok(found) => picks.extend(found),
+            Err(e) => {
+                log::warn!("IGDB offered nothing: {e}");
+                cover_error.get_or_insert(e);
+            }
         }
     }
 
+    if picks.is_empty() {
+        if let Some(reason) = cover_error {
+            return Err(reason);
+        }
+        return Err(format!(
+            "Orbit could not find artwork for \"{title}\". A cover can still be chosen by hand."
+        ));
+    }
     Ok(Artwork {
-        app_id: known.or(Some(app_id)),
+        app_id: known.or(app_id),
         picks,
     })
+}
+
+/// The first portrait SteamGridDB or IGDB can offer, for a game whose store
+/// page has no library capsule.
+async fn first_portrait(orbit: &Orbit, title: &str, app_id: Option<u64>) -> Option<String> {
+    let settings = orbit.store.load_settings();
+    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+        if let Ok(found) = sgdb::art(app_id, title, &key).await {
+            if let Some(pick) = found.into_iter().find(|pick| pick.kind == "portrait") {
+                return Some(pick.url);
+            }
+        }
+    }
+    let id = setting_text(&settings, "igdbClientId")?;
+    let secret = setting_text(&settings, "igdbClientSecret")?;
+    igdb::covers(title, &id, &secret, true)
+        .await
+        .ok()
+        .and_then(|found| found.into_iter().next())
+        .map(|pick| pick.url)
 }
 
 /// Read fresh each time, because the share of players who have each one moves.
@@ -1344,6 +1394,16 @@ fn remember_music(orbit: State<'_, Orbit>, source: String) -> Result<String, Str
 #[tauri::command]
 fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::SaveStatus {
     saves::status(orbit.store.root(), backup_root.as_deref())
+}
+
+/// Send the copies already made to a folder, or to an rsync destination.
+#[tauri::command]
+fn saves_sync(
+    orbit: State<'_, Orbit>,
+    destination: String,
+    backup_root: Option<String>,
+) -> Result<String, String> {
+    sync::copies(orbit.store.root(), backup_root.as_deref(), &destination)
 }
 
 #[tauri::command]
@@ -1873,6 +1933,7 @@ pub fn run() {
             remember_music,
             gamepad_poll,
             saves_status,
+            saves_sync,
             saves_backup,
             saves_restore,
             saves_list,

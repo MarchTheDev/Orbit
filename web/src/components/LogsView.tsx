@@ -287,11 +287,7 @@ export function LogsView({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{g.title}</span>
                       <span className="block truncate text-[11px] text-muted">
-                        {counts && counts.count > 0
-                          ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'}${counts.name ? ` · ${counts.name}` : ''}`
-                          : counts?.name
-                            ? `nothing on ${counts.name}`
-                            : 'nothing logged yet'}
+                        {logCountLabel(counts)}
                       </span>
                     </span>
                   </button>
@@ -386,4 +382,11 @@ export function LogsView({
 function countedOnRun(log: GameLog, run: { id: string; name: string; runs: number }): boolean {
   if (log.playthroughId) return log.playthroughId === run.id;
   return run.name === 'Main' || run.runs <= 1;
+}
+
+/** A number, including zero, so an empty playthrough does not look unchanged. */
+function logCountLabel(counts: { count: number; name: string | null } | undefined): string {
+  const count = counts?.count ?? 0;
+  const logs = count === 1 ? 'log' : 'logs';
+  return counts?.name ? `${count} ${logs} · ${counts.name}` : `${count} ${logs}`;
 }

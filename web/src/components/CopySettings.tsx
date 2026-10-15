@@ -13,8 +13,8 @@ import {
   type CopyPreview,
   type CopyResult,
 } from '../services/native';
-import { Checkbox } from './ui/Checkbox';
 import { btnAccent } from './ui/buttons';
+import { cn } from '../utils/cn';
 
 /**
  * A file the player keeps. Settings always. Journal and sessions only if asked.
@@ -73,8 +73,8 @@ export function CopySettings({
       const file = await previewCopy(path);
       setPreview({ path, file });
       setBringSettings(file.hasSettings);
-      setBringJournal(false);
-      setBringSessions(false);
+      setBringJournal(journal && file.playthroughs + file.logs > 0);
+      setBringSessions(sessions && file.sessions > 0);
     } catch (reason) {
       setPreview(null);
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -86,7 +86,7 @@ export function CopySettings({
   const bringIn = async () => {
     if (!preview) return;
     if (!bringSettings && !bringJournal && !bringSessions) {
-      setError('Tick what to bring in.');
+      setError('Light what to bring in.');
       return;
     }
     if (bringSettings) {
@@ -126,23 +126,25 @@ export function CopySettings({
 
   return (
     <div className="space-y-4">
-      <ul className="grid gap-2 sm:grid-cols-3">
-        <li className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
-          <span className="block text-[10px] font-semibold uppercase tracking-widest text-accent">Always in the file</span>
-          <span className="mt-0.5 block text-sm font-medium text-fg">Settings</span>
-        </li>
-        <li className="rounded-xl border border-line/60 bg-bg/30 px-3 py-2">
-          <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted">Only if you tick it</span>
-          <span className="mt-0.5 block text-sm font-medium text-fg">Journal</span>
-        </li>
-        <li className="rounded-xl border border-line/60 bg-bg/30 px-3 py-2">
-          <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted">Only if you tick it</span>
-          <span className="mt-0.5 block text-sm font-medium text-fg">Sessions</span>
-        </li>
-      </ul>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Piece title="Settings" detail="Always in the file" on locked />
+        <Piece
+          title="Journal"
+          detail={journal ? 'In the file' : 'Click to include'}
+          on={journal}
+          disabled={!native || busy}
+          onClick={() => setJournal((value) => !value)}
+        />
+        <Piece
+          title="Sessions"
+          detail={sessions ? 'In the file' : 'Click to include'}
+          on={sessions}
+          disabled={!native || busy}
+          onClick={() => setSessions((value) => !value)}
+        />
+      </div>
       <p className="text-xs leading-relaxed text-muted">
-        The library of games is not in the file, and neither are the games' save files. Those stay on the Saves page.
-        Keep the file somewhere you trust: it holds whatever Settings holds, including keys.
+        A lit box goes into the file. Games, and the games' save files, do not. Settings includes keys, so keep the file somewhere you trust.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -154,24 +156,10 @@ export function CopySettings({
           <div>
             <h3 className="text-sm font-semibold text-fg">Save a file</h3>
             <p className="mt-1 text-xs leading-relaxed text-muted">
-              Write this Orbit out so you can keep it, or move it to another computer.
+              The lit boxes above decide what is written.
             </p>
           </div>
         </div>
-        <Checkbox
-          checked={journal}
-          onChange={setJournal}
-          disabled={!native || busy}
-          label="Include the journal"
-          hint="Playthroughs, their notes, and journal entries."
-        />
-        <Checkbox
-          checked={sessions}
-          onChange={setSessions}
-          disabled={!native || busy}
-          label="Include sessions"
-          hint="The time already counted, with the playthrough it was played on."
-        />
         <button
           type="button"
           disabled={!native || busy}
@@ -205,34 +193,36 @@ export function CopySettings({
         {preview && (
           <div className="space-y-3">
             <p className="text-xs text-muted">{describePreview(preview.file)}</p>
-            <Checkbox
-              checked={bringSettings}
-              onChange={setBringSettings}
-              disabled={!preview.file.hasSettings || busy}
-              label="Replace settings"
-              hint="Overwrites themes, folders, and keys on this computer. You will be asked to confirm."
-            />
-            <Checkbox
-              checked={bringJournal}
-              onChange={setBringJournal}
-              disabled={preview.file.playthroughs + preview.file.logs === 0 || busy}
-              label="Bring in the journal"
-              hint="Adds playthroughs and entries that are not already here. Empty notes are filled. Notes already written stay."
-            />
-            <Checkbox
-              checked={bringSessions}
-              onChange={setBringSessions}
-              disabled={preview.file.sessions === 0 || busy}
-              label="Bring in sessions"
-              hint="Adds sessions that are not already here. Time already counted is not removed."
-            />
+            <div className="grid gap-2">
+              <Piece
+                title="Settings"
+                detail={bringSettings ? 'Will replace yours' : 'Left as they are'}
+                on={bringSettings}
+                disabled={!preview.file.hasSettings || busy}
+                onClick={() => setBringSettings((value) => !value)}
+              />
+              <Piece
+                title="Journal"
+                detail={bringJournal ? 'Will come in' : 'Left out'}
+                on={bringJournal}
+                disabled={preview.file.playthroughs + preview.file.logs === 0 || busy}
+                onClick={() => setBringJournal((value) => !value)}
+              />
+              <Piece
+                title="Sessions"
+                detail={bringSessions ? 'Will come in' : 'Left out'}
+                on={bringSessions}
+                disabled={preview.file.sessions === 0 || busy}
+                onClick={() => setBringSessions((value) => !value)}
+              />
+            </div>
             <button
               type="button"
               disabled={busy}
               onClick={() => void bringIn()}
               className={`${btnAccent} rounded-lg px-3 py-1.5 text-xs disabled:opacity-50`}
             >
-              {bringSettings ? 'Replace settings and bring in what is ticked' : 'Bring in what is ticked'}
+              Bring in what is lit
             </button>
           </div>
         )}
@@ -246,6 +236,42 @@ export function CopySettings({
       )}
       {notice && <p className="text-xs text-muted">{notice}</p>}
     </div>
+  );
+}
+
+function Piece({
+  title,
+  detail,
+  on,
+  locked = false,
+  disabled = false,
+  onClick,
+}: {
+  title: string;
+  detail: string;
+  on: boolean;
+  locked?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={locked || disabled}
+      onClick={onClick}
+      aria-pressed={on}
+      className={cn(
+        'rounded-2xl border px-3 py-3 text-left transition',
+        on
+          ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+          : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
+        locked && 'cursor-default',
+        disabled && !locked && 'cursor-not-allowed opacity-40',
+      )}
+    >
+      <span className="block text-sm font-semibold">{title}</span>
+      <span className={cn('mt-0.5 block text-[11px]', on ? 'text-accent' : 'text-muted')}>{detail}</span>
+    </button>
   );
 }
 

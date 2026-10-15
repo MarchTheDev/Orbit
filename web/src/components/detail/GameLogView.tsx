@@ -95,12 +95,15 @@ export function GameLogView({
   const [runs, setRuns] = useState<Playthrough[]>([]);
   const [runBusy, setRunBusy] = useState(false);
   const currentId = useRef<string | null>(null);
+  /** Only the latest read may update the list. An older one finishing last was
+   *  what left an empty playthrough showing the previous run's count. */
+  const loadGen = useRef(0);
 
   const load = useCallback(() => {
-    let alive = true;
+    const gen = ++loadGen.current;
     void (async () => {
       const [list, logs] = await Promise.all([listPlaythroughs(gameId), listGameLogs(gameId)]);
-      if (!alive) return;
+      if (gen !== loadGen.current) return;
       setRuns(list);
       const current =
         list.find((run) => run.id === currentId.current) ?? list.find((run) => run.current) ?? list[0];
@@ -112,14 +115,16 @@ export function GameLogView({
       setRows(visible);
       if (current) onPlaythrough?.({ id: current.id, name: current.name, count: visible.length, runs: list.length });
     })().catch((e) => {
-      if (alive) setError(e instanceof Error ? e.message : String(e));
+      if (gen === loadGen.current) setError(e instanceof Error ? e.message : String(e));
     });
-    return () => {
-      alive = false;
-    };
   }, [gameId, onPlaythrough]);
 
-  useEffect(() => load(), [load]);
+  useEffect(() => {
+    load();
+    return () => {
+      loadGen.current += 1;
+    };
+  }, [load]);
 
   useEffect(() => {
     const onImport = () => load();

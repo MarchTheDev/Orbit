@@ -2,9 +2,9 @@
 //!
 //! The Steam store answers questions about a title with no credentials at all,
 //! description, genres, developer, release year and artwork, which is what
-//! makes Orbit work out of the box. There is no second provider to configure:
-//! IGDB was dropped, so nothing here can expire, need a key, or fail because
-//! somebody's token ran out.
+//! makes Orbit work out of the box. IGDB is not asked from here. A cover from
+//! it is filled in only when Settings has a Twitch id and secret, and only
+//! from the command that already has those settings.
 
 use std::collections::HashMap;
 use std::time::Duration;
