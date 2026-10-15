@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import { AlertTriangle, Trash2 } from 'lucide-react';
 import { Modal, btnGhost } from './Modal';
 
@@ -6,12 +7,14 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = 'Continue',
+  confirmIcon: ConfirmIcon = Trash2,
   onConfirm,
   onCancel,
 }: {
   title: string;
   description: string;
   confirmLabel?: string;
+  confirmIcon?: ComponentType<{ className?: string }>;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -32,7 +35,7 @@ export function ConfirmDialog({
           className="flex items-center gap-2 rounded-lg border border-rose-400/35 bg-rose-500/15 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-300/70 hover:bg-rose-500/25"
           onClick={onConfirm}
         >
-          <Trash2 className="size-4" />
+          <ConfirmIcon className="size-4" />
           {confirmLabel}
         </button>
       </div>

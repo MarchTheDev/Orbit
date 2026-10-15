@@ -198,6 +198,24 @@ export function clearGameLogs(gameId: string): Promise<void> {
   return call('clear_game_logs', { gameId }, () => undefined);
 }
 
+/** Remove one playthrough's journal entries. Other runs, notes, and sessions stay. */
+export function clearPlaythroughLogs(gameId: string, playthroughId: string): Promise<void> {
+  return call('clear_playthrough_logs', { gameId, playthroughId }, () => undefined);
+}
+
+/** The run each game is currently writing into. */
+export interface CurrentPlaythrough {
+  gameId: string;
+  id: string;
+  name: string;
+  /** How many runs the game has, so an unassigned entry can be counted like the journal. */
+  runs: number;
+}
+
+export function listCurrentPlaythroughs(): Promise<CurrentPlaythrough[]> {
+  return call('list_current_playthroughs', {}, () => []);
+}
+
 /** The runs of one game. A browser preview gets a single Main run. */
 export function listPlaythroughs(gameId: string): Promise<Playthrough[]> {
   return call('list_playthroughs', { gameId }, () => [
@@ -732,19 +750,19 @@ export interface CopyResult {
 
 export function previewCopy(path: string): Promise<CopyPreview> {
   return call('preview_copy', { path }, async () => {
-    throw new Error('A copy needs the desktop app.');
+    throw new Error('Saving or bringing in a file needs the desktop app.');
   });
 }
 
 export function exportCopy(path: string, settings: unknown, journal: boolean, sessions: boolean): Promise<ExportInfo> {
   return call('export_copy', { path, settings, journal, sessions }, async () => {
-    throw new Error('A copy needs the desktop app.');
+    throw new Error('Saving or bringing in a file needs the desktop app.');
   });
 }
 
 export function importCopy(path: string, journal: boolean, sessions: boolean): Promise<CopyResult> {
   return call('import_copy', { path, journal, sessions }, async () => {
-    throw new Error('A copy needs the desktop app.');
+    throw new Error('Saving or bringing in a file needs the desktop app.');
   });
 }
 

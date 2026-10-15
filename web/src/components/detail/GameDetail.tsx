@@ -20,7 +20,7 @@ import type { ActiveSession, Companion, Game, GameStatus, LaunchTarget, Session 
 import { fetchMetadata } from '../../services/metadata';
 import { openExternal } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
-import { listGameLogs } from '../../services/native';
+import { listGameLogs, listPlaythroughs } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { driveLabel } from '../../utils/drive';
 import { isSteamGame, storeAppId } from '../../utils/steam';
@@ -202,12 +202,20 @@ export function GameDetail({
   useEffect(() => {
     let alive = true;
     const started = performance.now();
-    void listGameLogs(game.id).then((r) => {
+    void Promise.all([listGameLogs(game.id), listPlaythroughs(game.id)]).then(([rows, runs]) => {
       if (!alive) return;
+      // The badge is the run the journal opens on, not every run added together.
+      const current = runs.find((run) => run.current) ?? runs[0];
+      const count = current
+        ? rows.filter((row) => {
+            if (row.playthroughId) return row.playthroughId === current.id;
+            return current.name === 'Main' || runs.length <= 1;
+          }).length
+        : rows.length;
       // A count arriving mid-slide reflows the tab bar under the animation.
       const wait = Math.max(0, DRAWER_MS - (performance.now() - started));
       window.setTimeout(() => {
-        if (alive) setLogCount(r.length);
+        if (alive) setLogCount(count);
       }, wait);
     });
     return () => {
@@ -642,7 +650,12 @@ export function GameDetail({
           {tab === 'achievements' && <AchievementsTab game={game} onUpdate={onUpdate} />}
 
           {tab === 'log' && (
-            <GameLogView game={game} onChanged={refreshLogCount} onNotes={(notes) => onUpdate({ notes })} />
+            <GameLogView
+              game={game}
+              onChanged={refreshLogCount}
+              onPlaythrough={(run) => setLogCount(run.count)}
+              onNotes={(notes) => onUpdate({ notes })}
+            />
           )}
 
           {tab === 'sessions' && (

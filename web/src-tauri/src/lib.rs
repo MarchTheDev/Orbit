@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
-use db::{GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
+use db::{CurrentPlaythrough, GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
 use launch::FoundGame;
 use launch_target::LaunchTarget;
 use session::{ActiveView, Runner};
@@ -426,6 +426,22 @@ fn count_logs(orbit: State<'_, Orbit>) -> Result<i64, String> {
 #[tauri::command]
 fn clear_game_logs(orbit: State<'_, Orbit>, game_id: String) -> Result<(), String> {
     orbit.db.clear_game_logs(&game_id)
+}
+
+/// Clear the journal entries of one playthrough. Other runs stay.
+#[tauri::command]
+fn clear_playthrough_logs(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    playthrough_id: String,
+) -> Result<(), String> {
+    orbit.db.clear_playthrough_logs(&game_id, &playthrough_id)
+}
+
+/// The run each game is currently on, so a list can count that run.
+#[tauri::command]
+fn list_current_playthroughs(orbit: State<'_, Orbit>) -> Result<Vec<CurrentPlaythrough>, String> {
+    orbit.db.list_current_playthroughs()
 }
 
 /// Write a note against a game.
@@ -1793,6 +1809,8 @@ pub fn run() {
             list_all_logs,
             count_logs,
             clear_game_logs,
+            clear_playthrough_logs,
+            list_current_playthroughs,
             add_game_log,
             update_game_log,
             delete_game_log,

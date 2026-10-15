@@ -61,6 +61,7 @@ export function GameLogView({
   game,
   onChanged,
   onNotes,
+  onPlaythrough,
   addRequest,
   onAddHandled,
   withClock = false,
@@ -72,6 +73,9 @@ export function GameLogView({
   /** Save the game's own notes, which live in here now rather than in a box of
    *  their own on the overview. */
   onNotes?: (notes: string) => void;
+  /** The run on screen, and how many entries it has. The Journal's left-hand
+   *  count uses this so it matches the playthrough being read, not every run. */
+  onPlaythrough?: (run: { id: string; name: string; count: number; runs: number }) => void;
   /** A one-shot request from the Journal context menu to open a fresh entry. */
   addRequest?: number;
   onAddHandled?: () => void;
@@ -104,14 +108,16 @@ export function GameLogView({
         currentId.current = current.id;
         rememberPlaythrough(gameId, current.id);
       }
-      setRows(logs.filter((row) => belongsToRun(row, current, list)));
+      const visible = logs.filter((row) => belongsToRun(row, current, list));
+      setRows(visible);
+      if (current) onPlaythrough?.({ id: current.id, name: current.name, count: visible.length, runs: list.length });
     })().catch((e) => {
       if (alive) setError(e instanceof Error ? e.message : String(e));
     });
     return () => {
       alive = false;
     };
-  }, [gameId]);
+  }, [gameId, onPlaythrough]);
 
   useEffect(() => load(), [load]);
 

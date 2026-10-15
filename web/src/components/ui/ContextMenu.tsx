@@ -59,7 +59,7 @@ export function ContextMenu({
       // the app's own handler reopens it where the pointer is.
       if (
         e.type === 'contextmenu' &&
-        (e.target as HTMLElement | null)?.closest?.('[data-orbit-game], [data-orbit-session], [data-orbit-journal-game], [data-orbit-session-game]')
+        (e.target as HTMLElement | null)?.closest?.('[data-orbit-game], [data-orbit-session], [data-orbit-journal-game], [data-orbit-session-game], [data-orbit-save]')
       ) return;
       if (!box.current?.contains(e.target as Node)) onClose();
     };

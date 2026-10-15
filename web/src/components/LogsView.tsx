@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NotebookPen, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type { Game, GameLog } from '../types';
-import { clearGameLogs } from '../services/native';
-import { countLogs, listAllLogs } from '../services/native';
+import { clearPlaythroughLogs, countLogs, listAllLogs, listCurrentPlaythroughs, type CurrentPlaythrough } from '../services/native';
+import { rememberPlaythrough } from '../services/playthroughs';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
@@ -40,22 +40,27 @@ export function LogsView({
   const [logs, setLogs] = useState<GameLog[]>([]);
   /** How many there are in total, which can be more than were read. */
   const [total, setTotal] = useState(0);
+  /** The run each game is on, so a game that is not open still counts that run. */
+  const [currents, setCurrents] = useState<CurrentPlaythrough[]>([]);
+  /** The run on screen, whose count is what the journal itself is showing. */
+  const [openRun, setOpenRun] = useState<{ gameId: string; id: string; name: string; count: number; runs: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [version, setVersion] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [addRequest, setAddRequest] = useState<{ id: string; token: number } | null>(null);
   const addToken = useRef(0);
-  const [clearTarget, setClearTarget] = useState<{ game: Game; kind: 'logs' | 'notes' } | null>(null);
+  const [clearTarget, setClearTarget] = useState<{ game: Game; kind: 'logs' | 'notes'; run: { id: string; name: string } } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     let alive = true;
-    void Promise.all([listAllLogs(2000, 0), countLogs()])
-      .then(([rows, count]) => {
+    void Promise.all([listAllLogs(2000, 0), countLogs(), listCurrentPlaythroughs()])
+      .then(([rows, count, runs]) => {
         if (!alive) return;
         setLogs(rows);
         setTotal(count);
+        setCurrents(runs);
       })
       .catch(() => {
         // A failed read leaves the page empty rather than broken; the per-game
@@ -68,17 +73,60 @@ export function LogsView({
 
   useEffect(() => load(), [load]);
 
-  /** Entries and time per game, worked out once per read. */
+  const currentByGame = useMemo(() => new Map(currents.map((run) => [run.gameId, run])), [currents]);
+
+  const reportRun = useCallback((info: { id: string; name: string; count: number; runs: number }) => {
+    if (!selectedId) return;
+    setOpenRun((current) => {
+      if (
+        current &&
+        current.gameId === selectedId &&
+        current.id === info.id &&
+        current.name === info.name &&
+        current.count === info.count &&
+        current.runs === info.runs
+      ) {
+        return current;
+      }
+      return { gameId: selectedId, ...info };
+    });
+    // Remember it for the left-hand list, so leaving this game does not put the
+    // count back on the run it used to be on.
+    setCurrents((rows) => {
+      const rest = rows.filter((row) => row.gameId !== selectedId);
+      return [...rest, { gameId: selectedId, id: info.id, name: info.name, runs: info.runs }];
+    });
+  }, [selectedId]);
+
+  /**
+   * Entries for the run each game is on.
+   *
+   * The open game uses the count the journal just drew, which is the selected
+   * playthrough. Every other game uses the run it is currently on. A row with
+   * no run yet is counted on Main, or on the only run, which is where it is shown.
+   */
   const perGame = useMemo(() => {
-    const map = new Map<string, { count: number; secs: number }>();
+    const grouped = new Map<string, GameLog[]>();
     for (const log of logs) {
-      const found = map.get(log.gameId) ?? { count: 0, secs: 0 };
-      found.count += 1;
-      found.secs += log.secs;
-      map.set(log.gameId, found);
+      const found = grouped.get(log.gameId) ?? [];
+      found.push(log);
+      grouped.set(log.gameId, found);
+    }
+    const map = new Map<string, { count: number; name: string | null }>();
+    for (const game of games) {
+      if (openRun?.gameId === game.id) {
+        map.set(game.id, { count: openRun.count, name: openRun.name });
+        continue;
+      }
+      const run = currentByGame.get(game.id);
+      const rows = grouped.get(game.id) ?? [];
+      const count = run ? rows.filter((log) => countedOnRun(log, run)).length : rows.length;
+      map.set(game.id, { count, name: run?.name ?? null });
     }
     return map;
-  }, [logs]);
+  }, [games, logs, currentByGame, openRun]);
+
+  const gamesWithLogs = useMemo(() => new Set(logs.map((log) => log.gameId)).size, [logs]);
 
   /**
    * The games down the left, in the player's own order when there is one.
@@ -121,8 +169,14 @@ export function LogsView({
     { container: list, fromButtons: true },
   );
 
-  const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => perGame.has(g.id)) ?? ordered[0] ?? null;
+  const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => (perGame.get(g.id)?.count ?? 0) > 0) ?? ordered[0] ?? null;
+  const runOf = (gameId: string) => {
+    if (openRun?.gameId === gameId) return { id: openRun.id, name: openRun.name };
+    const run = currentByGame.get(gameId);
+    return run ? { id: run.id, name: run.name } : null;
+  };
   const menuGame = menu ? games.find((game) => game.id === menu.id) ?? null : null;
+  const menuRun = menuGame ? runOf(menuGame.id) : null;
   const menuItems: MenuItem[] = menuGame
     ? [
         { kind: 'label', label: menuGame.title },
@@ -137,16 +191,18 @@ export function LogsView({
         { label: 'Edit game…', icon: Pencil, onSelect: () => onEditGame(menuGame.id) },
         { kind: 'sep' },
         {
-          label: 'Reset log entries…',
+          label: menuRun ? `Reset log entries on ${menuRun.name}…` : 'Reset log entries…',
           icon: Trash2,
           danger: true,
-          onSelect: () => setClearTarget({ game: menuGame, kind: 'logs' }),
+          disabled: !menuRun,
+          onSelect: () => menuRun && setClearTarget({ game: menuGame, kind: 'logs', run: menuRun }),
         },
         {
-          label: 'Reset game notes…',
+          label: menuRun ? `Reset notes on ${menuRun.name}…` : 'Reset notes…',
           icon: RotateCcw,
           danger: true,
-          onSelect: () => setClearTarget({ game: menuGame, kind: 'notes' }),
+          disabled: !menuRun,
+          onSelect: () => menuRun && setClearTarget({ game: menuGame, kind: 'notes', run: menuRun }),
         },
       ]
     : [];
@@ -157,13 +213,17 @@ export function LogsView({
     setClearTarget(null);
     setActionError(null);
     if (target.kind === 'logs') {
-      void clearGameLogs(target.game.id)
+      void clearPlaythroughLogs(target.game.id, target.run.id)
         .then(() => setVersion((current) => current + 1))
         .catch((reason) => setActionError(reason instanceof Error ? reason.message : String(reason)));
     } else {
+      // The id is captured now, so the empty notes land on this run even if a
+      // switch is still on its way out.
+      rememberPlaythrough(target.game.id, target.run.id);
       onUpdate(target.game.id, { notes: '' });
     }
   };
+  const selectedRun = selected ? runOf(selected.id) : null;
 
   return (
     <div className="mx-auto max-w-[1400px] p-6">
@@ -183,8 +243,8 @@ export function LogsView({
             skip past. */}
         <div className="text-right">
           <p className="text-[11px] text-muted">
-            {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {perGame.size}{' '}
-            {perGame.size === 1 ? 'game' : 'games'}
+            {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
+            {gamesWithLogs === 1 ? 'game' : 'games'}
             {total > logs.length && ` · the latest ${logs.length} of ${total}`}
           </p>
         </div>
@@ -226,8 +286,12 @@ export function LogsView({
                     <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{g.title}</span>
-                      <span className="block text-[11px] text-muted">
-                        {counts ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'}` : 'nothing logged yet'}
+                      <span className="block truncate text-[11px] text-muted">
+                        {counts && counts.count > 0
+                          ? `${counts.count} ${counts.count === 1 ? 'log' : 'logs'}${counts.name ? ` · ${counts.name}` : ''}`
+                          : counts?.name
+                            ? `nothing on ${counts.name}`
+                            : 'nothing logged yet'}
                       </span>
                     </span>
                   </button>
@@ -245,23 +309,27 @@ export function LogsView({
                 <Cover game={selected} className="size-12 shrink-0 rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-sm font-semibold">{selected.title}</h2>
-                  <p className="text-[11px] text-muted">Entries clear for every playthrough. Notes clear for the current run.</p>
+                  <p className="text-[11px] text-muted">
+                    {selectedRun ? `Clears only ${selectedRun.name}. Other playthroughs stay.` : 'Clears only the playthrough you are reading.'}
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setClearTarget({ game: selected, kind: 'logs' })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
-                    title="Remove every Journal entry for this game, on every playthrough"
+                    disabled={!selectedRun}
+                    onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'logs', run: selectedRun })}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-40"
+                    title={selectedRun ? `Remove the Journal entries for ${selectedRun.name} only` : 'The playthrough is still loading'}
                   >
                     <Trash2 className="size-3.5" />
                     Clear log entries
                   </button>
                   <button
                     type="button"
-                    onClick={() => setClearTarget({ game: selected, kind: 'notes' })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300"
-                    title="Clear notes for the current playthrough"
+                    disabled={!selectedRun}
+                    onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'notes', run: selectedRun })}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-40"
+                    title={selectedRun ? `Clear notes for ${selectedRun.name} only` : 'The playthrough is still loading'}
                   >
                     <RotateCcw className="size-3.5" />
                     Clear notes
@@ -273,6 +341,7 @@ export function LogsView({
                 key={`${selected.id}-${version}`}
                 game={selected}
                 onChanged={() => setVersion((n) => n + 1)}
+                onPlaythrough={reportRun}
                 onNotes={(notes) => onUpdate(selected.id, { notes })}
                 addRequest={addRequest?.id === selected.id ? addRequest.token : undefined}
                 onAddHandled={() => setAddRequest(null)}
@@ -292,10 +361,12 @@ export function LogsView({
       {menu && menuGame && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
       {clearTarget && (
         <ConfirmDialog
-          title={clearTarget.kind === 'logs' ? `Reset ${clearTarget.game.title}'s log entries?` : `Reset ${clearTarget.game.title}'s notes?`}
+          title={clearTarget.kind === 'logs'
+            ? `Reset ${clearTarget.game.title}'s log entries on ${clearTarget.run.name}?`
+            : `Reset ${clearTarget.game.title}'s notes on ${clearTarget.run.name}?`}
           description={clearTarget.kind === 'logs'
-            ? 'This removes every Journal entry for this game, on every playthrough. Notes, play sessions, and other games stay untouched.'
-            : 'This clears the notes for the current playthrough. Journal entries, play sessions, and other playthroughs stay untouched.'}
+            ? `This removes the Journal entries for ${clearTarget.run.name} only. Other playthroughs, notes, and play sessions stay untouched.`
+            : `This clears the notes for ${clearTarget.run.name} only. Journal entries, play sessions, and other playthroughs stay untouched.`}
           confirmLabel={clearTarget.kind === 'logs' ? 'Reset log entries' : 'Reset notes'}
           onCancel={() => setClearTarget(null)}
           onConfirm={clearSelected}
@@ -303,4 +374,16 @@ export function LogsView({
       )}
     </div>
   );
+}
+
+/**
+ * An entry belongs to the run the list is counting.
+ *
+ * A row with no run yet is shown on Main, or when the game has only one run.
+ * The count has to use the same rule, or the number beside the game would not
+ * match the list.
+ */
+function countedOnRun(log: GameLog, run: { id: string; name: string; runs: number }): boolean {
+  if (log.playthroughId) return log.playthroughId === run.id;
+  return run.name === 'Main' || run.runs <= 1;
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FileDown, FileUp } from 'lucide-react';
 import { ask } from '@tauri-apps/plugin-dialog';
 import type { Settings } from '../types';
 import { pickFile, pickSaveFile } from '../services/desktop';
@@ -44,7 +45,7 @@ export function CopySettings({
   const save = async () => {
     setError(null);
     setNotice(null);
-    const path = await pickSaveFile('Save a copy of Orbit', 'Orbit-copy.json', ['json']);
+    const path = await pickSaveFile('Save an Orbit file', 'Orbit-copy.json', ['json']);
     if (!path) return;
     setBusy(true);
     try {
@@ -65,7 +66,7 @@ export function CopySettings({
   const choose = async () => {
     setError(null);
     setNotice(null);
-    const path = await pickFile('Choose an Orbit copy', ['json']);
+    const path = await pickFile('Choose an Orbit file', ['json']);
     if (!path) return;
     setBusy(true);
     try {
@@ -125,11 +126,38 @@ export function CopySettings({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3 rounded-2xl border border-line/50 bg-bg/20 p-4">
-        <p className="text-xs leading-relaxed text-muted">
-          A file you keep. It does not include your library of games. Journal and sessions stay out unless you tick them.
-          The file includes whatever Settings holds, so keep it somewhere you trust.
-        </p>
+      <ul className="grid gap-2 sm:grid-cols-3">
+        <li className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-widest text-accent">Always in the file</span>
+          <span className="mt-0.5 block text-sm font-medium text-fg">Settings</span>
+        </li>
+        <li className="rounded-xl border border-line/60 bg-bg/30 px-3 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted">Only if you tick it</span>
+          <span className="mt-0.5 block text-sm font-medium text-fg">Journal</span>
+        </li>
+        <li className="rounded-xl border border-line/60 bg-bg/30 px-3 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted">Only if you tick it</span>
+          <span className="mt-0.5 block text-sm font-medium text-fg">Sessions</span>
+        </li>
+      </ul>
+      <p className="text-xs leading-relaxed text-muted">
+        The library of games is not in the file, and neither are the games' save files. Those stay on the Saves page.
+        Keep the file somewhere you trust: it holds whatever Settings holds, including keys.
+      </p>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-3 rounded-2xl border border-accent/25 bg-accent/[0.04] p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/25 bg-accent/10 text-accent">
+            <FileDown className="size-4" />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-fg">Save a file</h3>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Write this Orbit out so you can keep it, or move it to another computer.
+            </p>
+          </div>
+        </div>
         <Checkbox
           checked={journal}
           onChange={setJournal}
@@ -150,22 +178,29 @@ export function CopySettings({
           onClick={() => void save()}
           className={`${btnAccent} rounded-lg px-3 py-1.5 text-xs disabled:opacity-50`}
         >
-          Save a copy
+          Save a file
         </button>
       </div>
 
       <div className="space-y-3 rounded-2xl border border-line/50 bg-bg/20 p-4">
-        <p className="text-xs leading-relaxed text-muted">
-          Bringing a copy in matches each row to a game already here, by id and then by title. A game that is not in this
-          library is skipped. Notes you have already written are kept.
-        </p>
+        <div className="flex items-start gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-line bg-panel text-muted">
+            <FileUp className="size-4" />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-fg">Bring a file in</h3>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Match each row to a game already here, by id and then by title. A game that is not in this library is skipped. Notes you have already written are kept.
+            </p>
+          </div>
+        </div>
         <button
           type="button"
           disabled={!native || busy}
           onClick={() => void choose()}
           className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition hover:border-accent/50 hover:text-fg disabled:opacity-50"
         >
-          Choose a copy
+          Choose a file
         </button>
         {preview && (
           <div className="space-y-3">
@@ -201,7 +236,8 @@ export function CopySettings({
             </button>
           </div>
         )}
-        {!native && <p className="text-xs text-muted">A copy needs the desktop app.</p>}
+        {!native && <p className="text-xs text-muted">Saving or bringing in a file needs the desktop app.</p>}
+      </div>
       </div>
       {error && (
         <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">

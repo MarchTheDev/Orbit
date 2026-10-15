@@ -16,6 +16,7 @@ import {
   Palette,
   Piano,
   RefreshCw,
+  ArrowLeftRight,
   Save,
   Search,
   SlidersHorizontal,
@@ -275,7 +276,7 @@ const SECTIONS = [
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
   { id: 'orbit-sound', label: 'Sound' },
-  { id: 'orbit-copy', label: 'A copy' },
+  { id: 'orbit-copy', label: 'Export' },
   { id: 'orbit-tools', label: 'Tools' },
   { id: 'orbit-updates', label: 'Updates' },
   { id: 'orbit-about', label: 'About' },
@@ -309,7 +310,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
-  { label: 'Save or bring in a copy', section: 'orbit-copy', keywords: 'export import backup settings journal sessions playthrough copy' },
+  { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
@@ -1119,9 +1120,9 @@ export function SettingsView({
 
       <Section
         id="orbit-copy"
-        icon={Save}
-        title="A copy"
-        lead="Save your settings to a file you keep. Journal and sessions are included only if you ask."
+        icon={ArrowLeftRight}
+        title="Export and import"
+        lead="Save this Orbit to a file you keep, and bring that file back later. Settings always go in. The journal and the sessions go in only if you tick them. This is not a copy of the games' save files."
       >
         <CopySettings settings={settings} setSettings={setSettings} onLibraryChanged={onLibraryChanged} />
       </Section>

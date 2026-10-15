@@ -181,6 +181,20 @@ pub struct PlaythroughRow {
     pub current: bool,
 }
 
+/// The run a game is writing into, and how many runs it has.
+///
+/// A list can then count that run without asking once per game. The count is
+/// what lets an entry with no run yet be treated the way the journal treats it:
+/// it is shown on Main, or on the only run.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentPlaythrough {
+    pub game_id: String,
+    pub id: String,
+    pub name: String,
+    pub runs: i64,
+}
+
 /// Library-wide figures for the statistics row.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1299,6 +1313,73 @@ impl Db {
         Ok(())
     }
 
+    /// Remove one run's journal entries. Other runs, their notes, and sessions stay.
+    ///
+    /// An entry that was written before it had a run is shown on Main, or on the
+    /// only run. Clearing that run takes those with it, or they would still be
+    /// sitting in the list that was just cleared.
+    pub fn clear_playthrough_logs(&self, game_id: &str, playthrough_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        let (owner, name): (String, String) = conn
+            .query_row(
+                "SELECT game_id, name FROM playthroughs WHERE id = ?1",
+                params![playthrough_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| format!("Could not clear that playthrough: {e}"))?
+            .ok_or_else(|| "That playthrough is not there.".to_string())?;
+        if owner != game_id {
+            return Err("That playthrough is not for this game.".into());
+        }
+        let runs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playthroughs WHERE game_id = ?1",
+                params![game_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("Could not clear that playthrough: {e}"))?;
+        conn.execute(
+            "DELETE FROM game_logs WHERE game_id = ?1 AND playthrough_id = ?2",
+            params![game_id, playthrough_id],
+        )
+        .map_err(|e| format!("Could not clear that playthrough: {e}"))?;
+        if name == "Main" || runs <= 1 {
+            conn.execute(
+                "DELETE FROM game_logs WHERE game_id = ?1 AND playthrough_id IS NULL",
+                params![game_id],
+            )
+            .map_err(|e| format!("Could not clear that playthrough: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// The run each game is currently on.
+    pub fn list_current_playthroughs(&self) -> Result<Vec<CurrentPlaythrough>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.game_id, p.id, p.name,
+                        (SELECT COUNT(*) FROM playthroughs c WHERE c.game_id = p.game_id)
+                   FROM playthroughs p
+                  WHERE p.current = 1
+                  ORDER BY p.game_id",
+            )
+            .map_err(|e| format!("Could not read playthroughs: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(CurrentPlaythrough {
+                    game_id: r.get(0)?,
+                    id: r.get(1)?,
+                    name: r.get(2)?,
+                    runs: r.get(3)?,
+                })
+            })
+            .map_err(|e| format!("Could not read playthroughs: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Could not read playthroughs: {e}"))
+    }
+
     // --------------------------------------------------------- playthroughs
 
     /// Every run of one game, oldest first. The current one is the journal
@@ -2274,5 +2355,49 @@ mod tests {
             .unwrap();
         assert_eq!(session.playthrough_id.as_deref(), Some(kept.id.as_str()));
         assert!(db.delete_playthrough(&kept.id).is_err());
+    }
+
+    #[test]
+    fn clearing_one_playthrough_leaves_the_other() {
+        let db = Db::open_memory().unwrap();
+        let mut first = game("g1", "Hades");
+        first.notes = "Ares build".into();
+        db.upsert_game(&first).unwrap();
+        let main = db.list_playthroughs("g1").unwrap().into_iter().next().unwrap();
+        db.add_game_log("g1", 1_700_000_000, 0, "beat Hades", "")
+            .unwrap();
+        let second = db.add_playthrough("g1", "Fresh file").unwrap();
+        db.write_playthrough_notes("g1", Some(&second.id), "no heat")
+            .unwrap();
+        db.add_game_log("g1", 1_700_000_100, 0, "first clear", "")
+            .unwrap();
+
+        let current = db.list_current_playthroughs().unwrap();
+        assert!(current.iter().any(|row| {
+            row.game_id == "g1" && row.id == second.id && row.name == "Fresh file" && row.runs == 2
+        }));
+
+        db.clear_playthrough_logs("g1", &second.id).unwrap();
+        let logs = db.list_game_logs("g1").unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].note, "beat Hades");
+        let runs = db.list_playthroughs("g1").unwrap();
+        assert_eq!(runs.iter().find(|row| row.id == second.id).unwrap().notes, "no heat");
+        assert_eq!(runs.iter().find(|row| row.id == main.id).unwrap().notes, "Ares build");
+
+        db.write_playthrough_notes("g1", Some(&second.id), "").unwrap();
+        let runs = db.list_playthroughs("g1").unwrap();
+        assert!(runs.iter().find(|row| row.id == second.id).unwrap().notes.is_empty());
+        assert_eq!(runs.iter().find(|row| row.id == main.id).unwrap().notes, "Ares build");
+        // Fresh file is the current run, so the game's own notes follow it.
+        assert_eq!(db.game("g1").unwrap().unwrap().notes, "");
+
+        db.add_game_log("g1", 1_700_000_200, 0, "still on fresh", "")
+            .unwrap();
+        db.clear_playthrough_logs("g1", &main.id).unwrap();
+        let logs = db.list_game_logs("g1").unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].note, "still on fresh");
+        assert!(db.clear_playthrough_logs("g2", &second.id).is_err());
     }
 }

@@ -522,5 +522,7 @@ export interface Settings {
     backupRoot?: string;
     /** The Saves list, in the order it was dragged. Games not listed wait at the end. */
     order?: string[];
+    /** Games left out of the Saves list. They stay in the library, and can be shown again from Saves. */
+    hidden?: string[];
   };
 }
