@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Image, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
 import { findArtwork, isNative } from '../../services/native';
@@ -8,7 +8,6 @@ import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
 import { LaunchEditor } from './LaunchEditor';
 import { Select } from '../ui/Select';
-import { SaveButton } from '../ui/SaveButton';
 import { MarkdownEditor } from '../ui/Markdown';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
@@ -20,12 +19,11 @@ import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
  * form rather than several, because the fields are not independent: a cover is
  * artwork, an author is text, and a completion time is a number, and a player
  * who wants to fix one of them should not have to work out which page it lives
- * on. Every field saves with the same button at the bottom.
+ * on. Closing this editor keeps the fields. There is no separate save step.
  */
-export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = false }: {
+export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
-  onSaved?: () => void;
   hideLaunchSettings?: boolean;
 }) {
   const meta = game.meta;
@@ -83,7 +81,24 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
     return Number.isFinite(n) && n >= 0 ? n : null;
   };
 
-  const save = () => {
+  const formSnap = JSON.stringify({
+    title, notes, planned, status, favorite, hidden, coverPath, coverUrl, backdropUrl,
+    summary, developer, releaseYear, rating, genres, fit, sizeGb, main, mainExtra, completionist,
+  });
+  const initialSnap = useRef<string | null>(null);
+  if (initialSnap.current === null) initialSnap.current = formSnap;
+  const openedTimes = useRef({ main, mainExtra, completionist });
+  const timesTouched = main !== openedTimes.current.main
+    || mainExtra !== openedTimes.current.mainExtra
+    || completionist !== openedTimes.current.completionist;
+  // Compared with the form as it opened, not with later background writes, so
+  // closing an untouched editor does not mark the game as edited by hand.
+  const dirtyRef = useRef(false);
+  dirtyRef.current = formSnap !== initialSnap.current;
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+
+  const commit = () => {
     const nextMeta: MetaData = {
       ...(meta ?? { summary: '', genres: [], developer: '', releaseYear: null, rating: null }),
       name: title.trim() || game.title,
@@ -119,7 +134,7 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
           };
 
     const gb = Number(sizeGb.replace(',', '.'));
-    onUpdate({
+    onUpdateRef.current({
       title: title.trim() || game.title,
       notes,
       planned,
@@ -130,13 +145,19 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
       sizeBytes: Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1e9) : 0,
       sizeGb: Number.isFinite(gb) && gb > 0 ? gb : 0,
       meta: nextMeta,
-      hltb: nextHltb ?? undefined,
+      // A refresh writes the times on its own. Closing must not put the old
+      // numbers back over that unless the fields themselves were edited.
+      ...(timesTouched ? { hltb: nextHltb ?? undefined } : {}),
     });
-    // Said out loud in the corner rather than next to the button: a line of text
-    // appearing beside it moved the row and made the whole footer jump.
-    say(planned ? `${nextMeta.name ?? game.title} saved, still not owned` : `${nextMeta.name ?? game.title} saved`);
-    onSaved?.();
   };
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current) commitRef.current();
+    };
+  }, []);
 
   return (
     <section className="space-y-4">
@@ -313,7 +334,7 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
             ))}
           </div>
           <p className="mt-1 text-[11px] text-muted">
-            Fill fills the tile and crops what does not fit; fit shows the whole picture. Save to keep it.
+            Fill fills the tile and crops what does not fit; fit shows the whole picture. Closing this keeps it.
           </p>
         </div>
 
@@ -324,7 +345,7 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
           onChoose={(pick) => {
             setCoverUrl(pick.url);
             setCoverPath('');
-            say('Cover chosen. Save to keep it.');
+            say('Cover chosen. Closing this keeps it.');
           }}
         />
       </div>
@@ -373,7 +394,9 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
         </div>
       </section>
 
-      {!hideLaunchSettings && <LaunchEditor game={game} onSave={(launch, companions) => onUpdate({ launch, companions })} />}
+      {!hideLaunchSettings && (
+        <LaunchEditor game={game} saveOnClose onSave={(launch, companions) => onUpdate({ launch, companions })} />
+      )}
 
       <div className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
         <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">
@@ -435,7 +458,6 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
       )}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <SaveButton onSave={save} />
         <button
           type="button"
           onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}

@@ -249,6 +249,7 @@ export function SavesView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CloudPanel settings={settings} setSettings={setSettings} />
           {rows.length > 0 && (
             <button
               type="button"
@@ -286,7 +287,6 @@ export function SavesView({
         </div>
       </div>
 
-      <CloudPanel settings={settings} setSettings={setSettings} />
 
       {status?.root && (
         <p className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted">

@@ -83,6 +83,14 @@
         }
       }
     },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "nsis/header.bmp",
+        "sidebarImage": "nsis/sidebar.bmp"
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

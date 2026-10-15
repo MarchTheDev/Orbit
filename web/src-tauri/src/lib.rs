@@ -1066,6 +1066,11 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
             if let Ok(found) = metadata::artwork(id).await {
                 picks.extend(found.into_iter().filter(|pick| pick.kind == "portrait"));
             }
+            // Big titles still have the old portrait file. Smaller ones, such as
+            // a new Steam release, only have it on the hashed path Bonker caches.
+            if picks.is_empty() {
+                picks.extend(metadata::bonker_portraits(id).await);
+            }
         }
     }
 

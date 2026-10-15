@@ -858,10 +858,12 @@ export function listSaves(gameId: string, title: string, place?: SavePlace): Pro
 export interface CloudStatus {
   ready: boolean;
   version: string;
+  /** True when Orbit's own copy will run, rather than rclone already on this PC. */
+  placed: boolean;
 }
 
 export function cloudStatus(): Promise<CloudStatus> {
-  return call('cloud_status', {}, async () => ({ ready: false, version: '' }));
+  return call('cloud_status', {}, async () => ({ ready: false, version: '', placed: false }));
 }
 
 export function cloudFetch(): Promise<string> {

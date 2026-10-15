@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { CloudDownload, CloudUpload, LoaderCircle } from 'lucide-react';
+import { Cloud, CloudDownload, CloudUpload, LoaderCircle } from 'lucide-react';
 import type { Settings } from '../../types';
 import { Checkbox } from '../ui/Checkbox';
 import { btnAccent } from '../ui/buttons';
-import { inputCls } from '../ui/Modal';
+import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
 import {
   cloudAttach,
@@ -33,10 +33,12 @@ const SERVERS = [
 type CloudSettings = NonNullable<NonNullable<Settings['saves']>['cloud']>;
 
 /**
- * Send the copies already on this PC to a cloud, through rclone.
+ * A button on Saves that opens rclone on its own.
  *
- * The folder on this machine is unchanged. rclone is downloaded into Orbit's
- * own folder when it is asked for, and it is not installed on the system.
+ * The copies stay on this PC either way. rclone is only used to send those
+ * copies. One already on this PC is used as it is. Otherwise Orbit keeps its
+ * own copy in its folder, which is not a system install. A local backup never
+ * asks for rclone.
  */
 export function CloudPanel({
   settings,
@@ -46,7 +48,9 @@ export function CloudPanel({
   setSettings: (patch: Partial<Settings>) => void;
 }) {
   const cloud = settings.saves?.cloud;
+  const [open, setOpen] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
+  const [placed, setPlaced] = useState(false);
   const [version, setVersion] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -58,7 +62,7 @@ export function CloudPanel({
   const [url, setUrl] = useState('');
   const [remotes, setRemotes] = useState<string[] | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
     if (!isNative()) {
       setReady(false);
       return;
@@ -66,9 +70,14 @@ export function CloudPanel({
     void cloudStatus()
       .then((status) => {
         setReady(status.ready);
+        setPlaced(status.placed);
         setVersion(status.version);
       })
       .catch(() => setReady(false));
+  };
+
+  useEffect(() => {
+    refresh();
   }, []);
 
   const saveCloud = (next: CloudSettings | undefined) => {
@@ -87,6 +96,7 @@ export function CloudPanel({
       setNote(await cloudFetch());
       const status = await cloudStatus();
       setReady(status.ready);
+      setPlaced(status.placed);
       setVersion(status.version);
     } catch (e) {
       fail(e);
@@ -178,170 +188,197 @@ export function CloudPanel({
     }
   };
 
+  const where = !ready
+    ? 'Not here yet'
+    : placed
+      ? "Orbit's copy"
+      : 'Already on this PC';
+
   return (
-    <div className="mb-4 rounded-xl border border-line bg-panel/40 p-3">
-      <p className="text-sm font-medium">Cloud copies</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted">
-        rclone sends the copies already on this PC to a cloud. The folder here stays as it is, and nothing is
-        installed on the system to make that copy.
-      </p>
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+          refresh();
+        }}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
+      >
+        <Cloud className="size-4" />
+        Cloud
+      </button>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={!isNative() || busy !== null}
-          onClick={() => void getRclone()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+      {open && (
+        <Modal
+          title="Cloud"
+          subtitle="Sends the copies already on this PC. A local backup installs nothing."
+          size="lg"
+          onClose={() => setOpen(false)}
         >
-          {busy === 'fetch' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
-          {ready ? 'rclone is ready' : 'Get rclone'}
-        </button>
-        {version && <span className="text-[11px] text-muted">{version}</span>}
-      </div>
-
-      {cloud?.remote ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-xs text-fg">
-            Connected to <span className="font-medium">{cloud.provider || cloud.remote}</span>
-            {cloud.own ? ' · a remote rclone already had' : ''}
-          </p>
-          <Checkbox
-            checked={!!cloud.auto}
-            onChange={(auto) => saveCloud({ ...cloud, auto })}
-            label="Also send after a backup"
-            hint="Only after a copy on this PC succeeds. If the cloud does not take it, the copy here is kept."
-          />
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void send(true)}
-              className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-            >
-              {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-              Send copies
-            </button>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void send(false)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
-            >
-              {busy === 'down' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
-              Bring copies down
-            </button>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void forget()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-50"
-            >
-              Forget
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-3 space-y-3">
-          <div>
-            <p className="text-[11px] text-muted">Sign in</p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {OAUTH.map((item) => (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-fg">
+                {ready === null ? 'Looking for rclone…' : `${where}${version ? ` · ${version}` : ''}`}
+              </p>
+              {ready === false && (
                 <button
-                  key={item.id}
                   type="button"
-                  disabled={!isNative() || !ready || busy !== null}
-                  onClick={() => void connect(item.id)}
-                  className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                  disabled={!isNative() || busy !== null}
+                  onClick={() => void getRclone()}
+                  className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
                 >
-                  {busy === item.id ? 'Waiting for the sign-in…' : item.label}
+                  {busy === 'fetch' ? 'Getting rclone…' : 'Get rclone'}
                 </button>
-              ))}
+              )}
             </div>
-            <p className="mt-1 text-[11px] text-muted">A work OneDrive can be a remote rclone already has, below.</p>
-          </div>
+            <p className="text-xs text-muted">
+              If rclone is already on this PC, that one is used. Otherwise Orbit keeps its own copy. Neither is a system install.
+            </p>
 
-          <div>
-            <p className="text-[11px] text-muted">A server</p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {SERVERS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled={!ready || busy !== null}
-                  onClick={() => setServer(item.id)}
-                  className={cn(
-                    'rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50',
-                    server === item.id ? 'border-accent text-fg' : 'border-line text-muted hover:border-accent hover:text-fg',
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-            {server && (
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {server === 'webdav' ? (
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1 block text-[11px] text-muted">Address</span>
-                    <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/name/" spellCheck={false} />
-                  </label>
-                ) : (
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1 block text-[11px] text-muted">Server</span>
-                    <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
-                  </label>
-                )}
-                <label className="block">
-                  <span className="mb-1 block text-[11px] text-muted">User</span>
-                  <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} autoComplete="off" />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-[11px] text-muted">Password</span>
-                  <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-                </label>
-                <button
-                  type="button"
-                  disabled={!isNative() || !ready || busy !== null}
-                  onClick={() => void connect(server)}
-                  className={cn(btnAccent, 'w-fit rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-                >
-                  {busy === server ? 'Connecting…' : 'Connect'}
-                </button>
-              </div>
-            )}
-          </div>
+            {!isNative() && <p className="text-xs text-muted">Cloud copies need the desktop app.</p>}
 
-          <div>
-            <button
-              type="button"
-              disabled={!isNative() || !ready || busy !== null}
-              onClick={() => void loadRemotes()}
-              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
-            >
-              {busy === 'remotes' ? 'Looking…' : 'Remotes rclone already has'}
-            </button>
-            {remotes && remotes.length === 0 && <p className="mt-1.5 text-[11px] text-muted">rclone has no remotes of its own.</p>}
-            {remotes && remotes.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-2">
-                {remotes.map((remote) => (
+            {cloud?.remote ? (
+              <div className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
+                <p className="text-sm font-medium">{cloud.provider || cloud.remote}</p>
+                <Checkbox
+                  checked={!!cloud.auto}
+                  onChange={(auto) => saveCloud({ ...cloud, auto })}
+                  label="Send after a backup"
+                />
+                <div className="flex flex-wrap gap-2">
                   <button
-                    key={remote}
                     type="button"
                     disabled={busy !== null}
-                    onClick={() => void useRemote(remote)}
-                    className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                    onClick={() => void send(true)}
+                    className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
                   >
-                    {busy === remote ? 'Checking…' : remote}
+                    {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+                    Send
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void send(false)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                  >
+                    {busy === 'down' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
+                    Bring down
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void forget()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-50"
+                  >
+                    Forget
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-muted">Sign in</p>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    {OAUTH.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        disabled={!isNative() || !ready || busy !== null}
+                        onClick={() => void connect(item.id)}
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                      >
+                        {busy === item.id ? 'Waiting for the sign-in…' : item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted">A work OneDrive has to be a remote rclone already has.</p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-muted">A server</p>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    {SERVERS.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        disabled={!isNative() || !ready || busy !== null}
+                        onClick={() => setServer(item.id)}
+                        className={cn(
+                          'rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50',
+                          server === item.id ? 'border-accent text-fg' : 'border-line text-muted hover:border-accent hover:text-fg',
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  {server && (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {server === 'webdav' ? (
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-[11px] text-muted">Address</span>
+                          <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/you/" spellCheck={false} />
+                        </label>
+                      ) : (
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-[11px] text-muted">Host</span>
+                          <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
+                        </label>
+                      )}
+                      <label>
+                        <span className="mb-1 block text-[11px] text-muted">User</span>
+                        <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} />
+                      </label>
+                      <label>
+                        <span className="mb-1 block text-[11px] text-muted">Password</span>
+                        <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => void connect(server)}
+                        className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+                      >
+                        {busy === server ? 'Connecting…' : 'Connect'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    disabled={!isNative() || !ready || busy !== null}
+                    onClick={() => void loadRemotes()}
+                    className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
+                  >
+                    {busy === 'remotes' ? 'Looking…' : 'Remotes rclone already has'}
+                  </button>
+                  {remotes && (
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {remotes.length === 0 && <p className="text-[11px] text-muted">None.</p>}
+                      {remotes.map((remote) => (
+                        <button
+                          key={remote}
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => void useRemote(remote)}
+                          className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                        >
+                          {busy === remote ? 'Using…' : remote}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
 
-      {error && <p role="alert" className="mt-2 text-xs text-rose-300">{error}</p>}
-      {note && <p className="mt-2 text-xs text-muted">{note}</p>}
-    </div>
+            {note && <p className="text-xs text-fg">{note}</p>}
+            {error && <p className="text-xs text-rose-300">{error}</p>}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

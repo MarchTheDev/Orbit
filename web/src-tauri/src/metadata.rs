@@ -1,10 +1,10 @@
 //! Game details without asking the player for anything.
 //!
-//! The Steam store answers questions about a title with no credentials at all,
+//! The Steam store answers questions about a title with no credentials at all:
 //! description, genres, developer, release year and artwork, which is what
-//! makes Orbit work out of the box. IGDB is not asked from here. A cover from
-//! it is filled in only when Settings has a Twitch id and secret, and only
-//! from the command that already has those settings.
+//! makes Orbit work out of the box. Newer and smaller titles keep the library
+//! portrait on a hashed path, so the old file names miss it. Those covers are
+//! read from Bonker's cache of the same Steam art, still with no key.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -243,7 +243,16 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     // wide header is the fallback, so the front end never has to fall through
     // to initials when the store has any artwork at all.
     let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
-    let cover_url = if exists(client, &portrait).await { Some(portrait) } else { None };
+    let mut cover_url = if exists(client, &portrait).await { Some(portrait) } else { None };
+    // A newer title often has no file at the old portrait name. Bonker still
+    // has the library capsule Steam shows in its own grid.
+    if cover_url.is_none() {
+        cover_url = bonker_portraits(app_id)
+            .await
+            .into_iter()
+            .find(|pick| pick.label.starts_with("Steam library"))
+            .map(|pick| pick.url);
+    }
 
     // A page with no name at all reads better as no name than as an empty one,
     // but the rest of the page is still filled in.
@@ -389,6 +398,73 @@ pub async fn artwork(app_id: u64) -> Result<Vec<ArtworkPick>, String> {
         return Err("The store has no artwork for this game.".into());
     }
     Ok(out)
+}
+
+const BONKER: &str = "https://api.bonker.dev";
+
+#[derive(Debug, Deserialize)]
+struct BonkerPage {
+    data: Option<BonkerData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BonkerData {
+    images: Option<BonkerImages>,
+}
+
+/// The library portraits Bonker caches for a Steam app.
+///
+/// `detail=media` only returns the wide header. The portrait lives on `full`,
+/// under `images.library_capsule`, which is the picture newer titles do not
+/// publish at the old `library_600x900.jpg` name.
+#[derive(Debug, Default, Deserialize)]
+struct BonkerImages {
+    library_capsule: Option<String>,
+    library_capsule_2x: Option<String>,
+    header: Option<String>,
+}
+
+/// Portrait covers for a title whose old Steam file names came back empty.
+///
+/// The library capsule is the cover. A store header is offered only when that
+/// capsule is missing, so a small title still has something to pick. Heroes,
+/// logos and wide capsules are not covers.
+pub async fn bonker_portraits(app_id: u64) -> Vec<ArtworkPick> {
+    let Ok(client) = client() else {
+        return Vec::new();
+    };
+    let url = format!("{BONKER}/api/appdetails?appids={app_id}&detail=full");
+    let Ok(response) = client.get(url).send().await else {
+        return Vec::new();
+    };
+    let Ok(page) = response.json::<BonkerPage>().await else {
+        return Vec::new();
+    };
+    page.data.and_then(|data| data.images).map(|images| portraits_of(&images)).unwrap_or_default()
+}
+
+fn portraits_of(images: &BonkerImages) -> Vec<ArtworkPick> {
+    let mut picks = Vec::new();
+    push_portrait(&mut picks, images.library_capsule.as_deref(), "Steam library cover");
+    push_portrait(&mut picks, images.library_capsule_2x.as_deref(), "Steam library cover, sharper");
+    if picks.is_empty() {
+        push_portrait(&mut picks, images.header.as_deref(), "Store header");
+    }
+    picks
+}
+
+fn push_portrait(picks: &mut Vec<ArtworkPick>, url: Option<&str>, label: &str) {
+    let Some(url) = url.map(str::trim).filter(|url| !url.is_empty()) else {
+        return;
+    };
+    if picks.iter().any(|pick| pick.url == url) {
+        return;
+    }
+    picks.push(ArtworkPick {
+        url: url.to_string(),
+        kind: "portrait".into(),
+        label: label.into(),
+    });
 }
 
 /// The store's id for a title, when the library does not know it.
@@ -646,6 +722,32 @@ mod tests {
         // warning that nothing uses it.
         let app: SteamApp = serde_json::from_str(r#"{"publishers":["Annapurna Interactive"]}"#).unwrap();
         assert_eq!(app.publishers.first().map(String::as_str), Some("Annapurna Interactive"));
+    }
+
+    #[test]
+    #[test]
+    fn a_library_capsule_is_the_cover_and_the_header_is_not() {
+        let images = BonkerImages {
+            library_capsule: Some("https://api.bonker.dev/api/image-cache/app_4731620_library_capsule.jpg".into()),
+            library_capsule_2x: Some("https://api.bonker.dev/api/image-cache/app_4731620_library_capsule_2x.jpg".into()),
+            header: Some("https://api.bonker.dev/api/image-cache/app_4731620_header.jpg".into()),
+        };
+        let picks = portraits_of(&images);
+        assert_eq!(picks.len(), 2);
+        assert!(picks.iter().all(|pick| pick.kind == "portrait"));
+        assert!(picks.iter().all(|pick| !pick.url.contains("header")));
+    }
+
+    #[test]
+    fn a_title_with_no_capsule_can_still_offer_the_header() {
+        let images = BonkerImages {
+            header: Some(" https://api.bonker.dev/api/image-cache/app_1_header.jpg ".into()),
+            ..BonkerImages::default()
+        };
+        let picks = portraits_of(&images);
+        assert_eq!(picks.len(), 1);
+        assert_eq!(picks[0].label, "Store header");
+        assert!(!picks[0].url.starts_with(' '));
     }
 
     #[test]

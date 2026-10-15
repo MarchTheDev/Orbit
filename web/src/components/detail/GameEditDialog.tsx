@@ -19,12 +19,12 @@ export function GameEditDialog({
     <Modal
       title={`Edit ${game.title}`}
       subtitle={hideLaunchSettings
-        ? "Edit this game's details. Changes save when you choose Save."
-        : "All of this game's details and launch settings, together. Changes save when you choose Save."}
+        ? "Edit this game's details. Closing this keeps the changes."
+        : "All of this game's details and launch settings, together. Closing this keeps the changes."}
       size="xl"
       onClose={onClose}
     >
-      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} onSaved={onClose} hideLaunchSettings={hideLaunchSettings} />
+      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} />
     </Modal>
   );
 }

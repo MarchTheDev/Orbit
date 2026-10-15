@@ -25,17 +25,30 @@ const AUTH_WAIT: Duration = Duration::from_secs(300);
 pub struct CloudStatus {
     pub ready: bool,
     pub version: String,
+    /// True when the copy in Orbit's folder is the one that will run, rather
+    /// than rclone that was already on this PC.
+    pub placed: bool,
 }
 
 pub fn status(data_dir: &Path) -> CloudStatus {
-    match binary(data_dir) {
+    let own = data_dir.join("tools").join(binary_name());
+    if own.is_file() {
+        return CloudStatus {
+            ready: true,
+            version: version_of(&own).unwrap_or_default(),
+            placed: true,
+        };
+    }
+    match which(binary_name()) {
         Some(path) => CloudStatus {
             ready: true,
             version: version_of(&path).unwrap_or_default(),
+            placed: false,
         },
         None => CloudStatus {
             ready: false,
             version: String::new(),
+            placed: false,
         },
     }
 }
@@ -87,7 +100,7 @@ pub fn connect(
     password: &str,
     url: &str,
 ) -> Result<String, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Download rclone from the Saves page first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let config = config_path(data_dir)?;
     let provider = provider.trim();
     let label = match provider {
@@ -106,7 +119,7 @@ pub fn connect(
 
 /// Remotes rclone already has, from its own config, not Orbit's.
 pub fn remotes(data_dir: &Path) -> Result<Vec<String>, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Download rclone from the Saves page first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let output = rclone(&bin, None)
         .arg("listremotes")
         .output()
@@ -124,7 +137,7 @@ pub fn remotes(data_dir: &Path) -> Result<Vec<String>, String> {
 /// Check a remote the player already has. Their remote is not deleted if the
 /// check fails, and Orbit's config is not used.
 pub fn attach(data_dir: &Path, remote: &str) -> Result<(), String> {
-    let bin = binary(data_dir).ok_or_else(|| "Download rclone from the Saves page first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let remote = remote.trim().trim_end_matches(':');
     if remote.is_empty() {
         return Err("Choose a remote first.".into());
@@ -146,7 +159,7 @@ pub fn forget(data_dir: &Path) -> Result<(), String> {
 }
 
 pub fn copy(data_dir: &Path, backup_root: Option<&str>, remote: &str, own: bool, up: bool) -> Result<String, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Download rclone from the Saves page first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let remote = remote.trim().trim_end_matches(':');
     if remote.is_empty() {
         return Err("Connect a cloud first.".into());

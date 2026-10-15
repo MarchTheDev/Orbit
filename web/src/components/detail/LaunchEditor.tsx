@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppWindow, FolderOpen, Plus, Timer, Wine, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
@@ -65,9 +65,12 @@ function summarise(t: LaunchTarget, companions: Companion[]): string {
 export function LaunchEditor({
   game,
   onSave,
+  saveOnClose = false,
 }: {
   game: Game;
   onSave: (t: LaunchTarget, companions: Companion[]) => void;
+  /** The edit dialog keeps launch changes when it closes, so it has no button. */
+  saveOnClose?: boolean;
 }) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
   const [args, setArgs] = useState(
@@ -132,7 +135,7 @@ export function LaunchEditor({
     }
   };
 
-  const save = () => {
+  const save = (announce = true) => {
     if (target.kind === 'executable') {
       if (!target.path.trim()) return;
       onSave({ kind: 'executable', path: target.path, args, workingDir: parentOf(target.path) }, companions);
@@ -146,17 +149,28 @@ export function LaunchEditor({
     } else {
       onSave({ kind: 'none' }, companions);
     }
-    say('Launch settings saved');
+    if (announce) say('Launch settings saved');
   };
 
   const setCompanion = (i: number, patch: Partial<Companion>) => {
     setCompanions((list) => list.map((c, n) => (n === i ? { ...c, ...patch } : c)));
   };
 
+  const savedArgs = game.launch && (game.launch.kind === 'executable' || game.launch.kind === 'wine') ? game.launch.args ?? '' : '';
   const dirty =
     JSON.stringify(target) !== JSON.stringify(game.launch ?? { kind: 'none' }) ||
     JSON.stringify(companions) !== JSON.stringify(game.companions ?? []) ||
-    (target.kind === 'executable' && args !== (game.launch?.kind === 'executable' ? game.launch.args ?? '' : ''));
+    ((target.kind === 'executable' || target.kind === 'wine') && args !== savedArgs);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!saveOnClose) return;
+    return () => {
+      if (dirtyRef.current) saveRef.current(false);
+    };
+  }, [saveOnClose]);
 
   return (
     <section className="space-y-4 rounded-xl border border-line bg-panel2 p-4">
@@ -363,13 +377,15 @@ export function LaunchEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
-        <SaveButton
-          onSave={save}
-          label="Save launch settings"
-          savedLabel="Launch settings saved"
-          className="!px-3 !py-1.5 !text-xs"
-        />
-        {!dirty && <span className="text-[11px] text-muted">Nothing to change</span>}
+        {!saveOnClose && (
+          <SaveButton
+            onSave={() => save()}
+            label="Save launch settings"
+            savedLabel="Launch settings saved"
+            className="!px-3 !py-1.5 !text-xs"
+          />
+        )}
+        {!saveOnClose && !dirty && <span className="text-[11px] text-muted">Nothing to change</span>}
         <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>
     </section>

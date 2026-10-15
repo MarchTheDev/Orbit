@@ -281,12 +281,6 @@ export function GameLogView({
   const drag = useDragReorder((fromId, toId, after) => move(Number(fromId), Number(toId), after));
 
   const current = runs.find((run) => run.id === currentId.current) ?? runs.find((run) => run.current) ?? runs[0];
-  const runCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const run of runs) counts[run.id] = allLogs.filter((row) => belongsToRun(row, run, runs)).length;
-    return counts;
-  }, [allLogs, runs]);
-
   const unsavedEntry = () =>
     Boolean(draft && (draft.note.trim() || draft.details.trim() || draft.at.trim() || draft.secs.trim()));
 
@@ -368,7 +362,6 @@ export function GameLogView({
       <PlaythroughBar
         runs={runs}
         currentId={current?.id ?? null}
-        counts={runCounts}
         busy={runBusy}
         onChoose={(run) => void chooseRun(run)}
         onAdd={(name) => void addRun(name)}
@@ -692,7 +685,6 @@ function belongsToRun(row: GameLog, current: Playthrough | undefined, runs: Play
 function PlaythroughBar({
   runs,
   currentId,
-  counts,
   busy,
   onChoose,
   onAdd,
@@ -701,7 +693,6 @@ function PlaythroughBar({
 }: {
   runs: Playthrough[];
   currentId: string | null;
-  counts: Record<string, number>;
   busy: boolean;
   onChoose: (run: Playthrough) => void;
   onAdd: (name: string) => void;
@@ -758,7 +749,7 @@ function PlaythroughBar({
                 : 'border-line text-muted hover:border-accent/40 hover:text-fg',
             )}
           >
-            {run.name}{counts[run.id] != null ? ` · ${counts[run.id]}` : ''}
+            {run.name}
           </button>
         ))}
         {adding ? (
