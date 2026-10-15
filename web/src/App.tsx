@@ -22,6 +22,7 @@ import { useSession } from './hooks/useSession';
 import { useGamepad } from './hooks/useGamepad';
 import {
   backupSave,
+  sendCloudAfterBackup,
   clearLibrary,
   savePlaceOf,
   isNative,
@@ -548,7 +549,12 @@ export default function App() {
     const game = games.find((item) => item.id === gameId);
     if (!game) return;
     void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings))
-      .then(() => toast({ text: `Backed up ${game.title}` }))
+      .then(() => {
+        toast({ text: `Backed up ${game.title}` });
+        return sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot).catch((e) => {
+          toast({ text: `The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`, tone: 'error' });
+        });
+      })
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);
 

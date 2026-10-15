@@ -75,7 +75,7 @@ export function GameLogView({
   onNotes?: (notes: string) => void;
   /** The run on screen, and how many entries it has. The Journal's left-hand
    *  count uses this so it matches the playthrough being read, not every run. */
-  onPlaythrough?: (run: { id: string; name: string; count: number; runs: number }) => void;
+  onPlaythrough?: (run: { gameId: string; id: string; name: string; count: number; runs: number }) => void;
   /** A one-shot request from the Journal context menu to open a fresh entry. */
   addRequest?: number;
   onAddHandled?: () => void;
@@ -93,11 +93,18 @@ export function GameLogView({
   const [detailsDraft, setDetailsDraft] = useState('');
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [runs, setRuns] = useState<Playthrough[]>([]);
+  const [allLogs, setAllLogs] = useState<GameLog[]>([]);
   const [runBusy, setRunBusy] = useState(false);
   const currentId = useRef<string | null>(null);
   /** Only the latest read may update the list. An older one finishing last was
    *  what left an empty playthrough showing the previous run's count. */
   const loadGen = useRef(0);
+
+  const publish = useCallback((run: Playthrough, list: Playthrough[], logs: GameLog[]) => {
+    const visible = logs.filter((row) => belongsToRun(row, run, list));
+    setRows(visible);
+    onPlaythrough?.({ gameId, id: run.id, name: run.name, count: visible.length, runs: list.length });
+  }, [gameId, onPlaythrough]);
 
   const load = useCallback(() => {
     const gen = ++loadGen.current;
@@ -105,19 +112,23 @@ export function GameLogView({
       const [list, logs] = await Promise.all([listPlaythroughs(gameId), listGameLogs(gameId)]);
       if (gen !== loadGen.current) return;
       setRuns(list);
+      setAllLogs(logs);
       const current =
         list.find((run) => run.id === currentId.current) ?? list.find((run) => run.current) ?? list[0];
       if (current) {
         currentId.current = current.id;
         rememberPlaythrough(gameId, current.id);
       }
-      const visible = logs.filter((row) => belongsToRun(row, current, list));
-      setRows(visible);
-      if (current) onPlaythrough?.({ id: current.id, name: current.name, count: visible.length, runs: list.length });
+      // Checked again because a playthrough click during the read has already
+      // published that run. Applying this older read would put the previous
+      // count back, which is what an empty run looked like until a log was
+      // added and removed.
+      if (gen !== loadGen.current) return;
+      if (current) publish(current, list, logs);
     })().catch((e) => {
       if (gen === loadGen.current) setError(e instanceof Error ? e.message : String(e));
     });
-  }, [gameId, onPlaythrough]);
+  }, [gameId, publish]);
 
   useEffect(() => {
     load();
@@ -270,6 +281,11 @@ export function GameLogView({
   const drag = useDragReorder((fromId, toId, after) => move(Number(fromId), Number(toId), after));
 
   const current = runs.find((run) => run.id === currentId.current) ?? runs.find((run) => run.current) ?? runs[0];
+  const runCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const run of runs) counts[run.id] = allLogs.filter((row) => belongsToRun(row, run, runs)).length;
+    return counts;
+  }, [allLogs, runs]);
 
   const unsavedEntry = () =>
     Boolean(draft && (draft.note.trim() || draft.details.trim() || draft.at.trim() || draft.secs.trim()));
@@ -278,8 +294,13 @@ export function GameLogView({
     if (runBusy || run.id === current?.id) return;
     if (unsavedEntry() && !confirm('Discard the entry you have not saved?')) return;
     setDraft(null);
+    // Drop a read that is already in flight, then publish this run from the
+    // entries already on the page. The count has to move on the click, including
+    // to zero, and not wait for another round trip.
+    loadGen.current += 1;
     currentId.current = run.id;
     rememberPlaythrough(gameId, run.id);
+    publish(run, runs, allLogs);
     setRunBusy(true);
     setError(null);
     try {
@@ -347,6 +368,7 @@ export function GameLogView({
       <PlaythroughBar
         runs={runs}
         currentId={current?.id ?? null}
+        counts={runCounts}
         busy={runBusy}
         onChoose={(run) => void chooseRun(run)}
         onAdd={(name) => void addRun(name)}
@@ -670,6 +692,7 @@ function belongsToRun(row: GameLog, current: Playthrough | undefined, runs: Play
 function PlaythroughBar({
   runs,
   currentId,
+  counts,
   busy,
   onChoose,
   onAdd,
@@ -678,6 +701,7 @@ function PlaythroughBar({
 }: {
   runs: Playthrough[];
   currentId: string | null;
+  counts: Record<string, number>;
   busy: boolean;
   onChoose: (run: Playthrough) => void;
   onAdd: (name: string) => void;
@@ -734,7 +758,7 @@ function PlaythroughBar({
                 : 'border-line text-muted hover:border-accent/40 hover:text-fg',
             )}
           >
-            {run.name}
+            {run.name}{counts[run.id] != null ? ` · ${counts[run.id]}` : ''}
           </button>
         ))}
         {adding ? (

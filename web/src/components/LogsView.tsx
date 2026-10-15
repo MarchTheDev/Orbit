@@ -75,12 +75,11 @@ export function LogsView({
 
   const currentByGame = useMemo(() => new Map(currents.map((run) => [run.gameId, run])), [currents]);
 
-  const reportRun = useCallback((info: { id: string; name: string; count: number; runs: number }) => {
-    if (!selectedId) return;
+  const reportRun = useCallback((info: { gameId: string; id: string; name: string; count: number; runs: number }) => {
     setOpenRun((current) => {
       if (
         current &&
-        current.gameId === selectedId &&
+        current.gameId === info.gameId &&
         current.id === info.id &&
         current.name === info.name &&
         current.count === info.count &&
@@ -88,15 +87,16 @@ export function LogsView({
       ) {
         return current;
       }
-      return { gameId: selectedId, ...info };
+      return info;
     });
     // Remember it for the left-hand list, so leaving this game does not put the
-    // count back on the run it used to be on.
+    // count back on the run it used to be on. A run with no entries is still
+    // remembered, or the number stays on the run that had some.
     setCurrents((rows) => {
-      const rest = rows.filter((row) => row.gameId !== selectedId);
-      return [...rest, { gameId: selectedId, id: info.id, name: info.name, runs: info.runs }];
+      const rest = rows.filter((row) => row.gameId !== info.gameId);
+      return [...rest, { gameId: info.gameId, id: info.id, name: info.name, runs: info.runs }];
     });
-  }, [selectedId]);
+  }, []);
 
   /**
    * Entries for the run each game is on.
@@ -170,6 +170,9 @@ export function LogsView({
   );
 
   const selected = games.find((g) => g.id === selectedId) ?? ordered.find((g) => (perGame.get(g.id)?.count ?? 0) > 0) ?? ordered[0] ?? null;
+  useEffect(() => {
+    if (selected && selected.id !== selectedId) setSelectedId(selected.id);
+  }, [selected, selectedId]);
   const runOf = (gameId: string) => {
     if (openRun?.gameId === gameId) return { id: openRun.id, name: openRun.name };
     const run = currentByGame.get(gameId);

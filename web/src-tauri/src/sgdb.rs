@@ -1,40 +1,33 @@
-//! Cover art from SteamGridDB.
+//! Portrait covers from SteamGridDB.
 //!
 //! Steam's own catalogue is free, needs no key and is what Orbit uses by
-//! default. SteamGridDB is the community's collection on top of it: replacement
-//! grids and heroes for the same games, which are often sharper and more varied
-//! than the capsule the store ships. It costs nothing but it does need a key,
-//! because every request is attributed to the person who asked - so Orbit never
-//! ships one and never invents one. No key in Settings means this module is
-//! never called at all.
-//!
-//! A Steam id is asked first: `/grids/steam/<app>` and `/heroes/steam/<app>`.
-//! Sizes are not filtered. Asking only for two exact crops used to hide the
-//! usual 600×900 grids, which looked like the site had nothing. A title is
-//! searched only when that id has no cover, and only an exact name is used.
-//! Both endpoints answer `{ "success": true, "data": [ { "url": ... } ] }`.
+//! default. SteamGridDB is asked only for a portrait grid, the shape a library
+//! tile is. Heroes, logos and wide banners are not covers, and mixing them in
+//! is what made a preview look half empty. A page is one screen of covers;
+//! the next page is a separate ask, because a popular game has far more than
+//! one screen of them.
 
 use serde::Deserialize;
 
 const API: &str = "https://www.steamgriddb.com/api/v2";
+/// One screen. The API allows 50; 24 is enough to browse without a wall of them.
+const PAGE_SIZE: u32 = 24;
+/// The portrait crops. 600×900 is the usual one, and leaving it out used to
+/// make a game look as if the site had nothing.
+const PORTRAITS: &str = "600x900,660x930,342x482";
 
 /// One picture, as the answer describes it.
 #[derive(Debug, Clone, Deserialize)]
 struct Asset {
     url: String,
-    /// Pixels, which the API gives and which are worth sorting by: the largest
-    /// of a game's grids is the one that survives being blown up on a detail
-    /// page.
     #[serde(default)]
     width: u32,
     #[serde(default)]
     height: u32,
-    /// The community's own ranking, where it has one.
     #[serde(default)]
     score: i64,
 }
 
-/// The envelope every endpoint answers with.
 #[derive(Debug, Clone, Deserialize)]
 struct Answer {
     #[serde(default)]
@@ -43,122 +36,117 @@ struct Answer {
     data: Vec<Asset>,
 }
 
-/// A game's pictures, best first.
+pub struct Page {
+    pub picks: Vec<crate::metadata::ArtworkPick>,
+    pub has_more: bool,
+}
+
+/// Portrait covers, best first. An empty page is a normal answer.
 ///
-/// An empty list is a normal answer: SteamGridDB simply may not have anything
-/// for that game, and the caller falls back to what the store had.
-///
-/// Sizes are not filtered. The old request asked only for two exact crops, and
-/// a game whose grids were the usual 600×900 came back empty, which looked like
-/// the site had nothing. A Steam id is tried first. A title is used only when
-/// that id has no cover, and only an exact name is accepted, so a nearby game
-/// does not lend its art.
-pub async fn art(
+/// A Steam id is tried first. A title is used when that page is empty, including
+/// a later page, and only an exact name is accepted.
+pub async fn portraits(
     app_id: Option<u64>,
     title: &str,
     api_key: &str,
-) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
+    page: u32,
+) -> Result<Page, String> {
     let key = api_key.trim();
     if key.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Page { picks: Vec::new(), has_more: false });
     }
 
-    let mut out = Vec::new();
     if let Some(app_id) = app_id {
-        // A missing page is not a bad key. Name search still gets a turn.
-        out.extend(pictures_or_empty(&format!("{API}/grids/steam/{app_id}"), key, "portrait").await?);
-        out.extend(pictures_or_empty(&format!("{API}/heroes/steam/{app_id}"), key, "hero").await?);
-    }
-    if out.iter().any(|pick| pick.kind == "portrait") {
-        return Ok(out);
+        let found = grids(&format!("{API}/grids/steam/{app_id}"), key, page).await?;
+        // An empty Steam-id page is not "this game has no covers". The name
+        // search is used for that page, and again for a later page, because the
+        // id that missed on the first screen will miss on the next one too.
+        if !found.picks.is_empty() {
+            return Ok(found);
+        }
     }
     if let Some(id) = find_game(title, key).await? {
-        let mut named = pictures_or_empty(&format!("{API}/grids/game/{id}"), key, "portrait").await?;
-        named.extend(pictures_or_empty(&format!("{API}/heroes/game/{id}"), key, "hero").await?);
-        named.append(&mut out);
-        out = named;
+        return grids(&format!("{API}/grids/game/{id}"), key, page).await;
     }
-    Ok(deduped(out))
+    Ok(Page { picks: Vec::new(), has_more: false })
 }
 
-/// Pictures, or nothing when the page is simply missing.
-///
-/// A refused key and a network failure still stop the lookup. A 404 does not,
-/// or a game SteamGridDB has under a different id would never be searched by name.
-async fn pictures_or_empty(
-    url: &str,
-    key: &str,
-    kind: &str,
-) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
-    match pictures(url, key, kind).await {
-        Ok(found) => Ok(found),
-        Err(reason) if reason.contains("refused") || reason.contains("could not be reached") => Err(reason),
-        Err(_) => Ok(Vec::new()),
+async fn grids(base: &str, key: &str, page: u32) -> Result<Page, String> {
+    let paged = format!("{base}?dimensions={PORTRAITS}&limit={PAGE_SIZE}&page={page}");
+    let mut fetched = get_json(key, &paged).await?;
+    // A catalogue that does not understand `page=0` still has a first page.
+    // Asking again without the parameter is that page, and only that page.
+    if page == 0 && fetched.status == 400 {
+        fetched = get_json(key, &format!("{base}?dimensions={PORTRAITS}&limit={PAGE_SIZE}")).await?;
     }
+    if fetched.status == 401 || fetched.status == 403 {
+        return Err("SteamGridDB refused that key. Check it in Settings → Artwork.".into());
+    }
+    if fetched.status == 429 {
+        return Err("SteamGridDB asked for a pause. Try the next page in a moment.".into());
+    }
+    if !(200..300).contains(&fetched.status) {
+        return Ok(Page { picks: Vec::new(), has_more: false });
+    }
+
+    let parsed: Answer = match serde_json::from_str(&fetched.body) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(Page { picks: Vec::new(), has_more: false }),
+    };
+    if !parsed.success {
+        return Ok(Page { picks: Vec::new(), has_more: false });
+    }
+
+    // Full before the filter: a page of 24 that loses a few odd crops still
+    // has another page behind it.
+    let has_more = parsed.data.len() as u32 >= PAGE_SIZE;
+    let mut assets: Vec<Asset> = parsed.data.into_iter().filter(|asset| is_portrait(asset.width, asset.height)).collect();
+    assets.sort_by(|a, b| {
+        b.score.cmp(&a.score).then_with(|| (b.width * b.height).cmp(&(a.width * a.height)))
+    });
+    let picks = assets
+        .into_iter()
+        .enumerate()
+        .map(|(index, asset)| crate::metadata::ArtworkPick {
+            url: asset.url,
+            kind: "portrait".into(),
+            label: format!(
+                "SteamGridDB cover {} · {}×{}",
+                page * PAGE_SIZE + index as u32 + 1,
+                asset.width,
+                asset.height
+            ),
+        })
+        .collect();
+    Ok(Page { picks, has_more })
 }
 
-/// One endpoint's worth of pictures.
-async fn pictures(
-    url: &str,
-    key: &str,
-    kind: &str,
-) -> Result<Vec<crate::metadata::ArtworkPick>, String> {
-    // Adult and humor pictures are left out by the API unless asked for. Sizes
-    // are not filtered: a game whose grids are not one of two crops still has art.
-    let url = format!("{url}?limit=24");
+struct Fetched {
+    status: u16,
+    body: String,
+}
+
+async fn get_json(key: &str, url: &str) -> Result<Fetched, String> {
     let client = crate::metadata::client()?;
     let answer = client
-        .get(&url)
-        // The key is the whole of the authentication; there is no login and no
-        // session, so it goes on the request rather than in the URL.
+        .get(url)
         .header("Authorization", format!("Bearer {key}"))
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("SteamGridDB could not be reached: {e}"))?;
-
-    let status = answer.status();
+    let status = answer.status().as_u16();
     let body = answer.text().await.map_err(|e| e.to_string())?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err("SteamGridDB refused that key. Check it in Settings → Artwork.".into());
-    }
-    if !status.is_success() {
-        return Err(format!("SteamGridDB answered {status}."));
-    }
+    Ok(Fetched { status, body })
+}
 
-    // A game with nothing there is not an error, and neither is an answer that
-    // says so in its own envelope rather than with a status code.
-    let parsed: Answer = match serde_json::from_str(&body) {
-        Ok(parsed) => parsed,
-        Err(_) => return Ok(Vec::new()),
-    };
-    if !parsed.success {
-        return Ok(Vec::new());
+/// A cover is taller than it is wide. A missing size is kept, because the
+/// request already asked only for portrait crops.
+fn is_portrait(width: u32, height: u32) -> bool {
+    if width == 0 || height == 0 {
+        return true;
     }
-
-    let mut assets = parsed.data;
-    // Best first: what the community ranked highest, and where nothing was
-    // ranked, the largest picture.
-    assets.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| (b.width * b.height).cmp(&(a.width * a.height)))
-    });
-
-    Ok(assets
-        .into_iter()
-        .enumerate()
-        .map(|(index, asset)| crate::metadata::ArtworkPick {
-            url: asset.url,
-            kind: kind.to_string(),
-            label: format!(
-                "SteamGridDB {kind} {} · {}×{}",
-                index + 1,
-                asset.width,
-                asset.height
-            ),
-        })
-        .collect())
+    height.saturating_mul(10) >= width.saturating_mul(13)
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,7 +163,6 @@ struct Hits {
     data: Vec<Hit>,
 }
 
-/// The SteamGridDB id of a game whose name is this title, ignoring case.
 async fn find_game(title: &str, key: &str) -> Result<Option<u64>, String> {
     let wanted = title.trim();
     if wanted.chars().count() < 2 {
@@ -213,16 +200,6 @@ async fn find_game(title: &str, key: &str) -> Result<Option<u64>, String> {
         .map(|hit| hit.id))
 }
 
-fn deduped(picks: Vec<crate::metadata::ArtworkPick>) -> Vec<crate::metadata::ArtworkPick> {
-    let mut seen = std::collections::HashSet::new();
-    picks
-        .into_iter()
-        .filter(|pick| seen.insert(pick.url.clone()))
-        .collect()
-}
-
-/// A path segment. Spaces and anything outside a URL name are escaped, so a
-/// title with a colon or an apostrophe still reaches the search.
 fn path_term(title: &str) -> String {
     let mut out = String::new();
     for byte in title.as_bytes() {
@@ -238,12 +215,23 @@ fn path_term(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::path_term;
+    use super::{is_portrait, path_term};
 
     #[test]
     fn a_title_with_punctuation_is_safe_in_a_path() {
         assert_eq!(path_term("Hades"), "Hades");
         assert_eq!(path_term("The Witcher 3"), "The%20Witcher%203");
         assert_eq!(path_term("Don't Starve"), "Don%27t%20Starve");
+    }
+
+    #[test]
+    fn only_a_portrait_crop_counts_as_a_cover() {
+        assert!(is_portrait(600, 900));
+        assert!(is_portrait(660, 930));
+        assert!(is_portrait(342, 482));
+        assert!(!is_portrait(460, 215));
+        assert!(!is_portrait(512, 512));
+        assert!(!is_portrait(1024, 1024));
+        assert!(is_portrait(0, 0));
     }
 }

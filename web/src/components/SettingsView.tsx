@@ -297,13 +297,13 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
-  { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher sync rsync cloud' },
+  { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher cloud rclone' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
   { label: 'Open in Orbit', section: 'orbit-appearance', keywords: 'explorer windows linux context menu right click executable import nautilus dolphin' },
-  { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year steamgriddb igdb twitch key' },
+  { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year steamgriddb portrait key' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
   { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
@@ -843,7 +843,7 @@ export function SettingsView({
         lead="Where the copies of save files are kept."
       >
         <p className="text-xs leading-relaxed text-muted">
-          Leave the path blank and Orbit uses its own backups folder. Syncing those copies somewhere else is on the Saves page.
+          Leave the path blank and Orbit uses its own backups folder. Sending those copies to a cloud is on the Saves page.
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">Where copies are kept</span>
@@ -964,8 +964,8 @@ export function SettingsView({
             SteamGridDB API key
           </label>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            Optional. Steam's own artwork needs nothing and is used either way. A key adds SteamGridDB
-            covers and heroes, and a name search when Steam has no grids. Get a free key from{' '}
+            Optional. Steam's own artwork needs nothing and is used when this is empty. A key asks
+            SteamGridDB for portrait covers only, a page at a time. Get a free key from{' '}
             <button
               type="button"
               className="underline decoration-line underline-offset-2 transition hover:text-accent"
@@ -990,58 +990,6 @@ export function SettingsView({
               <button
                 type="button"
                 onClick={() => setSettings({ sgdbApiKey: '' })}
-                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-line bg-panel/40 p-3">
-          <p className="text-sm font-semibold text-fg">IGDB</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            Optional. Used for a cover when Steam has no portrait, and as extra choices in Find artwork.
-            Both a client id and a secret are needed, from{' '}
-            <button
-              type="button"
-              className="underline decoration-line underline-offset-2 transition hover:text-accent"
-              onClick={() => void openExternal('https://dev.twitch.tv/console/apps')}
-            >
-              the Twitch developer console
-            </button>
-            . Nothing is asked when either is empty.
-          </p>
-          <label className="mt-2.5 block text-xs text-muted" htmlFor="igdb-id">
-            Client id
-          </label>
-          <input
-            id="igdb-id"
-            type="password"
-            value={settings.igdbClientId ?? ''}
-            onChange={(e) => setSettings({ igdbClientId: e.target.value })}
-            placeholder="Leave empty to skip IGDB"
-            className={`${inputCls} mt-1 font-mono`}
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <label className="mt-2.5 block text-xs text-muted" htmlFor="igdb-secret">
-            Client secret
-          </label>
-          <div className="mt-1 flex gap-2">
-            <input
-              id="igdb-secret"
-              type="password"
-              value={settings.igdbClientSecret ?? ''}
-              onChange={(e) => setSettings({ igdbClientSecret: e.target.value })}
-              placeholder="Leave empty to skip IGDB"
-              className={`${inputCls} min-w-0 flex-1 font-mono`}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {(settings.igdbClientId || settings.igdbClientSecret) && (
-              <button
-                type="button"
-                onClick={() => setSettings({ igdbClientId: '', igdbClientSecret: '' })}
                 className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
               >
                 Clear

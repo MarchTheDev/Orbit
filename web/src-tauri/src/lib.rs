@@ -19,11 +19,10 @@ mod launch_target;
 mod launchers;
 #[cfg(target_os = "linux")]
 mod linux_window;
-mod igdb;
+mod cloud;
 mod metadata;
 mod process;
 mod saves;
-mod sync;
 mod session;
 mod sgdb;
 mod steam;
@@ -953,8 +952,8 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
 
 /// Everything Orbit can find out about a game with no setup at all.
 ///
-/// The Steam store needs no key. SteamGridDB and IGDB are asked for a cover
-/// only when the store has no portrait and the player has put a key in Settings.
+/// The Steam store needs no key. SteamGridDB is asked for a portrait only when
+/// the store has none and the player has put a key in Settings.
 ///
 /// An app id is passed when the caller has one, an import by Steam id, say,
 /// in which case the store page is read directly and the title can be blank,
@@ -1011,9 +1010,10 @@ fn steam_app_id(game: &GameRow) -> Option<u64> {
 struct Artwork {
     /// The store's id, so the game can remember which app it is from now on.
     app_id: Option<u64>,
-    /// Every picture the store has, each one saying what sort of picture it is,
-    /// so the front end offers them in groups instead of guessing from the URL.
+    /// Portrait covers. A page is one screen of them.
     picks: Vec<metadata::ArtworkPick>,
+    page: u32,
+    has_more: bool,
 }
 
 /// The pictures the store has for a game, for a cover that crops badly.
@@ -1022,7 +1022,7 @@ struct Artwork {
 /// is the honest one here too: Orbit cannot know which crop suits a tile it did
 /// not draw, so the player picks.
 #[tauri::command]
-async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<Artwork, String> {
+async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String, page: Option<u32>) -> Result<Artwork, String> {
     let game = orbit
         .db
         .game(&game_id)?
@@ -1030,7 +1030,7 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String) -> Result<
 
     // A game added from a folder has no store id of its own, so the title is
     // asked about. That is also the moment the id becomes worth keeping.
-    artwork_for(&orbit, &game.title, steam_app_id(&game)).await
+    artwork_for(&orbit, &game.title, steam_app_id(&game), page.unwrap_or(0)).await
 }
 
 /// Pictures for a game that has not been saved yet, so Add Game can offer
@@ -1040,51 +1040,51 @@ async fn artwork_choices(
     orbit: State<'_, Orbit>,
     title: String,
     app_id: Option<u64>,
+    page: Option<u32>,
 ) -> Result<Artwork, String> {
     let title = title.trim();
     if title.is_empty() {
         return Err("Name the game before looking for covers.".into());
     }
-    artwork_for(orbit.inner(), title, app_id).await
+    artwork_for(orbit.inner(), title, app_id, page.unwrap_or(0)).await
 }
 
-async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>) -> Result<Artwork, String> {
+async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) -> Result<Artwork, String> {
     let app_id = match known {
         Some(id) => Some(id),
         None => metadata::app_id_for(title).await,
     };
-    // Steam is asked when there is an id, and a miss is not the end of the
-    // lookup: a game the store does not know can still have a cover elsewhere.
+    let settings = orbit.store.load_settings();
     let mut picks = Vec::new();
-    if let Some(id) = app_id {
-        if let Ok(found) = metadata::artwork(id).await {
-            picks.extend(found);
+    let mut has_more = false;
+    let mut cover_error = None;
+
+    // Steam's own portrait is the no-key default, and it only belongs on the
+    // first page. Later pages are more community covers, not the same capsule.
+    if page == 0 {
+        if let Some(id) = app_id {
+            if let Ok(found) = metadata::artwork(id).await {
+                picks.extend(found.into_iter().filter(|pick| pick.kind == "portrait"));
+            }
         }
     }
 
-    let settings = orbit.store.load_settings();
-    let mut cover_error = None;
     if let Some(key) = setting_text(&settings, "sgdbApiKey") {
-        match sgdb::art(app_id, title, &key).await {
-            Ok(mut found) => {
-                found.append(&mut picks);
-                picks = found;
+        match sgdb::portraits(app_id, title, &key, page).await {
+            Ok(found) => {
+                has_more = found.has_more;
+                for pick in found.picks {
+                    if !picks.iter().any(|have| have.url == pick.url) {
+                        picks.push(pick);
+                    }
+                }
             }
             Err(e) => {
                 log::warn!("SteamGridDB offered nothing: {e}");
+                if e.contains("refused") {
+                    return Err(e);
+                }
                 cover_error = Some(e);
-            }
-        }
-    }
-    if let (Some(id), Some(secret)) = (
-        setting_text(&settings, "igdbClientId"),
-        setting_text(&settings, "igdbClientSecret"),
-    ) {
-        match igdb::covers(title, &id, &secret, false).await {
-            Ok(found) => picks.extend(found),
-            Err(e) => {
-                log::warn!("IGDB offered nothing: {e}");
-                cover_error.get_or_insert(e);
             }
         }
     }
@@ -1093,33 +1093,29 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>) -> Result<A
         if let Some(reason) = cover_error {
             return Err(reason);
         }
-        return Err(format!(
-            "Orbit could not find artwork for \"{title}\". A cover can still be chosen by hand."
-        ));
+        if page == 0 {
+            return Err(format!(
+                "Orbit could not find a portrait cover for \"{title}\". A cover can still be chosen by hand."
+            ));
+        }
     }
     Ok(Artwork {
         app_id: known.or(app_id),
         picks,
+        page,
+        has_more,
     })
 }
 
-/// The first portrait SteamGridDB or IGDB can offer, for a game whose store
-/// page has no library capsule.
+/// The first portrait SteamGridDB can offer, for a game whose store page has
+/// no library capsule. Heroes and wide banners are not covers.
 async fn first_portrait(orbit: &Orbit, title: &str, app_id: Option<u64>) -> Option<String> {
     let settings = orbit.store.load_settings();
-    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
-        if let Ok(found) = sgdb::art(app_id, title, &key).await {
-            if let Some(pick) = found.into_iter().find(|pick| pick.kind == "portrait") {
-                return Some(pick.url);
-            }
-        }
-    }
-    let id = setting_text(&settings, "igdbClientId")?;
-    let secret = setting_text(&settings, "igdbClientSecret")?;
-    igdb::covers(title, &id, &secret, true)
+    let key = setting_text(&settings, "sgdbApiKey")?;
+    sgdb::portraits(app_id, title, &key, 0)
         .await
         .ok()
-        .and_then(|found| found.into_iter().next())
+        .and_then(|found| found.picks.into_iter().next())
         .map(|pick| pick.url)
 }
 
@@ -1396,14 +1392,62 @@ fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::
     saves::status(orbit.store.root(), backup_root.as_deref())
 }
 
-/// Send the copies already made to a folder, or to an rsync destination.
 #[tauri::command]
-fn saves_sync(
+fn cloud_status(orbit: State<'_, Orbit>) -> cloud::CloudStatus {
+    cloud::status(orbit.store.root())
+}
+
+/// Download rclone into Orbit's folder. Nothing is installed on the system.
+#[tauri::command]
+async fn cloud_fetch(orbit: State<'_, Orbit>) -> Result<String, String> {
+    cloud::fetch(orbit.store.root()).await
+}
+
+#[tauri::command]
+async fn cloud_connect(
     orbit: State<'_, Orbit>,
-    destination: String,
+    provider: String,
+    host: String,
+    user: String,
+    password: String,
+    url: String,
+) -> Result<String, String> {
+    let data = orbit.store.root().to_path_buf();
+    tokio::task::spawn_blocking(move || cloud::connect(&data, &provider, &host, &user, &password, &url))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cloud_remotes(orbit: State<'_, Orbit>) -> Result<Vec<String>, String> {
+    cloud::remotes(orbit.store.root())
+}
+
+#[tauri::command]
+async fn cloud_attach(orbit: State<'_, Orbit>, remote: String) -> Result<(), String> {
+    let data = orbit.store.root().to_path_buf();
+    tokio::task::spawn_blocking(move || cloud::attach(&data, &remote))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cloud_copy(
+    orbit: State<'_, Orbit>,
+    up: bool,
+    remote: String,
+    own: bool,
     backup_root: Option<String>,
 ) -> Result<String, String> {
-    sync::copies(orbit.store.root(), backup_root.as_deref(), &destination)
+    let data = orbit.store.root().to_path_buf();
+    tokio::task::spawn_blocking(move || cloud::copy(&data, backup_root.as_deref(), &remote, own, up))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cloud_forget(orbit: State<'_, Orbit>) -> Result<(), String> {
+    cloud::forget(orbit.store.root())
 }
 
 #[tauri::command]
@@ -1933,7 +1977,13 @@ pub fn run() {
             remember_music,
             gamepad_poll,
             saves_status,
-            saves_sync,
+            cloud_status,
+            cloud_fetch,
+            cloud_connect,
+            cloud_remotes,
+            cloud_attach,
+            cloud_copy,
+            cloud_forget,
             saves_backup,
             saves_restore,
             saves_list,

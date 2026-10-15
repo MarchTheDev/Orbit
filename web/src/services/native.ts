@@ -558,14 +558,14 @@ export function fetchAchievements(gameId: string): Promise<Achievement[]> {
  * Every picture the store has for a game, so a cover that crops badly can be
  * swapped for a better one.
  */
-export function findArtworkChoices(title: string, appId?: number | null): Promise<ArtworkFound> {
-  return call('artwork_choices', { title, appId: appId ?? null }, async () => ({ appId: null, picks: [] }));
+export function findArtworkChoices(title: string, appId?: number | null, page = 0): Promise<ArtworkFound> {
+  return call('artwork_choices', { title, appId: appId ?? null, page }, async () => ({ appId: null, picks: [] }));
 }
 
-export function findArtwork(gameId: string): Promise<ArtworkFound> {
+export function findArtwork(gameId: string, page = 0): Promise<ArtworkFound> {
   return call(
     'artwork_candidates',
-    { gameId },
+    { gameId, page },
     async () => {
       await sleep(250);
       // Nothing to ask in a browser, and the sample library has no store pages.
@@ -589,6 +589,9 @@ export interface ArtworkPick {
 export interface ArtworkFound {
   appId: number | null;
   picks: ArtworkPick[];
+  /** Missing on a preview fallback, which has no pages to turn. */
+  page?: number;
+  hasMore?: boolean;
 }
 
 /** Put one game's notes in the order they were dragged into. */
@@ -852,10 +855,72 @@ export function listSaves(gameId: string, title: string, place?: SavePlace): Pro
   return call('saves_list', { gameId, title, ...place }, () => []);
 }
 
-export function syncSaves(destination: string, backupRoot?: string | null): Promise<string> {
-  return call('saves_sync', { destination, backupRoot: backupRoot || null }, async () => {
-    throw new Error('Syncing copies needs the desktop app.');
+export interface CloudStatus {
+  ready: boolean;
+  version: string;
+}
+
+export function cloudStatus(): Promise<CloudStatus> {
+  return call('cloud_status', {}, async () => ({ ready: false, version: '' }));
+}
+
+export function cloudFetch(): Promise<string> {
+  return call('cloud_fetch', {}, async () => {
+    throw new Error('Cloud copies need the desktop app.');
   });
+}
+
+export function cloudConnect(
+  provider: string,
+  fields: { host?: string; user?: string; password?: string; url?: string } = {},
+): Promise<string> {
+  return call(
+    'cloud_connect',
+    {
+      provider,
+      host: fields.host ?? '',
+      user: fields.user ?? '',
+      password: fields.password ?? '',
+      url: fields.url ?? '',
+    },
+    async () => {
+      throw new Error('Cloud copies need the desktop app.');
+    },
+  );
+}
+
+export function cloudRemotes(): Promise<string[]> {
+  return call('cloud_remotes', {}, async () => []);
+}
+
+export function cloudAttach(remote: string): Promise<void> {
+  return call('cloud_attach', { remote }, async () => {
+    throw new Error('Cloud copies need the desktop app.');
+  });
+}
+
+export function cloudCopy(up: boolean, remote: string, own: boolean, backupRoot?: string | null): Promise<string> {
+  return call('cloud_copy', { up, remote, own, backupRoot: backupRoot || null }, async () => {
+    throw new Error('Cloud copies need the desktop app.');
+  });
+}
+
+export function cloudForget(): Promise<void> {
+  return call('cloud_forget', {}, async () => undefined);
+}
+
+/**
+ * Send the copies after a backup, when that was asked for.
+ *
+ * The caller has already kept the copy on this PC. A failure here must be
+ * caught there, so the cloud does not undo that.
+ */
+export function sendCloudAfterBackup(
+  cloud: { remote?: string; own?: boolean; auto?: boolean } | undefined,
+  backupRoot?: string | null,
+): Promise<void> {
+  if (!cloud?.auto || !cloud.remote) return Promise.resolve();
+  return cloudCopy(true, cloud.remote, !!cloud.own, backupRoot).then(() => undefined);
 }
 
 export function suggestSaves(title: string): Promise<string[]> {

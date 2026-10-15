@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, Image, LoaderCircle, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { FolderOpen, Image, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
-import { findArtwork, isNative, type ArtworkPick } from '../../services/native';
+import { findArtwork, isNative } from '../../services/native';
 import { say } from '../../utils/toast';
 import { fileSrc, pickAnyFile } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
-import { Cover } from '../ui/Cover';
 import { LaunchEditor } from './LaunchEditor';
 import { Select } from '../ui/Select';
 import { SaveButton } from '../ui/SaveButton';
 import { MarkdownEditor } from '../ui/Markdown';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
+import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
 
 /**
  * Everything about a game, in one place.
@@ -22,19 +22,6 @@ import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
  * who wants to fix one of them should not have to work out which page it lives
  * on. Every field saves with the same button at the bottom.
  */
-/**
- * The shapes of artwork the store publishes, in the order they are worth
- * looking at, each saying where it belongs.
- */
-const GROUPS = [
-  { kind: 'portrait', title: 'Portrait', where: 'fills a tile, the shape the library is built for', shape: 'tall' },
-  { kind: 'hero', title: 'Hero art', where: 'wide, for the backdrop behind a page', shape: 'wide' },
-  { kind: 'screenshot', title: 'Screenshots', where: 'wide, for the backdrop behind a page', shape: 'wide' },
-  { kind: 'capsule', title: 'Capsule', where: 'the store\'s own tile art; used as a cover', shape: 'tall' },
-  { kind: 'header', title: 'Header', where: 'wide and short; used as a cover', shape: 'wide' },
-  { kind: 'logo', title: 'Logo', where: 'the name on its own, over the backdrop', shape: 'wide' },
-] as const;
-
 export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = false }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
@@ -63,10 +50,6 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
   const [status, setStatus] = useState<GameStatus>(game.status);
   const [favorite, setFavorite] = useState(game.favorite);
   const [hidden, setHidden] = useState(!!game.hidden);
-  /** Pictures the store offers, once the player asks for them. */
-  const [options, setOptions] = useState<ArtworkPick[]>([]);
-  const [finding, setFinding] = useState(false);
-  const [artError, setArtError] = useState<string | null>(null);
 
   // A different game means a different form; the fields are reseeded rather than
   // carrying the last game's title into this one's.
@@ -90,32 +73,7 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
     setStatus(game.status);
     setFavorite(game.favorite);
     setHidden(!!game.hidden);
-    setOptions([]);
-    setArtError(null);
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /**
-   * Ask the store for every picture it has of this game.
-   *
-   * A cover that crops badly is usually the wrong crop rather than the wrong
-   * picture, and the store publishes several. The list is offered as pictures to
-   * look at, because a URL tells nobody anything.
-   */
-  const findArt = async () => {
-    setFinding(true);
-    setArtError(null);
-    try {
-      const found = await findArtwork(game.id);
-      setOptions(found.picks);
-      if (found.picks.length === 0) {
-        setArtError('The store has no pictures for this game. A file can still be chosen by hand.');
-      }
-    } catch (e) {
-      setArtError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFinding(false);
-    }
-  };
 
   /** A number field, where empty means "no value" rather than zero. */
   const hours = (value: string): number | null => {
@@ -184,15 +142,10 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
     <section className="space-y-4">
       <div className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
         <div className="flex items-start gap-3">
-          <div className="h-24 w-[4.5rem] shrink-0 overflow-hidden rounded-xl border border-line bg-panel shadow-lg">
-            {coverPath.trim() ? (
-              <img src={fileSrc(coverPath.trim())} alt="" className="size-full object-cover" />
-            ) : coverUrl.trim() ? (
-              <img src={coverUrl.trim()} alt="" className="size-full object-cover" />
-            ) : (
-              <Cover game={game} className="size-full [&_span]:text-sm" />
-            )}
-          </div>
+          <PortraitFrame
+            src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
+            className="border border-line shadow-lg"
+          />
           <div className="min-w-0 flex-1 space-y-1">
             <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
               <Pencil className="size-3.5" />
@@ -283,7 +236,10 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
         </h4>
 
         <div className="flex gap-3">
-          <Cover game={game} className="h-28 w-20 shrink-0 rounded-lg [&_span]:text-lg" />
+          <PortraitFrame
+            src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || null}
+            className="rounded-lg"
+          />
           <div className="min-w-0 flex-1 space-y-2">
             <label className="block">
               <span className={labelCls}>Cover picture (a file on this PC)</span>
@@ -361,77 +317,16 @@ export function GameEditTab({ game, onUpdate, onSaved, hideLaunchSettings = fals
           </p>
         </div>
 
-        <div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void findArt()}
-              disabled={finding}
-              className={`${btnGhost} flex items-center gap-2 text-xs disabled:opacity-50`}
-            >
-              {finding ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {finding ? 'Looking…' : 'Find other artwork'}
-            </button>
-            <span className="text-[11px] text-muted">
-              Every picture the store has, grouped by the shape it is, so a badly cropped cover can be swapped.
-            </span>
-          </div>
-
-          {artError && <p className="mt-2 text-[11px] text-rose-400">{artError}</p>}
-
-          {options.length > 0 && (
-            <div className="mt-3 space-y-3">
-              {GROUPS.map(({ kind, title, where, shape }) => {
-                const picks = options.filter((o) => o.kind === kind);
-                if (picks.length === 0) return null;
-                return (
-                  <div key={kind}>
-                    <p className="mb-1.5 text-[11px] text-muted">
-                      <span className="font-medium text-fg">{title}</span> · {where}
-                    </p>
-                    <ul className="flex flex-wrap gap-2">
-                      {picks.map((pick) => (
-                        <li key={pick.url}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // Where a click sends the picture is decided by
-                              // what it is, not by what its file name happens to
-                              // contain: a portrait is a cover, the wide ones
-                              // are backdrops.
-                              if (pick.kind === 'portrait' || pick.kind === 'capsule' || pick.kind === 'header') {
-                                setCoverUrl(pick.url);
-                              } else {
-                                setBackdropUrl(pick.url);
-                              }
-                              say(`${pick.label} chosen. Save to keep it.`);
-                            }}
-                            title={`${pick.label}. ${where}`}
-                            className={`group block overflow-hidden rounded-lg border-2 transition ${
-                              pick.url === coverUrl || pick.url === backdropUrl
-                                ? 'border-accent'
-                                : 'border-line hover:border-muted'
-                            }`}
-                          >
-                            <img
-                              src={pick.url}
-                              alt={pick.label}
-                              loading="lazy"
-                              className={shape === 'wide' ? 'h-16 w-28 object-cover' : 'h-24 w-16 object-cover'}
-                            />
-                            <span className="block max-w-28 truncate bg-panel px-1.5 py-1 text-left text-[10px] text-muted group-hover:text-fg">
-                              {pick.label}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <PortraitBrowser
+          resetKey={game.id}
+          selected={coverUrl}
+          load={(page) => findArtwork(game.id, page)}
+          onChoose={(pick) => {
+            setCoverUrl(pick.url);
+            setCoverPath('');
+            say('Cover chosen. Save to keep it.');
+          }}
+        />
       </div>
 
       <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/40 p-3">

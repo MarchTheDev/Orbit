@@ -377,14 +377,6 @@ export interface Settings {
    * ships one nor invents one.
    */
   sgdbApiKey?: string;
-  /**
-   * A Twitch application id and secret, for IGDB covers.
-   *
-   * Empty means IGDB is never asked. Steam's own art stays the default, and
-   * these are only used when the player has put both in.
-   */
-  igdbClientId?: string;
-  igdbClientSecret?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */
@@ -532,7 +524,16 @@ export interface Settings {
     order?: string[];
     /** Games left out of the Saves list. They stay in the library, and can be shown again from Saves. */
     hidden?: string[];
-    /** Where the copies are sent. A folder, or an rsync destination such as name@computer:folder. */
-    syncTo?: string;
+    /**
+     * Where the copies already on this PC are sent, through rclone.
+     *
+     * `own` is a remote rclone already had. Orbit does not delete that one.
+     */
+    cloud?: {
+      remote: string;
+      provider: string;
+      own: boolean;
+      auto?: boolean;
+    };
   };
 }

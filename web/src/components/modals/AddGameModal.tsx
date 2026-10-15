@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FolderOpen, LoaderCircle, Plus, Search, Sparkles, TriangleAlert, X } from 'lucide-react';
+import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../../data/launchers';
-import { exeInfo, findArtworkChoices, folderPrograms, isNative, type ArtworkPick } from '../../services/native';
+import { exeInfo, findArtworkChoices, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
@@ -13,6 +13,7 @@ import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../u
 import { CheckboxInline } from '../ui/Checkbox';
 import { Select } from '../ui/Select';
 import { LauncherIcon } from '../ui/LauncherIcon';
+import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
 
 /** What the player has told us so far. */
 interface Draft {
@@ -100,9 +101,6 @@ export function AddGameModal({
   const [details, setDetails] = useState<DetailsDraft>(EMPTY_DETAILS);
   const [detailsEdited, setDetailsEdited] = useState(false);
   const [coverUrlEdited, setCoverUrlEdited] = useState(false);
-  const [covers, setCovers] = useState<ArtworkPick[]>([]);
-  const [coverError, setCoverError] = useState<string | null>(null);
-  const [findingCovers, setFindingCovers] = useState(false);
   const [coverAppId, setCoverAppId] = useState<number | null>(null);
   const [fetchMeta, setFetchMeta] = useState(true);
   const [dropped, setDropped] = useState<string[]>([]);
@@ -356,22 +354,16 @@ export function AddGameModal({
         {looked && (
           <section className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
             <div className="flex items-start gap-3">
-              <div className="grid h-24 w-[4.5rem] shrink-0 place-items-center overflow-hidden rounded-xl border border-line bg-panel shadow-lg">
-                {d.coverPath ? (
-                  <img src={fileSrc(d.coverPath)} alt="" className="size-full object-cover" />
-                ) : storeCover ? (
-                  <img src={storeCover} alt="" className="size-full object-cover" />
-                ) : (
-                  <span
-                    className="grid size-full place-items-center text-sm font-black text-white/90"
-                    style={{
-                      background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
-                    }}
-                  >
-                    {initials(title || 'Orbit')}
-                  </span>
-                )}
-              </div>
+              <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
+                <span
+                  className="grid size-full place-items-center text-sm font-black text-white/90"
+                  style={{
+                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                  }}
+                >
+                  {initials(title || 'Orbit')}
+                </span>
+              </PortraitFrame>
 
               <div className="min-w-0 flex-1 space-y-1">
                 <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
@@ -507,67 +499,19 @@ export function AddGameModal({
           </button>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className={`${btnGhost} flex items-center gap-2 text-xs disabled:opacity-50`}
-              disabled={findingCovers || title.length < 2}
-              onClick={() => {
-                setFindingCovers(true);
-                setCoverError(null);
-                void findArtworkChoices(title, match?.appId ?? coverAppId)
-                  .then((found) => {
-                    const rank = (kind: string) => (kind === 'portrait' ? 0 : kind === 'capsule' || kind === 'header' ? 1 : 2);
-                    setCovers([...found.picks].sort((a, b) => rank(a.kind) - rank(b.kind)));
-                    if (found.appId) setCoverAppId(found.appId);
-                    if (found.picks.length === 0) {
-                      setCoverError('The store has no other covers for this name. A file can still be chosen.');
-                    }
-                  })
-                  .catch((error) => setCoverError(error instanceof Error ? error.message : String(error)))
-                  .finally(() => setFindingCovers(false));
-              }}
-            >
-              {findingCovers ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {findingCovers ? 'Looking…' : 'Find other covers'}
-            </button>
-            <span className="text-[11px] text-muted">The automatic cover, or one of the other pictures the store has.</span>
-          </div>
-          {coverError && <p className="text-[11px] text-rose-300">{coverError}</p>}
-          {covers.length > 0 && (
-            <ul className="flex gap-2 overflow-x-auto pb-1">
-              {covers.map((pick) => (
-                <li key={pick.url} className="shrink-0">
-                  <button
-                    type="button"
-                    title={pick.label}
-                    onClick={() => {
-                      if (pick.kind === 'hero' || pick.kind === 'logo' || pick.kind === 'screenshot') {
-                        editDetails('backgroundUrl', pick.url);
-                      } else {
-                        editDetails('coverUrl', pick.url);
-                        set('coverPath', null);
-                      }
-                    }}
-                    className={`block overflow-hidden rounded-lg border-2 ${
-                      pick.url === details.coverUrl || pick.url === details.backgroundUrl
-                        ? 'border-accent'
-                        : 'border-line hover:border-muted'
-                    }`}
-                  >
-                    <img
-                      src={pick.url}
-                      alt={pick.label}
-                      loading="lazy"
-                      className={pick.kind === 'portrait' ? 'h-24 w-16 object-cover' : 'h-16 w-28 object-cover'}
-                    />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <PortraitBrowser
+          resetKey={title}
+          disabled={title.trim().length < 2}
+          selected={details.coverUrl}
+          load={(page) => findArtworkChoices(title, match?.appId ?? coverAppId, page)}
+          onFound={(found) => {
+            if (found.appId) setCoverAppId(found.appId);
+          }}
+          onChoose={(pick) => {
+            editDetails('coverUrl', pick.url);
+            set('coverPath', null);
+          }}
+        />
 
         {!d.exePath.trim() && (
           <p className="rounded-lg border border-line bg-panel2/40 px-3 py-2 text-xs text-muted">
@@ -642,9 +586,9 @@ export function AddGameModal({
                   wins until a file is chosen, and with neither this is the
                   initials placeholder the library falls back to. */}
               {d.coverPath ? (
-                <img src={fileSrc(d.coverPath)} alt="" className="h-12 w-9 shrink-0 rounded object-cover" />
+                <img src={fileSrc(d.coverPath)} alt="" className="h-12 w-9 shrink-0 rounded bg-black object-cover" />
               ) : storeCover ? (
-                <img src={storeCover} alt="" className="h-12 w-9 shrink-0 rounded object-cover" />
+                <img src={storeCover} alt="" className="h-12 w-9 shrink-0 rounded bg-black object-cover" />
               ) : (
                 <div
                   className="grid h-12 w-9 shrink-0 place-items-center rounded text-xs font-black text-white/90"

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
+import { ArchiveRestore, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -14,7 +14,7 @@ import {
   savePlaceOf,
   savesStatus,
   suggestSaves,
-  syncSaves,
+  sendCloudAfterBackup,
   type SaveBackup,
   type SaveStatus,
 } from '../services/native';
@@ -27,7 +27,8 @@ import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
-import { btnBrowse, inputCls, Modal } from './ui/Modal';
+import { inputCls, Modal } from './ui/Modal';
+import { CloudPanel } from './saves/CloudPanel';
 
 /**
  * Copies of the files a game writes while it is played.
@@ -35,7 +36,7 @@ import { btnBrowse, inputCls, Modal } from './ui/Modal';
  * Orbit looks in the usual places — Documents, Saved Games, the game's own
  * folder, a Wine prefix, a Steam prefix — and copies what it finds. Nothing
  * else has to be installed. A folder the player names is used instead. Those
- * copies can be sent on from this page. Nothing is installed to do that.
+ * copies can be sent to a cloud from this page. Nothing is installed for the copy that stays here.
  */
 export function SavesView({
   games,
@@ -56,9 +57,6 @@ export function SavesView({
   const [savedTick, setSavedTick] = useState(0);
   const [browsing, setBrowsing] = useState(false);
   const [browseQuery, setBrowseQuery] = useState('');
-  const [syncing, setSyncing] = useState(false);
-  const [syncNote, setSyncNote] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const savedOrder = settings.saves?.order;
   const hiddenIds = (settings.saves?.hidden ?? []).filter((id) => games.some((game) => game.id === id));
   const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
@@ -100,7 +98,6 @@ export function SavesView({
   );
   const auto = settings.saves?.auto ?? [];
   const dirs = settings.saves?.dirs ?? {};
-  const syncTo = settings.saves?.syncTo ?? '';
   const browseGames = useMemo(() => {
     const query = browseQuery.trim().toLowerCase();
     return [...games]
@@ -120,23 +117,10 @@ export function SavesView({
   const setDir = (id: string, dir: string) => {
     setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
   };
-  const setSyncTo = (value: string) => {
-    setSyncNote(null);
-    setSyncError(null);
-    setSettings({ saves: { ...settings.saves, syncTo: value } });
-  };
-  const syncCopies = async () => {
-    if (!isNative() || syncing || !syncTo.trim()) return;
-    setSyncing(true);
-    setSyncError(null);
-    setSyncNote(null);
-    try {
-      setSyncNote(await syncSaves(syncTo, settings.saves?.backupRoot));
-    } catch (e) {
-      setSyncError(String(e).replace(/^Error:\s*/, ''));
-    } finally {
-      setSyncing(false);
-    }
+  const afterBackup = () => {
+    void sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot).catch((e) => {
+      say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
+    });
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
@@ -159,6 +143,7 @@ export function SavesView({
     }
     setBackingAll(false);
     setSavedTick((n) => n + 1);
+    if (copied > 0) afterBackup();
     if (copied === 0) {
       say(skipped === 0 ? 'There are no games to back up.' : 'No save folders were found to copy.');
       return;
@@ -204,7 +189,10 @@ export function SavesView({
           icon: HardDriveDownload,
           disabled: !isNative(),
           onSelect: () => void runGame(
-            () => backupSave(menuGame.id, menuGame.title, dirs[menuGame.id] ?? null, saveHintsOf(menuGame), savePlaceOf(menuGame, settings)),
+            async () => {
+              await backupSave(menuGame.id, menuGame.title, dirs[menuGame.id] ?? null, saveHintsOf(menuGame), savePlaceOf(menuGame, settings));
+              afterBackup();
+            },
             `Backed up ${menuGame.title}`,
           ),
         },
@@ -298,49 +286,7 @@ export function SavesView({
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl border border-line bg-panel/40 p-3">
-        <p className="text-sm font-medium">Sync copies</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted">
-          Send the copies already made to a folder, or to <span className="text-fg">name@computer:folder</span> if
-          rsync is installed. Nothing there is deleted, and nothing extra is installed for a folder on this machine.
-        </p>
-        <div className="mt-2.5 flex flex-wrap gap-2">
-          <input
-            value={syncTo}
-            onChange={(event) => setSyncTo(event.target.value)}
-            placeholder="Folder, or name@computer:folder"
-            spellCheck={false}
-            className={`${inputCls} min-w-0 flex-1 font-mono`}
-          />
-          {isNative() && (
-            <button
-              type="button"
-              className={`${btnBrowse} flex items-center gap-2`}
-              onClick={() =>
-                void pickFolder('Where should the copies be sent?', syncTo || undefined).then(
-                  (path) => path && setSyncTo(path),
-                )
-              }
-            >
-              <FolderOpen className="size-4" />
-              Browse…
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={!isNative() || syncing || !syncTo.trim()}
-            onClick={() => void syncCopies()}
-            className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-3 py-2 text-sm disabled:opacity-50')}
-          >
-            <CloudUpload className="size-4" />
-            {syncing ? 'Syncing…' : 'Sync'}
-          </button>
-        </div>
-        {syncError && (
-          <p role="alert" className="mt-2 text-xs text-rose-300">{syncError}</p>
-        )}
-        {syncNote && <p className="mt-2 text-xs text-muted">{syncNote}</p>}
-      </div>
+      <CloudPanel settings={settings} setSettings={setSettings} />
 
       {status?.root && (
         <p className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted">
@@ -614,7 +560,14 @@ function SaveRow({
       <div className="flex flex-wrap gap-2">
         <button
           disabled={busy || !isNative()}
-          onClick={() => void run(() => backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings)), `Backed up ${game.title}`)}
+          onClick={() => void run(async () => {
+            await backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings));
+            try {
+              await sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot);
+            } catch (e) {
+              say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
+            }
+          }, `Backed up ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-40"
         >
           <HardDriveDownload className="size-3.5" />
