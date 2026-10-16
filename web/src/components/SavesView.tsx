@@ -494,17 +494,14 @@ export function SavesView({
                   <Cover game={game} className="h-28 w-20 shrink-0 overflow-hidden rounded-xl shadow-sm [&_span]:text-sm" />
                   <span className="min-w-0">
                   <span className="block truncate font-medium">{game.title}</span>
-                  <span className="block truncate text-xs text-muted">
+                  <span className="block text-xs text-muted">
                     {hidden.has(game.id) ? 'Hidden from Saves · ' : ''}
                     {auto.includes(game.id) ? 'Backs up when a session ends' : 'Manual only'}
-                    {dirs[game.id]
-                      ? ` · ${dirs[game.id]}`
-                      : looked.has(game.id)
-                        ? ' · No save folder found'
-                        : isNative()
-                          ? ' · Looking for the save folder'
-                          : ''}
+                    {!dirs[game.id] && (looked.has(game.id) ? ' · No save folder found' : isNative() ? ' · Looking for the save folder' : '')}
                   </span>
+                  {dirs[game.id] && (
+                    <span className="mt-0.5 block break-all text-[11px] text-muted" title={dirs[game.id]}>{dirs[game.id]}</span>
+                  )}
                   </span>
                 </span>
                 <span className="text-xs text-muted">{openId === game.id ? 'Close' : 'Manage'}</span>
@@ -652,7 +649,6 @@ function SaveRow({
   looked: boolean;
 }) {
   const [busy, setBusy] = useState(false);
-  const [editingDir, setEditingDir] = useState(false);
   const [backups, setBackups] = useState<SaveBackup[] | null>(null);
   const [hints, setHints] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -687,14 +683,7 @@ function SaveRow({
       />
       <div>
         <p className="mb-1 text-xs text-muted">Save folder</p>
-        {dir && !editingDir ? (
-          <p className="flex flex-wrap items-center gap-2 text-xs text-fg">
-            <span className="min-w-0 break-all">{dir}</span>
-            <button type="button" onClick={() => setEditingDir(true)} className="text-muted underline-offset-2 hover:text-fg hover:underline">
-              Change
-            </button>
-          </p>
-        ) : !dir && !looked && isNative() ? (
+        {!dir && !looked && isNative() ? (
           <p className="text-xs text-muted">Looking for the save folder…</p>
         ) : (
           <div className="flex gap-2">
@@ -749,7 +738,7 @@ function SaveRow({
           <ArchiveRestore className="size-3.5" />
           Restore latest
         </button>
-        {(!dir || editingDir) && (
+        {!dir && (
           <button
             disabled={busy || !isNative()}
             onClick={() =>
@@ -757,7 +746,6 @@ function SaveRow({
                 const found = await findSave(game.title, saveHintsOf(game));
                 if (!found) throw new Error(`Orbit could not find a save folder for ${game.title}.`);
                 onDir(found);
-                setEditingDir(false);
               }, `Found a save folder for ${game.title}`)
             }
             className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"

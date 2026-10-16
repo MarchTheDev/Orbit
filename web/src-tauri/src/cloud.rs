@@ -495,17 +495,43 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
     if !config.is_file() {
         let _ = fs::write(config, "");
     }
+    match auth_port() {
+        AuthPort::Busy => {
+            clear_stale_sign_in(config);
+            if !matches!(auth_port(), AuthPort::Free) {
+                return Err("The sign-in port is already in use. Close the other sign-in and try again.".into());
+            }
+        }
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open),
+        AuthPort::Free | AuthPort::Unknown => {}
+    }
+    authorize_once(bin, config, provider, open).or_else(|err| {
+        if sign_in_port_failed(&err) {
+            authorize_when_port_blocked(bin, config, provider, open)
+        } else {
+            Err(err)
+        }
+    })
+}
+
+fn authorize_once(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
     // `--auto-confirm` answers rclone's extra questions with their defaults, so
     // a closed input does not look like the player cancelled. rclone logs the
-    // redirect address (`http://127.0.0.1:53682/`) before the real page. Opening
-    // that address is what fails the login: it is not the sign-in page. Only
-    // `.../auth?state=` is opened, which is the page rclone itself would open.
+    // redirect address (`http://127.0.0.1:53682/` or `http://localhost:53682/`)
+    // before the real page. Opening that address is what fails the login: it is
+    // not the sign-in page. Only `.../auth?state=` is opened, which is the page
+    // rclone itself would open.
     let mut child = rclone(bin, Some(config))
         .args(["--auto-confirm", "authorize", provider, "--auth-no-open-browser"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Could not start rclone: {e}"))?;
+    let pid_file = config.parent().map(|dir| {
+        let path = dir.join("sign-in.pid");
+        let _ = fs::write(&path, child.id().to_string());
+        path
+    });
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let text = Arc::new(Mutex::new(String::new()));
@@ -534,6 +560,9 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
             for reader in readers {
                 let _ = reader.join();
             }
+            if let Some(path) = &pid_file {
+                let _ = fs::remove_file(path);
+            }
             return Err("The sign-in was not finished. Try connecting again.".into());
         }
         match child.try_wait() {
@@ -544,6 +573,9 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
                 for reader in readers {
                     let _ = reader.join();
                 }
+                if let Some(path) = &pid_file {
+                    let _ = fs::remove_file(path);
+                }
                 return Err(format!("rclone stopped while signing in: {e}"));
             }
         }
@@ -551,11 +583,286 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
     for reader in readers {
         let _ = reader.join();
     }
+    if let Some(path) = &pid_file {
+        let _ = fs::remove_file(path);
+    }
     let collected = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if !status.success() {
-        return Err(public_error(collected.as_bytes(), "The sign-in did not finish."));
+        return Err(sign_in_failure(&collected));
     }
     token_from(&collected).ok_or_else(|| "rclone did not return a sign-in.".into())
+}
+
+/// True when Windows is holding rclone's sign-in port, so the window can say
+/// why a permission prompt is about to appear.
+pub fn auth_port_needs_help() -> bool {
+    matches!(auth_port(), AuthPort::Blocked)
+}
+
+enum AuthPort {
+    Free,
+    Busy,
+    Blocked,
+    Unknown,
+}
+
+/// rclone's sign-in page has to answer on 127.0.0.1:53682. The providers
+/// registered that address, so another port cannot be used.
+fn auth_port() -> AuthPort {
+    match std::net::TcpListener::bind(("127.0.0.1", 53682)) {
+        Ok(listener) => {
+            drop(listener);
+            AuthPort::Free
+        }
+        Err(err) => {
+            let raw = err.raw_os_error();
+            if err.kind() == std::io::ErrorKind::AddrInUse || raw == Some(10048) {
+                AuthPort::Busy
+            } else if err.kind() == std::io::ErrorKind::PermissionDenied || raw == Some(10013) || raw == Some(13) {
+                AuthPort::Blocked
+            } else {
+                AuthPort::Unknown
+            }
+        }
+    }
+}
+
+fn sign_in_port_failed(detail: &str) -> bool {
+    // The redirect notice also names port 53682. That notice is printed on a
+    // normal sign-in, so the port number alone must not count as this failure.
+    detail.to_ascii_lowercase().contains("failed to start auth webserver")
+}
+
+/// The redirect notice is rclone talking to someone who made their own app.
+/// Orbit did not, and showing that address is what made a blocked port look
+/// like a setting the player had to edit.
+fn sign_in_failure(detail: &str) -> String {
+    if sign_in_port_failed(detail) {
+        return if cfg!(windows) {
+            "Windows is holding the port the sign-in page needs. Allow the permission prompt, then try the cloud again.".into()
+        } else {
+            "The sign-in page could not start because its port is in use. Try again in a moment.".into()
+        };
+    }
+    let cleaned = detail
+        .lines()
+        .filter(|line| !line.to_ascii_lowercase().contains("redirect url"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    public_error(cleaned.as_bytes(), "The sign-in did not finish.")
+}
+
+fn clear_stale_sign_in(config: &Path) {
+    let Some(dir) = config.parent() else {
+        return;
+    };
+    let pid_path = dir.join("sign-in.pid");
+    let Ok(text) = fs::read_to_string(&pid_path) else {
+        return;
+    };
+    let Ok(pid) = text.trim().parse::<u32>() else {
+        return;
+    };
+    if pid == 0 || pid == std::process::id() || !process_is_rclone(pid) {
+        return;
+    }
+    kill_pid(pid);
+    let _ = fs::remove_file(&pid_path);
+    std::thread::sleep(Duration::from_millis(300));
+}
+
+#[cfg(windows)]
+fn process_is_rclone(pid: u32) -> bool {
+    let output = process::command("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("rclone")
+}
+
+#[cfg(not(windows))]
+fn process_is_rclone(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/comm"))
+        .map(|text| text.to_ascii_lowercase().contains("rclone"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn kill_pid(pid: u32) {
+    let _ = process::command("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
+}
+
+#[cfg(not(windows))]
+fn kill_pid(pid: u32) {
+    let _ = process::command("kill").arg(pid.to_string()).output();
+}
+
+fn authorize_when_port_blocked(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        authorize_with_port_freed(bin, config, provider, open)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (bin, config, provider, open);
+        Err("The sign-in page could not start because its port is in use. Try again in a moment.".into())
+    }
+}
+
+/// Windows often reserves 53682 for Hyper-V, WSL, or Docker, and then refuses
+/// the bind even though nothing is listening. rclone cannot use another port:
+/// the cloud services registered this one. The documented fix is to move the
+/// dynamic range past it and restart the service that reserved it, then bind
+/// while that reservation is gone.
+#[cfg(windows)]
+fn authorize_with_port_freed(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
+    if !matches!(provider, "drive" | "onedrive" | "dropbox" | "box") {
+        return Err("That cloud could not be signed in.".into());
+    }
+    let Some(dir) = config.parent() else {
+        return Err("The sign-in page could not start.".into());
+    };
+    let script = dir.join("sign-in.ps1");
+    let stdout_path = dir.join("sign-in-out.txt");
+    let stderr_path = dir.join("sign-in-err.txt");
+    let url_path = dir.join("sign-in-url.txt");
+    for path in [&stdout_path, &stderr_path, &url_path] {
+        let _ = fs::remove_file(path);
+    }
+    let body = sign_in_script(bin, config, provider, &stdout_path, &stderr_path, &url_path);
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend(body.as_bytes());
+    fs::write(&script, bytes).map_err(|e| format!("Could not prepare the sign-in. {e}"))?;
+
+    let opened = AtomicBool::new(false);
+    let stop = AtomicBool::new(false);
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let started = Instant::now();
+            while !stop.load(Ordering::SeqCst) && started.elapsed() < AUTH_WAIT {
+                if let Ok(text) = fs::read_to_string(&url_path) {
+                    if let Some(url) = auth_url(text.trim()) {
+                        if !opened.swap(true, Ordering::SeqCst) {
+                            open(&url);
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+        let ran = run_elevated(&script);
+        stop.store(true, Ordering::SeqCst);
+        ran
+    })?;
+    if !ran {
+        return Err("The permission prompt was dismissed, so the sign-in port is still blocked.".into());
+    }
+    let collected = fs::read_to_string(&stdout_path).unwrap_or_default();
+    if let Some(token) = token_from(&collected) {
+        return Ok(token);
+    }
+    let detail = fs::read_to_string(&stderr_path).unwrap_or_default();
+    Err(sign_in_failure(&detail))
+}
+
+#[cfg(windows)]
+fn run_elevated(script: &Path) -> Result<bool, String> {
+    let path = script.display().to_string().replace('\'', "''");
+    let command = format!(
+        "Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{path}' -Verb RunAs -Wait"
+    );
+    let output = process::command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+        .output()
+        .map_err(|e| format!("Windows did not show the permission prompt. {e}"))?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    let detail = format!(
+        "{} {}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    if detail.to_ascii_lowercase().contains("cancel") {
+        return Ok(false);
+    }
+    Err("Windows did not free the sign-in port. Allow the permission prompt and try the cloud again.".into())
+}
+
+#[cfg(windows)]
+fn sign_in_script(bin: &Path, config: &Path, provider: &str, stdout_path: &Path, stderr_path: &Path, url_path: &Path) -> String {
+    // Paths are PowerShell single-quoted literals. The process argument string
+    // then wraps the config in double quotes, which is what Windows itself reads.
+    format!(
+        r#"$ErrorActionPreference = 'Continue'
+$bin = {bin}
+$config = {config}
+$urlFile = {url}
+$outFile = {stdout}
+$errFile = {stderr}
+netsh int ipv4 set dynamicport tcp start=53683 num=11853 | Out-Null
+try {{ Stop-Service -Name winnat -Force -ErrorAction SilentlyContinue }} catch {{}}
+try {{
+  $p = New-Object System.Diagnostics.Process
+  $p.StartInfo.FileName = $bin
+  $p.StartInfo.Arguments = '--config "' + $config.Replace('"','') + '" --auto-confirm authorize {provider} --auth-no-open-browser'
+  $p.StartInfo.UseShellExecute = $false
+  $p.StartInfo.RedirectStandardOutput = $true
+  $p.StartInfo.RedirectStandardError = $true
+  $p.StartInfo.CreateNoWindow = $true
+  $null = $p.Start()
+  $out = New-Object System.Text.StringBuilder
+  $err = New-Object System.Text.StringBuilder
+  $p.add_OutputDataReceived([System.Diagnostics.DataReceivedEventHandler] {{
+    param($sender, $e)
+    if ($e.Data) {{ [void]$out.AppendLine($e.Data) }}
+  }})
+  $p.add_ErrorDataReceived([System.Diagnostics.DataReceivedEventHandler] {{
+    param($sender, $e)
+    if (-not $e.Data) {{ return }}
+    [void]$err.AppendLine($e.Data)
+    $found = [regex]::Match($e.Data, 'https?://\S+/auth\?\S*state=\S*')
+    if ($found.Success) {{
+      $url = $found.Value.TrimEnd('.', ',', [char]34, [char]39)
+      Set-Content -LiteralPath $urlFile -Value $url -Encoding ascii
+    }}
+  }})
+  $p.BeginOutputReadLine()
+  $p.BeginErrorReadLine()
+  Start-Sleep -Seconds 1
+  try {{ Start-Service -Name winnat -ErrorAction SilentlyContinue }} catch {{}}
+  if (-not $p.WaitForExit(300000)) {{ try {{ $p.Kill() }} catch {{}} }}
+  Set-Content -LiteralPath $outFile -Value $out.ToString() -Encoding utf8
+  Set-Content -LiteralPath $errFile -Value $err.ToString() -Encoding utf8
+  exit 0
+}} finally {{
+  try {{ Start-Service -Name winnat -ErrorAction SilentlyContinue }} catch {{}}
+}}
+"#,
+        bin = ps_single(&bin.display().to_string()),
+        config = ps_single(&config.display().to_string()),
+        provider = provider,
+        url = ps_single(&url_path.display().to_string()),
+        stdout = ps_single(&stdout_path.display().to_string()),
+        stderr = ps_single(&stderr_path.display().to_string()),
+    )
+}
+
+#[cfg(windows)]
+fn ps_single(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
 fn read_auth(
@@ -1197,7 +1504,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, orbit_name, page, rename_remote_text, token_from};
+    use super::{allowed_archive, clean_folder, orbit_name, page, rename_remote_text, sign_in_failure, token_from};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -1217,6 +1524,15 @@ mod tests {
         assert!(!next.contains("[orbit-next]"));
         assert!(next.contains("type = dropbox"));
         assert!(!next.contains("type = drive"));
+    }
+
+    #[test]
+    fn a_blocked_port_is_not_described_as_a_redirect_setting() {
+        let detail = "2026/10/16 22:31:52 NOTICE: Make sure your Redirect URL is set to \"http://localhost:53682/\" in your custom config.\nError: config failed to refresh token: failed to start auth webserver: listen tcp 127.0.0.1:53682: bind: An attempt was made to access a socket in a way forbidden by its access permissions.";
+        let shown = sign_in_failure(detail);
+        assert!(!shown.to_ascii_lowercase().contains("redirect url"));
+        assert!(!shown.contains("localhost:53682"));
+        assert!(shown.contains("port"));
     }
 
     #[test]

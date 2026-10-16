@@ -4,6 +4,7 @@ import { Cloud, CloudDownload, CloudUpload, ExternalLink, LoaderCircle } from 'l
 import type { Game, Settings } from '../../types';
 import { openExternal } from '../../services/desktop';
 import { CheckboxInline } from '../ui/Checkbox';
+import { Cover } from '../ui/Cover';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
@@ -90,7 +91,7 @@ export function CloudAccounts({
         <div key={account.remote} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel/50 px-3 py-2.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{account.provider || account.remote}</p>
-            {account.own && <p className="truncate text-[11px] text-muted">A remote rclone already had</p>}
+            {account.own && <p className="truncate text-[11px] text-muted">Already on this PC</p>}
           </div>
           <button
             type="button"
@@ -143,7 +144,6 @@ export function CloudPanel({
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [server, setServer] = useState<(typeof SERVERS)[number]['id'] | null>(null);
-  const [showServers, setShowServers] = useState(false);
   const [host, setHost] = useState('');
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
@@ -175,9 +175,13 @@ export function CloudPanel({
   useEffect(() => {
     if (!isNative()) return;
     let stop: (() => void) | undefined;
-    void listen<{ url?: string; opened?: boolean } | string>('cloud-auth', (event) => {
+    void listen<{ url?: string; opened?: boolean; freeing?: boolean } | string>('cloud-auth', (event) => {
       const payload = event.payload;
-      const link = typeof payload === 'string' ? payload : payload.url;
+      if (payload && typeof payload !== 'string' && payload.freeing) {
+        setNote('Windows is holding the sign-in port. Allow the prompt. WSL or Docker may pause for a moment, then the browser opens.');
+        return;
+      }
+      const link = typeof payload === 'string' ? payload : payload?.url;
       if (!link) return;
       setAuthUrl(link);
       if (typeof payload === 'string' || payload.opened === false) void openExternal(link);
@@ -383,130 +387,144 @@ export function CloudPanel({
       )}
 
       <section className="space-y-2">
-        <h3 className="text-sm font-medium">Clouds</h3>
-        {accounts.length === 0 && <p className="text-xs text-muted">None connected. Add one below. Disconnect from Settings, under Backups.</p>}
-        {accounts.map((account) => (
-          <CloudCard
-            key={account.remote}
-            account={account}
-            others={accounts.filter((item) => item.remote !== account.remote)}
-            busy={busy}
-            onIncluded={(on) => setIncluded(account.remote, on)}
-            onFolder={(folder) => setFolder(account.remote, folder)}
-            onSend={(up) => void sendOne(account, up)}
-            onCopyFrom={(from) => void copyFrom(from, account)}
-            fail={fail}
-          />
-        ))}
-        {accounts.length > 0 && <p className="text-[11px] text-muted">Disconnect a cloud from Settings, under Backups.</p>}
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-medium">Connected</h3>
+            <p className="text-[11px] text-muted">Click a cloud to mark it. A lit card is included.</p>
+          </div>
+          {accounts.length > 0 && <p className="text-[11px] text-muted">Disconnect in Settings, under Backups.</p>}
+        </div>
+        {accounts.length === 0 && <p className="text-xs text-muted">None yet. Add one below.</p>}
+        <div className="grid gap-2">
+          {accounts.map((account) => (
+            <CloudCard
+              key={account.remote}
+              account={account}
+              others={accounts.filter((item) => item.remote !== account.remote)}
+              busy={busy}
+              onIncluded={(on) => setIncluded(account.remote, on)}
+              onFolder={(folder) => setFolder(account.remote, folder)}
+              onSend={(up) => void sendOne(account, up)}
+              onCopyFrom={(from) => void copyFrom(from, account)}
+              fail={fail}
+            />
+          ))}
+        </div>
       </section>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">Add a cloud</h3>
-        <div className="flex flex-wrap gap-2">
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-sm font-medium">Add a cloud</h3>
+          <p className="text-[11px] text-muted">Sign in with the browser. More than one can stay connected.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {OAUTH.map((item) => (
             <button
               key={item.id}
               type="button"
               disabled={!isNative() || !ready || busy !== null}
               onClick={() => void connect(item.id)}
-              className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+              className="rounded-2xl border border-line/70 bg-bg/30 px-3 py-3 text-sm font-semibold text-fg transition hover:border-accent/40 disabled:opacity-50"
             >
-              {busy === item.id ? 'Waiting for the sign-in…' : item.label}
+              {busy === item.id ? 'Waiting…' : item.label}
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-muted">A work OneDrive has to be a remote rclone already has.</p>
-        <button
-          type="button"
-          onClick={() => {
-            setShowServers((on) => !on);
-            if (showServers) setServer(null);
-          }}
-          className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
-        >
-          {showServers ? 'Hide servers' : 'A server'}
-        </button>
-        {showServers && (
-        <>
-        <div className="flex flex-wrap gap-2">
-          {SERVERS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={!isNative() || !ready || busy !== null}
-              onClick={() => setServer(server === item.id ? null : item.id)}
-              className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50',
-                server === item.id ? 'border-accent text-fg' : 'border-line text-muted hover:border-accent hover:text-fg',
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        {server && (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {server === 'webdav' ? (
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-[11px] text-muted">Address</span>
-                <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/you/" spellCheck={false} />
-              </label>
-            ) : (
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-[11px] text-muted">Host</span>
-                <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
-              </label>
-            )}
-            <label>
-              <span className="mb-1 block text-[11px] text-muted">User</span>
-              <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} />
-            </label>
-            <label>
-              <span className="mb-1 block text-[11px] text-muted">Password</span>
-              <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </label>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void connect(server)}
-              className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
-            >
-              {busy === server ? 'Connecting…' : 'Connect'}
-            </button>
+
+        <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
+          <div>
+            <h4 className="text-sm font-medium">FTP, SFTP, shared folder, or WebDAV</h4>
+            <p className="text-[11px] text-muted">For a machine you already have an address for. These have no website to open.</p>
           </div>
-        )}
-        </>
-        )}
-        <button
-          type="button"
-          disabled={!isNative() || !ready || busy !== null}
-          onClick={() => void loadRemotes()}
-          className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
-        >
-          {busy === 'remotes' ? 'Looking…' : 'A remote rclone already has'}
-        </button>
-        {remotes && (
-          <div className="flex flex-wrap gap-2">
-            {remotes.length === 0 && <p className="text-[11px] text-muted">None.</p>}
-            {remotes.map((remote) => (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {SERVERS.map((item) => (
               <button
-                key={remote}
+                key={item.id}
                 type="button"
-                disabled={busy !== null}
-                onClick={() => void useRemote(remote)}
-                className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                disabled={!isNative() || !ready || busy !== null}
+                onClick={() => setServer(server === item.id ? null : item.id)}
+                className={cn(
+                  'rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition disabled:opacity-50',
+                  server === item.id
+                    ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                    : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
+                )}
               >
-                {busy === remote ? 'Using…' : remote}
+                {item.id === 'smb' ? 'Shared folder' : item.label}
               </button>
             ))}
           </div>
-        )}
+          {server && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {server === 'webdav' ? (
+                <label className="sm:col-span-2">
+                  <span className="mb-1 block text-[11px] text-muted">Address</span>
+                  <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/you/" spellCheck={false} />
+                </label>
+              ) : (
+                <label className="sm:col-span-2">
+                  <span className="mb-1 block text-[11px] text-muted">Host</span>
+                  <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
+                </label>
+              )}
+              <label>
+                <span className="mb-1 block text-[11px] text-muted">User</span>
+                <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} />
+              </label>
+              <label>
+                <span className="mb-1 block text-[11px] text-muted">Password</span>
+                <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </label>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => void connect(server)}
+                className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+              >
+                {busy === server ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
+          <div>
+            <h4 className="text-sm font-medium">Already set up in rclone</h4>
+            <p className="text-[11px] text-muted">A connection this PC already has. Removing it here does not delete it from rclone.</p>
+          </div>
+          <button
+            type="button"
+            disabled={!isNative() || !ready || busy !== null}
+            onClick={() => void loadRemotes()}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+          >
+            {busy === 'remotes' ? 'Looking…' : remotes ? 'Look again' : 'Show connections'}
+          </button>
+          {remotes && (
+            <div className="flex flex-wrap gap-2">
+              {remotes.length === 0 && <p className="text-[11px] text-muted">None found.</p>}
+              {remotes.map((remote) => (
+                <button
+                  key={remote}
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => void useRemote(remote)}
+                  className="rounded-2xl border border-line/70 bg-bg/30 px-3 py-2 text-xs font-semibold text-fg hover:border-accent/40 disabled:opacity-50"
+                >
+                  {busy === remote ? 'Adding…' : remote}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Games with a save folder</h3>
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-medium">Games</h3>
+            <p className="text-[11px] text-muted">Click a cover to include it. Games with no save folder are left out.</p>
+          </div>
           {known.length > 0 && (
             <div className="flex gap-2">
               <button type="button" onClick={() => setVisible(true)} className="text-[11px] text-muted hover:text-fg">All</button>
@@ -514,7 +532,6 @@ export function CloudPanel({
             </div>
           )}
         </div>
-        <p className="text-[11px] text-muted">Games with no save folder are left out. A game can still be sent from its row on Saves.</p>
         {known.length > 8 && (
           <input
             className={inputCls}
@@ -527,22 +544,34 @@ export function CloudPanel({
         {known.length === 0 ? (
           <p className="text-xs text-muted">None yet. Orbit looks for save folders on its own.</p>
         ) : (
-          <ul className="max-h-48 space-y-1 overflow-y-auto">
-            {shown.length === 0 && <li className="text-[11px] text-muted">No match.</li>}
-            {shown.map((game) => (
-              <li key={game.id}>
-                <CheckboxInline
-                  checked={!skip.has(game.id)}
-                  onChange={(on) => setSkipped(game.id, !on)}
-                  label={
-                    <span className="min-w-0">
-                      <span className="block truncate">{game.title}</span>
-                      <span className="block truncate text-[11px] text-muted">{dirs[game.id]}</span>
+          <ul className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
+            {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
+            {shown.map((game) => {
+              const on = !skip.has(game.id);
+              return (
+                <li key={game.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSkipped(game.id, on)}
+                    aria-pressed={on}
+                    title={dirs[game.id]}
+                    className={cn(
+                      'w-full rounded-2xl border p-1.5 text-left transition',
+                      on
+                        ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                        : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
+                    )}
+                  >
+                    <Cover game={game} className="aspect-[2/3] w-full rounded-lg" />
+                    <span className="mt-1 block truncate text-xs font-semibold">{game.title}</span>
+                    <span className="mt-0.5 block break-all text-[10px] leading-snug text-muted line-clamp-2">{dirs[game.id]}</span>
+                    <span className={cn('mt-0.5 block text-[10px]', on ? 'text-accent' : 'text-muted')}>
+                      {on ? 'Included' : 'Left out'}
                     </span>
-                  }
-                />
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -588,7 +617,7 @@ export function CloudPanel({
         </p>
       )}
       {note && <p className="text-xs text-fg">{note}</p>}
-      {error && <p className="text-xs text-rose-300">{error}</p>}
+      {error && <p className="break-words text-xs text-rose-300">{error}</p>}
     </div>
   );
 
@@ -608,8 +637,8 @@ export function CloudPanel({
       {open && (
         <Modal
           title="Cloud"
-          subtitle="Several clouds can stay connected. Only games with a save folder are listed."
-          size="lg"
+          subtitle="Mark the clouds and the games. A lit card is included."
+          size="xl"
           onClose={() => setOpen(false)}
         >
           {controls}
@@ -639,7 +668,6 @@ function CloudCard({
   fail: (e: unknown) => void;
 }) {
   const [page, setPage] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [copying, setCopying] = useState(false);
   const [path, setPath] = useState(account.folder ?? '');
   const [moving, setMoving] = useState(false);
@@ -670,7 +698,6 @@ function CloudCard({
       const to = path.trim() || 'Orbit';
       await cloudMove(account.remote, account.own, from, to);
       onFolder(to === 'Orbit' ? undefined : to);
-      setEditing(false);
     } catch (e) {
       fail(e);
     } finally {
@@ -680,10 +707,24 @@ function CloudCard({
 
   const known = OAUTH.some((item) => item.label === account.provider);
 
+  const marked = account.on !== false;
+
   return (
-    <div className="space-y-2 rounded-xl border border-line bg-panel/40 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-sm font-medium">{account.provider || account.remote}</p>
+    <div
+      className={cn(
+        'space-y-3 rounded-2xl border p-3 transition',
+        marked
+          ? 'border-accent bg-accent/15 shadow-[0_0_24px_-12px_var(--c-accent)]'
+          : 'border-line/70 bg-bg/30',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <button type="button" onClick={() => onIncluded(!marked)} className="min-w-0 text-left">
+          <span className="block truncate text-sm font-semibold">{account.provider || account.remote}</span>
+          <span className={cn('mt-0.5 block text-[11px]', marked ? 'text-accent' : 'text-muted')}>
+            {marked ? 'Backups go here' : 'Click to include'}
+          </span>
+        </button>
         {page && (
           <button
             type="button"
@@ -691,24 +732,12 @@ function CloudCard({
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-accent"
           >
             <ExternalLink className="size-3.5" />
-            {known ? `Open ${account.provider}` : 'Open in the browser'}
+            {known ? `Open ${account.provider}` : 'Open'}
           </button>
         )}
       </div>
-      <CheckboxInline
-        checked={account.on !== false}
-        onChange={onIncluded}
-        label="Send backups here"
-      />
-      <div className="text-[11px] text-muted">
-        <span>Folder: {account.folder?.trim() || 'Orbit'}</span>
-        {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className="ml-2 text-fg underline-offset-2 hover:underline">
-            Change
-          </button>
-        )}
-      </div>
-      {editing && (
+      <label className="block">
+        <span className="mb-1 block text-[11px] text-muted">Folder on this cloud</span>
         <div className="flex gap-2">
           <input
             className={inputCls}
@@ -719,14 +748,14 @@ function CloudCard({
           />
           <button
             type="button"
-            disabled={busy !== null || moving}
+            disabled={busy !== null || moving || (path.trim() || 'Orbit') === (account.folder?.trim() || 'Orbit')}
             onClick={() => void move()}
             className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
           >
             {moving ? 'Moving…' : 'Move'}
           </button>
         </div>
-      )}
+      </label>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -735,7 +764,7 @@ function CloudCard({
           className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-accent disabled:opacity-50"
         >
           {busy === `send-${account.remote}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-          Send
+          Send copies
         </button>
         <button
           type="button"
@@ -744,7 +773,7 @@ function CloudCard({
           className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
         >
           {busy === `down-${account.remote}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
-          Bring down
+          Copy to this PC
         </button>
         {others.length > 0 && (
           <button
@@ -752,7 +781,7 @@ function CloudCard({
             onClick={() => setCopying((on) => !on)}
             className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-fg"
           >
-            Copy from another
+            Copy from another cloud
           </button>
         )}
       </div>
