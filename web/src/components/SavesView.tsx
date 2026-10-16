@@ -15,6 +15,7 @@ import {
   savesStatus,
   suggestSaves,
   cloudCopy,
+  cloudGameOf,
   sendCloudAfterBackup,
   type SaveBackup,
   type SaveStatus,
@@ -119,10 +120,20 @@ export function SavesView({
   const setDir = (id: string, dir: string) => {
     setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
   };
-  const afterBackup = () => {
-    void sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot).catch((e) => {
+  const afterBackup = (only?: ReturnType<typeof cloudGameOf>[]) => {
+    void sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot, only).catch((e) => {
       say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
     });
+  };
+  const sendGameToCloud = async (game: Game) => {
+    const cloud = settings.saves?.cloud;
+    if (!cloud?.remote) throw new Error('Sign in to a cloud first.');
+    await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+    try {
+      await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot, cloud.folder, [cloudGameOf(game)]);
+    } catch (e) {
+      throw new Error(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
+    }
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
@@ -145,7 +156,7 @@ export function SavesView({
     }
     setBackingAll(false);
     setSavedTick((n) => n + 1);
-    if (copied > 0) afterBackup();
+    if (copied > 0) afterBackup(games.map(cloudGameOf));
     if (copied === 0) {
       say(skipped === 0 ? 'There are no games to back up.' : 'No save folders were found to copy.');
       return;
@@ -160,9 +171,15 @@ export function SavesView({
   const backupToCloud = async () => {
     const cloud = settings.saves?.cloud;
     if (!isNative() || sendingCloud || !cloud?.remote) return;
+    const skip = new Set(cloud.skip ?? []);
+    const chosen = games.filter((game) => !skip.has(game.id));
+    if (chosen.length === 0) {
+      say('Choose at least one game on the Cloud page.');
+      return;
+    }
     setSendingCloud(true);
     let copied = 0;
-    for (const game of listed) {
+    for (const game of chosen) {
       try {
         await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
         copied += 1;
@@ -172,7 +189,7 @@ export function SavesView({
     }
     setSavedTick((n) => n + 1);
     try {
-      const sent = await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot);
+      const sent = await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot, cloud.folder, chosen.map(cloudGameOf));
       say(copied > 0 ? sent : `${sent} No new save folder was copied first.`);
     } catch (e) {
       say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
@@ -217,10 +234,16 @@ export function SavesView({
           onSelect: () => void runGame(
             async () => {
               await backupSave(menuGame.id, menuGame.title, dirs[menuGame.id] ?? null, saveHintsOf(menuGame), savePlaceOf(menuGame, settings));
-              afterBackup();
+              afterBackup([cloudGameOf(menuGame)]);
             },
             `Backed up ${menuGame.title}`,
           ),
+        },
+        {
+          label: 'Back up to the cloud',
+          icon: CloudUpload,
+          disabled: !isNative(),
+          onSelect: () => void runGame(() => sendGameToCloud(menuGame), `Sent ${menuGame.title} to the cloud`),
         },
         {
           label: 'Restore latest',
@@ -304,7 +327,7 @@ export function SavesView({
               type="button"
               disabled={sendingCloud}
               onClick={() => void backupToCloud()}
-              title="Make the copies, then send them. Nothing is sent on its own when sync is manual."
+              title="Make the copies of the ticked games, then send them. Nothing is sent on its own when sync is manual."
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
             >
               <CloudUpload className="size-4" />
@@ -425,6 +448,7 @@ export function SavesView({
                     refreshToken={savedTick}
                     onAuto={(on) => setAuto(game.id, on)}
                     onDir={(dir) => setDir(game.id, dir)}
+                    onCloud={() => sendGameToCloud(game)}
                   />
                 </div>
               )}
@@ -532,6 +556,7 @@ function SaveRow({
   refreshToken,
   onAuto,
   onDir,
+  onCloud,
 }: {
   game: Game;
   auto: boolean;
@@ -540,6 +565,7 @@ function SaveRow({
   refreshToken: number;
   onAuto: (on: boolean) => void;
   onDir: (dir: string) => void;
+  onCloud: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState<SaveBackup[] | null>(null);
@@ -601,7 +627,7 @@ function SaveRow({
           onClick={() => void run(async () => {
             await backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings));
             try {
-              await sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot);
+              await sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot, [cloudGameOf(game)]);
             } catch (e) {
               say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
             }
@@ -610,6 +636,14 @@ function SaveRow({
         >
           <HardDriveDownload className="size-3.5" />
           Back up now
+        </button>
+        <button
+          disabled={busy || !isNative()}
+          onClick={() => void run(onCloud, `Sent ${game.title} to the cloud`)}
+          className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
+        >
+          <CloudUpload className="size-3.5" />
+          To the cloud
         </button>
         <button
           disabled={busy || !isNative()}

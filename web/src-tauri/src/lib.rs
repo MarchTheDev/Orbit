@@ -1422,10 +1422,14 @@ async fn cloud_connect(
     user: String,
     password: String,
     url: String,
+    extra: Option<bool>,
+    folder: Option<String>,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
+    let remote_name = if extra.unwrap_or(false) { "orbit-next" } else { "orbit" };
+    let folder = folder.unwrap_or_else(|| "Orbit".into());
     tokio::task::spawn_blocking(move || {
-        cloud::connect(&data, &provider, &host, &user, &password, &url, &|link| {
+        cloud::connect(&data, &provider, &host, &user, &password, &url, remote_name, &folder, &|link| {
             // Opened here, and again from the window only if this call failed.
             // Two browsers would spend the sign-in on the first tab. The short
             // wait is so the page is answering before the browser asks for it.
@@ -1444,9 +1448,10 @@ fn cloud_remotes(orbit: State<'_, Orbit>) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn cloud_attach(orbit: State<'_, Orbit>, remote: String) -> Result<(), String> {
+async fn cloud_attach(orbit: State<'_, Orbit>, remote: String, folder: Option<String>) -> Result<(), String> {
     let data = orbit.store.root().to_path_buf();
-    tokio::task::spawn_blocking(move || cloud::attach(&data, &remote))
+    let folder = folder.unwrap_or_else(|| "Orbit".into());
+    tokio::task::spawn_blocking(move || cloud::attach(&data, &remote, &folder))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1458,11 +1463,87 @@ async fn cloud_copy(
     remote: String,
     own: bool,
     backup_root: Option<String>,
+    folder: Option<String>,
+    only: Option<Vec<cloud::CloudGame>>,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
-    tokio::task::spawn_blocking(move || cloud::copy(&data, backup_root.as_deref(), &remote, own, up))
+    tokio::task::spawn_blocking(move || {
+        cloud::copy(
+            &data,
+            backup_root.as_deref(),
+            &remote,
+            own,
+            up,
+            folder.as_deref(),
+            only.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Move the copies to another path on the same cloud.
+#[tauri::command]
+async fn cloud_move(
+    orbit: State<'_, Orbit>,
+    remote: String,
+    own: bool,
+    from: String,
+    to: String,
+) -> Result<String, String> {
+    let data = orbit.store.root().to_path_buf();
+    tokio::task::spawn_blocking(move || cloud::move_folder(&data, &remote, own, &from, &to))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Copy the cloud folder onto another remote. Neither sign-in is replaced.
+#[tauri::command]
+async fn cloud_transfer(
+    orbit: State<'_, Orbit>,
+    from_remote: String,
+    from_own: bool,
+    to_remote: String,
+    to_own: bool,
+    folder: Option<String>,
+) -> Result<String, String> {
+    let data = orbit.store.root().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        cloud::transfer(
+            &data,
+            &from_remote,
+            from_own,
+            &to_remote,
+            to_own,
+            folder.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Use the waiting second cloud, and drop the one that was in use.
+#[tauri::command]
+fn cloud_adopt(orbit: State<'_, Orbit>) -> Result<String, String> {
+    cloud::adopt(orbit.store.root())
+}
+
+/// Drop a second sign-in that was only used to copy across.
+#[tauri::command]
+fn cloud_drop_next(orbit: State<'_, Orbit>) -> Result<(), String> {
+    cloud::drop_next(orbit.store.root())
+}
+
+/// The service's own web page, or nothing for a server.
+#[tauri::command]
+fn cloud_page(orbit: State<'_, Orbit>, remote: String, own: bool, provider: String) -> Option<String> {
+    cloud::page(orbit.store.root(), &remote, own, &provider)
+}
+
+/// A second sign-in waiting to be used, or nothing.
+#[tauri::command]
+fn cloud_pending(orbit: State<'_, Orbit>) -> Option<String> {
+    cloud::pending(orbit.store.root())
 }
 
 #[tauri::command]
@@ -2003,6 +2084,12 @@ pub fn run() {
             cloud_remotes,
             cloud_attach,
             cloud_copy,
+            cloud_move,
+            cloud_transfer,
+            cloud_adopt,
+            cloud_drop_next,
+            cloud_page,
+            cloud_pending,
             cloud_forget,
             saves_backup,
             saves_restore,

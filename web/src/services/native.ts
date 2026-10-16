@@ -880,7 +880,7 @@ export function cloudFetch(replace = false): Promise<string> {
 
 export function cloudConnect(
   provider: string,
-  fields: { host?: string; user?: string; password?: string; url?: string } = {},
+  fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null } = {},
 ): Promise<string> {
   return call(
     'cloud_connect',
@@ -890,6 +890,8 @@ export function cloudConnect(
       user: fields.user ?? '',
       password: fields.password ?? '',
       url: fields.url ?? '',
+      extra: !!fields.extra,
+      folder: fields.folder ?? null,
     },
     async () => {
       throw new Error('Cloud copies need the desktop app.');
@@ -901,16 +903,73 @@ export function cloudRemotes(): Promise<string[]> {
   return call('cloud_remotes', {}, async () => []);
 }
 
-export function cloudAttach(remote: string): Promise<void> {
-  return call('cloud_attach', { remote }, async () => {
+export function cloudAttach(remote: string, folder?: string | null): Promise<void> {
+  return call('cloud_attach', { remote, folder: folder ?? null }, async () => {
     throw new Error('Cloud copies need the desktop app.');
   });
 }
 
-export function cloudCopy(up: boolean, remote: string, own: boolean, backupRoot?: string | null): Promise<string> {
-  return call('cloud_copy', { up, remote, own, backupRoot: backupRoot || null }, async () => {
+export interface CloudGame {
+  id: string;
+  title: string;
+  publisher?: string | null;
+}
+
+export function cloudGameOf(game: { id: string; title: string; meta?: { developer?: string | null } | null }): CloudGame {
+  return { id: game.id, title: game.title, publisher: game.meta?.developer?.trim() || null };
+}
+
+export function cloudCopy(
+  up: boolean,
+  remote: string,
+  own: boolean,
+  backupRoot?: string | null,
+  folder?: string | null,
+  only?: CloudGame[] | null,
+): Promise<string> {
+  return call(
+    'cloud_copy',
+    { up, remote, own, backupRoot: backupRoot || null, folder: folder || null, only: only ?? null },
+    async () => {
+      throw new Error('Cloud copies need the desktop app.');
+    },
+  );
+}
+
+export function cloudMove(remote: string, own: boolean, from: string, to: string): Promise<string> {
+  return call('cloud_move', { remote, own, from, to }, async () => {
     throw new Error('Cloud copies need the desktop app.');
   });
+}
+
+export function cloudTransfer(
+  fromRemote: string,
+  fromOwn: boolean,
+  toRemote: string,
+  toOwn: boolean,
+  folder?: string | null,
+): Promise<string> {
+  return call('cloud_transfer', { fromRemote, fromOwn, toRemote, toOwn, folder: folder || null }, async () => {
+    throw new Error('Cloud copies need the desktop app.');
+  });
+}
+
+export function cloudAdopt(): Promise<string> {
+  return call('cloud_adopt', {}, async () => {
+    throw new Error('Cloud copies need the desktop app.');
+  });
+}
+
+export function cloudDropNext(): Promise<void> {
+  return call('cloud_drop_next', {}, async () => undefined);
+}
+
+export function cloudPage(remote: string, own: boolean, provider: string): Promise<string | null> {
+  return call('cloud_page', { remote, own, provider }, async () => null);
+}
+
+export function cloudPending(): Promise<string | null> {
+  return call('cloud_pending', {}, async () => null);
 }
 
 export function cloudForget(): Promise<void> {
@@ -924,11 +983,15 @@ export function cloudForget(): Promise<void> {
  * caught there, so the cloud does not undo that.
  */
 export function sendCloudAfterBackup(
-  cloud: { remote?: string; own?: boolean; auto?: boolean } | undefined,
+  cloud: { remote?: string; own?: boolean; auto?: boolean; folder?: string; skip?: string[] } | undefined,
   backupRoot?: string | null,
+  only?: CloudGame[] | null,
 ): Promise<void> {
   if (!cloud?.auto || !cloud.remote) return Promise.resolve();
-  return cloudCopy(true, cloud.remote, !!cloud.own, backupRoot).then(() => undefined);
+  const skip = new Set(cloud.skip ?? []);
+  const games = only?.filter((game) => !skip.has(game.id));
+  if (only && (!games || games.length === 0)) return Promise.resolve();
+  return cloudCopy(true, cloud.remote, !!cloud.own, backupRoot, cloud.folder, games).then(() => undefined);
 }
 
 export function suggestSaves(title: string): Promise<string[]> {

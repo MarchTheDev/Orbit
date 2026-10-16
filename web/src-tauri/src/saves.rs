@@ -642,6 +642,37 @@ fn publisher_above(from: &Path, game: &str) -> Option<String> {
     None
 }
 
+/// Folders this game already has under the copies root, as paths rclone can append.
+///
+/// A game that has never been copied is left out. The caller decides what to say
+/// about that. The paths stay relative so a cloud folder can be put in front.
+pub fn existing_relatives(
+    data_dir: &Path,
+    backup_root: Option<&str>,
+    game_id: &str,
+    title: &str,
+    publisher: Option<&str>,
+) -> Vec<String> {
+    let root = root_of(data_dir, backup_root);
+    let mut relatives = Vec::new();
+    for dir in game_backup_dirs(&root, game_id, title, publisher) {
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(rel) = dir.strip_prefix(&root) else {
+            continue;
+        };
+        let text = rel.to_string_lossy().replace('\\', "/");
+        if text.is_empty() || text.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+            continue;
+        }
+        if !relatives.contains(&text) {
+            relatives.push(text);
+        }
+    }
+    relatives
+}
+
 fn game_backup_dirs(root: &Path, game_id: &str, title: &str, publisher: Option<&str>) -> Vec<PathBuf> {
     let game = folder_name(title);
     let mut dirs = Vec::new();
@@ -1109,6 +1140,24 @@ mod tests {
         assert_eq!(folder_name("Red Dead Redemption 2"), "Red Dead Redemption 2");
         assert_eq!(folder_name("Rockstar Games"), "Rockstar Games");
         assert!(!folder_name("Red/Dead").contains('/'));
+    }
+
+    #[test]
+    #[test]
+    fn an_existing_copy_is_the_path_sent_to_the_cloud() {
+        let root = std::env::temp_dir().join(format!("orbit-saves-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let game = root.join("Rockstar Games").join("Red Dead Redemption 2");
+        fs::create_dir_all(&game).unwrap();
+        let relatives = existing_relatives(
+            &root,
+            Some(root.to_str().unwrap()),
+            "id",
+            "Red Dead Redemption 2",
+            Some("Rockstar Games"),
+        );
+        assert!(relatives.iter().any(|rel| rel == "Rockstar Games/Red Dead Redemption 2"));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

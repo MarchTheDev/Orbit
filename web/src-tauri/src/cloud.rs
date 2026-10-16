@@ -36,6 +36,15 @@ pub struct CloudStatus {
     pub latest: String,
 }
 
+/// One game whose copies should be sent, rather than the whole tree.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudGame {
+    pub id: String,
+    pub title: String,
+    pub publisher: Option<String>,
+}
+
 pub async fn status(data_dir: &Path) -> CloudStatus {
     let folder = data_dir.join("tools");
     let own = folder.join(binary_name());
@@ -119,10 +128,11 @@ pub async fn fetch(data_dir: &Path, replace: bool) -> Result<String, String> {
     ))
 }
 
-/// Sign in to a cloud, or save a server, as the remote named `orbit`.
+/// Sign in to a cloud, or save a server, as `remote_name` in Orbit's config.
 ///
 /// A failed check removes that remote again. It does not touch a remote the
-/// player already had in rclone.
+/// player already had in rclone. `orbit-next` is a second sign-in used only to
+/// copy the backups across, and it does not replace `orbit`.
 pub fn connect(
     data_dir: &Path,
     provider: &str,
@@ -130,20 +140,27 @@ pub fn connect(
     user: &str,
     password: &str,
     url: &str,
+    remote_name: &str,
+    folder: &str,
     open: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let config = config_path(data_dir)?;
     let provider = provider.trim();
+    let remote_name = remote_name.trim();
+    if remote_name != "orbit" && remote_name != "orbit-next" {
+        return Err("That cloud could not be saved.".into());
+    }
+    let folder = clean_folder(folder)?;
     let label = match provider {
-        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, open)?,
-        "onedrive" => oauth_onedrive(&bin, &config, open)?,
-        "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, host, user, password, url)?,
+        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open)?,
+        "onedrive" => oauth_onedrive(&bin, &config, remote_name, open)?,
+        "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, remote_name, host, user, password, url)?,
         other => return Err(format!("Orbit does not know how to connect {other}.")),
     };
     set_mode(&config, 0o600);
-    if let Err(reason) = mkdir(&bin, Some(&config), "orbit") {
-        let _ = delete_remote(&bin, &config);
+    if let Err(reason) = mkdir(&bin, Some(&config), remote_name, &folder) {
+        let _ = delete_named(&bin, &config, remote_name);
         return Err(reason);
     }
     Ok(label)
@@ -168,17 +185,15 @@ pub fn remotes(data_dir: &Path) -> Result<Vec<String>, String> {
 
 /// Check a remote the player already has. Their remote is not deleted if the
 /// check fails, and Orbit's config is not used.
-pub fn attach(data_dir: &Path, remote: &str) -> Result<(), String> {
+pub fn attach(data_dir: &Path, remote: &str, folder: &str) -> Result<(), String> {
     let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
-    let remote = remote.trim().trim_end_matches(':');
-    if remote.is_empty() {
-        return Err("Choose a remote first.".into());
-    }
-    mkdir(&bin, None, remote)
+    let remote = checked_remote(remote)?;
+    let folder = clean_folder(folder)?;
+    mkdir(&bin, None, remote, &folder)
 }
 
 /// Forget Orbit's remote. A remote rclone already had is left alone: this only
-/// deletes `orbit` from Orbit's own config.
+/// deletes `orbit` and a waiting `orbit-next` from Orbit's own config.
 pub fn forget(data_dir: &Path) -> Result<(), String> {
     let Some(bin) = binary(data_dir) else {
         return Ok(());
@@ -187,15 +202,23 @@ pub fn forget(data_dir: &Path) -> Result<(), String> {
     if !config.is_file() {
         return Ok(());
     }
-    delete_remote(&bin, &config)
+    delete_named(&bin, &config, "orbit")?;
+    let _ = delete_named(&bin, &config, "orbit-next");
+    Ok(())
 }
 
-pub fn copy(data_dir: &Path, backup_root: Option<&str>, remote: &str, own: bool, up: bool) -> Result<String, String> {
+pub fn copy(
+    data_dir: &Path,
+    backup_root: Option<&str>,
+    remote: &str,
+    own: bool,
+    up: bool,
+    folder: Option<&str>,
+    only: Option<&[CloudGame]>,
+) -> Result<String, String> {
     let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
-    let remote = remote.trim().trim_end_matches(':');
-    if remote.is_empty() {
-        return Err("Connect a cloud first.".into());
-    }
+    let remote = checked_remote(remote)?;
+    let folder = clean_folder(folder.unwrap_or("Orbit"))?;
     let source = saves::root_of(data_dir, backup_root);
     if up && !source.is_dir() {
         return Err("There are no copies to send yet. Back up a game first.".into());
@@ -203,42 +226,183 @@ pub fn copy(data_dir: &Path, backup_root: Option<&str>, remote: &str, own: bool,
     if !up {
         fs::create_dir_all(&source).map_err(|e| format!("Could not create the copies folder: {e}"))?;
     }
-    let config = if own {
-        None
-    } else {
-        let path = config_path(data_dir)?;
-        if !path.is_file() {
-            return Err("Connect a cloud first.".into());
+    let config = config_for(data_dir, own)?;
+    if up {
+        if let Some(games) = only {
+            return copy_games(&bin, config.as_deref(), data_dir, backup_root, remote, &folder, games);
         }
-        Some(path)
-    };
-    let cloud = format!("{remote}:Orbit");
+    }
+    let cloud = format!("{remote}:{folder}");
     let (from, to) = if up {
         (source.to_string_lossy().into_owned(), cloud)
     } else {
         (format!("{cloud}/"), source.to_string_lossy().into_owned())
     };
+    run_copy(&bin, config.as_deref(), &from, &to)?;
+    Ok(if up {
+        format!("Sent the copies to {remote}.")
+    } else {
+        format!("Brought the copies down into {}.", source.display())
+    })
+}
+
+/// Move the copies from one path to another on the same cloud.
+///
+/// An empty source is not an error: the next backup uses the new path.
+pub fn move_folder(data_dir: &Path, remote: &str, own: bool, from: &str, to: &str) -> Result<String, String> {
+    let remote = checked_remote(remote)?;
+    let from = clean_folder(from)?;
+    let to = clean_folder(to)?;
+    if from == to {
+        return Ok("The copies are already there.".into());
+    }
+    if to.starts_with(&format!("{from}/")) || from.starts_with(&format!("{to}/")) {
+        return Err("Choose a path that is not inside the current one.".into());
+    }
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let config = config_for(data_dir, own)?;
     let output = rclone(&bin, config.as_deref())
-        .args(["copy", "--update", "--retries", "2", "--low-level-retries", "3", "--"])
-        .arg(&from)
-        .arg(&to)
+        .args(["moveto"])
+        .arg(format!("{remote}:{from}"))
+        .arg(format!("{remote}:{to}"))
         .output()
         .map_err(|e| format!("Could not start rclone: {e}"))?;
     if output.status.success() {
-        return Ok(if up {
-            format!("Sent the copies to {remote}.")
-        } else {
-            format!("Brought the copies down into {}.", source.display())
-        });
+        return Ok(format!("Moved the copies to {to}."));
     }
-    Err(public_error(&output.stderr, "rclone did not finish."))
+    let detail = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    if detail.contains("not found")
+        || detail.contains("doesn't exist")
+        || detail.contains("does not exist")
+        || detail.contains("directory not found")
+    {
+        let _ = mkdir(&bin, config.as_deref(), remote, &to);
+        return Ok(format!("The next copies will go to {to}."));
+    }
+    Err(public_error(&output.stderr, "The folder could not be moved."))
 }
 
-fn oauth(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+/// Copy the cloud folder from one remote onto another.
+///
+/// The two remotes can live in different rclone configs. A temporary config is
+/// used only for that copy, then removed. Neither remote is deleted.
+pub fn transfer(
+    data_dir: &Path,
+    from_remote: &str,
+    from_own: bool,
+    to_remote: &str,
+    to_own: bool,
+    folder: Option<&str>,
+) -> Result<String, String> {
+    let from_remote = checked_remote(from_remote)?.to_string();
+    let to_remote = checked_remote(to_remote)?.to_string();
+    if from_remote == to_remote && from_own == to_own {
+        return Err("That is already this cloud.".into());
+    }
+    let folder = clean_folder(folder.unwrap_or("Orbit"))?;
+    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let from_config = config_for(data_dir, from_own)?;
+    let to_config = config_for(data_dir, to_own)?;
+    let mut cleanup = None;
+    let (config, from_name, to_name) = if from_own == to_own {
+        (from_config, from_remote.clone(), to_remote.clone())
+    } else {
+        let from_text = show_remote(&bin, from_config.as_deref(), &from_remote)?;
+        let to_text = show_remote(&bin, to_config.as_deref(), &to_remote)?;
+        let to_name = if from_remote == to_remote {
+            unused_name(&from_text, &format!("{to_remote}-copy"))
+        } else {
+            to_remote.clone()
+        };
+        let to_text = if to_name == to_remote {
+            to_text
+        } else {
+            retitle(&to_text, &to_remote, &to_name)
+        };
+        let path = data_dir.join("tools").join("rclone-transfer.conf");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Could not prepare the copy: {e}"))?;
+        }
+        fs::write(&path, format!("{from_text}\n{to_text}\n")).map_err(|e| format!("Could not prepare the copy: {e}"))?;
+        set_mode(&path, 0o600);
+        cleanup = Some(path.clone());
+        (Some(path), from_remote, to_name)
+    };
+    let result = run_copy(
+        &bin,
+        config.as_deref(),
+        &format!("{from_name}:{folder}"),
+        &format!("{to_name}:{folder}"),
+    )
+    .map(|_| "Copied the copies to the other cloud.".to_string());
+    if let Some(path) = cleanup {
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
+/// Make the waiting second sign-in the one Orbit uses, and drop the old one.
+pub fn adopt(data_dir: &Path) -> Result<String, String> {
+    let config = config_path(data_dir)?;
+    if !config.is_file() {
+        return Err("There is no other cloud waiting.".into());
+    }
+    let text = fs::read_to_string(&config).map_err(|e| format!("Could not read the cloud sign-in: {e}"))?;
+    if !has_section(&text, "orbit-next") {
+        return Err("There is no other cloud waiting.".into());
+    }
+    let text = rename_remote_text(&text, "orbit-next", "orbit");
+    fs::write(&config, &text).map_err(|e| format!("Could not switch clouds: {e}"))?;
+    set_mode(&config, 0o600);
+    let kind = kind_in_section(&text, "orbit").unwrap_or_default();
+    Ok(label_of(&kind).to_string())
+}
+
+/// Drop a second sign-in that was only used to copy across. The current one stays.
+pub fn drop_next(data_dir: &Path) -> Result<(), String> {
+    let Some(bin) = binary(data_dir) else {
+        return Ok(());
+    };
+    let config = config_path(data_dir)?;
+    if !config.is_file() {
+        return Ok(());
+    }
+    delete_named(&bin, &config, "orbit-next")
+}
+
+/// The service's own web page, when it has one. A server has none.
+pub fn page(data_dir: &Path, remote: &str, own: bool, provider: &str) -> Option<String> {
+    let kind = kind_of_label(provider).or_else(|| remote_kind(data_dir, remote, own));
+    match kind.as_deref() {
+        Some("drive") => Some("https://drive.google.com/".into()),
+        Some("onedrive") => Some("https://onedrive.live.com/".into()),
+        Some("dropbox") => Some("https://www.dropbox.com/home".into()),
+        Some("box") => Some("https://app.box.com/".into()),
+        _ => None,
+    }
+}
+
+/// A second sign-in that is waiting to be used, or nothing.
+pub fn pending(data_dir: &Path) -> Option<String> {
+    let config = config_path(data_dir).ok()?;
+    let text = fs::read_to_string(config).ok()?;
+    if !has_section(&text, "orbit-next") {
+        return None;
+    }
+    Some(label_of(&kind_in_section(&text, "orbit-next").unwrap_or_default()).to_string())
+}
+
+fn oauth(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    remote_name: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
     let token = authorize(bin, config, provider, open)?;
-    let _ = delete_remote(bin, config);
+    let _ = delete_named(bin, config, remote_name);
     let output = rclone(bin, Some(config))
-        .args(["config", "create", "orbit", provider, "token"])
+        .args(["config", "create", remote_name, provider, "token"])
         .arg(&token)
         .output()
         .map_err(|e| format!("Could not save that cloud: {e}"))?;
@@ -248,11 +412,16 @@ fn oauth(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send 
     Ok(label_of(provider).into())
 }
 
-fn oauth_onedrive(bin: &Path, config: &Path, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+fn oauth_onedrive(
+    bin: &Path,
+    config: &Path,
+    remote_name: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
     let token = authorize(bin, config, "onedrive", open)?;
-    let _ = delete_remote(bin, config);
+    let _ = delete_named(bin, config, remote_name);
     let output = rclone(bin, Some(config))
-        .args(["config", "create", "orbit", "onedrive", "drive_type", "personal", "token"])
+        .args(["config", "create", remote_name, "onedrive", "drive_type", "personal", "token"])
         .arg(&token)
         .output()
         .map_err(|e| format!("Could not save that cloud: {e}"))?;
@@ -269,6 +438,7 @@ fn server(
     bin: &Path,
     config: &Path,
     provider: &str,
+    remote_name: &str,
     host: &str,
     user: &str,
     password: &str,
@@ -287,9 +457,9 @@ fn server(
     } else {
         obscure(bin, password)?
     };
-    let _ = delete_remote(bin, config);
+    let _ = delete_named(bin, config, remote_name);
     let mut cmd = rclone(bin, Some(config));
-    cmd.args(["config", "create", "orbit", provider]);
+    cmd.args(["config", "create", remote_name, provider]);
     if provider == "webdav" {
         cmd.args(["url", url, "vendor", "other"]);
     } else {
@@ -446,9 +616,9 @@ fn obscure(bin: &Path, password: &str) -> Result<String, String> {
     Ok(obscured)
 }
 
-fn mkdir(bin: &Path, config: Option<&Path>, remote: &str) -> Result<(), String> {
+fn mkdir(bin: &Path, config: Option<&Path>, remote: &str, folder: &str) -> Result<(), String> {
     let output = rclone(bin, config)
-        .args(["mkdir", &format!("{remote}:Orbit")])
+        .args(["mkdir", &format!("{remote}:{folder}")])
         .output()
         .map_err(|e| format!("Could not reach that cloud: {e}"))?;
     if output.status.success() {
@@ -457,12 +627,12 @@ fn mkdir(bin: &Path, config: Option<&Path>, remote: &str) -> Result<(), String> 
     Err(public_error(&output.stderr, "rclone could not reach that cloud."))
 }
 
-fn delete_remote(bin: &Path, config: &Path) -> Result<(), String> {
+fn delete_named(bin: &Path, config: &Path, name: &str) -> Result<(), String> {
     if !config.is_file() {
         return Ok(());
     }
     let output = rclone(bin, Some(config))
-        .args(["config", "delete", "orbit"])
+        .args(["config", "delete", name])
         .output()
         .map_err(|e| e.to_string())?;
     if output.status.success() {
@@ -684,6 +854,282 @@ fn set_mode(path: &Path, mode: u32) {
 #[cfg(not(unix))]
 fn set_mode(_path: &Path, _mode: u32) {}
 
+fn copy_games(
+    bin: &Path,
+    config: Option<&Path>,
+    data_dir: &Path,
+    backup_root: Option<&str>,
+    remote: &str,
+    folder: &str,
+    games: &[CloudGame],
+) -> Result<String, String> {
+    if games.is_empty() {
+        return Err("Choose a game first.".into());
+    }
+    let source = saves::root_of(data_dir, backup_root);
+    let mut sent = 0usize;
+    let mut missing = Vec::new();
+    for game in games {
+        let relatives = saves::existing_relatives(
+            data_dir,
+            backup_root,
+            &game.id,
+            &game.title,
+            game.publisher.as_deref(),
+        );
+        if relatives.is_empty() {
+            missing.push(game.title.clone());
+            continue;
+        }
+        for relative in relatives {
+            let Some(relative) = safe_relative(&relative) else {
+                continue;
+            };
+            let local = under(&source, &relative);
+            if !local.is_dir() {
+                continue;
+            }
+            run_copy(bin, config, &local.to_string_lossy(), &format!("{remote}:{folder}/{relative}"))?;
+            sent += 1;
+        }
+    }
+    if sent == 0 {
+        return Err(if missing.len() == 1 {
+            format!("Back up {} on this PC first.", missing[0])
+        } else {
+            "Back up a chosen game on this PC first.".into()
+        });
+    }
+    if missing.is_empty() {
+        Ok("Sent the chosen copies.".into())
+    } else {
+        Ok(format!("Sent the chosen copies. These had no folder yet: {}.", missing.join(", ")))
+    }
+}
+
+fn run_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
+    let output = rclone(bin, config)
+        .args(["copy", "--update", "--retries", "2", "--low-level-retries", "3", "--"])
+        .arg(from)
+        .arg(to)
+        .output()
+        .map_err(|e| format!("Could not start rclone: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(public_error(&output.stderr, "rclone did not finish."))
+    }
+}
+
+fn show_remote(bin: &Path, config: Option<&Path>, name: &str) -> Result<String, String> {
+    let output = rclone(bin, config)
+        .args(["config", "show", name])
+        .output()
+        .map_err(|e| format!("Could not read that cloud: {e}"))?;
+    if !output.status.success() {
+        return Err(public_error(&output.stderr, "That cloud is not connected."));
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !text.contains('[') {
+        return Err("That cloud is not connected.".into());
+    }
+    Ok(text)
+}
+
+fn config_for(data_dir: &Path, own: bool) -> Result<Option<PathBuf>, String> {
+    if own {
+        return Ok(None);
+    }
+    let path = config_path(data_dir)?;
+    if !path.is_file() {
+        return Err("Connect a cloud first.".into());
+    }
+    Ok(Some(path))
+}
+
+fn checked_remote(name: &str) -> Result<&str, String> {
+    let name = name.trim().trim_end_matches(':');
+    if name.is_empty() || name.contains(['/', '\\', ':', '\0']) {
+        return Err("That cloud is not connected.".into());
+    }
+    Ok(name)
+}
+
+fn clean_folder(folder: &str) -> Result<String, String> {
+    let folder = folder.trim().replace('\\', "/");
+    let folder = folder.trim_matches('/');
+    if folder.is_empty() {
+        return Ok("Orbit".into());
+    }
+    if folder.contains(':') || folder.contains('\0') {
+        return Err("That path cannot be used on the cloud.".into());
+    }
+    if folder.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return Err("That path cannot be used on the cloud.".into());
+    }
+    Ok(folder.to_string())
+}
+
+fn safe_relative(relative: &str) -> Option<String> {
+    let relative = relative.replace('\\', "/");
+    let relative = relative.trim_matches('/');
+    if relative.is_empty() || relative.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return None;
+    }
+    Some(relative.to_string())
+}
+
+fn under(root: &Path, relative: &str) -> PathBuf {
+    relative
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
+struct IniSection {
+    name: String,
+    lines: Vec<String>,
+}
+
+fn parse_ini(text: &str) -> (Vec<String>, Vec<IniSection>) {
+    let mut preamble = Vec::new();
+    let mut sections = Vec::new();
+    let mut current: Option<IniSection> = None;
+    for line in text.lines() {
+        if let Some(name) = section_header(line) {
+            if let Some(section) = current.take() {
+                sections.push(section);
+            }
+            current = Some(IniSection { name, lines: vec![line.to_string()] });
+        } else if let Some(section) = current.as_mut() {
+            section.lines.push(line.to_string());
+        } else {
+            preamble.push(line.to_string());
+        }
+    }
+    if let Some(section) = current {
+        sections.push(section);
+    }
+    (preamble, sections)
+}
+
+fn section_header(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() > 2 {
+        let name = trimmed[1..trimmed.len() - 1].trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn write_ini(preamble: &[String], sections: &[IniSection]) -> String {
+    let mut out = String::new();
+    for line in preamble {
+        out.push_str(line);
+        out.push('\n');
+    }
+    for section in sections {
+        for line in &section.lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn has_section(text: &str, name: &str) -> bool {
+    parse_ini(text).1.iter().any(|section| section.name == name)
+}
+
+fn rename_remote_text(text: &str, from: &str, to: &str) -> String {
+    let (preamble, mut sections) = parse_ini(text);
+    sections.retain(|section| section.name != to);
+    for section in &mut sections {
+        if section.name == from {
+            section.name = to.to_string();
+            if let Some(header) = section.lines.first_mut() {
+                *header = format!("[{to}]");
+            }
+        }
+    }
+    write_ini(&preamble, &sections)
+}
+
+fn kind_in(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("type") else {
+            continue;
+        };
+        let Some(rest) = rest.trim().strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+fn kind_in_section(text: &str, name: &str) -> Option<String> {
+    let section = parse_ini(text).1.into_iter().find(|section| section.name == name)?;
+    kind_in(&section.lines.join("\n"))
+}
+
+fn retitle(section: &str, from: &str, to: &str) -> String {
+    let mut lines = section.lines();
+    let header = lines.next().unwrap_or("");
+    let header = if header.trim() == format!("[{from}]") {
+        format!("[{to}]")
+    } else {
+        header.to_string()
+    };
+    let mut out = header;
+    out.push('\n');
+    for line in lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn unused_name(text: &str, preferred: &str) -> String {
+    if has_section(text, preferred) {
+        format!("{preferred}-2")
+    } else {
+        preferred.to_string()
+    }
+}
+
+fn kind_of_label(provider: &str) -> Option<String> {
+    match provider {
+        "Google Drive" | "drive" => Some("drive".into()),
+        "OneDrive" | "onedrive" => Some("onedrive".into()),
+        "Dropbox" | "dropbox" => Some("dropbox".into()),
+        "Box" | "box" => Some("box".into()),
+        "WebDAV" | "webdav" => Some("webdav".into()),
+        "FTP" | "ftp" => Some("ftp".into()),
+        "SFTP" | "sftp" => Some("sftp".into()),
+        "SMB" | "smb" => Some("smb".into()),
+        _ => None,
+    }
+}
+
+fn remote_kind(data_dir: &Path, remote: &str, own: bool) -> Option<String> {
+    let remote = checked_remote(remote).ok()?;
+    let bin = binary(data_dir)?;
+    let config = config_for(data_dir, own).ok()?;
+    let output = rclone(&bin, config.as_deref()).args(["config", "show", remote]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    kind_in(&String::from_utf8_lossy(&output.stdout))
+}
+
 fn label_of(provider: &str) -> &'static str {
     match provider {
         "drive" => "Google Drive",
@@ -725,7 +1171,36 @@ fn strip_secret(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{allowed_archive, token_from};
+    use std::path::Path;
+
+    use super::{allowed_archive, clean_folder, page, rename_remote_text, token_from};
+
+    #[test]
+    fn a_cloud_path_stays_inside_the_cloud() {
+        assert_eq!(clean_folder("").unwrap(), "Orbit");
+        assert_eq!(clean_folder(" Games/Saves ").unwrap(), "Games/Saves");
+        assert_eq!(clean_folder("Games\\Saves").unwrap(), "Games/Saves");
+        assert!(clean_folder("../nope").is_err());
+        assert!(clean_folder("C:/Windows").is_err());
+        assert!(clean_folder("a/../b").is_err());
+    }
+
+    #[test]
+    fn another_cloud_takes_the_place_of_this_one() {
+        let text = "[orbit]\ntype = drive\n\n[orbit-next]\ntype = dropbox\n";
+        let next = rename_remote_text(text, "orbit-next", "orbit");
+        assert!(next.contains("[orbit]"));
+        assert!(!next.contains("[orbit-next]"));
+        assert!(next.contains("type = dropbox"));
+        assert!(!next.contains("type = drive"));
+    }
+
+    #[test]
+    fn a_server_has_no_web_page() {
+        assert_eq!(page(Path::new("."), "orbit", false, "FTP"), None);
+        assert_eq!(page(Path::new("."), "orbit", false, "Google Drive").as_deref(), Some("https://drive.google.com/"));
+        assert_eq!(page(Path::new("."), "orbit", false, "Box").as_deref(), Some("https://app.box.com/"));
+    }
 
     #[test]
     fn a_sign_in_is_the_json_rclone_prints() {

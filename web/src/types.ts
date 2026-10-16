@@ -537,12 +537,16 @@ export interface Settings {
      * Where the copies already on this PC are sent, through rclone.
      *
      * `own` is a remote rclone already had. Orbit does not delete that one.
+     * `folder` is the path on that cloud. Empty means Orbit.
+     * `skip` is the games left out of the cloud backup. A game can still be sent on its own.
      */
     cloud?: {
       remote: string;
       provider: string;
       own: boolean;
       auto?: boolean;
+      folder?: string;
+      skip?: string[];
     };
   };
 }
