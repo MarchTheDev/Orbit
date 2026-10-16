@@ -534,12 +534,25 @@ export interface Settings {
     /** Games left out of the Saves list. They stay in the library, and can be shown again from Saves. */
     hidden?: string[];
     /**
-     * Where the copies already on this PC are sent, through rclone.
+     * Clouds the copies can be sent to. More than one can be connected.
      *
-     * `own` is a remote rclone already had. Orbit does not delete that one.
-     * `folder` is the path on that cloud. Empty means Orbit.
-     * `skip` is the games left out of the cloud backup. A game can still be sent on its own.
+     * `on` missing means that cloud is included. `own` is a remote rclone already
+     * had. Orbit does not delete that one. `folder` empty means Orbit.
+     *
+     * `cloud` is the older single connection. It is only read when `clouds` is
+     * missing, then replaced.
      */
+    clouds?: {
+      remote: string;
+      provider: string;
+      own: boolean;
+      folder?: string;
+      on?: boolean;
+    }[];
+    /** After a backup, send to the clouds that are included. */
+    cloudAuto?: boolean;
+    /** Games left out of the cloud backup. A game can still be sent on its own. */
+    cloudSkip?: string[];
     cloud?: {
       remote: string;
       provider: string;

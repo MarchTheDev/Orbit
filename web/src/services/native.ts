@@ -14,6 +14,7 @@ import type {
   LaunchInfo,
   LaunchTarget,
   Session,
+  Settings,
   Stats,
   SteamGame,
   FolderProgram,
@@ -880,7 +881,7 @@ export function cloudFetch(replace = false): Promise<string> {
 
 export function cloudConnect(
   provider: string,
-  fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null } = {},
+  fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null; name?: string | null } = {},
 ): Promise<string> {
   return call(
     'cloud_connect',
@@ -892,6 +893,7 @@ export function cloudConnect(
       url: fields.url ?? '',
       extra: !!fields.extra,
       folder: fields.folder ?? null,
+      name: fields.name ?? null,
     },
     async () => {
       throw new Error('Cloud copies need the desktop app.');
@@ -972,8 +974,85 @@ export function cloudPending(): Promise<string | null> {
   return call('cloud_pending', {}, async () => null);
 }
 
-export function cloudForget(): Promise<void> {
-  return call('cloud_forget', {}, async () => undefined);
+export function cloudForget(remote?: string | null): Promise<void> {
+  return call('cloud_forget', { remote: remote || null }, async () => undefined);
+}
+
+export interface CloudAccount {
+  remote: string;
+  provider: string;
+  own: boolean;
+  folder?: string;
+  on?: boolean;
+}
+
+/** Connected clouds, including one saved before more than one was allowed. */
+export function cloudAccounts(saves?: Settings['saves']): CloudAccount[] {
+  if (saves?.clouds) return saves.clouds;
+  const one = saves?.cloud;
+  if (!one?.remote) return [];
+  return [{
+    remote: one.remote,
+    provider: one.provider || one.remote,
+    own: !!one.own,
+    folder: one.folder,
+    on: true,
+  }];
+}
+
+export function cloudAutoOn(saves?: Settings['saves']): boolean {
+  if (typeof saves?.cloudAuto === 'boolean') return saves.cloudAuto;
+  return !!saves?.cloud?.auto;
+}
+
+export function cloudSkipOf(saves?: Settings['saves']): string[] {
+  if (saves?.cloudSkip) return saves.cloudSkip;
+  return saves?.cloud?.skip ?? [];
+}
+
+export function chosenClouds(accounts: CloudAccount[]): CloudAccount[] {
+  return accounts.filter((account) => account.on !== false);
+}
+
+export function freshRemote(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = '';
+  for (let i = 0; i < 6; i += 1) id += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return `orbit-${id}`;
+}
+
+/** Replace the cloud list and drop the older single connection. */
+export function savesWithClouds(
+  saves: Settings['saves'] | undefined,
+  patch: { clouds?: CloudAccount[]; cloudAuto?: boolean; cloudSkip?: string[] } = {},
+): NonNullable<Settings['saves']> {
+  const next = { ...(saves ?? {}) } as NonNullable<Settings['saves']> & { syncTo?: string };
+  delete next.syncTo;
+  delete next.cloud;
+  return {
+    ...next,
+    clouds: patch.clouds ?? cloudAccounts(saves),
+    cloudAuto: patch.cloudAuto ?? cloudAutoOn(saves),
+    cloudSkip: patch.cloudSkip ?? cloudSkipOf(saves),
+  };
+}
+
+export async function sendToClouds(
+  accounts: CloudAccount[],
+  which: 'chosen' | 'all',
+  backupRoot?: string | null,
+  only?: CloudGame[] | null,
+): Promise<string> {
+  const targets = which === 'all' ? accounts : chosenClouds(accounts);
+  if (targets.length === 0) {
+    throw new Error(accounts.length === 0 ? 'Sign in to a cloud first.' : 'Choose a cloud first.');
+  }
+  const notes: string[] = [];
+  for (const account of targets) {
+    notes.push(await cloudCopy(true, account.remote, account.own, backupRoot, account.folder, only));
+  }
+  if (targets.length === 1) return notes[0] ?? 'Sent the copies.';
+  return `Sent the copies to ${targets.map((account) => account.provider).join(', ')}.`;
 }
 
 /**
@@ -983,15 +1062,17 @@ export function cloudForget(): Promise<void> {
  * caught there, so the cloud does not undo that.
  */
 export function sendCloudAfterBackup(
-  cloud: { remote?: string; own?: boolean; auto?: boolean; folder?: string; skip?: string[] } | undefined,
+  saves: Settings['saves'] | undefined,
   backupRoot?: string | null,
   only?: CloudGame[] | null,
 ): Promise<void> {
-  if (!cloud?.auto || !cloud.remote) return Promise.resolve();
-  const skip = new Set(cloud.skip ?? []);
+  if (!cloudAutoOn(saves)) return Promise.resolve();
+  const targets = chosenClouds(cloudAccounts(saves));
+  if (targets.length === 0) return Promise.resolve();
+  const skip = new Set(cloudSkipOf(saves));
   const games = only?.filter((game) => !skip.has(game.id));
   if (only && (!games || games.length === 0)) return Promise.resolve();
-  return cloudCopy(true, cloud.remote, !!cloud.own, backupRoot, cloud.folder, games).then(() => undefined);
+  return sendToClouds(targets, 'all', backupRoot, games).then(() => undefined);
 }
 
 export function suggestSaves(title: string): Promise<string[]> {

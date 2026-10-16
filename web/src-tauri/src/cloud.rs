@@ -147,10 +147,7 @@ pub fn connect(
     let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let config = config_path(data_dir)?;
     let provider = provider.trim();
-    let remote_name = remote_name.trim();
-    if remote_name != "orbit" && remote_name != "orbit-next" {
-        return Err("That cloud could not be saved.".into());
-    }
+    let remote_name = orbit_name(remote_name)?;
     let folder = clean_folder(folder)?;
     let label = match provider {
         "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open)?,
@@ -190,6 +187,19 @@ pub fn attach(data_dir: &Path, remote: &str, folder: &str) -> Result<(), String>
     let remote = checked_remote(remote)?;
     let folder = clean_folder(folder)?;
     mkdir(&bin, None, remote, &folder)
+}
+
+/// Forget one Orbit remote. A name that is not Orbit's is left alone.
+pub fn forget_one(data_dir: &Path, remote: &str) -> Result<(), String> {
+    let remote = orbit_name(remote)?;
+    let Some(bin) = binary(data_dir) else {
+        return Ok(());
+    };
+    let config = config_path(data_dir)?;
+    if !config.is_file() {
+        return Ok(());
+    }
+    delete_named(&bin, &config, remote)
 }
 
 /// Forget Orbit's remote. A remote rclone already had is left alone: this only
@@ -947,6 +957,20 @@ fn config_for(data_dir: &Path, own: bool) -> Result<Option<PathBuf>, String> {
     Ok(Some(path))
 }
 
+fn orbit_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    let safe = !name.is_empty()
+        && name.len() <= 40
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !name.contains("--");
+    if safe && (name == "orbit" || name.starts_with("orbit-")) {
+        return Ok(name);
+    }
+    Err("That cloud could not be saved.".into())
+}
+
 fn checked_remote(name: &str) -> Result<&str, String> {
     let name = name.trim().trim_end_matches(':');
     if name.is_empty() || name.contains(['/', '\\', ':', '\0']) {
@@ -1173,7 +1197,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, page, rename_remote_text, token_from};
+    use super::{allowed_archive, clean_folder, orbit_name, page, rename_remote_text, token_from};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -1193,6 +1217,15 @@ mod tests {
         assert!(!next.contains("[orbit-next]"));
         assert!(next.contains("type = dropbox"));
         assert!(!next.contains("type = drive"));
+    }
+
+    #[test]
+    fn another_cloud_gets_its_own_name() {
+        assert_eq!(orbit_name("orbit").unwrap(), "orbit");
+        assert_eq!(orbit_name("orbit-abc123").unwrap(), "orbit-abc123");
+        assert!(orbit_name("mydrive").is_err());
+        assert!(orbit_name("orbit-../x").is_err());
+        assert!(orbit_name("orbit-").is_err());
     }
 
     #[test]

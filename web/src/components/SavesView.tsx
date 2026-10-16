@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
+import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -14,9 +14,12 @@ import {
   savePlaceOf,
   savesStatus,
   suggestSaves,
-  cloudCopy,
+  cloudAccounts,
   cloudGameOf,
+  cloudSkipOf,
+  chosenClouds,
   sendCloudAfterBackup,
+  sendToClouds,
   type SaveBackup,
   type SaveStatus,
 } from '../services/native';
@@ -60,6 +63,20 @@ export function SavesView({
   const [savedTick, setSavedTick] = useState(0);
   const [browsing, setBrowsing] = useState(false);
   const [browseQuery, setBrowseQuery] = useState('');
+  const [looked, setLooked] = useState<Set<string>>(() => new Set());
+  const tried = useRef(new Set<string>());
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const dirWrites = useRef(Promise.resolve());
+  const rememberDir = (id: string, path: string) => {
+    dirWrites.current = dirWrites.current.then(() => {
+      const current = settingsRef.current;
+      if (current.saves?.dirs?.[id]?.trim()) return;
+      const dirs = { ...current.saves?.dirs, [id]: path };
+      settingsRef.current = { ...current, saves: { ...current.saves, dirs } };
+      setSettings({ saves: settingsRef.current.saves });
+    });
+  };
   const savedOrder = settings.saves?.order;
   const hiddenIds = (settings.saves?.hidden ?? []).filter((id) => games.some((game) => game.id === id));
   const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
@@ -113,6 +130,37 @@ export function SavesView({
     void savesStatus(settings.saves?.backupRoot).then(setStatus).catch(() => undefined);
   }, [settings.saves?.backupRoot]);
 
+  const gameKey = games.map((game) => game.id).join('\n');
+  useEffect(() => {
+    if (!isNative()) return;
+    const pending = games.filter((game) => !settingsRef.current.saves?.dirs?.[game.id]?.trim() && !tried.current.has(game.id));
+    if (pending.length === 0) return;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const game = pending[cursor];
+        cursor += 1;
+        if (!game || tried.current.has(game.id)) continue;
+        tried.current.add(game.id);
+        let path: string | null = null;
+        try {
+          path = await findSave(game.title, saveHintsOf(game));
+        } catch {
+          path = null;
+        }
+        setLooked((current) => {
+          const next = new Set(current);
+          next.add(game.id);
+          return next;
+        });
+        if (path) rememberDir(game.id, path);
+      }
+    });
+    void Promise.all(workers);
+    // The id list is the dependency. A new array of the same games must not start the search again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameKey]);
+
   const setAuto = (id: string, on: boolean) => {
     const next = on ? [...new Set([...auto, id])] : auto.filter((item) => item !== id);
     setSettings({ saves: { ...settings.saves, auto: next, dirs } });
@@ -121,16 +169,16 @@ export function SavesView({
     setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
   };
   const afterBackup = (only?: ReturnType<typeof cloudGameOf>[]) => {
-    void sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot, only).catch((e) => {
+    void sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, only).catch((e) => {
       say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
     });
   };
-  const sendGameToCloud = async (game: Game) => {
-    const cloud = settings.saves?.cloud;
-    if (!cloud?.remote) throw new Error('Sign in to a cloud first.');
+  const clouds = cloudAccounts(settings.saves);
+  const sendGameToCloud = async (game: Game, which: 'chosen' | 'all' = 'chosen') => {
+    if (clouds.length === 0) throw new Error('Sign in to a cloud first.');
     await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
     try {
-      await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot, cloud.folder, [cloudGameOf(game)]);
+      await sendToClouds(clouds, which, settings.saves?.backupRoot, [cloudGameOf(game)]);
     } catch (e) {
       throw new Error(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
     }
@@ -168,13 +216,12 @@ export function SavesView({
     );
   };
 
-  const backupToCloud = async () => {
-    const cloud = settings.saves?.cloud;
-    if (!isNative() || sendingCloud || !cloud?.remote) return;
-    const skip = new Set(cloud.skip ?? []);
-    const chosen = games.filter((game) => !skip.has(game.id));
+  const backupToCloud = async (which: 'chosen' | 'all' = 'chosen') => {
+    if (!isNative() || sendingCloud || clouds.length === 0) return;
+    const skip = new Set(cloudSkipOf(settings.saves));
+    const chosen = games.filter((game) => !!dirs[game.id]?.trim() && !skip.has(game.id));
     if (chosen.length === 0) {
-      say('Choose at least one game on the Cloud page.');
+      say('No save folders found yet.');
       return;
     }
     setSendingCloud(true);
@@ -189,7 +236,7 @@ export function SavesView({
     }
     setSavedTick((n) => n + 1);
     try {
-      const sent = await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot, cloud.folder, chosen.map(cloudGameOf));
+      const sent = await sendToClouds(which === 'all' ? clouds : chosenClouds(clouds), 'all', settings.saves?.backupRoot, chosen.map(cloudGameOf));
       say(copied > 0 ? sent : `${sent} No new save folder was copied first.`);
     } catch (e) {
       say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
@@ -240,11 +287,19 @@ export function SavesView({
           ),
         },
         {
-          label: 'Back up to the cloud',
+          label: clouds.length > 1 ? 'Back up to marked clouds' : 'Back up to the cloud',
           icon: CloudUpload,
           disabled: !isNative(),
-          onSelect: () => void runGame(() => sendGameToCloud(menuGame), `Sent ${menuGame.title} to the cloud`),
+          onSelect: () => void runGame(() => sendGameToCloud(menuGame, 'chosen'), `Sent ${menuGame.title} to the cloud`),
         },
+        ...(clouds.length > 1
+          ? [{
+              label: 'Back up to all clouds',
+              icon: CloudUpload,
+              disabled: !isNative(),
+              onSelect: () => void runGame(() => sendGameToCloud(menuGame, 'all'), `Sent ${menuGame.title} to every cloud`),
+            }]
+          : []),
         {
           label: 'Restore latest',
           icon: ArchiveRestore,
@@ -322,16 +377,16 @@ export function SavesView({
               {showHidden ? 'Hide them again' : `Show ${hiddenIds.length} hidden`}
             </button>
           )}
-          {isNative() && settings.saves?.cloud?.remote && (
+          {isNative() && clouds.length > 0 && (
             <button
               type="button"
               disabled={sendingCloud}
-              onClick={() => void backupToCloud()}
-              title="Make the copies of the ticked games, then send them. Nothing is sent on its own when sync is manual."
+              onClick={() => void backupToCloud('chosen')}
+              title="Back up games with a save folder, then send them to the marked clouds."
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
             >
               <CloudUpload className="size-4" />
-              {sendingCloud ? 'Backing up…' : 'Back up to the cloud'}
+              {sendingCloud ? 'Backing up…' : clouds.length > 1 ? 'Back up to marked clouds' : 'Back up to the cloud'}
             </button>
           )}
           {isNative() && listed.length > 0 && (
@@ -362,6 +417,26 @@ export function SavesView({
             <FolderOpen className="size-3" />
             Open
           </button>
+          {isNative() && (
+            <button
+              type="button"
+              onClick={() => void pickFolder('Where should save copies be kept?', settings.saves?.backupRoot || undefined).then((path) => {
+                if (path) setSettings({ saves: { ...settings.saves, backupRoot: path } });
+              })}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-fg"
+            >
+              Change
+            </button>
+          )}
+          {settings.saves?.backupRoot && (
+            <button
+              type="button"
+              onClick={() => setSettings({ saves: { ...settings.saves, backupRoot: '' } })}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-fg"
+            >
+              Use Orbit's folder
+            </button>
+          )}
         </p>
       )}
 
@@ -422,7 +497,13 @@ export function SavesView({
                   <span className="block truncate text-xs text-muted">
                     {hidden.has(game.id) ? 'Hidden from Saves · ' : ''}
                     {auto.includes(game.id) ? 'Backs up when a session ends' : 'Manual only'}
-                    {dirs[game.id] ? ` · ${dirs[game.id]}` : ''}
+                    {dirs[game.id]
+                      ? ` · ${dirs[game.id]}`
+                      : looked.has(game.id)
+                        ? ' · No save folder found'
+                        : isNative()
+                          ? ' · Looking for the save folder'
+                          : ''}
                   </span>
                   </span>
                 </span>
@@ -449,6 +530,7 @@ export function SavesView({
                     onAuto={(on) => setAuto(game.id, on)}
                     onDir={(dir) => setDir(game.id, dir)}
                     onCloud={() => sendGameToCloud(game)}
+                    looked={looked.has(game.id)}
                   />
                 </div>
               )}
@@ -557,6 +639,7 @@ function SaveRow({
   onAuto,
   onDir,
   onCloud,
+  looked,
 }: {
   game: Game;
   auto: boolean;
@@ -566,8 +649,10 @@ function SaveRow({
   onAuto: (on: boolean) => void;
   onDir: (dir: string) => void;
   onCloud: () => Promise<void>;
+  looked: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [editingDir, setEditingDir] = useState(false);
   const [backups, setBackups] = useState<SaveBackup[] | null>(null);
   const [hints, setHints] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -600,34 +685,45 @@ function SaveRow({
         label="Back up when the session ends"
         hint="Orbit takes a copy as the clock stops. It does not do this for a session that was already over when Orbit opened."
       />
-      <label className="block">
-        <span className="mb-1 block text-xs text-muted">Save folder, if the search looks in the wrong place</span>
-        <div className="flex gap-2">
-          <input
-            className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
-            value={dir}
-            onChange={(e) => onDir(e.target.value)}
-            placeholder="The folder the game writes into"
-            spellCheck={false}
-          />
-          {isNative() && (
-            <button
-              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 text-xs text-muted hover:border-accent hover:text-fg"
-              onClick={() => void pickFolder('Where does this game keep its saves?').then((p) => p && onDir(p))}
-            >
-              <FolderOpen className="size-3.5" />
-              Browse
+      <div>
+        <p className="mb-1 text-xs text-muted">Save folder</p>
+        {dir && !editingDir ? (
+          <p className="flex flex-wrap items-center gap-2 text-xs text-fg">
+            <span className="min-w-0 break-all">{dir}</span>
+            <button type="button" onClick={() => setEditingDir(true)} className="text-muted underline-offset-2 hover:text-fg hover:underline">
+              Change
             </button>
-          )}
-        </div>
-      </label>
+          </p>
+        ) : !dir && !looked && isNative() ? (
+          <p className="text-xs text-muted">Looking for the save folder…</p>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm"
+              value={dir}
+              onChange={(e) => onDir(e.target.value)}
+              placeholder={looked ? 'No save folder found. Name it if the search missed it.' : 'The folder the game writes into'}
+              spellCheck={false}
+            />
+            {isNative() && (
+              <button
+                className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 text-xs text-muted hover:border-accent hover:text-fg"
+                onClick={() => void pickFolder('Where does this game keep its saves?').then((p) => p && onDir(p))}
+              >
+                <FolderOpen className="size-3.5" />
+                Browse
+              </button>
+            )}
+          </div>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2">
         <button
           disabled={busy || !isNative()}
           onClick={() => void run(async () => {
             await backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings));
             try {
-              await sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot, [cloudGameOf(game)]);
+              await sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, [cloudGameOf(game)]);
             } catch (e) {
               say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
             }
@@ -653,34 +749,37 @@ function SaveRow({
           <ArchiveRestore className="size-3.5" />
           Restore latest
         </button>
-        <button
-          disabled={busy || !isNative()}
-          onClick={() =>
-            void run(async () => {
-              const found = await findSave(game.title, saveHintsOf(game));
-              if (!found) throw new Error(`Orbit could not find a save folder for ${game.title}.`);
-              onDir(found);
-            }, `Found a save folder for ${game.title}`)
-          }
-          className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
-        >
-          <Search className="size-3.5" />
-          Find folder
-        </button>
-        <button
-          disabled={busy || !isNative()}
-          onClick={() => {
-            setHints(null);
-            void suggestSaves(game.title)
-              .then(setHints)
-              .catch((e) => setError(String(e)));
-          }}
-          className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
-        >
-          <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
-          Wiki paths
-        </button>
+        {(!dir || editingDir) && (
+          <button
+            disabled={busy || !isNative()}
+            onClick={() =>
+              void run(async () => {
+                const found = await findSave(game.title, saveHintsOf(game));
+                if (!found) throw new Error(`Orbit could not find a save folder for ${game.title}.`);
+                onDir(found);
+                setEditingDir(false);
+              }, `Found a save folder for ${game.title}`)
+            }
+            className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
+          >
+            <Search className="size-3.5" />
+            Look again
+          </button>
+        )}
       </div>
+      <button
+        type="button"
+        disabled={busy || !isNative()}
+        onClick={() => {
+          setHints(null);
+          void suggestSaves(game.title)
+            .then(setHints)
+            .catch((e) => setError(String(e)));
+        }}
+        className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-40"
+      >
+        Wiki paths
+      </button>
       {error && <p className="text-xs text-rose-300">{error}</p>}
       {hints && (
         <ul className="space-y-1 rounded-lg border border-line bg-panel2 px-3 py-2 text-xs text-muted">

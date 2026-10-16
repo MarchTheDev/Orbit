@@ -551,7 +551,7 @@ export default function App() {
     void backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings))
       .then(() => {
         toast({ text: `Backed up ${game.title}` });
-        return sendCloudAfterBackup(settings.saves?.cloud, settings.saves?.backupRoot, [
+        return sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, [
           { id: game.id, title: game.title, publisher: game.meta?.developer ?? null },
         ]).catch((e) => {
           toast({ text: `The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`, tone: 'error' });
@@ -1050,7 +1050,6 @@ export default function App() {
             <SettingsView
               settings={settings}
               setSettings={setSettings}
-              games={games}
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);

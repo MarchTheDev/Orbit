@@ -1424,9 +1424,12 @@ async fn cloud_connect(
     url: String,
     extra: Option<bool>,
     folder: Option<String>,
+    name: Option<String>,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
-    let remote_name = if extra.unwrap_or(false) { "orbit-next" } else { "orbit" };
+    let remote_name = name.filter(|item| !item.is_empty()).unwrap_or_else(|| {
+        if extra.unwrap_or(false) { "orbit-next".into() } else { "orbit".into() }
+    });
     let folder = folder.unwrap_or_else(|| "Orbit".into());
     tokio::task::spawn_blocking(move || {
         cloud::connect(&data, &provider, &host, &user, &password, &url, remote_name, &folder, &|link| {
@@ -1547,8 +1550,11 @@ fn cloud_pending(orbit: State<'_, Orbit>) -> Option<String> {
 }
 
 #[tauri::command]
-fn cloud_forget(orbit: State<'_, Orbit>) -> Result<(), String> {
-    cloud::forget(orbit.store.root())
+fn cloud_forget(orbit: State<'_, Orbit>, remote: Option<String>) -> Result<(), String> {
+    match remote.filter(|name| !name.is_empty()) {
+        Some(name) => cloud::forget_one(orbit.store.root(), &name),
+        None => cloud::forget(orbit.store.root()),
+    }
 }
 
 #[tauri::command]

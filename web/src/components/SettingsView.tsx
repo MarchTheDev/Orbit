@@ -26,7 +26,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { FontChoice, Game, LauncherId, Page, Settings } from '../types';
+import type { FontChoice, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
@@ -43,7 +43,7 @@ import {
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { CopySettings } from './CopySettings';
-import { CloudPanel } from './saves/CloudPanel';
+import { CloudAccounts } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
@@ -298,8 +298,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
-  { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher cloud rclone' },
-  { label: 'Cloud sign-in', section: 'orbit-backups', keywords: 'rclone google drive onedrive dropbox box sign in sign out sync manual automatic update' },
+  { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive onedrive dropbox box disconnect sign out server ftp' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
@@ -339,7 +338,6 @@ function fileName(path: string): string {
 export function SettingsView({
   settings,
   setSettings,
-  games = [],
   onImportLauncher,
   onClearLibrary,
   onReset,
@@ -350,8 +348,6 @@ export function SettingsView({
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings>) => void;
-  /** Used by a manual cloud backup, so it can copy the saves before sending them. */
-  games?: Game[];
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
   onClearLibrary: () => void;
@@ -845,71 +841,9 @@ export function SettingsView({
         id="orbit-backups"
         icon={Save}
         title="Backups"
-        lead="Where the copies of save files are kept."
+        lead="Clouds the copies can be sent to. Disconnect one here."
       >
-        <p className="text-xs leading-relaxed text-muted">
-          Leave the path blank and Orbit uses its own backups folder. Cloud is the same copies, sent on from here.
-        </p>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">Where copies are kept</span>
-          <div className="flex gap-2">
-            <input
-              className={`${inputCls} min-w-0 flex-1 font-mono`}
-              value={settings.saves?.backupRoot ?? ''}
-              onChange={(e) =>
-                setSettings({ saves: { ...settings.saves, backupRoot: e.target.value } })
-              }
-              placeholder={where ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups` : 'Orbit’s own backups folder'}
-              spellCheck={false}
-            />
-            {isNative() && (
-              <button
-                type="button"
-                className={`${btnBrowse} flex items-center gap-2`}
-                onClick={() =>
-                  void pickFolder('Where should save copies be kept?', settings.saves?.backupRoot || undefined).then(
-                    (path) => path && setSettings({ saves: { ...settings.saves, backupRoot: path } }),
-                  )
-                }
-              >
-                <FolderOpen className="size-4" />
-                Browse…
-              </button>
-            )}
-          </div>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {settings.saves?.backupRoot && (
-            <button
-              type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
-              onClick={() => setSettings({ saves: { ...settings.saves, backupRoot: '' } })}
-            >
-              Use Orbit’s folder
-            </button>
-          )}
-          {isNative() && (
-            <button
-              type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
-              onClick={() => {
-                const custom = settings.saves?.backupRoot?.trim();
-                const fallback = where
-                  ? `${where.path}${where.path.includes('\\') ? '\\' : '/'}backups`
-                  : '';
-                const target = custom || fallback;
-                if (target) void revealInExplorer(target);
-              }}
-            >
-              Open folder
-            </button>
-          )}
-        </div>
-        <SubHead>Cloud</SubHead>
-        <p className="text-xs leading-relaxed text-muted">
-          Sign in, sign out, and choose whether a backup is sent up or stays until you send it. A local copy still installs nothing.
-        </p>
-        <CloudPanel settings={settings} setSettings={setSettings} games={games} embedded />
+        <CloudAccounts settings={settings} setSettings={setSettings} />
       </Section>
 
       <Section
