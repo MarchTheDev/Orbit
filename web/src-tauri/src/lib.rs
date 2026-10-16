@@ -1399,9 +1399,12 @@ fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::
 }
 
 #[tauri::command]
-async fn cloud_status(orbit: State<'_, Orbit>) -> cloud::CloudStatus {
+async fn cloud_status(orbit: State<'_, Orbit>) -> Result<cloud::CloudStatus, String> {
+    // An async command that borrows app state has to return a Result, or the
+    // desktop build stops before it starts. The path is copied first so that
+    // borrow is not held while the version check waits on the network.
     let root = orbit.store.root().to_path_buf();
-    cloud::status(&root).await
+    Ok(cloud::status(&root).await)
 }
 
 /// Download rclone into Orbit's folder. Nothing is installed on the system.
