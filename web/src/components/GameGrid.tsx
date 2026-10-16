@@ -137,8 +137,6 @@ function Tile({
       className={cn(
         'group',
         'cursor-pointer active:cursor-grabbing',
-        // The card the pointer is over while something is being moved.
-        over && 'ring-2 ring-accent ring-offset-2 ring-offset-bg',
         dragging && 'opacity-60',
       )}
     >
@@ -163,6 +161,9 @@ function Tile({
           // title underneath.
           'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
+          // The same rounded cover ring as a selected tile. A square ring on the
+          // outer box sat around the title and looked like a stock overlay.
+          over && !selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
         )}
       >
         <Cover game={game} className="size-full" />

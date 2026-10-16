@@ -38,6 +38,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use db::{CurrentPlaythrough, GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
 use launch::FoundGame;
@@ -1404,12 +1405,13 @@ fn cloud_status(orbit: State<'_, Orbit>) -> cloud::CloudStatus {
 
 /// Download rclone into Orbit's folder. Nothing is installed on the system.
 #[tauri::command]
-async fn cloud_fetch(orbit: State<'_, Orbit>) -> Result<String, String> {
-    cloud::fetch(orbit.store.root()).await
+async fn cloud_fetch(orbit: State<'_, Orbit>, replace: Option<bool>) -> Result<String, String> {
+    cloud::fetch(orbit.store.root(), replace.unwrap_or(false)).await
 }
 
 #[tauri::command]
 async fn cloud_connect(
+    app: tauri::AppHandle,
     orbit: State<'_, Orbit>,
     provider: String,
     host: String,
@@ -1418,9 +1420,18 @@ async fn cloud_connect(
     url: String,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
-    tokio::task::spawn_blocking(move || cloud::connect(&data, &provider, &host, &user, &password, &url))
-        .await
-        .map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || {
+        cloud::connect(&data, &provider, &host, &user, &password, &url, &|link| {
+            // Opened here, and again from the window only if this call failed.
+            // Two browsers would spend the sign-in on the first tab. The short
+            // wait is so the page is answering before the browser asks for it.
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let opened = app.opener().open_url(link, None::<&str>).is_ok();
+            let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

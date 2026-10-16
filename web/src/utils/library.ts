@@ -1,5 +1,23 @@
 import type { Game } from '../types';
 
+/** A game the Library would still show after it leaves the Backlog. */
+export function inLibraryShelf(game: Game): boolean {
+  return !game.planned && (game.inLibrary || onDisk(game));
+}
+
+/**
+ * Whether the Backlog page lists this game.
+ *
+ * `backlogOff` wins, so taking a game off the page does not delete it.
+ * `backlogOn` puts a library game back without changing how the Library works.
+ */
+export function onBacklogPage(game: Game, syncLibrary: boolean, on: readonly string[] = [], off: readonly string[] = []): boolean {
+  if (game.planned) return false;
+  if (off.includes(game.id)) return false;
+  if (on.includes(game.id)) return true;
+  return onDisk(game) || !game.inLibrary || syncLibrary;
+}
+
 /**
  * Whether Orbit has anywhere to point at for this game.
  *

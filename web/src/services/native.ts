@@ -860,14 +860,16 @@ export interface CloudStatus {
   version: string;
   /** True when Orbit's own copy will run, rather than rclone already on this PC. */
   placed: boolean;
+  /** Folder Orbit keeps its own rclone in. */
+  folder: string;
 }
 
 export function cloudStatus(): Promise<CloudStatus> {
-  return call('cloud_status', {}, async () => ({ ready: false, version: '', placed: false }));
+  return call('cloud_status', {}, async () => ({ ready: false, version: '', placed: false, folder: '' }));
 }
 
-export function cloudFetch(): Promise<string> {
-  return call('cloud_fetch', {}, async () => {
+export function cloudFetch(replace = false): Promise<string> {
+  return call('cloud_fetch', { replace }, async () => {
     throw new Error('Cloud copies need the desktop app.');
   });
 }

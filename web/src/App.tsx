@@ -66,7 +66,7 @@ import { SettingsView } from './components/SettingsView';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { onDisk } from './utils/library';
+import { inLibraryShelf, onDisk } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -1074,6 +1074,18 @@ export default function App() {
             // Off by default: a game the player added to the library by hand
             // stays there, and only crosses over to this page when asked for.
             syncLibrary={settings.syncBacklog === true}
+            backlogOn={settings.backlogOn ?? []}
+            backlogOff={settings.backlogOff ?? []}
+            onBacklogMembership={(id, on) => {
+              setSettings((current) => {
+                const currentOn = current.backlogOn ?? [];
+                const currentOff = current.backlogOff ?? [];
+                return {
+                  backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+                  backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+                };
+              });
+            }}
             myOrder={settings.backlogOrder}
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
@@ -1309,6 +1321,22 @@ export default function App() {
           onPlay={() => void startGame(selected)}
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
+          onLeaveBacklog={
+            page === 'backlog' && inLibraryShelf(selected)
+              ? () => {
+                  const id = selected.id;
+                  setSettings((current) => {
+                    const currentOn = current.backlogOn ?? [];
+                    const currentOff = current.backlogOff ?? [];
+                    return {
+                      backlogOn: currentOn.filter((item) => item !== id),
+                      backlogOff: [...currentOff.filter((item) => item !== id), id],
+                    };
+                  });
+                  setSelectedId(null);
+                }
+              : undefined
+          }
           closeRequest={detailClose}
           onClose={() => setSelectedId(null)}
         />

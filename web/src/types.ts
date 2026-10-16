@@ -435,6 +435,15 @@ export interface Settings {
    */
   syncBacklog?: boolean;
   /**
+   * Games put on the Backlog by hand, even when they would otherwise stay in
+   * the Library only.
+   */
+  backlogOn?: string[];
+  /**
+   * Games taken off the Backlog without being removed from the Library.
+   */
+  backlogOff?: string[];
+  /**
    * Whether the interface fades in when the app opens. On by default: it is
    * forty-five hundredths of a second, and it covers the moment the library is
    * still arriving. Off for anybody who would rather it simply be there.

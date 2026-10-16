@@ -21,12 +21,12 @@ import { fetchMetadata, searchGames } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtDate, fmtMinutes, hashHue, uid } from '../utils/format';
 import { moveInOrder } from '../utils/reorder';
-import { onDisk } from '../utils/library';
+import { inLibraryShelf, onBacklogPage, onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { cn } from '../utils/cn';
-import { inputCls } from './ui/Modal';
+import { Modal, inputCls } from './ui/Modal';
 import { btnAccent } from './ui/buttons';
 
 /**
@@ -75,6 +75,9 @@ export function BacklogView({
   onRemove,
   fetchMetadata: fetchMeta,
   syncLibrary,
+  backlogOn,
+  backlogOff,
+  onBacklogMembership,
   myOrder,
   setMyOrder,
 }: {
@@ -97,6 +100,10 @@ export function BacklogView({
    * play does not have to be kept in two places by hand.
    */
   syncLibrary: boolean;
+  /** Games put on this page by hand, and games taken off it without a delete. */
+  backlogOn: string[];
+  backlogOff: string[];
+  onBacklogMembership: (id: string, on: boolean) => void;
   /** The player's own order for this page, as ids. */
   myOrder: string[];
   setMyOrder: (ids: string[]) => void;
@@ -105,6 +112,7 @@ export function BacklogView({
   const [order, setOrder] = useState<Order>('mine');
   /** The title being put on the list, while it is being typed. */
   const [planning, setPlanning] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<GameSuggestion[]>([]);
   const [looking, setLooking] = useState(false);
@@ -131,8 +139,9 @@ export function BacklogView({
    * nothing the library does not already say. A game marked owned from this
    * page has no shelf of its own and stays here until it has a program.
    */
-  const owned = games.filter(
-    (g) => !g.planned && (onDisk(g) || !g.inLibrary || syncLibrary),
+  const owned = games.filter((g) => onBacklogPage(g, syncLibrary, backlogOn, backlogOff));
+  const fromLibrary = games.filter(
+    (g) => inLibraryShelf(g) && !onBacklogPage(g, syncLibrary, backlogOn, backlogOff),
   );
 
   /**
@@ -328,6 +337,15 @@ export function BacklogView({
         </div>
 
         <button
+          type="button"
+          onClick={() => setPicking(true)}
+          className="flex items-center gap-2 rounded-full border border-line py-2 pl-3 pr-4 text-sm text-fg hover:border-accent"
+          title="Put a library game on this page, including one taken off it"
+        >
+          <Plus className="size-4" />
+          From the library
+        </button>
+        <button
           onClick={() => setPlanning(planning === null ? '' : null)}
           className={cn(btnAccent, 'flex items-center gap-2 rounded-full py-2 pl-3 pr-4 text-sm')}
           title="Add something you plan to play, even if you do not own it yet"
@@ -336,6 +354,34 @@ export function BacklogView({
           Plan a game
         </button>
       </div>
+
+      {picking && (
+        <Modal
+          title="From the library"
+          subtitle="These stay in the Library. Taking one off the Backlog later does not delete it."
+          size="lg"
+          onClose={() => setPicking(false)}
+        >
+          {fromLibrary.length === 0 ? (
+            <p className="text-sm text-muted">Every library game that can sit here is already on the page.</p>
+          ) : (
+            <ul className="max-h-96 space-y-1 overflow-y-auto">
+              {fromLibrary.map((game) => (
+                <li key={game.id}>
+                  <button
+                    type="button"
+                    onClick={() => onBacklogMembership(game.id, true)}
+                    className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left hover:bg-panel2"
+                  >
+                    <Cover game={game} className="h-12 w-9 shrink-0 rounded-md" />
+                    <span className="min-w-0 truncate text-sm">{game.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
+      )}
 
       {/* The waiting list at a glance, to answer "what can I finish this
           weekend" without opening anything: the shortest, the longest, and how

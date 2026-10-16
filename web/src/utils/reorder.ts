@@ -16,6 +16,22 @@
  * so the halfway mark is a few pixels in and almost every drop landed on the
  * no-op half.
  */
+/**
+ * Put the dragged item in the place of the one it was dropped on.
+ *
+ * A tall row has no visible "before" and "after". Dropping on a card means
+ * that card's place, not the slot one above or below it. Using the halfway
+ * mark made Saves land one position off, so the drag had to overshoot.
+ */
+export function takePlace(ids: string[], fromId: string, toId: string): string[] {
+  const from = ids.indexOf(fromId);
+  const to = ids.indexOf(toId);
+  if (from < 0 || to < 0 || from === to) return ids;
+  const next = ids.filter((id) => id !== fromId);
+  next.splice(to, 0, fromId);
+  return next;
+}
+
 export function moveInOrder(ids: string[], fromId: string, toId: string, after: boolean): string[] {
   if (fromId === toId) return ids;
   const from = ids.indexOf(fromId);

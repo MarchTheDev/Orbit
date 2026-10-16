@@ -43,6 +43,7 @@ import {
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { CopySettings } from './CopySettings';
+import { CloudPanel } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
@@ -298,6 +299,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
   { label: 'Backup folder', section: 'orbit-backups', keywords: 'saves backup copies path folder restore publisher cloud rclone' },
+  { label: 'Cloud sign-in', section: 'orbit-backups', keywords: 'rclone google drive onedrive dropbox box sign in sign out sync manual automatic update' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
@@ -843,7 +845,7 @@ export function SettingsView({
         lead="Where the copies of save files are kept."
       >
         <p className="text-xs leading-relaxed text-muted">
-          Leave the path blank and Orbit uses its own backups folder. Sending those copies to a cloud is on the Saves page.
+          Leave the path blank and Orbit uses its own backups folder. Cloud is the same copies, sent on from here.
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">Where copies are kept</span>
@@ -900,6 +902,11 @@ export function SettingsView({
             </button>
           )}
         </div>
+        <SubHead>Cloud</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          Sign in, sign out, and choose whether a backup is sent up or stays until you send it. A local copy still installs nothing.
+        </p>
+        <CloudPanel settings={settings} setSettings={setSettings} embedded />
       </Section>
 
       <Section

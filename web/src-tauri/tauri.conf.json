@@ -85,8 +85,8 @@
     },
     "windows": {
       "nsis": {
-        "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico",
+        "installerIcon": "nsis/installer.ico",
+        "uninstallerIcon": "nsis/installer.ico",
         "headerImage": "nsis/header.bmp",
         "sidebarImage": "nsis/sidebar.bmp"
       }

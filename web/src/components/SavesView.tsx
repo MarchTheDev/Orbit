@@ -24,7 +24,7 @@ import { btnAccent } from './ui/buttons';
 import { say } from '../utils/toast';
 import { cn } from '../utils/cn';
 import { useDragReorder } from '../hooks/useDragReorder';
-import { moveInOrder } from '../utils/reorder';
+import { takePlace } from '../utils/reorder';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { inputCls, Modal } from './ui/Modal';
@@ -81,8 +81,8 @@ export function SavesView({
   );
   const list = useRef<HTMLUListElement>(null);
   const { bind, dragging, over } = useDragReorder(
-    (fromId, toId, after) => {
-      const nextVisible = moveInOrder(listed.map((game) => game.id), fromId, toId, after);
+    (fromId, toId) => {
+      const nextVisible = takePlace(listed.map((game) => game.id), fromId, toId);
       const order = showHidden || hidden.size === 0
         ? nextVisible
         : keepHiddenSlots(rows.map((game) => game.id), nextVisible, hiddenIds);
@@ -94,7 +94,7 @@ export function SavesView({
       });
     },
     // The row is itself a button, so the press has to be allowed to start there.
-    { container: list, fromButtons: true },
+    { container: list, fromButtons: true, onto: true },
   );
   const auto = settings.saves?.auto ?? [];
   const dirs = settings.saves?.dirs ?? {};

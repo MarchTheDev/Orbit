@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { Cloud, CloudDownload, CloudUpload, LoaderCircle } from 'lucide-react';
 import type { Settings } from '../../types';
-import { Checkbox } from '../ui/Checkbox';
+import { openExternal } from '../../services/desktop';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
@@ -43,15 +44,20 @@ type CloudSettings = NonNullable<NonNullable<Settings['saves']>['cloud']>;
 export function CloudPanel({
   settings,
   setSettings,
+  embedded = false,
 }: {
   settings: Settings;
   setSettings: (patch: Partial<Settings>) => void;
+  /** Drawn in place, for the Backups section, rather than behind a button. */
+  embedded?: boolean;
 }) {
   const cloud = settings.saves?.cloud;
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
   const [placed, setPlaced] = useState(false);
+  const [folder, setFolder] = useState('');
   const [version, setVersion] = useState('');
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +77,7 @@ export function CloudPanel({
       .then((status) => {
         setReady(status.ready);
         setPlaced(status.placed);
+        setFolder(status.folder ?? '');
         setVersion(status.version);
       })
       .catch(() => setReady(false));
@@ -78,6 +85,21 @@ export function CloudPanel({
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    if (!isNative()) return;
+    let stop: (() => void) | undefined;
+    void listen<{ url?: string; opened?: boolean } | string>('cloud-auth', (event) => {
+      const payload = event.payload;
+      const url = typeof payload === 'string' ? payload : payload.url;
+      if (!url) return;
+      setAuthUrl(url);
+      if (typeof payload === 'string' || payload.opened === false) void openExternal(url);
+    }).then((unlisten) => {
+      stop = unlisten;
+    }).catch(() => {});
+    return () => stop?.();
   }, []);
 
   const saveCloud = (next: CloudSettings | undefined) => {
@@ -88,15 +110,16 @@ export function CloudPanel({
 
   const fail = (e: unknown) => setError(String(e).replace(/^Error:\s*/, ''));
 
-  const getRclone = async () => {
-    setBusy('fetch');
+  const getRclone = async (replace = false) => {
+    setBusy(replace ? 'update' : 'fetch');
     setError(null);
     setNote(null);
     try {
-      setNote(await cloudFetch());
+      setNote(await cloudFetch(replace));
       const status = await cloudStatus();
       setReady(status.ready);
       setPlaced(status.placed);
+      setFolder(status.folder ?? '');
       setVersion(status.version);
     } catch (e) {
       fail(e);
@@ -105,10 +128,20 @@ export function CloudPanel({
     }
   };
 
+  const setAuto = (auto: boolean) => {
+    saveCloud({
+      remote: cloud?.remote ?? '',
+      provider: cloud?.provider ?? '',
+      own: cloud?.own ?? false,
+      auto,
+    });
+  };
+
   const connect = async (provider: string) => {
     setBusy(provider);
     setError(null);
     setNote(null);
+    setAuthUrl(null);
     try {
       const label = await cloudConnect(provider, { host, user, password, url });
       setPassword('');
@@ -180,7 +213,7 @@ export function CloudPanel({
     try {
       if (cloud && !cloud.own) await cloudForget();
       saveCloud(undefined);
-      setNote(cloud?.own ? 'Stopped using that remote. It is still in rclone.' : 'Forgot that cloud.');
+      setNote(cloud?.own ? 'Signed out of that remote. It is still in rclone.' : 'Signed out.');
     } catch (e) {
       fail(e);
     } finally {
@@ -193,58 +226,85 @@ export function CloudPanel({
     : placed
       ? "Orbit's copy"
       : 'Already on this PC';
+  const automatic = !!cloud?.auto;
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(true);
-          refresh();
-        }}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
-      >
-        <Cloud className="size-4" />
-        Cloud
-      </button>
-
-      {open && (
-        <Modal
-          title="Cloud"
-          subtitle="Sends the copies already on this PC. A local backup installs nothing."
-          size="lg"
-          onClose={() => setOpen(false)}
-        >
+  const controls = (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-fg">
                 {ready === null ? 'Looking for rclone…' : `${where}${version ? ` · ${version}` : ''}`}
               </p>
-              {ready === false && (
-                <button
-                  type="button"
-                  disabled={!isNative() || busy !== null}
-                  onClick={() => void getRclone()}
-                  className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-                >
-                  {busy === 'fetch' ? 'Getting rclone…' : 'Get rclone'}
-                </button>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {(ready === false || (ready && !placed)) && (
+                  <button
+                    type="button"
+                    disabled={!isNative() || busy !== null}
+                    onClick={() => void getRclone(false)}
+                    className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+                  >
+                    {busy === 'fetch' ? 'Getting rclone…' : ready ? 'Keep a copy in Orbit' : 'Get rclone'}
+                  </button>
+                )}
+                {placed && (
+                  <button
+                    type="button"
+                    disabled={!isNative() || busy !== null}
+                    onClick={() => void getRclone(true)}
+                    className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+                  >
+                    {busy === 'update' ? 'Updating…' : 'Update rclone'}
+                  </button>
+                )}
+              </div>
             </div>
             <p className="text-xs text-muted">
-              If rclone is already on this PC, that one is used. Otherwise Orbit keeps its own copy. Neither is a system install.
+              If rclone is already on this PC, that one is used. Otherwise Orbit keeps its own copy in its folder. Neither is a system install, and a newer copy replaces only that folder.
             </p>
+            {folder && (
+              <p className="break-all font-mono text-[11px] text-muted" title="Where Orbit keeps rclone">
+                {folder}
+                {placed ? '' : ready ? ' · not the copy being used' : ''}
+              </p>
+            )}
+
+            <div>
+              <p className="text-[11px] uppercase tracking-widest text-muted">Sync</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={!automatic}
+                  onClick={() => setAuto(false)}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs',
+                    !automatic ? 'border-accent text-fg' : 'border-line text-muted hover:border-accent hover:text-fg',
+                  )}
+                >
+                  Manual
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={automatic}
+                  onClick={() => setAuto(true)}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs',
+                    automatic ? 'border-accent text-fg' : 'border-line text-muted hover:border-accent hover:text-fg',
+                  )}
+                >
+                  After a backup
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-muted">
+                {automatic
+                  ? 'A finished backup is sent up. Send and Bring down still work whenever you want them.'
+                  : 'Nothing is sent unless you press Send. A backup on this PC stays here.'}
+              </p>
+            </div>
 
             {!isNative() && <p className="text-xs text-muted">Cloud copies need the desktop app.</p>}
 
             {cloud?.remote ? (
               <div className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
                 <p className="text-sm font-medium">{cloud.provider || cloud.remote}</p>
-                <Checkbox
-                  checked={!!cloud.auto}
-                  onChange={(auto) => saveCloud({ ...cloud, auto })}
-                  label="Send after a backup"
-                />
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -374,9 +434,48 @@ export function CloudPanel({
               </div>
             )}
 
+            {authUrl && (
+              <p className="text-xs text-muted">
+                The sign-in page should be open. If it is not,{' '}
+                <button
+                  type="button"
+                  onClick={() => void openExternal(authUrl)}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  open it again
+                </button>
+                .
+              </p>
+            )}
             {note && <p className="text-xs text-fg">{note}</p>}
             {error && <p className="text-xs text-rose-300">{error}</p>}
           </div>
+  );
+
+  if (embedded) return controls;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+          refresh();
+        }}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
+      >
+        <Cloud className="size-4" />
+        Cloud
+      </button>
+
+      {open && (
+        <Modal
+          title="Cloud"
+          subtitle="Sends the copies already on this PC. A local backup installs nothing."
+          size="lg"
+          onClose={() => setOpen(false)}
+        >
+          {controls}
         </Modal>
       )}
     </>

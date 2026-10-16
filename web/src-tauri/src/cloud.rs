@@ -28,15 +28,20 @@ pub struct CloudStatus {
     /// True when the copy in Orbit's folder is the one that will run, rather
     /// than rclone that was already on this PC.
     pub placed: bool,
+    /// The folder Orbit keeps its own rclone in. Empty until that folder is known.
+    pub folder: String,
 }
 
 pub fn status(data_dir: &Path) -> CloudStatus {
-    let own = data_dir.join("tools").join(binary_name());
+    let folder = data_dir.join("tools");
+    let own = folder.join(binary_name());
+    let folder = folder.display().to_string();
     if own.is_file() {
         return CloudStatus {
             ready: true,
             version: version_of(&own).unwrap_or_default(),
             placed: true,
+            folder,
         };
     }
     match which(binary_name()) {
@@ -44,21 +49,27 @@ pub fn status(data_dir: &Path) -> CloudStatus {
             ready: true,
             version: version_of(&path).unwrap_or_default(),
             placed: false,
+            folder,
         },
         None => CloudStatus {
             ready: false,
             version: String::new(),
             placed: false,
+            folder,
         },
     }
 }
 
 /// Download the official rclone build into Orbit's folder. Not a system install.
-pub async fn fetch(data_dir: &Path) -> Result<String, String> {
-    if let Some(path) = binary(data_dir) {
+///
+/// `replace` fetches a new copy even when Orbit already has one, which is how
+/// an update works. A rclone that was already on this PC is left where it is.
+pub async fn fetch(data_dir: &Path, replace: bool) -> Result<String, String> {
+    let dest = data_dir.join("tools").join(binary_name());
+    if dest.is_file() && !replace {
         return Ok(format!(
             "rclone is ready ({})",
-            version_of(&path).unwrap_or_else(|| "installed".into())
+            version_of(&dest).unwrap_or_else(|| "installed".into())
         ));
     }
     let name = archive_name()?;
@@ -99,13 +110,14 @@ pub fn connect(
     user: &str,
     password: &str,
     url: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
     let config = config_path(data_dir)?;
     let provider = provider.trim();
     let label = match provider {
-        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider)?,
-        "onedrive" => oauth_onedrive(&bin, &config)?,
+        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, open)?,
+        "onedrive" => oauth_onedrive(&bin, &config, open)?,
         "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, host, user, password, url)?,
         other => return Err(format!("Orbit does not know how to connect {other}.")),
     };
@@ -202,8 +214,8 @@ pub fn copy(data_dir: &Path, backup_root: Option<&str>, remote: &str, own: bool,
     Err(public_error(&output.stderr, "rclone did not finish."))
 }
 
-fn oauth(bin: &Path, config: &Path, provider: &str) -> Result<String, String> {
-    let token = authorize(bin, provider)?;
+fn oauth(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+    let token = authorize(bin, provider, open)?;
     let _ = delete_remote(bin, config);
     let output = rclone(bin, Some(config))
         .args(["config", "create", "orbit", provider, "token"])
@@ -216,8 +228,8 @@ fn oauth(bin: &Path, config: &Path, provider: &str) -> Result<String, String> {
     Ok(label_of(provider).into())
 }
 
-fn oauth_onedrive(bin: &Path, config: &Path) -> Result<String, String> {
-    let token = authorize(bin, "onedrive")?;
+fn oauth_onedrive(bin: &Path, config: &Path, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+    let token = authorize(bin, "onedrive", open)?;
     let _ = delete_remote(bin, config);
     let output = rclone(bin, Some(config))
         .args(["config", "create", "orbit", "onedrive", "drive_type", "personal", "token"])
@@ -276,9 +288,14 @@ fn server(
     Ok(label_of(provider).into())
 }
 
-fn authorize(bin: &Path, provider: &str) -> Result<String, String> {
+fn authorize(bin: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+    // `--auto-confirm` answers rclone's extra questions with their defaults, so
+    // a closed input does not look like the player cancelled. The browser is
+    // opened by Orbit, not by rclone: a windowed app opening it through
+    // Explorer was probing the local sign-in page and rclone treated that as a
+    // failed login.
     let mut child = rclone(bin, None)
-        .args(["authorize", provider, "--auth-no-open-browser"])
+        .args(["--auto-confirm", "authorize", provider, "--auth-no-open-browser"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -300,18 +317,10 @@ fn authorize(bin: &Path, provider: &str) -> Result<String, String> {
     let status = loop {
         if let Some(url) = link.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if !opened.load(Ordering::SeqCst) {
-                match open_url(&url) {
-                    Ok(()) => {
-                        opened.store(true, Ordering::SeqCst);
-                    }
-                    Err(_) => {
-                        let _ = child.kill();
-                        for reader in readers {
-                            let _ = reader.join();
-                        }
-                        return Err(format!("Orbit could not open the sign-in page. Open it yourself: {url}"));
-                    }
-                }
+                opened.store(true, Ordering::SeqCst);
+                // The page is handed over and rclone is left running. Killing it
+                // here is what turned a slow browser into "the sign-in was cancelled".
+                open(&url);
             }
         }
         if started.elapsed() > AUTH_WAIT {
@@ -338,7 +347,11 @@ fn authorize(bin: &Path, provider: &str) -> Result<String, String> {
     }
     let collected = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if !status.success() {
-        return Err("The sign-in was cancelled.".into());
+        let reason = public_error(collected.as_bytes(), "The sign-in did not finish.");
+        if let Some(url) = first_url(&collected) {
+            return Err(format!("{reason} The page was {url}"));
+        }
+        return Err(reason);
     }
     token_from(&collected).ok_or_else(|| "rclone did not return a sign-in.".into())
 }
@@ -369,18 +382,9 @@ fn collect_auth(stream: impl Read, text: &Mutex<String>, link: &Mutex<Option<Str
 
 fn first_url(line: &str) -> Option<String> {
     line.split_whitespace()
+        .map(|word| word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '<' | '>' | '(' | ')')))
         .find(|word| word.starts_with("http://") || word.starts_with("https://"))
-        .map(|word| word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '>' | ')')).to_string())
-}
-
-fn open_url(url: &str) -> Result<(), String> {
-    #[cfg(windows)]
-    let spawned = process::command("explorer").arg(url).spawn();
-    #[cfg(target_os = "macos")]
-    let spawned = process::command("open").arg(url).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let spawned = process::command("xdg-open").arg(url).spawn();
-    spawned.map(|_| ()).map_err(|e| e.to_string())
+        .map(|word| word.trim_end_matches('.').to_string())
 }
 
 fn token_from(stdout: &str) -> Option<String> {

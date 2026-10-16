@@ -42,6 +42,14 @@ export function useDragReorder(
      * actually dragged.
      */
     fromButtons?: boolean;
+    /**
+     * The row under the pointer is the target, not the last midpoint passed.
+     *
+     * A list of tall cards is aimed at a card. The midpoint rule highlights the
+     * card above until the pointer crosses the middle, so the drop lands one
+     * place short of where it looks.
+     */
+    onto?: boolean;
   },
 ) {
   const optionsRef = useRef(options);
@@ -120,6 +128,24 @@ export function useDragReorder(
         (el) => el.getAttribute('data-orbit-drop') !== heldId,
       );
       if (rows.length === 0) return null;
+      if (optionsRef.current?.onto) {
+        // The row the pointer is actually on. A midpoint would still be the row
+        // above until the pointer crossed its middle, which is the miss. A gap
+        // between rows belongs to the nearer one, so a drop there is not lost.
+        const hit = rows.find((row) => {
+          const rect = row.getBoundingClientRect();
+          return y >= rect.top && y <= rect.bottom;
+        });
+        const target = hit ?? rows.reduce((best, row) => {
+          const dist = (el: HTMLElement) => {
+            const rect = el.getBoundingClientRect();
+            return y < rect.top ? rect.top - y : y - rect.bottom;
+          };
+          return dist(row) < dist(best) ? row : best;
+        });
+        const id = target.getAttribute('data-orbit-drop');
+        return id ? { id, after: false } : null;
+      }
       return slotAt(
         rows.map((row) => {
           const rect = row.getBoundingClientRect();

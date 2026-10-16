@@ -152,12 +152,13 @@ export function useLibrary() {
     setGames(gamesRef.current);
   }, []);
 
-  const setSettings = useCallback((patch: Partial<Settings>) => {
+  const setSettings = useCallback((patch: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => {
     setSettingsState((current) => {
       if (!current) return current;
-      const next = { ...current, ...patch };
-      if (patch.theme) applyTheme(patch.theme);
-      if (patch.fontFamily) applyFont(patch.fontFamily);
+      const resolved = typeof patch === 'function' ? patch(current) : patch;
+      const next = { ...current, ...resolved };
+      if (resolved.theme) applyTheme(resolved.theme);
+      if (resolved.fontFamily) applyFont(resolved.fontFamily);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });

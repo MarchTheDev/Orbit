@@ -59,6 +59,8 @@ interface Props {
   onPlay: () => void;
   onStop: () => void;
   onRemove: () => void;
+  /** Take this game off the Backlog only. It stays in the Library. */
+  onLeaveBacklog?: () => void;
   onClose: () => void;
   /**
    * Incremented when the pad asks this drawer to close. The drawer slides out
@@ -78,6 +80,7 @@ export function GameDetail({
   onPlay,
   onStop,
   onRemove,
+  onLeaveBacklog,
   onClose,
   closeRequest = 0,
 }: Props) {
@@ -636,11 +639,11 @@ export function GameDetail({
             </p>
             <div className="mt-3 flex gap-2">
               <button
-                onClick={onRemove}
+                onClick={onLeaveBacklog ?? onRemove}
                 className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm text-rose-400 hover:border-rose-400"
               >
                 <Trash2 className="size-4" />
-                Remove
+                {onLeaveBacklog ? 'Take off Backlog' : 'Remove'}
               </button>
             </div>
           </section>
