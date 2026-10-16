@@ -1432,7 +1432,7 @@ async fn cloud_connect(
     });
     let folder = folder.unwrap_or_else(|| "Orbit".into());
     tokio::task::spawn_blocking(move || {
-        cloud::connect(&data, &provider, &host, &user, &password, &url, remote_name, &folder, &|link| {
+        cloud::connect(&data, &provider, &host, &user, &password, &url, &remote_name, &folder, &|link| {
             // Opened here, and again from the window only if this call failed.
             // Two browsers would spend the sign-in on the first tab. The short
             // wait is so the page is answering before the browser asks for it.
