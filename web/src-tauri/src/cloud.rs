@@ -766,7 +766,7 @@ fn authorize_with_port_freed(
         stop.store(true, Ordering::SeqCst);
         ran
     })?;
-    if !ran {
+    if !result {
         return Err("The permission prompt was dismissed, so the sign-in port is still blocked.".into());
     }
     let collected = fs::read_to_string(&stdout_path).unwrap_or_default();
