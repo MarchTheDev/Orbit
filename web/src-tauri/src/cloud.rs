@@ -30,34 +30,54 @@ pub struct CloudStatus {
     pub placed: bool,
     /// The folder Orbit keeps its own rclone in. Empty until that folder is known.
     pub folder: String,
+    /// True only when Orbit's own copy is older than the current release.
+    pub update: bool,
+    /// The current release, when it was looked up. Empty if that check did not answer.
+    pub latest: String,
 }
 
-pub fn status(data_dir: &Path) -> CloudStatus {
+pub async fn status(data_dir: &Path) -> CloudStatus {
     let folder = data_dir.join("tools");
     let own = folder.join(binary_name());
     let folder = folder.display().to_string();
-    if own.is_file() {
-        return CloudStatus {
+    let mut found = if own.is_file() {
+        CloudStatus {
             ready: true,
             version: version_of(&own).unwrap_or_default(),
             placed: true,
             folder,
-        };
+            update: false,
+            latest: String::new(),
+        }
+    } else {
+        match which(binary_name()) {
+            Some(path) => CloudStatus {
+                ready: true,
+                version: version_of(&path).unwrap_or_default(),
+                placed: false,
+                folder,
+                update: false,
+                latest: String::new(),
+            },
+            None => CloudStatus {
+                ready: false,
+                version: String::new(),
+                placed: false,
+                folder,
+                update: false,
+                latest: String::new(),
+            },
+        }
+    };
+    // Only Orbit's own copy can be replaced. A rclone already on this PC is left alone,
+    // and the button stays hidden unless the current release is actually newer.
+    if found.placed {
+        if let Some(latest) = latest_release().await {
+            found.update = version_newer(&latest, &found.version);
+            found.latest = latest;
+        }
     }
-    match which(binary_name()) {
-        Some(path) => CloudStatus {
-            ready: true,
-            version: version_of(&path).unwrap_or_default(),
-            placed: false,
-            folder,
-        },
-        None => CloudStatus {
-            ready: false,
-            version: String::new(),
-            placed: false,
-            folder,
-        },
-    }
+    found
 }
 
 /// Download the official rclone build into Orbit's folder. Not a system install.
@@ -215,7 +235,7 @@ pub fn copy(data_dir: &Path, backup_root: Option<&str>, remote: &str, own: bool,
 }
 
 fn oauth(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
-    let token = authorize(bin, provider, open)?;
+    let token = authorize(bin, config, provider, open)?;
     let _ = delete_remote(bin, config);
     let output = rclone(bin, Some(config))
         .args(["config", "create", "orbit", provider, "token"])
@@ -229,7 +249,7 @@ fn oauth(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send 
 }
 
 fn oauth_onedrive(bin: &Path, config: &Path, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
-    let token = authorize(bin, "onedrive", open)?;
+    let token = authorize(bin, config, "onedrive", open)?;
     let _ = delete_remote(bin, config);
     let output = rclone(bin, Some(config))
         .args(["config", "create", "orbit", "onedrive", "drive_type", "personal", "token"])
@@ -288,13 +308,19 @@ fn server(
     Ok(label_of(provider).into())
 }
 
-fn authorize(bin: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+    // Orbit's own config, so authorize does not read the rclone the player
+    // already has in AppData. An empty file is enough: the token is printed,
+    // then saved here afterwards.
+    if !config.is_file() {
+        let _ = fs::write(config, "");
+    }
     // `--auto-confirm` answers rclone's extra questions with their defaults, so
-    // a closed input does not look like the player cancelled. The browser is
-    // opened by Orbit, not by rclone: a windowed app opening it through
-    // Explorer was probing the local sign-in page and rclone treated that as a
-    // failed login.
-    let mut child = rclone(bin, None)
+    // a closed input does not look like the player cancelled. rclone logs the
+    // redirect address (`http://127.0.0.1:53682/`) before the real page. Opening
+    // that address is what fails the login: it is not the sign-in page. Only
+    // `.../auth?state=` is opened, which is the page rclone itself would open.
+    let mut child = rclone(bin, Some(config))
         .args(["--auto-confirm", "authorize", provider, "--auth-no-open-browser"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -347,11 +373,7 @@ fn authorize(bin: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) ->
     }
     let collected = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if !status.success() {
-        let reason = public_error(collected.as_bytes(), "The sign-in did not finish.");
-        if let Some(url) = first_url(&collected) {
-            return Err(format!("{reason} The page was {url}"));
-        }
-        return Err(reason);
+        return Err(public_error(collected.as_bytes(), "The sign-in did not finish."));
     }
     token_from(&collected).ok_or_else(|| "rclone did not return a sign-in.".into())
 }
@@ -370,7 +392,7 @@ fn collect_auth(stream: impl Read, text: &Mutex<String>, link: &Mutex<Option<Str
     let reader = BufReader::new(stream);
     for line in reader.lines().map_while(Result::ok) {
         if link.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
-            if let Some(url) = first_url(&line) {
+            if let Some(url) = auth_url(&line) {
                 *link.lock().unwrap_or_else(|e| e.into_inner()) = Some(url);
             }
         }
@@ -380,10 +402,21 @@ fn collect_auth(stream: impl Read, text: &Mutex<String>, link: &Mutex<Option<Str
     }
 }
 
-fn first_url(line: &str) -> Option<String> {
+/// The page rclone asks the browser to open.
+///
+/// A notice on the line before that names the redirect address,
+/// `http://127.0.0.1:53682/` or `http://localhost:53682/`. Opening that address
+/// hits the local page with no code, and rclone treats it as a failed login.
+/// The real page is the one with `/auth` and `state=`.
+fn auth_url(line: &str) -> Option<String> {
     line.split_whitespace()
-        .map(|word| word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '<' | '>' | '(' | ')')))
-        .find(|word| word.starts_with("http://") || word.starts_with("https://"))
+        .map(|word| word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '<' | '>' | '(' | ')' | '`')))
+        .find(|word| {
+            let lower = word.to_ascii_lowercase();
+            (lower.starts_with("http://") || lower.starts_with("https://"))
+                && lower.contains("/auth")
+                && lower.contains("state=")
+        })
         .map(|word| word.trim_end_matches('.').to_string())
 }
 
@@ -473,6 +506,44 @@ fn which(name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// The current rclone release, as published next to the download.
+async fn latest_release() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let text = client
+        .get("https://downloads.rclone.org/version.txt")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    let line = text.lines().next()?.trim();
+    if version_parts(line).is_some() { Some(line.to_string()) } else { None }
+}
+
+fn version_parts(text: &str) -> Option<(u64, u64, u64)> {
+    let start = text.find('v')?;
+    let rest = text.get(start + 1..)?;
+    let mut nums = rest.split(|c: char| !c.is_ascii_digit());
+    let major = nums.next()?.parse::<u64>().ok()?;
+    let minor = nums.next()?.parse::<u64>().ok()?;
+    let patch = nums.next().unwrap_or("0").parse::<u64>().ok()?;
+    Some((major, minor, patch))
+}
+
+fn version_newer(latest: &str, current: &str) -> bool {
+    match (version_parts(latest), version_parts(current)) {
+        (Some(latest), Some(current)) => latest > current,
+        _ => false,
+    }
 }
 
 fn version_of(bin: &Path) -> Option<String> {

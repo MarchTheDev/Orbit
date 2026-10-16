@@ -26,7 +26,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { FontChoice, LauncherId, Page, Settings } from '../types';
+import type { FontChoice, Game, LauncherId, Page, Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
@@ -339,6 +339,7 @@ function fileName(path: string): string {
 export function SettingsView({
   settings,
   setSettings,
+  games = [],
   onImportLauncher,
   onClearLibrary,
   onReset,
@@ -349,6 +350,8 @@ export function SettingsView({
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings>) => void;
+  /** Used by a manual cloud backup, so it can copy the saves before sending them. */
+  games?: Game[];
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
   onClearLibrary: () => void;
@@ -906,7 +909,7 @@ export function SettingsView({
         <p className="text-xs leading-relaxed text-muted">
           Sign in, sign out, and choose whether a backup is sent up or stays until you send it. A local copy still installs nothing.
         </p>
-        <CloudPanel settings={settings} setSettings={setSettings} embedded />
+        <CloudPanel settings={settings} setSettings={setSettings} games={games} embedded />
       </Section>
 
       <Section

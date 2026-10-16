@@ -1048,6 +1048,7 @@ export default function App() {
             <SettingsView
               settings={settings}
               setSettings={setSettings}
+              games={games}
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);

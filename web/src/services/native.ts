@@ -862,10 +862,14 @@ export interface CloudStatus {
   placed: boolean;
   /** Folder Orbit keeps its own rclone in. */
   folder: string;
+  /** True only when Orbit's own copy is older than the current release. */
+  update?: boolean;
+  /** The current release, when it was looked up. */
+  latest?: string;
 }
 
 export function cloudStatus(): Promise<CloudStatus> {
-  return call('cloud_status', {}, async () => ({ ready: false, version: '', placed: false, folder: '' }));
+  return call('cloud_status', {}, async () => ({ ready: false, version: '', placed: false, folder: '', update: false, latest: '' }));
 }
 
 export function cloudFetch(replace = false): Promise<string> {

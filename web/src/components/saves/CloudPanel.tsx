@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Cloud, CloudDownload, CloudUpload, LoaderCircle } from 'lucide-react';
-import type { Settings } from '../../types';
+import type { Game, Settings } from '../../types';
 import { openExternal } from '../../services/desktop';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
@@ -14,7 +14,10 @@ import {
   cloudForget,
   cloudRemotes,
   cloudStatus,
+  backupSave,
   isNative,
+  saveHintsOf,
+  savePlaceOf,
 } from '../../services/native';
 
 const OAUTH = [
@@ -44,10 +47,13 @@ type CloudSettings = NonNullable<NonNullable<Settings['saves']>['cloud']>;
 export function CloudPanel({
   settings,
   setSettings,
+  games = [],
   embedded = false,
 }: {
   settings: Settings;
   setSettings: (patch: Partial<Settings>) => void;
+  /** When set, a manual cloud backup makes the local copies first, then sends them. */
+  games?: Game[];
   /** Drawn in place, for the Backups section, rather than behind a button. */
   embedded?: boolean;
 }) {
@@ -57,6 +63,8 @@ export function CloudPanel({
   const [placed, setPlaced] = useState(false);
   const [folder, setFolder] = useState('');
   const [version, setVersion] = useState('');
+  const [update, setUpdate] = useState(false);
+  const [latest, setLatest] = useState('');
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -79,6 +87,8 @@ export function CloudPanel({
         setPlaced(status.placed);
         setFolder(status.folder ?? '');
         setVersion(status.version);
+        setUpdate(!!status.update);
+        setLatest(status.latest ?? '');
       })
       .catch(() => setReady(false));
   };
@@ -121,6 +131,36 @@ export function CloudPanel({
       setPlaced(status.placed);
       setFolder(status.folder ?? '');
       setVersion(status.version);
+      setUpdate(!!status.update);
+      setLatest(status.latest ?? '');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const backupToCloud = async () => {
+    if (!cloud?.remote) {
+      setError('Sign in first.');
+      return;
+    }
+    setBusy('up');
+    setError(null);
+    setNote(null);
+    try {
+      let copied = 0;
+      for (const game of games) {
+        if (game.planned) continue;
+        try {
+          await backupSave(game.id, game.title, settings.saves?.dirs?.[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+          copied += 1;
+        } catch {
+          // A game with no save folder is skipped. The others still go up.
+        }
+      }
+      const sent = await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot);
+      setNote(games.length > 0 && copied === 0 ? `${sent} No new save folder was copied first.` : sent);
     } catch (e) {
       fail(e);
     } finally {
@@ -245,11 +285,12 @@ export function CloudPanel({
                     {busy === 'fetch' ? 'Getting rclone…' : ready ? 'Keep a copy in Orbit' : 'Get rclone'}
                   </button>
                 )}
-                {placed && (
+                {placed && update && (
                   <button
                     type="button"
                     disabled={!isNative() || busy !== null}
                     onClick={() => void getRclone(true)}
+                    title={latest ? `The current release is ${latest}` : 'A newer rclone is out'}
                     className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
                   >
                     {busy === 'update' ? 'Updating…' : 'Update rclone'}
@@ -258,7 +299,7 @@ export function CloudPanel({
               </div>
             </div>
             <p className="text-xs text-muted">
-              If rclone is already on this PC, that one is used. Otherwise Orbit keeps its own copy in its folder. Neither is a system install, and a newer copy replaces only that folder.
+              If rclone is already on this PC, that one is used. Otherwise Orbit keeps its own copy in its folder. Neither is a system install. Update only shows when a newer release is out.
             </p>
             {folder && (
               <p className="break-all font-mono text-[11px] text-muted" title="Where Orbit keeps rclone">
@@ -295,9 +336,19 @@ export function CloudPanel({
               </div>
               <p className="mt-1 text-[11px] text-muted">
                 {automatic
-                  ? 'A finished backup is sent up. Send and Bring down still work whenever you want them.'
-                  : 'Nothing is sent unless you press Send. A backup on this PC stays here.'}
+                  ? 'A finished backup is sent up. You can still send the copies yourself.'
+                  : 'Nothing is sent on its own. Back up to the cloud when you want the copies sent.'}
               </p>
+              <button
+                type="button"
+                disabled={!isNative() || !cloud?.remote || busy !== null}
+                onClick={() => void backupToCloud()}
+                title={cloud?.remote ? 'Make the copies, then send them' : 'Sign in first'}
+                className={cn(btnAccent, 'mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+              >
+                {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+                {busy === 'up' ? 'Backing up…' : 'Back up to the cloud'}
+              </button>
             </div>
 
             {!isNative() && <p className="text-xs text-muted">Cloud copies need the desktop app.</p>}

@@ -1399,8 +1399,9 @@ fn saves_status(orbit: State<'_, Orbit>, backup_root: Option<String>) -> saves::
 }
 
 #[tauri::command]
-fn cloud_status(orbit: State<'_, Orbit>) -> cloud::CloudStatus {
-    cloud::status(orbit.store.root())
+async fn cloud_status(orbit: State<'_, Orbit>) -> cloud::CloudStatus {
+    let root = orbit.store.root().to_path_buf();
+    cloud::status(&root).await
 }
 
 /// Download rclone into Orbit's folder. Nothing is installed on the system.

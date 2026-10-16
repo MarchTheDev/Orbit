@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
+import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, RefreshCw, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -14,6 +14,7 @@ import {
   savePlaceOf,
   savesStatus,
   suggestSaves,
+  cloudCopy,
   sendCloudAfterBackup,
   type SaveBackup,
   type SaveStatus,
@@ -50,6 +51,7 @@ export function SavesView({
   const [status, setStatus] = useState<SaveStatus | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [backingAll, setBackingAll] = useState(false);
+  const [sendingCloud, setSendingCloud] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; copies: SaveBackup[] | null } | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<Game | null>(null);
@@ -155,6 +157,30 @@ export function SavesView({
     );
   };
 
+  const backupToCloud = async () => {
+    const cloud = settings.saves?.cloud;
+    if (!isNative() || sendingCloud || !cloud?.remote) return;
+    setSendingCloud(true);
+    let copied = 0;
+    for (const game of listed) {
+      try {
+        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+        copied += 1;
+      } catch {
+        // A game with no save folder is skipped. The others still go up.
+      }
+    }
+    setSavedTick((n) => n + 1);
+    try {
+      const sent = await cloudCopy(true, cloud.remote, !!cloud.own, settings.saves?.backupRoot);
+      say(copied > 0 ? sent : `${sent} No new save folder was copied first.`);
+    } catch (e) {
+      say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
+    } finally {
+      setSendingCloud(false);
+    }
+  };
+
   const runGame = async (fn: () => Promise<unknown>, done: string) => {
     setMenuError(null);
     try {
@@ -249,7 +275,7 @@ export function SavesView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <CloudPanel settings={settings} setSettings={setSettings} />
+          <CloudPanel settings={settings} setSettings={setSettings} games={games} />
           {rows.length > 0 && (
             <button
               type="button"
@@ -271,6 +297,18 @@ export function SavesView({
             >
               {showHidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {showHidden ? 'Hide them again' : `Show ${hiddenIds.length} hidden`}
+            </button>
+          )}
+          {isNative() && settings.saves?.cloud?.remote && (
+            <button
+              type="button"
+              disabled={sendingCloud}
+              onClick={() => void backupToCloud()}
+              title="Make the copies, then send them. Nothing is sent on its own when sync is manual."
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+            >
+              <CloudUpload className="size-4" />
+              {sendingCloud ? 'Backing up…' : 'Back up to the cloud'}
             </button>
           )}
           {isNative() && listed.length > 0 && (
