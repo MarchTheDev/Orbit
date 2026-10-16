@@ -3,13 +3,11 @@ import { listen } from '@tauri-apps/api/event';
 import { Cloud, CloudDownload, CloudUpload, ExternalLink, LoaderCircle } from 'lucide-react';
 import type { Game, Settings } from '../../types';
 import { openExternal } from '../../services/desktop';
-import { CheckboxInline } from '../ui/Checkbox';
 import { Cover } from '../ui/Cover';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
 import {
-  cloudAttach,
   cloudAccounts,
   cloudAutoOn,
   cloudConnect,
@@ -17,9 +15,9 @@ import {
   cloudFetch,
   cloudForget,
   cloudGameOf,
+  cloudLabel,
   cloudMove,
   cloudPage,
-  cloudRemotes,
   cloudSkipOf,
   cloudStatus,
   cloudTransfer,
@@ -33,11 +31,11 @@ import {
   type CloudAccount,
 } from '../../services/native';
 
-const OAUTH = [
-  { id: 'drive', label: 'Google Drive' },
-  { id: 'onedrive', label: 'OneDrive' },
-  { id: 'dropbox', label: 'Dropbox' },
-  { id: 'box', label: 'Box' },
+const SERVICES = [
+  { id: 'drive', label: 'Google Drive', kind: 'oauth' },
+  { id: 'dropbox', label: 'Dropbox', kind: 'oauth' },
+  { id: 'mega', label: 'MEGA', kind: 'account' },
+  { id: 'protondrive', label: 'Proton Drive', kind: 'account' },
 ] as const;
 
 const SERVERS = [
@@ -90,7 +88,7 @@ export function CloudAccounts({
       {accounts.map((account) => (
         <div key={account.remote} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel/50 px-3 py-2.5">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{account.provider || account.remote}</p>
+            <p className="truncate text-sm font-medium">{cloudLabel(account, accounts)}</p>
             {account.own && <p className="truncate text-[11px] text-muted">Already on this PC</p>}
           </div>
           <button
@@ -103,6 +101,127 @@ export function CloudAccounts({
           </button>
         </div>
       ))}
+      {error && <p className="text-xs text-rose-300">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * rclone lives with the backup settings, not on the cloud page.
+ *
+ * The cloud page only mentions it when a newer copy is out, or when it is
+ * missing and the player needs to know where to get it.
+ */
+export function CloudTools() {
+  const [ready, setReady] = useState<boolean | null>(null);
+  const [placed, setPlaced] = useState(false);
+  const [folder, setFolder] = useState('');
+  const [version, setVersion] = useState('');
+  const [update, setUpdate] = useState(false);
+  const [latest, setLatest] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = (status: Awaited<ReturnType<typeof cloudStatus>>) => {
+    setReady(status.ready);
+    setPlaced(status.placed);
+    setFolder(status.folder ?? '');
+    setVersion(status.version);
+    setUpdate(!!status.update);
+    setLatest(status.latest ?? '');
+  };
+
+  useEffect(() => {
+    if (!isNative()) {
+      setReady(false);
+      return;
+    }
+    void cloudStatus().then(apply).catch(() => setReady(false));
+  }, []);
+
+  const get = async (replace = false) => {
+    setBusy(replace ? 'update' : 'fetch');
+    setError(null);
+    setNote(null);
+    try {
+      setNote(await cloudFetch(replace));
+      apply(await cloudStatus());
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ''));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const check = async () => {
+    setBusy('check');
+    setError(null);
+    setNote(null);
+    try {
+      const status = await cloudStatus();
+      apply(status);
+      setNote(
+        !status.ready
+          ? 'rclone is not here yet.'
+          : status.update
+            ? `A newer rclone is out${status.latest ? `: ${status.latest}` : ''}.`
+            : 'rclone is up to date.',
+      );
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ''));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const where = ready === null
+    ? 'Looking…'
+    : !ready
+      ? 'Not here yet.'
+      : placed
+        ? `Orbit's rclone${version ? ` · ${version}` : ''}`
+        : `rclone already on this PC${version ? ` · ${version}` : ''}`;
+
+  return (
+    <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
+      <div>
+        <h4 className="text-sm font-medium">rclone</h4>
+        <p className="text-[11px] text-muted">{where}</p>
+      </div>
+      {folder && <p className="break-all font-mono text-[11px] text-muted">{folder}</p>}
+      <div className="flex flex-wrap gap-2">
+        {(ready === false || (ready && !placed)) && (
+          <button
+            type="button"
+            disabled={!isNative() || busy !== null}
+            onClick={() => void get(false)}
+            className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+          >
+            {busy === 'fetch' ? 'Getting rclone…' : ready ? 'Keep a copy in Orbit' : 'Get rclone'}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={!isNative() || busy !== null}
+          onClick={() => void check()}
+          className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+        >
+          {busy === 'check' ? 'Checking…' : 'Check for an update'}
+        </button>
+        {update && (
+          <button
+            type="button"
+            disabled={!isNative() || busy !== null}
+            onClick={() => void get(true)}
+            title={latest ? `The current release is ${latest}` : 'A newer rclone is out'}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+          >
+            {busy === 'update' ? 'Updating…' : 'Update rclone'}
+          </button>
+        )}
+      </div>
+      {note && <p className="text-xs text-fg">{note}</p>}
       {error && <p className="text-xs text-rose-300">{error}</p>}
     </div>
   );
@@ -134,9 +253,6 @@ export function CloudPanel({
 
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
-  const [placed, setPlaced] = useState(false);
-  const [rcloneFolder, setRcloneFolder] = useState('');
-  const [version, setVersion] = useState('');
   const [update, setUpdate] = useState(false);
   const [latest, setLatest] = useState('');
   const [authUrl, setAuthUrl] = useState<string | null>(null);
@@ -144,11 +260,15 @@ export function CloudPanel({
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [server, setServer] = useState<(typeof SERVERS)[number]['id'] | null>(null);
+  const [accountKind, setAccountKind] = useState<'mega' | 'protondrive' | null>(null);
   const [host, setHost] = useState('');
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
   const [url, setUrl] = useState('');
-  const [remotes, setRemotes] = useState<string[] | null>(null);
+  const [email, setEmail] = useState('');
+  const [accountPass, setAccountPass] = useState('');
+  const [code, setCode] = useState('');
+  const [mailbox, setMailbox] = useState('');
   const [gameQuery, setGameQuery] = useState('');
 
   const refresh = () => {
@@ -159,9 +279,6 @@ export function CloudPanel({
     void cloudStatus()
       .then((status) => {
         setReady(status.ready);
-        setPlaced(status.placed);
-        setRcloneFolder(status.folder ?? '');
-        setVersion(status.version);
         setUpdate(!!status.update);
         setLatest(status.latest ?? '');
       })
@@ -175,8 +292,12 @@ export function CloudPanel({
   useEffect(() => {
     if (!isNative()) return;
     let stop: (() => void) | undefined;
-    void listen<{ url?: string; opened?: boolean; freeing?: boolean } | string>('cloud-auth', (event) => {
+    void listen<{ url?: string; opened?: boolean; freeing?: boolean; note?: string } | string>('cloud-auth', (event) => {
       const payload = event.payload;
+      if (payload && typeof payload !== 'string' && payload.note) {
+        setNote(payload.note);
+        return;
+      }
       if (payload && typeof payload !== 'string' && payload.freeing) {
         setNote('Windows is holding the sign-in port. Allow the prompt. WSL or Docker may pause for a moment, then the browser opens.');
         return;
@@ -234,27 +355,30 @@ export function CloudPanel({
     }
   };
 
-  const useRemote = async (remote: string) => {
-    setBusy(remote);
+  const connectAccount = async (provider: 'mega' | 'protondrive') => {
+    setBusy(provider);
     setError(null);
     setNote(null);
+    const used = new Set(accounts.map((item) => item.remote));
+    let name = freshRemote();
+    while (used.has(name)) name = freshRemote();
+    const address = email.trim();
     try {
-      await cloudAttach(remote);
-      const rest = accounts.filter((item) => item.remote !== remote);
-      write({ clouds: [...rest, { remote, provider: remote, own: true, on: true }] });
-      setNote(`Using ${remote}. Disconnecting it here does not remove it from rclone.`);
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const loadRemotes = async () => {
-    setBusy('remotes');
-    setError(null);
-    try {
-      setRemotes(await cloudRemotes());
+      const label = await cloudConnect(provider, {
+        user: address,
+        password: accountPass,
+        code,
+        mailbox: provider === 'protondrive' ? mailbox : undefined,
+        name,
+      });
+      setAccountPass('');
+      setCode('');
+      setMailbox('');
+      write({
+        clouds: [...accounts, { remote: name, provider: label, own: false, on: true, account: address }],
+      });
+      setNote(`Connected to ${label}.`);
+      setAccountKind(null);
     } catch (e) {
       fail(e);
     } finally {
@@ -350,40 +474,24 @@ export function CloudPanel({
 
   const query = gameQuery.trim().toLowerCase();
   const shown = known.filter((game) => !query || game.title.toLowerCase().includes(query));
-  const where = !ready ? 'Looking for rclone…' : placed ? "Orbit's rclone" : ready ? 'rclone already on this PC' : 'rclone is not here yet';
 
   const controls = (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-fg">
-          {where}{version ? ` · ${version}` : ''}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {(ready === false || (ready && !placed)) && (
-            <button
-              type="button"
-              disabled={!isNative() || busy !== null}
-              onClick={() => void getRclone(false)}
-              className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-            >
-              {busy === 'fetch' ? 'Getting rclone…' : ready ? 'Keep a copy in Orbit' : 'Get rclone'}
-            </button>
-          )}
-          {placed && update && (
-            <button
-              type="button"
-              disabled={!isNative() || busy !== null}
-              onClick={() => void getRclone(true)}
-              title={latest ? `The current release is ${latest}` : 'A newer rclone is out'}
-              className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
-            >
-              {busy === 'update' ? 'Updating…' : 'Update rclone'}
-            </button>
-          )}
+      {ready === false && (
+        <p className="text-xs text-muted">rclone is not here yet. Get it in Settings, under Backups.</p>
+      )}
+      {update && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-accent bg-accent/15 px-3 py-2 shadow-[0_0_24px_-12px_var(--c-accent)]">
+          <p className="text-xs text-fg">A newer rclone is out{latest ? ` · ${latest}` : ''}.</p>
+          <button
+            type="button"
+            disabled={!isNative() || busy !== null}
+            onClick={() => void getRclone(true)}
+            className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+          >
+            {busy === 'update' ? 'Updating…' : 'Update rclone'}
+          </button>
         </div>
-      </div>
-      {rcloneFolder && (
-        <p className="break-all font-mono text-[11px] text-muted">{rcloneFolder}</p>
       )}
 
       <section className="space-y-2">
@@ -399,6 +507,7 @@ export function CloudPanel({
           {accounts.map((account) => (
             <CloudCard
               key={account.remote}
+              title={cloudLabel(account, accounts)}
               account={account}
               others={accounts.filter((item) => item.remote !== account.remote)}
               busy={busy}
@@ -415,21 +524,64 @@ export function CloudPanel({
       <section className="space-y-3">
         <div>
           <h3 className="text-sm font-medium">Add a cloud</h3>
-          <p className="text-[11px] text-muted">Sign in with the browser. More than one can stay connected.</p>
+          <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {OAUTH.map((item) => (
+          {SERVICES.map((item) => (
             <button
               key={item.id}
               type="button"
               disabled={!isNative() || !ready || busy !== null}
-              onClick={() => void connect(item.id)}
-              className="rounded-2xl border border-line/70 bg-bg/30 px-3 py-3 text-sm font-semibold text-fg transition hover:border-accent/40 disabled:opacity-50"
+              onClick={() => {
+                if (item.kind === 'account') {
+                  setServer(null);
+                  setAccountKind(accountKind === item.id ? null : item.id);
+                  return;
+                }
+                setAccountKind(null);
+                void connect(item.id);
+              }}
+              className={cn(
+                'rounded-2xl border px-3 py-3 text-sm font-semibold transition disabled:opacity-50',
+                accountKind === item.id
+                  ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                  : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
+              )}
             >
               {busy === item.id ? 'Waiting…' : item.label}
             </button>
           ))}
         </div>
+        {accountKind && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-muted">Email</span>
+              <input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} autoComplete="off" />
+            </label>
+            <label className="sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-muted">Password</span>
+              <input className={inputCls} type="password" value={accountPass} onChange={(e) => setAccountPass(e.target.value)} autoComplete="new-password" />
+            </label>
+            <label className={accountKind === 'protondrive' ? '' : 'sm:col-span-2'}>
+              <span className="mb-1 block text-[11px] text-muted">Two-factor code, if this account asks for one</span>
+              <input className={inputCls} value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} autoComplete="one-time-code" />
+            </label>
+            {accountKind === 'protondrive' && (
+              <label>
+                <span className="mb-1 block text-[11px] text-muted">Mailbox password, if this account has one</span>
+                <input className={inputCls} type="password" value={mailbox} onChange={(e) => setMailbox(e.target.value)} autoComplete="new-password" />
+              </label>
+            )}
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void connectAccount(accountKind)}
+              className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+            >
+              {busy === accountKind ? 'Connecting…' : 'Connect'}
+            </button>
+          </div>
+        )}
 
         <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
           <div>
@@ -442,7 +594,10 @@ export function CloudPanel({
                 key={item.id}
                 type="button"
                 disabled={!isNative() || !ready || busy !== null}
-                onClick={() => setServer(server === item.id ? null : item.id)}
+                onClick={() => {
+                  setAccountKind(null);
+                  setServer(server === item.id ? null : item.id);
+                }}
                 className={cn(
                   'rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition disabled:opacity-50',
                   server === item.id
@@ -487,36 +642,6 @@ export function CloudPanel({
           )}
         </div>
 
-        <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
-          <div>
-            <h4 className="text-sm font-medium">Already set up in rclone</h4>
-            <p className="text-[11px] text-muted">A connection this PC already has. Removing it here does not delete it from rclone.</p>
-          </div>
-          <button
-            type="button"
-            disabled={!isNative() || !ready || busy !== null}
-            onClick={() => void loadRemotes()}
-            className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
-          >
-            {busy === 'remotes' ? 'Looking…' : remotes ? 'Look again' : 'Show connections'}
-          </button>
-          {remotes && (
-            <div className="flex flex-wrap gap-2">
-              {remotes.length === 0 && <p className="text-[11px] text-muted">None found.</p>}
-              {remotes.map((remote) => (
-                <button
-                  key={remote}
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void useRemote(remote)}
-                  className="rounded-2xl border border-line/70 bg-bg/30 px-3 py-2 text-xs font-semibold text-fg hover:border-accent/40 disabled:opacity-50"
-                >
-                  {busy === remote ? 'Adding…' : remote}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </section>
 
       <section className="space-y-2">
@@ -577,11 +702,24 @@ export function CloudPanel({
       </section>
 
       <section className="space-y-2">
-        <CheckboxInline
-          checked={auto}
-          onChange={(on) => write({ cloudAuto: on })}
-          label="Also send after a backup, to the clouds that are marked"
-        />
+        <button
+          type="button"
+          aria-pressed={auto}
+          onClick={() => write({ cloudAuto: !auto })}
+          className={cn(
+            'w-full rounded-2xl border px-4 py-3 text-left transition',
+            auto
+              ? 'border-accent bg-accent/15 shadow-[0_0_24px_-12px_var(--c-accent)]'
+              : 'border-line/70 bg-bg/30 hover:border-accent/40',
+          )}
+        >
+          <span className="block text-sm font-semibold">{auto ? 'Sends after a backup' : 'Send after a backup'}</span>
+          <span className={cn('mt-0.5 block text-[11px]', auto ? 'text-accent' : 'text-muted')}>
+            {auto
+              ? 'A backup also goes to the lit clouds. Click to keep the copy on this PC until you send it.'
+              : 'Click to send to the lit clouds after a backup. Off keeps the copy on this PC until you send it.'}
+          </span>
+        </button>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -649,6 +787,7 @@ export function CloudPanel({
 }
 
 function CloudCard({
+  title,
   account,
   others,
   busy,
@@ -658,6 +797,7 @@ function CloudCard({
   onCopyFrom,
   fail,
 }: {
+  title: string;
   account: CloudAccount;
   others: CloudAccount[];
   busy: string | null;
@@ -705,8 +845,6 @@ function CloudCard({
     }
   };
 
-  const known = OAUTH.some((item) => item.label === account.provider);
-
   const marked = account.on !== false;
 
   return (
@@ -720,7 +858,7 @@ function CloudCard({
     >
       <div className="flex items-start justify-between gap-2">
         <button type="button" onClick={() => onIncluded(!marked)} className="min-w-0 text-left">
-          <span className="block truncate text-sm font-semibold">{account.provider || account.remote}</span>
+          <span className="block truncate text-sm font-semibold">{title}</span>
           <span className={cn('mt-0.5 block text-[11px]', marked ? 'text-accent' : 'text-muted')}>
             {marked ? 'Backups go here' : 'Click to include'}
           </span>
@@ -732,7 +870,7 @@ function CloudCard({
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-accent"
           >
             <ExternalLink className="size-3.5" />
-            {known ? `Open ${account.provider}` : 'Open'}
+            Open {account.provider || 'cloud'}
           </button>
         )}
       </div>
@@ -795,7 +933,7 @@ function CloudCard({
               onClick={() => onCopyFrom(other)}
               className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
             >
-              {busy === `copy-${account.remote}` ? 'Copying…' : other.provider}
+              {busy === `copy-${account.remote}` ? 'Copying…' : cloudLabel(other, [account, ...others])}
             </button>
           ))}
         </div>

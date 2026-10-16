@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, Search } from 'lucide-react';
+import { ArchiveRestore, ChevronDown, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -16,10 +16,12 @@ import {
   suggestSaves,
   cloudAccounts,
   cloudGameOf,
+  cloudLabel,
   cloudSkipOf,
   chosenClouds,
   sendCloudAfterBackup,
   sendToClouds,
+  type CloudAccount,
   type SaveBackup,
   type SaveStatus,
 } from '../services/native';
@@ -174,11 +176,13 @@ export function SavesView({
     });
   };
   const clouds = cloudAccounts(settings.saves);
-  const sendGameToCloud = async (game: Game, which: 'chosen' | 'all' = 'chosen') => {
+  const sendGameToCloud = async (game: Game, target: 'chosen' | 'all' | CloudAccount = 'chosen') => {
     if (clouds.length === 0) throw new Error('Sign in to a cloud first.');
+    const list = target === 'all' ? clouds : target === 'chosen' ? chosenClouds(clouds) : [target];
+    if (list.length === 0) throw new Error('Mark a cloud first, or pick one.');
     await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
     try {
-      await sendToClouds(clouds, which, settings.saves?.backupRoot, [cloudGameOf(game)]);
+      await sendToClouds(list, 'all', settings.saves?.backupRoot, [cloudGameOf(game)]);
     } catch (e) {
       throw new Error(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
     }
@@ -286,20 +290,34 @@ export function SavesView({
             `Backed up ${menuGame.title}`,
           ),
         },
-        {
-          label: clouds.length > 1 ? 'Back up to marked clouds' : 'Back up to the cloud',
-          icon: CloudUpload,
-          disabled: !isNative(),
-          onSelect: () => void runGame(() => sendGameToCloud(menuGame, 'chosen'), `Sent ${menuGame.title} to the cloud`),
-        },
         ...(clouds.length > 1
-          ? [{
-              label: 'Back up to all clouds',
+          ? [
+              { kind: 'label' as const, label: 'Back up to the cloud' },
+              ...clouds.map((cloud) => ({
+                label: cloudLabel(cloud, clouds),
+                icon: CloudUpload,
+                disabled: !isNative(),
+                onSelect: () => void runGame(
+                  () => sendGameToCloud(menuGame, cloud),
+                  `Sent ${menuGame.title} to ${cloudLabel(cloud, clouds)}`,
+                ),
+              })),
+              {
+                label: 'All clouds',
+                icon: CloudUpload,
+                disabled: !isNative(),
+                onSelect: () => void runGame(() => sendGameToCloud(menuGame, 'all'), `Sent ${menuGame.title} to every cloud`),
+              },
+            ]
+          : [{
+              label: 'Back up to the cloud',
               icon: CloudUpload,
               disabled: !isNative(),
-              onSelect: () => void runGame(() => sendGameToCloud(menuGame, 'all'), `Sent ${menuGame.title} to every cloud`),
-            }]
-          : []),
+              onSelect: () => void runGame(
+                () => sendGameToCloud(menuGame, clouds[0] ?? 'chosen'),
+                `Sent ${menuGame.title} to the cloud`,
+              ),
+            }]),
         {
           label: 'Restore latest',
           icon: ArchiveRestore,
@@ -526,7 +544,8 @@ export function SavesView({
                     refreshToken={savedTick}
                     onAuto={(on) => setAuto(game.id, on)}
                     onDir={(dir) => setDir(game.id, dir)}
-                    onCloud={() => sendGameToCloud(game)}
+                    clouds={clouds}
+                    onCloud={(target) => sendGameToCloud(game, target)}
                     looked={looked.has(game.id)}
                   />
                 </div>
@@ -627,6 +646,85 @@ function keepHiddenSlots(previous: string[], nextVisible: string[], hiddenIds: s
   return result;
 }
 
+function CloudSendButton({
+  clouds,
+  busy,
+  disabled,
+  onSend,
+}: {
+  clouds: CloudAccount[];
+  busy: boolean;
+  disabled: boolean;
+  onSend: (target: CloudAccount | 'all') => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  if (clouds.length <= 1) {
+    return (
+      <button
+        type="button"
+        disabled={disabled || busy}
+        onClick={() => onSend(clouds[0] ?? 'all')}
+        className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
+      >
+        <CloudUpload className="size-3.5" />
+        To the cloud
+      </button>
+    );
+  }
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        disabled={disabled || busy}
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
+      >
+        <CloudUpload className="size-3.5" />
+        To the cloud
+        <ChevronDown className="size-3.5" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-30 mt-1 min-w-52 rounded-xl border border-line bg-panel p-1 shadow-xl">
+          {clouds.map((cloud) => (
+            <button
+              key={cloud.remote}
+              type="button"
+              className="block w-full rounded-lg px-3 py-1.5 text-left text-xs text-fg hover:bg-accent/15"
+              onClick={() => {
+                setOpen(false);
+                onSend(cloud);
+              }}
+            >
+              {cloudLabel(cloud, clouds)}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="block w-full rounded-lg px-3 py-1.5 text-left text-xs font-semibold text-fg hover:bg-accent/15"
+            onClick={() => {
+              setOpen(false);
+              onSend('all');
+            }}
+          >
+            All clouds
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SaveRow({
   game,
   auto,
@@ -635,6 +733,7 @@ function SaveRow({
   refreshToken,
   onAuto,
   onDir,
+  clouds,
   onCloud,
   looked,
 }: {
@@ -645,7 +744,8 @@ function SaveRow({
   refreshToken: number;
   onAuto: (on: boolean) => void;
   onDir: (dir: string) => void;
-  onCloud: () => Promise<void>;
+  clouds: CloudAccount[];
+  onCloud: (target: CloudAccount | 'all') => Promise<void>;
   looked: boolean;
 }) {
   const [busy, setBusy] = useState(false);
@@ -722,14 +822,15 @@ function SaveRow({
           <HardDriveDownload className="size-3.5" />
           Back up now
         </button>
-        <button
-          disabled={busy || !isNative()}
-          onClick={() => void run(onCloud, `Sent ${game.title} to the cloud`)}
-          className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
-        >
-          <CloudUpload className="size-3.5" />
-          To the cloud
-        </button>
+        <CloudSendButton
+          clouds={clouds}
+          busy={busy}
+          disabled={!isNative()}
+          onSend={(target) => void run(
+            () => onCloud(target),
+            target === 'all' ? `Sent ${game.title} to every cloud` : `Sent ${game.title} to ${cloudLabel(target, clouds)}`,
+          )}
+        />
         <button
           disabled={busy || !isNative()}
           onClick={() => void run(() => restoreSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings)), `Restored ${game.title}`)}

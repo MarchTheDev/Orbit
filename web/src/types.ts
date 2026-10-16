@@ -538,6 +538,7 @@ export interface Settings {
      *
      * `on` missing means that cloud is included. `own` is a remote rclone already
      * had. Orbit does not delete that one. `folder` empty means Orbit.
+     * `account` is the email, when the service signed in with one.
      *
      * `cloud` is the older single connection. It is only read when `clouds` is
      * missing, then replaced.
@@ -548,6 +549,7 @@ export interface Settings {
       own: boolean;
       folder?: string;
       on?: boolean;
+      account?: string;
     }[];
     /** After a backup, send to the clouds that are included. */
     cloudAuto?: boolean;

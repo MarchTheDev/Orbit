@@ -881,7 +881,7 @@ export function cloudFetch(replace = false): Promise<string> {
 
 export function cloudConnect(
   provider: string,
-  fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null; name?: string | null } = {},
+  fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null; name?: string | null; code?: string | null; mailbox?: string | null } = {},
 ): Promise<string> {
   return call(
     'cloud_connect',
@@ -894,6 +894,8 @@ export function cloudConnect(
       extra: !!fields.extra,
       folder: fields.folder ?? null,
       name: fields.name ?? null,
+      code: fields.code ?? null,
+      mailbox: fields.mailbox ?? null,
     },
     async () => {
       throw new Error('Cloud copies need the desktop app.');
@@ -984,6 +986,19 @@ export interface CloudAccount {
   own: boolean;
   folder?: string;
   on?: boolean;
+  /** The email, when this service signed in with one. */
+  account?: string;
+}
+
+/** A name that tells two accounts of the same service apart. */
+export function cloudLabel(account: CloudAccount, all: CloudAccount[]): string {
+  const name = account.provider || account.remote;
+  const email = account.account?.trim();
+  if (email) return `${name} · ${email}`;
+  const same = all.filter((item) => item.provider === account.provider);
+  if (same.length < 2) return name;
+  const index = same.findIndex((item) => item.remote === account.remote) + 1;
+  return index > 0 ? `${name} ${index}` : name;
 }
 
 /** Connected clouds, including one saved before more than one was allowed. */
@@ -1052,7 +1067,7 @@ export async function sendToClouds(
     notes.push(await cloudCopy(true, account.remote, account.own, backupRoot, account.folder, only));
   }
   if (targets.length === 1) return notes[0] ?? 'Sent the copies.';
-  return `Sent the copies to ${targets.map((account) => account.provider).join(', ')}.`;
+  return `Sent the copies to ${targets.map((account) => cloudLabel(account, accounts)).join(', ')}.`;
 }
 
 /**

@@ -142,16 +142,23 @@ pub fn connect(
     url: &str,
     remote_name: &str,
     folder: &str,
+    code: &str,
+    mailbox: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let config = config_path(data_dir)?;
     let provider = provider.trim();
     let remote_name = orbit_name(remote_name)?;
     let folder = clean_folder(folder)?;
+    if matches!(provider, "drive" | "dropbox" | "onedrive" | "box") {
+        prepare_oauth_port(&config, tell)?;
+    }
     let label = match provider {
         "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open)?,
         "onedrive" => oauth_onedrive(&bin, &config, remote_name, open)?,
+        "mega" | "protondrive" => account_login(&bin, &config, provider, remote_name, user, password, code, mailbox)?,
         "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, remote_name, host, user, password, url)?,
         other => return Err(format!("Orbit does not know how to connect {other}.")),
     };
@@ -165,7 +172,7 @@ pub fn connect(
 
 /// Remotes rclone already has, from its own config, not Orbit's.
 pub fn remotes(data_dir: &Path) -> Result<Vec<String>, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let output = rclone(&bin, None)
         .arg("listremotes")
         .output()
@@ -183,7 +190,7 @@ pub fn remotes(data_dir: &Path) -> Result<Vec<String>, String> {
 /// Check a remote the player already has. Their remote is not deleted if the
 /// check fails, and Orbit's config is not used.
 pub fn attach(data_dir: &Path, remote: &str, folder: &str) -> Result<(), String> {
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let remote = checked_remote(remote)?;
     let folder = clean_folder(folder)?;
     mkdir(&bin, None, remote, &folder)
@@ -226,7 +233,7 @@ pub fn copy(
     folder: Option<&str>,
     only: Option<&[CloudGame]>,
 ) -> Result<String, String> {
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let remote = checked_remote(remote)?;
     let folder = clean_folder(folder.unwrap_or("Orbit"))?;
     let source = saves::root_of(data_dir, backup_root);
@@ -269,7 +276,7 @@ pub fn move_folder(data_dir: &Path, remote: &str, own: bool, from: &str, to: &st
     if to.starts_with(&format!("{from}/")) || from.starts_with(&format!("{to}/")) {
         return Err("Choose a path that is not inside the current one.".into());
     }
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let config = config_for(data_dir, own)?;
     let output = rclone(&bin, config.as_deref())
         .args(["moveto"])
@@ -310,7 +317,7 @@ pub fn transfer(
         return Err("That is already this cloud.".into());
     }
     let folder = clean_folder(folder.unwrap_or("Orbit"))?;
-    let bin = binary(data_dir).ok_or_else(|| "Open Cloud on the Saves page and get rclone first.".to_string())?;
+    let bin = binary(data_dir).ok_or_else(|| "Get rclone in Settings, under Backups, first.".to_string())?;
     let from_config = config_for(data_dir, from_own)?;
     let to_config = config_for(data_dir, to_own)?;
     let mut cleanup = None;
@@ -388,6 +395,8 @@ pub fn page(data_dir: &Path, remote: &str, own: bool, provider: &str) -> Option<
         Some("onedrive") => Some("https://onedrive.live.com/".into()),
         Some("dropbox") => Some("https://www.dropbox.com/home".into()),
         Some("box") => Some("https://app.box.com/".into()),
+        Some("mega") => Some("https://mega.nz/fm".into()),
+        Some("protondrive") => Some("https://drive.proton.me/".into()),
         _ => None,
     }
 }
@@ -488,6 +497,174 @@ fn server(
     Ok(label_of(provider).into())
 }
 
+/// MEGA and Proton Drive sign in with the account itself, not a browser page.
+fn account_login(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    remote_name: &str,
+    user: &str,
+    password: &str,
+    code: &str,
+    mailbox: &str,
+) -> Result<String, String> {
+    let user = user.trim();
+    let code = code.trim();
+    let mailbox = mailbox.trim();
+    if user.is_empty() {
+        return Err("An email address is needed.".into());
+    }
+    if password.is_empty() {
+        return Err("A password is needed.".into());
+    }
+    let _ = delete_named(bin, config, remote_name);
+    let mut cmd = rclone(bin, Some(config));
+    // A closed input must not sit on a question. `--obscure` hides the
+    // password itself, so a password that looks like an already-hidden one
+    // is not stored twice and then rejected.
+    cmd.arg("--auto-confirm");
+    cmd.args(["config", "create", remote_name, provider]);
+    if provider == "protondrive" {
+        cmd.args(["username", user, "password", password]);
+        if !mailbox.is_empty() {
+            cmd.args(["mailbox_password", mailbox]);
+        }
+    } else {
+        cmd.args(["user", user, "pass", password]);
+    }
+    if !code.is_empty() {
+        cmd.args(["2fa", code]);
+    }
+    cmd.arg("--obscure");
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Could not save that account: {e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let out_thread = std::thread::spawn(move || read_pipe(stdout));
+    let err_thread = std::thread::spawn(move || read_pipe(stderr));
+    let started = Instant::now();
+    let status = loop {
+        if started.elapsed() > Duration::from_secs(90) {
+            let _ = child.kill();
+            let _ = out_thread.join();
+            let _ = err_thread.join();
+            return Err("That account did not answer. Check the email, password, and code.".into());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = out_thread.join();
+                let _ = err_thread.join();
+                return Err(format!("rclone stopped while saving that account: {e}"));
+            }
+        }
+    };
+    let mut detail = err_thread.join().unwrap_or_default();
+    if detail.is_empty() {
+        detail = out_thread.join().unwrap_or_default();
+    } else {
+        let _ = out_thread.join();
+    }
+    if !status.success() {
+        let mut shown = String::from_utf8_lossy(&detail).to_string();
+        for secret in [password, mailbox, code] {
+            if secret.len() >= 4 {
+                shown = shown.replace(secret, "••••");
+            }
+        }
+        return Err(public_error(shown.as_bytes(), "That account could not be saved."));
+    }
+    Ok(label_of(provider).into())
+}
+
+fn read_pipe(pipe: Option<impl Read>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_end(&mut buf);
+    }
+    buf
+}
+
+/// A finished sign-in can leave 127.0.0.1:53682 busy with nobody listening.
+/// That is not another sign-in. Stop an Orbit rclone that is still waiting,
+/// then wait the port out instead of refusing the next cloud.
+fn prepare_oauth_port(config: &Path, tell: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
+    // The pid file is cheap. Looking through every process waits, so that
+    // only happens once the port is actually busy.
+    clear_stale_sign_in(config);
+    let started = Instant::now();
+    let mut told = false;
+    let mut released = false;
+    loop {
+        match auth_port() {
+            AuthPort::Free | AuthPort::Unknown => return Ok(()),
+            AuthPort::Blocked => return Ok(()),
+            AuthPort::Busy => {
+                if !released {
+                    release_our_authorize(config);
+                    released = true;
+                    continue;
+                }
+                if !listeners_on_auth_port() {
+                    if !told {
+                        tell("The last sign-in is letting go of the port. Orbit will try again in a moment.");
+                        told = true;
+                    }
+                    if started.elapsed() > Duration::from_secs(120) {
+                        return Err("The last sign-in is still letting go of the port. Wait a minute and try the cloud again.".into());
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                if started.elapsed() > Duration::from_secs(4) {
+                    return Err("The sign-in page is still open from the last attempt. Close that browser tab and try again.".into());
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        }
+    }
+}
+
+fn release_our_authorize(config: &Path) {
+    clear_stale_sign_in(config);
+    for pid in rclone_authorize_pids() {
+        kill_pid(pid);
+    }
+    for pid in listening_pids() {
+        if process_is_rclone(pid) {
+            kill_pid(pid);
+        }
+    }
+}
+
+/// Processes listening on the sign-in port. Empty when the check cannot be made.
+fn listening_pids() -> Vec<u32> {
+    #[cfg(windows)]
+    {
+        let script = "Get-NetTCPConnection -LocalPort 53682 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess }";
+        let Ok(output) = process::command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+        else {
+            return Vec::new();
+        };
+        return String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+            .filter(|pid| *pid > 0)
+            .collect();
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
 fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
     // Orbit's own config, so authorize does not read the rclone the player
     // already has in AppData. An empty file is enough: the token is printed,
@@ -495,23 +672,51 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
     if !config.is_file() {
         let _ = fs::write(config, "");
     }
+    clear_stale_sign_in(config);
+    // A busy port is not another sign-in. prepare_oauth_port already waited
+    // it out. Try anyway, and say so only if rclone still cannot take it.
     match auth_port() {
-        AuthPort::Busy => {
-            clear_stale_sign_in(config);
-            if !matches!(auth_port(), AuthPort::Free) {
-                return Err("The sign-in port is already in use. Close the other sign-in and try again.".into());
-            }
-        }
         AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open),
-        AuthPort::Free | AuthPort::Unknown => {}
+        AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
     }
-    authorize_once(bin, config, provider, open).or_else(|err| {
-        if sign_in_port_failed(&err) {
+    authorize_once(bin, config, provider, open).or_else(|err| recover_authorize(bin, config, provider, open, &err))
+}
+
+fn recover_authorize(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+    err: &str,
+) -> Result<String, String> {
+    if sign_in_port_failed(err) {
+        return authorize_when_port_blocked(bin, config, provider, open);
+    }
+    if !port_still_busy(err) {
+        return Err(err.to_string());
+    }
+    release_our_authorize(config);
+    std::thread::sleep(Duration::from_secs(2));
+    match auth_port() {
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open),
+        AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
+    }
+    authorize_once(bin, config, provider, open).or_else(|again| {
+        if sign_in_port_failed(&again) {
             authorize_when_port_blocked(bin, config, provider, open)
+        } else if port_still_busy(&again) {
+            Err("The last sign-in is still letting go of the port. Wait a minute and try the cloud again.".into())
         } else {
-            Err(err)
+            Err(again)
         }
     })
+}
+
+fn port_still_busy(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("address already in use")
+        || lower.contains("only one usage of each socket address")
+        || lower.contains("sign-in port is already in use")
 }
 
 fn authorize_once(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
@@ -663,12 +868,15 @@ fn clear_stale_sign_in(config: &Path) {
     let Ok(pid) = text.trim().parse::<u32>() else {
         return;
     };
-    if pid == 0 || pid == std::process::id() || !process_is_rclone(pid) {
+    if pid == 0 || pid == std::process::id() {
+        let _ = fs::remove_file(&pid_path);
         return;
     }
-    kill_pid(pid);
+    if process_is_rclone(pid) {
+        kill_pid(pid);
+        std::thread::sleep(Duration::from_millis(300));
+    }
     let _ = fs::remove_file(&pid_path);
-    std::thread::sleep(Duration::from_millis(300));
 }
 
 #[cfg(windows)]
@@ -697,6 +905,72 @@ fn kill_pid(pid: u32) {
 #[cfg(not(windows))]
 fn kill_pid(pid: u32) {
     let _ = process::command("kill").arg(pid.to_string()).output();
+}
+
+/// True when something is actually listening, not merely holding the port
+/// after a finished sign-in.
+fn listeners_on_auth_port() -> bool {
+    #[cfg(windows)]
+    {
+        // netstat's state word is translated. Listen is not.
+        return !listening_pids().is_empty();
+    }
+    #[cfg(not(windows))]
+    {
+        for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
+            let Ok(text) = fs::read_to_string(path) else { continue };
+            for line in text.lines().skip(1) {
+                let parts: Vec<_> = line.split_whitespace().collect();
+                if parts.len() < 4 || parts[3] != "0A" {
+                    continue;
+                }
+                let Some(port) = parts[1].rsplit(':').next() else { continue };
+                if u16::from_str_radix(port, 16) == Ok(53682) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// rclone authorize started by Orbit, including one the elevated script left
+/// running. That script does not write the pid file.
+fn rclone_authorize_pids() -> Vec<u32> {
+    #[cfg(windows)]
+    {
+        let script = "Get-CimInstance Win32_Process -Filter \"Name = 'rclone.exe'\" | ForEach-Object { if ($_.CommandLine -match 'authorize' -and $_.CommandLine -match 'auth-no-open-browser') { $_.ProcessId } }";
+        let Ok(output) = process::command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+        else {
+            return Vec::new();
+        };
+        return String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse().ok())
+            .collect();
+    }
+    #[cfg(not(windows))]
+    {
+        let mut pids = Vec::new();
+        let Ok(dir) = fs::read_dir("/proc") else {
+            return pids;
+        };
+        for entry in dir.flatten() {
+            let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(cmd) = fs::read(format!("/proc/{pid}/cmdline")) else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(&cmd);
+            if text.contains("rclone") && text.contains("authorize") && text.contains("auth-no-open-browser") {
+                pids.push(pid);
+            }
+        }
+        pids
+    }
 }
 
 fn authorize_when_port_blocked(
@@ -1442,6 +1716,8 @@ fn kind_of_label(provider: &str) -> Option<String> {
         "OneDrive" | "onedrive" => Some("onedrive".into()),
         "Dropbox" | "dropbox" => Some("dropbox".into()),
         "Box" | "box" => Some("box".into()),
+        "MEGA" | "mega" => Some("mega".into()),
+        "Proton Drive" | "protondrive" => Some("protondrive".into()),
         "WebDAV" | "webdav" => Some("webdav".into()),
         "FTP" | "ftp" => Some("ftp".into()),
         "SFTP" | "sftp" => Some("sftp".into()),
@@ -1467,6 +1743,8 @@ fn label_of(provider: &str) -> &'static str {
         "onedrive" => "OneDrive",
         "dropbox" => "Dropbox",
         "box" => "Box",
+        "mega" => "MEGA",
+        "protondrive" => "Proton Drive",
         "webdav" => "WebDAV",
         "ftp" => "FTP",
         "sftp" => "SFTP",
@@ -1504,7 +1782,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, orbit_name, page, rename_remote_text, sign_in_failure, token_from};
+    use super::{allowed_archive, clean_folder, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -1549,6 +1827,15 @@ mod tests {
         assert_eq!(page(Path::new("."), "orbit", false, "FTP"), None);
         assert_eq!(page(Path::new("."), "orbit", false, "Google Drive").as_deref(), Some("https://drive.google.com/"));
         assert_eq!(page(Path::new("."), "orbit", false, "Box").as_deref(), Some("https://app.box.com/"));
+        assert_eq!(page(Path::new("."), "orbit", false, "MEGA").as_deref(), Some("https://mega.nz/fm"));
+        assert_eq!(page(Path::new("."), "orbit", false, "Proton Drive").as_deref(), Some("https://drive.proton.me/"));
+    }
+
+    #[test]
+    fn a_finished_sign_in_is_not_another_sign_in() {
+        assert!(port_still_busy("bind: address already in use"));
+        assert!(port_still_busy("Only one usage of each socket address"));
+        assert!(!port_still_busy("The sign-in did not finish."));
     }
 
     #[test]

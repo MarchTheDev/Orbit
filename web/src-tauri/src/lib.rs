@@ -1425,26 +1425,45 @@ async fn cloud_connect(
     extra: Option<bool>,
     folder: Option<String>,
     name: Option<String>,
+    code: Option<String>,
+    mailbox: Option<String>,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
     let remote_name = name.filter(|item| !item.is_empty()).unwrap_or_else(|| {
         if extra.unwrap_or(false) { "orbit-next".into() } else { "orbit".into() }
     });
     let folder = folder.unwrap_or_else(|| "Orbit".into());
+    let code = code.unwrap_or_default();
+    let mailbox = mailbox.unwrap_or_default();
     tokio::task::spawn_blocking(move || {
         // Said before the permission prompt, so the window explains it.
         #[cfg(windows)]
         if cloud::auth_port_needs_help() {
             let _ = app.emit("cloud-auth", serde_json::json!({ "freeing": true }));
         }
-        cloud::connect(&data, &provider, &host, &user, &password, &url, &remote_name, &folder, &|link| {
-            // Opened here, and again from the window only if this call failed.
-            // Two browsers would spend the sign-in on the first tab. The short
-            // wait is so the page is answering before the browser asks for it.
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            let opened = app.opener().open_url(link, None::<&str>).is_ok();
-            let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
-        })
+        cloud::connect(
+            &data,
+            &provider,
+            &host,
+            &user,
+            &password,
+            &url,
+            &remote_name,
+            &folder,
+            &code,
+            &mailbox,
+            &|link| {
+                // Opened here, and again from the window only if this call failed.
+                // Two browsers would spend the sign-in on the first tab. The short
+                // wait is so the page is answering before the browser asks for it.
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let opened = app.opener().open_url(link, None::<&str>).is_ok();
+                let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
+            },
+            &|text| {
+                let _ = app.emit("cloud-auth", serde_json::json!({ "note": text }));
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())?
