@@ -31,9 +31,11 @@ import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
 import {
+  cloudAutoOn,
   dataDir,
   dataDirSize,
   isNative,
+  savesWithClouds,
   listDrives,
   rememberMusic,
   revealInExplorer,
@@ -298,6 +300,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
+  { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out server ftp' },
   { label: 'rclone', section: 'orbit-backups', keywords: 'rclone get update folder path check backups' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
@@ -844,6 +847,12 @@ export function SettingsView({
         title="Backups"
         lead="Clouds the copies can be sent to, and rclone. Disconnect a cloud here."
       >
+        <Checkbox
+          checked={cloudAutoOn(settings.saves)}
+          onChange={(on) => setSettings({ saves: savesWithClouds(settings.saves, { cloudAuto: on }) })}
+          label="Also send a backup to the cloud"
+          hint="A backup saved on this PC is also sent to the clouds marked on the Cloud page. Off leaves it on this PC until you send it."
+        />
         <CloudTools />
         <CloudAccounts settings={settings} setSettings={setSettings} />
       </Section>

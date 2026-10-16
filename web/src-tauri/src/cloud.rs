@@ -156,12 +156,15 @@ pub fn connect(
         prepare_oauth_port(&config, tell)?;
     }
     let label = match provider {
-        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open)?,
-        "onedrive" => oauth_onedrive(&bin, &config, remote_name, open)?,
+        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open, tell)?,
+        "onedrive" => oauth_onedrive(&bin, &config, remote_name, open, tell)?,
         "mega" | "protondrive" => account_login(&bin, &config, provider, remote_name, user, password, code, mailbox)?,
         "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, remote_name, host, user, password, url)?,
         other => return Err(format!("Orbit does not know how to connect {other}.")),
     };
+    // The browser login is done. Say so before the folder is created, which
+    // is the slow part, so the cloud can appear while that finishes.
+    tell("signed-in");
     set_mode(&config, 0o600);
     if let Err(reason) = mkdir(&bin, Some(&config), remote_name, &folder) {
         let _ = delete_named(&bin, &config, remote_name);
@@ -417,8 +420,9 @@ fn oauth(
     provider: &str,
     remote_name: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
-    let token = authorize(bin, config, provider, open)?;
+    let token = authorize(bin, config, provider, open, tell)?;
     let _ = delete_named(bin, config, remote_name);
     let output = rclone(bin, Some(config))
         .args(["config", "create", remote_name, provider, "token"])
@@ -436,8 +440,9 @@ fn oauth_onedrive(
     config: &Path,
     remote_name: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
-    let token = authorize(bin, config, "onedrive", open)?;
+    let token = authorize(bin, config, "onedrive", open, tell)?;
     let _ = delete_named(bin, config, remote_name);
     let output = rclone(bin, Some(config))
         .args(["config", "create", remote_name, "onedrive", "drive_type", "personal", "token"])
@@ -665,7 +670,13 @@ fn listening_pids() -> Vec<u32> {
     }
 }
 
-fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+fn authorize(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
     // Orbit's own config, so authorize does not read the rclone the player
     // already has in AppData. An empty file is enough: the token is printed,
     // then saved here afterwards.
@@ -676,10 +687,10 @@ fn authorize(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + S
     // A busy port is not another sign-in. prepare_oauth_port already waited
     // it out. Try anyway, and say so only if rclone still cannot take it.
     match auth_port() {
-        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open),
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open, tell),
         AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
     }
-    authorize_once(bin, config, provider, open).or_else(|err| recover_authorize(bin, config, provider, open, &err))
+    authorize_once(bin, config, provider, open, tell).or_else(|err| recover_authorize(bin, config, provider, open, tell, &err))
 }
 
 fn recover_authorize(
@@ -687,10 +698,11 @@ fn recover_authorize(
     config: &Path,
     provider: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
     err: &str,
 ) -> Result<String, String> {
     if sign_in_port_failed(err) {
-        return authorize_when_port_blocked(bin, config, provider, open);
+        return authorize_when_port_blocked(bin, config, provider, open, tell);
     }
     if !port_still_busy(err) {
         return Err(err.to_string());
@@ -698,12 +710,12 @@ fn recover_authorize(
     release_our_authorize(config);
     std::thread::sleep(Duration::from_secs(2));
     match auth_port() {
-        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open),
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open, tell),
         AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
     }
-    authorize_once(bin, config, provider, open).or_else(|again| {
+    authorize_once(bin, config, provider, open, tell).or_else(|again| {
         if sign_in_port_failed(&again) {
-            authorize_when_port_blocked(bin, config, provider, open)
+            authorize_when_port_blocked(bin, config, provider, open, tell)
         } else if port_still_busy(&again) {
             Err("The last sign-in is still letting go of the port. Wait a minute and try the cloud again.".into())
         } else {
@@ -719,13 +731,20 @@ fn port_still_busy(err: &str) -> bool {
         || lower.contains("sign-in port is already in use")
 }
 
-fn authorize_once(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str) + Send + Sync)) -> Result<String, String> {
+fn authorize_once(
+    bin: &Path,
+    config: &Path,
+    provider: &str,
+    open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
     // `--auto-confirm` answers rclone's extra questions with their defaults, so
     // a closed input does not look like the player cancelled. rclone logs the
     // redirect address (`http://127.0.0.1:53682/` or `http://localhost:53682/`)
-    // before the real page. Opening that address is what fails the login: it is
-    // not the sign-in page. Only `.../auth?state=` is opened, which is the page
-    // rclone itself would open.
+    // before the real page. Opening that address fails the login. The local
+    // `/auth` address is also not what the browser should open: it only
+    // redirects, and that redirect is requested again after the login, as a
+    // second tab that asks for the account once more.
     let mut child = rclone(bin, Some(config))
         .args(["--auto-confirm", "authorize", provider, "--auth-no-open-browser"])
         .stdout(Stdio::piped())
@@ -750,6 +769,7 @@ fn authorize_once(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str
         readers.push(read_auth(stderr, &text, &link));
     }
     let opened = AtomicBool::new(false);
+    let signed = AtomicBool::new(false);
     let started = Instant::now();
     let status = loop {
         if let Some(url) = link.lock().unwrap_or_else(|e| e.into_inner()).clone() {
@@ -757,7 +777,14 @@ fn authorize_once(bin: &Path, config: &Path, provider: &str, open: &(dyn Fn(&str
                 opened.store(true, Ordering::SeqCst);
                 // The page is handed over and rclone is left running. Killing it
                 // here is what turned a slow browser into "the sign-in was cancelled".
-                open(&url);
+                open(&login_page(&url));
+            }
+        }
+        if !signed.load(Ordering::SeqCst) {
+            let so_far = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if so_far.to_ascii_lowercase().contains("got code") {
+                signed.store(true, Ordering::SeqCst);
+                tell("signed-in");
             }
         }
         if started.elapsed() > AUTH_WAIT {
@@ -978,14 +1005,15 @@ fn authorize_when_port_blocked(
     config: &Path,
     provider: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     #[cfg(windows)]
     {
-        authorize_with_port_freed(bin, config, provider, open)
+        authorize_with_port_freed(bin, config, provider, open, tell)
     }
     #[cfg(not(windows))]
     {
-        let _ = (bin, config, provider, open);
+        let _ = (bin, config, provider, open, tell);
         Err("The sign-in page could not start because its port is in use. Try again in a moment.".into())
     }
 }
@@ -1001,6 +1029,7 @@ fn authorize_with_port_freed(
     config: &Path,
     provider: &str,
     open: &(dyn Fn(&str) + Send + Sync),
+    tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     if !matches!(provider, "drive" | "onedrive" | "dropbox" | "box") {
         return Err("That cloud could not be signed in.".into());
@@ -1021,6 +1050,7 @@ fn authorize_with_port_freed(
     fs::write(&script, bytes).map_err(|e| format!("Could not prepare the sign-in. {e}"))?;
 
     let opened = AtomicBool::new(false);
+    let signed = AtomicBool::new(false);
     let stop = AtomicBool::new(false);
     let result = std::thread::scope(|scope| {
         scope.spawn(|| {
@@ -1029,8 +1059,16 @@ fn authorize_with_port_freed(
                 if let Ok(text) = fs::read_to_string(&url_path) {
                     if let Some(url) = auth_url(text.trim()) {
                         if !opened.swap(true, Ordering::SeqCst) {
-                            open(&url);
+                            open(&login_page(&url));
                         }
+                    }
+                }
+                if !signed.load(Ordering::SeqCst) {
+                    let so_far = fs::read_to_string(&stdout_path).unwrap_or_default()
+                        + &fs::read_to_string(&stderr_path).unwrap_or_default();
+                    if so_far.to_ascii_lowercase().contains("got code") {
+                        signed.store(true, Ordering::SeqCst);
+                        tell("signed-in");
                     }
                 }
                 std::thread::sleep(Duration::from_millis(200));
@@ -1179,6 +1217,66 @@ fn auth_url(line: &str) -> Option<String> {
                 && lower.contains("state=")
         })
         .map(|word| word.trim_end_matches('.').to_string())
+}
+
+/// The provider's own login page, not rclone's local redirect.
+///
+/// Opening `http://127.0.0.1:53682/auth?state=` makes the browser follow a
+/// temporary redirect. After the account is accepted, that redirect is
+/// requested again and a second tab asks for the login once more.
+fn login_page(local: &str) -> String {
+    if !is_local_auth(local) {
+        return local.to_string();
+    }
+    for _ in 0..8 {
+        if let Some(url) = redirect_of(local) {
+            if !is_local_auth(&url) {
+                return url;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    local.to_string()
+}
+
+fn is_local_auth(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    (lower.contains("127.0.0.1:53682") || lower.contains("localhost:53682") || lower.contains("[::1]:53682"))
+        && lower.contains("/auth")
+        && lower.contains("state=")
+}
+
+fn redirect_of(local: &str) -> Option<String> {
+    let path = local
+        .split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|index| &rest[index..]))
+        .unwrap_or("/");
+    let mut stream = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], 53682)),
+        Duration::from_millis(400),
+    )
+    .ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
+    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:53682\r\nConnection: close\r\n\r\n");
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).ok()?;
+    let header = buf.split("\r\n\r\n").next().unwrap_or(&buf);
+    location_from(header)
+}
+
+fn location_from(header: &str) -> Option<String> {
+    for line in header.lines() {
+        let Some((name, value)) = line.split_once(':') else { continue };
+        if name.eq_ignore_ascii_case("location") {
+            let url = value.trim();
+            if url.starts_with("http://") || url.starts_with("https://") {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn token_from(stdout: &str) -> Option<String> {
@@ -1782,7 +1880,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from};
+    use super::{allowed_archive, clean_folder, is_local_auth, location_from, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -1832,6 +1930,16 @@ mod tests {
     }
 
     #[test]
+    fn the_login_page_is_not_the_local_redirect() {
+        assert!(is_local_auth("http://127.0.0.1:53682/auth?state=abc"));
+        assert!(!is_local_auth("https://accounts.google.com/o/oauth2/auth?state=abc"));
+        assert_eq!(
+            location_from("HTTP/1.1 307 Temporary Redirect\r\nLocation: https://accounts.google.com/o/oauth2/auth?state=abc\r\n").as_deref(),
+            Some("https://accounts.google.com/o/oauth2/auth?state=abc"),
+        );
+        assert!(location_from("HTTP/1.1 200 OK\r\n").is_none());
+    }
+
     fn a_finished_sign_in_is_not_another_sign_in() {
         assert!(port_still_busy("bind: address already in use"));
         assert!(port_still_busy("Only one usage of each socket address"));

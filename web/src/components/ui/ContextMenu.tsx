@@ -33,11 +33,13 @@ export function ContextMenu({
   y,
   items,
   onClose,
+  className,
 }: {
   x: number;
   y: number;
   items: MenuItem[];
   onClose: () => void;
+  className?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
 
@@ -89,7 +91,7 @@ export function ContextMenu({
       ref={box}
       role="menu"
       style={{ left: x, top: y }}
-      className="fixed z-50 min-w-52 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl"
+      className={cn('fixed z-50 min-w-52 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl', className)}
     >
       {items.map((item, i) => {
         if (item.kind === 'sep') return <div key={i} className="my-1 h-px bg-line" />;

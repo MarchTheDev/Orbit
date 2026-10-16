@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
 import { Cloud, CloudDownload, CloudUpload, ExternalLink, LoaderCircle } from 'lucide-react';
 import type { Game, Settings } from '../../types';
 import { openExternal } from '../../services/desktop';
+import { CheckboxBox } from '../ui/Checkbox';
 import { Cover } from '../ui/Cover';
+import { ContextMenu, type MenuItem } from '../ui/ContextMenu';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
 import {
   cloudAccounts,
-  cloudAutoOn,
   cloudConnect,
   cloudCopy,
   cloudFetch,
@@ -37,6 +39,17 @@ const SERVICES = [
   { id: 'mega', label: 'MEGA', kind: 'account' },
   { id: 'protondrive', label: 'Proton Drive', kind: 'account' },
 ] as const;
+
+const PROVIDER_LABEL: Record<string, string> = {
+  drive: 'Google Drive',
+  dropbox: 'Dropbox',
+  mega: 'MEGA',
+  protondrive: 'Proton Drive',
+  ftp: 'FTP',
+  sftp: 'SFTP',
+  smb: 'SMB',
+  webdav: 'WebDAV',
+};
 
 const SERVERS = [
   { id: 'ftp', label: 'FTP' },
@@ -243,7 +256,6 @@ export function CloudPanel({
   games?: Game[];
 }) {
   const accounts = cloudAccounts(settings.saves);
-  const auto = cloudAutoOn(settings.saves);
   const skip = new Set(cloudSkipOf(settings.saves));
   const dirs = settings.saves?.dirs ?? {};
   const known = [...games]
@@ -270,6 +282,17 @@ export function CloudPanel({
   const [code, setCode] = useState('');
   const [mailbox, setMailbox] = useState('');
   const [gameQuery, setGameQuery] = useState('');
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupPick, setBackupPick] = useState<string[]>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [authOpened, setAuthOpened] = useState(true);
+  const updateSaves = (patch: (current: Settings) => Partial<Settings>) => {
+    (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)(patch);
+  };
+  const pending = useRef<{ gen: number; name: string; provider: string; account?: string } | null>(null);
+  const connectGen = useRef(0);
+  const setSettingsRef = useRef(setSettings);
+  setSettingsRef.current = setSettings;
 
   const refresh = () => {
     if (!isNative()) {
@@ -292,8 +315,23 @@ export function CloudPanel({
   useEffect(() => {
     if (!isNative()) return;
     let stop: (() => void) | undefined;
-    void listen<{ url?: string; opened?: boolean; freeing?: boolean; note?: string } | string>('cloud-auth', (event) => {
+    void listen<{ url?: string; opened?: boolean; freeing?: boolean; note?: string; signedIn?: boolean } | string>('cloud-auth', (event) => {
       const payload = event.payload;
+      if (payload && typeof payload !== 'string' && payload.signedIn) {
+        const item = pending.current;
+        if (item && item.gen === connectGen.current) {
+          (setSettingsRef.current as (patch: (current: Settings) => Partial<Settings>) => void)((current) => ({
+            saves: savesWithClouds(current.saves, {
+              clouds: [
+                ...cloudAccounts(current.saves).filter((cloud) => cloud.remote !== item.name),
+                { remote: item.name, provider: item.provider, own: false, on: true, account: item.account },
+              ],
+            }),
+          }));
+          setNote('Signed in.');
+        }
+        return;
+      }
       if (payload && typeof payload !== 'string' && payload.note) {
         setNote(payload.note);
         return;
@@ -305,7 +343,10 @@ export function CloudPanel({
       const link = typeof payload === 'string' ? payload : payload?.url;
       if (!link) return;
       setAuthUrl(link);
-      if (typeof payload === 'string' || payload.opened === false) void openExternal(link);
+      const opened = typeof payload !== 'string' && payload.opened !== false;
+      setAuthOpened(opened);
+      // One opener. Opening the page again here is the second login tab.
+      if (!opened) void openExternal(link);
     }).then((unlisten) => {
       stop = unlisten;
     }).catch(() => {});
@@ -332,25 +373,51 @@ export function CloudPanel({
     }
   };
 
+  const beginConnect = (name: string, provider: string, account?: string) => {
+    const gen = connectGen.current + 1;
+    connectGen.current = gen;
+    pending.current = { gen, name, provider, account };
+    return gen;
+  };
+
+  const dropConnect = (name: string, gen: number) => {
+    if (connectGen.current === gen) connectGen.current += 1;
+    pending.current = null;
+    updateSaves((current) => ({
+      saves: savesWithClouds(current.saves, {
+        clouds: cloudAccounts(current.saves).filter((cloud) => cloud.remote !== name),
+      }),
+    }));
+  };
+
   const connect = async (provider: string) => {
     setBusy(provider);
     setError(null);
     setNote(null);
     setAuthUrl(null);
+    setAuthOpened(true);
     const used = new Set(accounts.map((item) => item.remote));
     let name = freshRemote();
     while (used.has(name)) name = freshRemote();
+    const gen = beginConnect(name, PROVIDER_LABEL[provider] ?? provider);
     try {
       const label = await cloudConnect(provider, { host, user, password, url, name });
       setPassword('');
-      write({
-        clouds: [...accounts, { remote: name, provider: label, own: false, on: true }],
-      });
+      updateSaves((current) => ({
+        saves: savesWithClouds(current.saves, {
+          clouds: [
+            ...cloudAccounts(current.saves).filter((cloud) => cloud.remote !== name),
+            { remote: name, provider: label, own: false, on: true },
+          ],
+        }),
+      }));
       setNote(`Connected to ${label}.`);
       setServer(null);
     } catch (e) {
+      dropConnect(name, gen);
       fail(e);
     } finally {
+      if (pending.current?.gen === gen) pending.current = null;
       setBusy(null);
     }
   };
@@ -363,6 +430,7 @@ export function CloudPanel({
     let name = freshRemote();
     while (used.has(name)) name = freshRemote();
     const address = email.trim();
+    const gen = beginConnect(name, PROVIDER_LABEL[provider] ?? provider, address);
     try {
       const label = await cloudConnect(provider, {
         user: address,
@@ -374,14 +442,21 @@ export function CloudPanel({
       setAccountPass('');
       setCode('');
       setMailbox('');
-      write({
-        clouds: [...accounts, { remote: name, provider: label, own: false, on: true, account: address }],
-      });
+      updateSaves((current) => ({
+        saves: savesWithClouds(current.saves, {
+          clouds: [
+            ...cloudAccounts(current.saves).filter((cloud) => cloud.remote !== name),
+            { remote: name, provider: label, own: false, on: true, account: address },
+          ],
+        }),
+      }));
       setNote(`Connected to ${label}.`);
       setAccountKind(null);
     } catch (e) {
+      dropConnect(name, gen);
       fail(e);
     } finally {
+      if (pending.current?.gen === gen) pending.current = null;
       setBusy(null);
     }
   };
@@ -414,23 +489,32 @@ export function CloudPanel({
     write({ cloudSkip: [...next] });
   };
 
-  const backup = async (which: 'chosen' | 'all') => {
-    if (chosen.length === 0) {
+  const backupTo = async (targets: CloudAccount[], gamesToSend = chosen) => {
+    if (accounts.length === 0) {
+      setError('Sign in to a cloud first.');
+      return;
+    }
+    if (gamesToSend.length === 0) {
       setError('Choose a game with a save folder.');
       return;
     }
-    setBusy(which === 'all' ? 'all' : 'up');
+    if (targets.length === 0) {
+      setError('Choose a cloud.');
+      return;
+    }
+    setBusy('up');
     setError(null);
     setNote(null);
+    setBackupOpen(false);
     try {
-      for (const game of chosen) {
+      for (const game of gamesToSend) {
         try {
           await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
         } catch {
           // A game whose folder cannot be copied is left. The others still go.
         }
       }
-      setNote(await sendToClouds(accounts, which, settings.saves?.backupRoot, chosen.map(cloudGameOf)));
+      setNote(await sendToClouds(targets, 'all', settings.saves?.backupRoot, gamesToSend.map(cloudGameOf)));
     } catch (e) {
       fail(e);
     } finally {
@@ -474,9 +558,138 @@ export function CloudPanel({
 
   const query = gameQuery.trim().toLowerCase();
   const shown = known.filter((game) => !query || game.title.toLowerCase().includes(query));
+  const menuGame = menu ? known.find((game) => game.id === menu.id) ?? null : null;
+  const menuItems: MenuItem[] = menuGame
+    ? [
+        { kind: 'label', label: menuGame.title },
+        ...(accounts.length > 1
+          ? [
+              { kind: 'label' as const, label: 'Sync to the cloud' },
+              ...accounts.map((cloud) => ({
+                label: cloudLabel(cloud, accounts),
+                icon: CloudUpload,
+                disabled: !isNative() || busy !== null,
+                onSelect: () => void backupTo([cloud], [menuGame]),
+              })),
+              {
+                label: 'All clouds',
+                icon: CloudUpload,
+                disabled: !isNative() || busy !== null,
+                onSelect: () => void backupTo(accounts, [menuGame]),
+              },
+            ]
+          : [{
+              label: 'Sync to the cloud',
+              icon: CloudUpload,
+              disabled: !isNative() || busy !== null,
+              onSelect: () => void backupTo(accounts.slice(0, 1), [menuGame]),
+            }]),
+      ]
+    : [];
 
   const controls = (
     <div className="space-y-5">
+      <section className="space-y-2">
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-medium">Games</h3>
+            <p className="text-[11px] text-muted">Click a cover to include it. Right-click one to sync it. Games with no save folder are left out.</p>
+          </div>
+          {known.length > 0 && (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setVisible(true)} className="text-[11px] text-muted hover:text-fg">All</button>
+              <button type="button" onClick={() => setVisible(false)} className="text-[11px] text-muted hover:text-fg">None</button>
+            </div>
+          )}
+        </div>
+        {known.length > 8 && (
+          <input
+            className={inputCls}
+            value={gameQuery}
+            onChange={(e) => setGameQuery(e.target.value)}
+            placeholder="Find a game"
+            spellCheck={false}
+          />
+        )}
+        {known.length === 0 ? (
+          <p className="text-xs text-muted">None yet. Orbit looks for save folders on its own.</p>
+        ) : (
+          <ul className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
+            {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
+            {shown.map((game) => {
+              const on = !skip.has(game.id);
+              return (
+                <li key={game.id}>
+                  <button
+                    type="button"
+                    data-orbit-save={game.id}
+                    onClick={() => setSkipped(game.id, on)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setMenu({ x: event.clientX, y: event.clientY, id: game.id });
+                    }}
+                    aria-pressed={on}
+                    title={dirs[game.id]}
+                    className={cn(
+                      'w-full rounded-2xl border p-1.5 text-left transition',
+                      on
+                        ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                        : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
+                    )}
+                  >
+                    <Cover game={game} className="aspect-[2/3] w-full rounded-lg" />
+                    <span className="mt-1 block truncate text-xs font-semibold">{game.title}</span>
+                    <span className="mt-0.5 block break-all text-[10px] leading-snug text-muted line-clamp-2">{dirs[game.id]}</span>
+                    <span className={cn('mt-0.5 block text-[10px]', on ? 'text-accent' : 'text-muted')}>
+                      {on ? 'Included' : 'Left out'}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div>
+          <button
+            type="button"
+            disabled={!isNative() || accounts.length === 0 || chosen.length === 0 || busy !== null}
+            onClick={() => {
+              setBackupPick(accounts.filter((account) => account.on !== false).map((account) => account.remote));
+              setBackupOpen((value) => !value);
+            }}
+            className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+          >
+            {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+            {busy === 'up' ? 'Backing up…' : 'Back up'}
+          </button>
+          {backupOpen && (
+            <div className="mt-2 w-full max-w-xs rounded-2xl border border-line bg-bg/40 p-2">
+              <p className="px-1 pb-1 text-[11px] text-muted">Choose the clouds</p>
+              {accounts.map((account) => (
+                <label key={account.remote} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-fg hover:bg-accent/10">
+                  <CheckboxBox
+                    checked={backupPick.includes(account.remote)}
+                    onChange={(on) => setBackupPick((current) => on
+                      ? [...current, account.remote]
+                      : current.filter((remote) => remote !== account.remote))}
+                  />
+                  <span className="min-w-0 truncate">{cloudLabel(account, accounts)}</span>
+                </label>
+              ))}
+              <button
+                type="button"
+                disabled={busy !== null || backupPick.length === 0}
+                onClick={() => void backupTo(accounts.filter((account) => backupPick.includes(account.remote)))}
+                className={cn(btnAccent, 'mt-1 w-full rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+              >
+                Back up to these
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
       {ready === false && (
         <p className="text-xs text-muted">rclone is not here yet. Get it in Settings, under Backups.</p>
       )}
@@ -498,7 +711,7 @@ export function CloudPanel({
         <div className="flex items-end justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">Connected</h3>
-            <p className="text-[11px] text-muted">Click a cloud to mark it. A lit card is included.</p>
+            <p className="text-[11px] text-muted">A lit card is included when a backup is also sent to the cloud.</p>
           </div>
           {accounts.length > 0 && <p className="text-[11px] text-muted">Disconnect in Settings, under Backups.</p>}
         </div>
@@ -548,7 +761,7 @@ export function CloudPanel({
                   : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
               )}
             >
-              {busy === item.id ? 'Waiting…' : item.label}
+              {busy === item.id ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : item.label}
             </button>
           ))}
         </div>
@@ -578,16 +791,13 @@ export function CloudPanel({
               onClick={() => void connectAccount(accountKind)}
               className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
             >
-              {busy === accountKind ? 'Connecting…' : 'Connect'}
+              {busy === accountKind ? (note === 'Signed in.' ? 'Finishing…' : 'Connecting…') : 'Connect'}
             </button>
           </div>
         )}
 
         <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
-          <div>
-            <h4 className="text-sm font-medium">FTP, SFTP, shared folder, or WebDAV</h4>
-            <p className="text-[11px] text-muted">For a machine you already have an address for. These have no website to open.</p>
-          </div>
+          <h4 className="text-sm font-medium">Server</h4>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {SERVERS.map((item) => (
               <button
@@ -644,108 +854,8 @@ export function CloudPanel({
 
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-end justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-medium">Games</h3>
-            <p className="text-[11px] text-muted">Click a cover to include it. Games with no save folder are left out.</p>
-          </div>
-          {known.length > 0 && (
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setVisible(true)} className="text-[11px] text-muted hover:text-fg">All</button>
-              <button type="button" onClick={() => setVisible(false)} className="text-[11px] text-muted hover:text-fg">None</button>
-            </div>
-          )}
-        </div>
-        {known.length > 8 && (
-          <input
-            className={inputCls}
-            value={gameQuery}
-            onChange={(e) => setGameQuery(e.target.value)}
-            placeholder="Find a game"
-            spellCheck={false}
-          />
-        )}
-        {known.length === 0 ? (
-          <p className="text-xs text-muted">None yet. Orbit looks for save folders on its own.</p>
-        ) : (
-          <ul className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
-            {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
-            {shown.map((game) => {
-              const on = !skip.has(game.id);
-              return (
-                <li key={game.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSkipped(game.id, on)}
-                    aria-pressed={on}
-                    title={dirs[game.id]}
-                    className={cn(
-                      'w-full rounded-2xl border p-1.5 text-left transition',
-                      on
-                        ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
-                        : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
-                    )}
-                  >
-                    <Cover game={game} className="aspect-[2/3] w-full rounded-lg" />
-                    <span className="mt-1 block truncate text-xs font-semibold">{game.title}</span>
-                    <span className="mt-0.5 block break-all text-[10px] leading-snug text-muted line-clamp-2">{dirs[game.id]}</span>
-                    <span className={cn('mt-0.5 block text-[10px]', on ? 'text-accent' : 'text-muted')}>
-                      {on ? 'Included' : 'Left out'}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <button
-          type="button"
-          aria-pressed={auto}
-          onClick={() => write({ cloudAuto: !auto })}
-          className={cn(
-            'w-full rounded-2xl border px-4 py-3 text-left transition',
-            auto
-              ? 'border-accent bg-accent/15 shadow-[0_0_24px_-12px_var(--c-accent)]'
-              : 'border-line/70 bg-bg/30 hover:border-accent/40',
-          )}
-        >
-          <span className="block text-sm font-semibold">{auto ? 'Sends after a backup' : 'Send after a backup'}</span>
-          <span className={cn('mt-0.5 block text-[11px]', auto ? 'text-accent' : 'text-muted')}>
-            {auto
-              ? 'A backup also goes to the lit clouds. Click to keep the copy on this PC until you send it.'
-              : 'Click to send to the lit clouds after a backup. Off keeps the copy on this PC until you send it.'}
-          </span>
-        </button>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={!isNative() || accounts.length === 0 || chosen.length === 0 || busy !== null}
-            onClick={() => void backup('chosen')}
-            className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-          >
-            {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-            {busy === 'up' ? 'Backing up…' : 'Back up to marked clouds'}
-          </button>
-          {accounts.length > 1 && (
-            <button
-              type="button"
-              disabled={!isNative() || chosen.length === 0 || busy !== null}
-              onClick={() => void backup('all')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
-            >
-              {busy === 'all' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-              {busy === 'all' ? 'Backing up…' : 'Back up to all clouds'}
-            </button>
-          )}
-        </div>
-      </section>
-
       {!isNative() && <p className="text-xs text-muted">Cloud copies need the desktop app.</p>}
-      {authUrl && (
+      {authUrl && !authOpened && (
         <p className="text-xs text-muted">
           The sign-in page should be open. If it is not,{' '}
           <button type="button" onClick={() => void openExternal(authUrl)} className="text-accent underline-offset-2 hover:underline">
@@ -781,6 +891,10 @@ export function CloudPanel({
         >
           {controls}
         </Modal>
+      )}
+      {menu && menuGame && createPortal(
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} className="z-[70]" />,
+        document.body,
       )}
     </>
   );

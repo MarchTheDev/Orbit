@@ -1453,15 +1453,16 @@ async fn cloud_connect(
             &code,
             &mailbox,
             &|link| {
-                // Opened here, and again from the window only if this call failed.
-                // Two browsers would spend the sign-in on the first tab. The short
-                // wait is so the page is answering before the browser asks for it.
-                std::thread::sleep(std::time::Duration::from_millis(250));
+                // One opener. A second tab spends the sign-in and asks for it again.
                 let opened = app.opener().open_url(link, None::<&str>).is_ok();
                 let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
             },
             &|text| {
-                let _ = app.emit("cloud-auth", serde_json::json!({ "note": text }));
+                if text == "signed-in" {
+                    let _ = app.emit("cloud-auth", serde_json::json!({ "signedIn": true }));
+                } else {
+                    let _ = app.emit("cloud-auth", serde_json::json!({ "note": text }));
+                }
             },
         )
     })
