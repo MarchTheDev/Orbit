@@ -371,6 +371,29 @@ export function SavesView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isNative() && listed.length > 0 && (
+            <button
+              type="button"
+              disabled={backingAll}
+              onClick={() => void backupAll()}
+              className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-4 py-2 text-sm')}
+            >
+              <HardDriveDownload className="size-4" />
+              {backingAll ? 'Backing up…' : 'Backup all'}
+            </button>
+          )}
+          {isNative() && clouds.length > 0 && (
+            <button
+              type="button"
+              disabled={sendingCloud}
+              onClick={() => void backupToCloud('chosen')}
+              title="Backup games with a save folder, then send them to the ticked clouds."
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+            >
+              <CloudUpload className="size-4" />
+              {sendingCloud ? 'Backing up…' : 'Backup to the cloud'}
+            </button>
+          )}
           <CloudPanel settings={settings} setSettings={setSettings} games={games} />
           {rows.length > 0 && (
             <button
@@ -393,29 +416,6 @@ export function SavesView({
             >
               {showHidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {showHidden ? 'Hide them again' : `Show ${hiddenIds.length} hidden`}
-            </button>
-          )}
-          {isNative() && clouds.length > 0 && (
-            <button
-              type="button"
-              disabled={sendingCloud}
-              onClick={() => void backupToCloud('chosen')}
-              title="Back up games with a save folder, then send them to the marked clouds."
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
-            >
-              <CloudUpload className="size-4" />
-              {sendingCloud ? 'Backing up…' : clouds.length > 1 ? 'Back up to marked clouds' : 'Back up to the cloud'}
-            </button>
-          )}
-          {isNative() && listed.length > 0 && (
-            <button
-              type="button"
-              disabled={backingAll}
-              onClick={() => void backupAll()}
-              className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-4 py-2 text-sm')}
-            >
-              <HardDriveDownload className="size-4" />
-              {backingAll ? 'Backing up…' : 'Backup all'}
             </button>
           )}
         </div>

@@ -701,6 +701,11 @@ fn recover_authorize(
     tell: &(dyn Fn(&str) + Send + Sync),
     err: &str,
 ) -> Result<String, String> {
+    // A finished browser login must not start another one. The cloud is already
+    // added when the code arrives, and a retry is the second login tab.
+    if err.to_ascii_lowercase().contains("got code") {
+        return Err(err.to_string());
+    }
     if sign_in_port_failed(err) {
         return authorize_when_port_blocked(bin, config, provider, open, tell);
     }
@@ -746,7 +751,7 @@ fn authorize_once(
     // redirects, and that redirect is requested again after the login, as a
     // second tab that asks for the account once more.
     let mut child = rclone(bin, Some(config))
-        .args(["--auto-confirm", "authorize", provider, "--auth-no-open-browser"])
+        .args(["--auto-confirm", "authorize", "--auth-no-open-browser", provider])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -777,7 +782,13 @@ fn authorize_once(
                 opened.store(true, Ordering::SeqCst);
                 // The page is handed over and rclone is left running. Killing it
                 // here is what turned a slow browser into "the sign-in was cancelled".
-                open(&login_page(&url));
+                // The local /auth address is never opened: after a login the
+                // browser asks for it again, and that second tab is another login.
+                if let Some(page) = login_page(&url) {
+                    open(&page);
+                } else {
+                    tell("The sign-in page could not be opened. Try the cloud again.");
+                }
             }
         }
         if !signed.load(Ordering::SeqCst) {
@@ -1059,7 +1070,11 @@ fn authorize_with_port_freed(
                 if let Ok(text) = fs::read_to_string(&url_path) {
                     if let Some(url) = auth_url(text.trim()) {
                         if !opened.swap(true, Ordering::SeqCst) {
-                            open(&login_page(&url));
+                            if let Some(page) = login_page(&url) {
+                                open(&page);
+                            } else {
+                                tell("The sign-in page could not be opened. Try the cloud again.");
+                            }
                         }
                     }
                 }
@@ -1129,7 +1144,7 @@ try {{ Stop-Service -Name winnat -Force -ErrorAction SilentlyContinue }} catch {
 try {{
   $p = New-Object System.Diagnostics.Process
   $p.StartInfo.FileName = $bin
-  $p.StartInfo.Arguments = '--config "' + $config.Replace('"','') + '" --auto-confirm authorize {provider} --auth-no-open-browser'
+  $p.StartInfo.Arguments = '--config "' + $config.Replace('"','') + '" --auto-confirm authorize --auth-no-open-browser {provider}'
   $p.StartInfo.UseShellExecute = $false
   $p.StartInfo.RedirectStandardOutput = $true
   $p.StartInfo.RedirectStandardError = $true
@@ -1224,26 +1239,33 @@ fn auth_url(line: &str) -> Option<String> {
 /// Opening `http://127.0.0.1:53682/auth?state=` makes the browser follow a
 /// temporary redirect. After the account is accepted, that redirect is
 /// requested again and a second tab asks for the login once more.
-fn login_page(local: &str) -> String {
+fn login_page(local: &str) -> Option<String> {
     if !is_local_auth(local) {
-        return local.to_string();
+        return Some(local.to_string());
     }
-    for _ in 0..8 {
+    for _ in 0..20 {
         if let Some(url) = redirect_of(local) {
             if !is_local_auth(&url) {
-                return url;
+                return Some(url);
             }
         }
-        std::thread::sleep(Duration::from_millis(40));
+        std::thread::sleep(Duration::from_millis(50));
     }
-    local.to_string()
+    None
 }
 
 fn is_local_auth(url: &str) -> bool {
+    // The host has to be the local sign-in page. A provider login also contains
+    // `/auth` and `state=`, and its redirect address names this port, so a
+    // substring check treated that login page as the local redirect and opened
+    // the local page anyway. That is the tab that asks for the login again.
     let lower = url.to_ascii_lowercase();
-    (lower.contains("127.0.0.1:53682") || lower.contains("localhost:53682") || lower.contains("[::1]:53682"))
-        && lower.contains("/auth")
-        && lower.contains("state=")
+    let local = lower.starts_with("http://127.0.0.1:53682")
+        || lower.starts_with("http://localhost:53682")
+        || lower.starts_with("http://[::1]:53682")
+        || lower.starts_with("https://127.0.0.1:53682")
+        || lower.starts_with("https://localhost:53682");
+    local && lower.contains("/auth") && lower.contains("state=")
 }
 
 fn redirect_of(local: &str) -> Option<String> {
@@ -1933,6 +1955,9 @@ mod tests {
     fn the_login_page_is_not_the_local_redirect() {
         assert!(is_local_auth("http://127.0.0.1:53682/auth?state=abc"));
         assert!(!is_local_auth("https://accounts.google.com/o/oauth2/auth?state=abc"));
+        assert!(!is_local_auth(
+            "https://accounts.google.com/o/oauth2/auth?redirect_uri=http://127.0.0.1:53682/&state=abc"
+        ));
         assert_eq!(
             location_from("HTTP/1.1 307 Temporary Redirect\r\nLocation: https://accounts.google.com/o/oauth2/auth?state=abc\r\n").as_deref(),
             Some("https://accounts.google.com/o/oauth2/auth?state=abc"),

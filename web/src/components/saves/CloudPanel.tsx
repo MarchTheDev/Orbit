@@ -241,36 +241,23 @@ export function CloudTools() {
 }
 
 /**
- * The cloud page on Saves.
- *
- * Several clouds can stay connected. A backup goes to the ones marked, or to
- * all of them. Only games with a save folder are listed.
+ * Sign in to a cloud, or to a server. This lives in Settings so the cloud page
+ * stays a list of clouds to tick.
  */
-export function CloudPanel({
+export function AddCloud({
   settings,
   setSettings,
-  games = [],
 }: {
   settings: Settings;
   setSettings: (patch: Partial<Settings>) => void;
-  games?: Game[];
 }) {
   const accounts = cloudAccounts(settings.saves);
-  const skip = new Set(cloudSkipOf(settings.saves));
-  const dirs = settings.saves?.dirs ?? {};
-  const known = [...games]
-    .filter((game) => !!dirs[game.id]?.trim())
-    .sort((a, b) => a.title.localeCompare(b.title));
-  const chosen = known.filter((game) => !skip.has(game.id));
-
-  const [open, setOpen] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
-  const [update, setUpdate] = useState(false);
-  const [latest, setLatest] = useState('');
-  const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [authOpened, setAuthOpened] = useState(true);
   const [server, setServer] = useState<(typeof SERVERS)[number]['id'] | null>(null);
   const [accountKind, setAccountKind] = useState<'mega' | 'protondrive' | null>(null);
   const [host, setHost] = useState('');
@@ -281,35 +268,21 @@ export function CloudPanel({
   const [accountPass, setAccountPass] = useState('');
   const [code, setCode] = useState('');
   const [mailbox, setMailbox] = useState('');
-  const [gameQuery, setGameQuery] = useState('');
-  const [backupOpen, setBackupOpen] = useState(false);
-  const [backupPick, setBackupPick] = useState<string[]>([]);
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [authOpened, setAuthOpened] = useState(true);
-  const updateSaves = (patch: (current: Settings) => Partial<Settings>) => {
-    (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)(patch);
-  };
   const pending = useRef<{ gen: number; name: string; provider: string; account?: string } | null>(null);
   const connectGen = useRef(0);
   const setSettingsRef = useRef(setSettings);
   setSettingsRef.current = setSettings;
 
-  const refresh = () => {
+  const updateSaves = (patch: (current: Settings) => Partial<Settings>) => {
+    (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)(patch);
+  };
+
+  useEffect(() => {
     if (!isNative()) {
       setReady(false);
       return;
     }
-    void cloudStatus()
-      .then((status) => {
-        setReady(status.ready);
-        setUpdate(!!status.update);
-        setLatest(status.latest ?? '');
-      })
-      .catch(() => setReady(false));
-  };
-
-  useEffect(() => {
-    refresh();
+    void cloudStatus().then((status) => setReady(status.ready)).catch(() => setReady(false));
   }, []);
 
   useEffect(() => {
@@ -329,6 +302,7 @@ export function CloudPanel({
             }),
           }));
           setNote('Signed in.');
+          setAuthUrl(null);
         }
         return;
       }
@@ -343,35 +317,14 @@ export function CloudPanel({
       const link = typeof payload === 'string' ? payload : payload?.url;
       if (!link) return;
       setAuthUrl(link);
-      const opened = typeof payload !== 'string' && payload.opened !== false;
-      setAuthOpened(opened);
-      // One opener. Opening the page again here is the second login tab.
-      if (!opened) void openExternal(link);
+      setAuthOpened(typeof payload !== 'string' && payload.opened !== false);
     }).then((unlisten) => {
       stop = unlisten;
     }).catch(() => {});
     return () => stop?.();
   }, []);
 
-  const write = (patch: { clouds?: CloudAccount[]; cloudAuto?: boolean; cloudSkip?: string[] }) => {
-    setSettings({ saves: savesWithClouds(settings.saves, patch) });
-  };
-
   const fail = (e: unknown) => setError(String(e).replace(/^Error:\s*/, ''));
-
-  const getRclone = async (replace = false) => {
-    setBusy(replace ? 'update' : 'fetch');
-    setError(null);
-    setNote(null);
-    try {
-      setNote(await cloudFetch(replace));
-      refresh();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const beginConnect = (name: string, provider: string, account?: string) => {
     const gen = connectGen.current + 1;
@@ -461,6 +414,210 @@ export function CloudPanel({
     }
   };
 
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">Add a cloud</h4>
+        <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again.</p>
+      </div>
+      {!ready && isNative() && <p className="text-xs text-muted">rclone is not here yet. Get it below.</p>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {SERVICES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            disabled={!isNative() || !ready || busy !== null}
+            onClick={() => {
+              if (item.kind === 'account') {
+                setServer(null);
+                setAccountKind(accountKind === item.id ? null : item.id);
+                return;
+              }
+              setAccountKind(null);
+              void connect(item.id);
+            }}
+            className={cn(
+              'rounded-2xl border px-3 py-3 text-sm font-semibold transition disabled:opacity-50',
+              accountKind === item.id
+                ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
+            )}
+          >
+            {busy === item.id ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : item.label}
+          </button>
+        ))}
+      </div>
+      {accountKind && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-muted">Email</span>
+            <input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} autoComplete="off" />
+          </label>
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-muted">Password</span>
+            <input className={inputCls} type="password" value={accountPass} onChange={(e) => setAccountPass(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label className={accountKind === 'protondrive' ? '' : 'sm:col-span-2'}>
+            <span className="mb-1 block text-[11px] text-muted">Two-factor code, if this account asks for one</span>
+            <input className={inputCls} value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} autoComplete="one-time-code" />
+          </label>
+          {accountKind === 'protondrive' && (
+            <label>
+              <span className="mb-1 block text-[11px] text-muted">Mailbox password, if this account has one</span>
+              <input className={inputCls} type="password" value={mailbox} onChange={(e) => setMailbox(e.target.value)} autoComplete="new-password" />
+            </label>
+          )}
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void connectAccount(accountKind)}
+            className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+          >
+            {busy === accountKind ? (note === 'Signed in.' ? 'Finishing…' : 'Connecting…') : 'Connect'}
+          </button>
+        </div>
+      )}
+      <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
+        <h4 className="text-sm font-medium">FTP, SFTP, shared folder, or WebDAV</h4>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {SERVERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              disabled={!isNative() || !ready || busy !== null}
+              onClick={() => {
+                setAccountKind(null);
+                setServer(server === item.id ? null : item.id);
+              }}
+              className={cn(
+                'rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition disabled:opacity-50',
+                server === item.id
+                  ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                  : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
+              )}
+            >
+              {item.id === 'smb' ? 'Shared folder' : item.label}
+            </button>
+          ))}
+        </div>
+        {server && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {server === 'webdav' ? (
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-[11px] text-muted">Address</span>
+                <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/you/" spellCheck={false} />
+              </label>
+            ) : (
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-[11px] text-muted">Host</span>
+                <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
+              </label>
+            )}
+            <label>
+              <span className="mb-1 block text-[11px] text-muted">User</span>
+              <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} />
+            </label>
+            <label>
+              <span className="mb-1 block text-[11px] text-muted">Password</span>
+              <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </label>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void connect(server)}
+              className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+            >
+              {busy === server ? 'Connecting…' : 'Connect'}
+            </button>
+          </div>
+        )}
+      </div>
+      {authUrl && !authOpened && (
+        <p className="text-xs text-muted">
+          The sign-in page should be open. If it is not,{' '}
+          <button type="button" onClick={() => void openExternal(authUrl)} className="text-accent underline-offset-2 hover:underline">
+            open it
+          </button>
+          .
+        </p>
+      )}
+      {note && <p className="text-xs text-fg">{note}</p>}
+      {error && <p className="break-words text-xs text-rose-300">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The cloud page on Saves.
+ *
+ * Games come first. Connected clouds are a tick list. Adding one is in Settings.
+ */
+export function CloudPanel({
+  settings,
+  setSettings,
+  games = [],
+}: {
+  settings: Settings;
+  setSettings: (patch: Partial<Settings>) => void;
+  games?: Game[];
+}) {
+  const accounts = cloudAccounts(settings.saves);
+  const skip = new Set(cloudSkipOf(settings.saves));
+  const dirs = settings.saves?.dirs ?? {};
+  const known = [...games]
+    .filter((game) => !!dirs[game.id]?.trim())
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const chosen = known.filter((game) => !skip.has(game.id));
+  const ticked = accounts.filter((account) => account.on !== false);
+
+  const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState<boolean | null>(null);
+  const [update, setUpdate] = useState(false);
+  const [latest, setLatest] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [gameQuery, setGameQuery] = useState('');
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+
+  const refresh = () => {
+    if (!isNative()) {
+      setReady(false);
+      return;
+    }
+    void cloudStatus()
+      .then((status) => {
+        setReady(status.ready);
+        setUpdate(!!status.update);
+        setLatest(status.latest ?? '');
+      })
+      .catch(() => setReady(false));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const write = (patch: { clouds?: CloudAccount[]; cloudAuto?: boolean; cloudSkip?: string[] }) => {
+    setSettings({ saves: savesWithClouds(settings.saves, patch) });
+  };
+
+  const fail = (e: unknown) => setError(String(e).replace(/^Error:\s*/, ''));
+
+  const getRclone = async (replace = false) => {
+    setBusy(replace ? 'update' : 'fetch');
+    setError(null);
+    setNote(null);
+    try {
+      setNote(await cloudFetch(replace));
+      refresh();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const setIncluded = (remote: string, on: boolean) => {
     write({
       clouds: accounts.map((item) => (item.remote === remote ? { ...item, on } : item)),
@@ -505,7 +662,6 @@ export function CloudPanel({
     setBusy('up');
     setError(null);
     setNote(null);
-    setBackupOpen(false);
     try {
       for (const game of gamesToSend) {
         try {
@@ -650,44 +806,6 @@ export function CloudPanel({
             })}
           </ul>
         )}
-        <div>
-          <button
-            type="button"
-            disabled={!isNative() || accounts.length === 0 || chosen.length === 0 || busy !== null}
-            onClick={() => {
-              setBackupPick(accounts.filter((account) => account.on !== false).map((account) => account.remote));
-              setBackupOpen((value) => !value);
-            }}
-            className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-          >
-            {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-            {busy === 'up' ? 'Backing up…' : 'Back up'}
-          </button>
-          {backupOpen && (
-            <div className="mt-2 w-full max-w-xs rounded-2xl border border-line bg-bg/40 p-2">
-              <p className="px-1 pb-1 text-[11px] text-muted">Choose the clouds</p>
-              {accounts.map((account) => (
-                <label key={account.remote} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-fg hover:bg-accent/10">
-                  <CheckboxBox
-                    checked={backupPick.includes(account.remote)}
-                    onChange={(on) => setBackupPick((current) => on
-                      ? [...current, account.remote]
-                      : current.filter((remote) => remote !== account.remote))}
-                  />
-                  <span className="min-w-0 truncate">{cloudLabel(account, accounts)}</span>
-                </label>
-              ))}
-              <button
-                type="button"
-                disabled={busy !== null || backupPick.length === 0}
-                onClick={() => void backupTo(accounts.filter((account) => backupPick.includes(account.remote)))}
-                className={cn(btnAccent, 'mt-1 w-full rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-              >
-                Back up to these
-              </button>
-            </div>
-          )}
-        </div>
       </section>
 
       {ready === false && (
@@ -711,11 +829,19 @@ export function CloudPanel({
         <div className="flex items-end justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">Connected</h3>
-            <p className="text-[11px] text-muted">A lit card is included when a backup is also sent to the cloud.</p>
+            <p className="text-[11px] text-muted">Tick a cloud to include it. Add one in Settings, under Backups.</p>
           </div>
-          {accounts.length > 0 && <p className="text-[11px] text-muted">Disconnect in Settings, under Backups.</p>}
         </div>
-        {accounts.length === 0 && <p className="text-xs text-muted">None yet. Add one below.</p>}
+        {accounts.length === 0 && <p className="text-xs text-muted">None yet.</p>}
+        <button
+          type="button"
+          disabled={!isNative() || ticked.length === 0 || chosen.length === 0 || busy !== null}
+          onClick={() => void backupTo(ticked)}
+          className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+        >
+          {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+          {busy === 'up' ? 'Backing up…' : 'Backup'}
+        </button>
         <div className="grid gap-2">
           {accounts.map((account) => (
             <CloudCard
@@ -734,136 +860,7 @@ export function CloudPanel({
         </div>
       </section>
 
-      <section className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium">Add a cloud</h3>
-          <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {SERVICES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={!isNative() || !ready || busy !== null}
-              onClick={() => {
-                if (item.kind === 'account') {
-                  setServer(null);
-                  setAccountKind(accountKind === item.id ? null : item.id);
-                  return;
-                }
-                setAccountKind(null);
-                void connect(item.id);
-              }}
-              className={cn(
-                'rounded-2xl border px-3 py-3 text-sm font-semibold transition disabled:opacity-50',
-                accountKind === item.id
-                  ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
-                  : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
-              )}
-            >
-              {busy === item.id ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : item.label}
-            </button>
-          ))}
-        </div>
-        {accountKind && (
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="sm:col-span-2">
-              <span className="mb-1 block text-[11px] text-muted">Email</span>
-              <input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} autoComplete="off" />
-            </label>
-            <label className="sm:col-span-2">
-              <span className="mb-1 block text-[11px] text-muted">Password</span>
-              <input className={inputCls} type="password" value={accountPass} onChange={(e) => setAccountPass(e.target.value)} autoComplete="new-password" />
-            </label>
-            <label className={accountKind === 'protondrive' ? '' : 'sm:col-span-2'}>
-              <span className="mb-1 block text-[11px] text-muted">Two-factor code, if this account asks for one</span>
-              <input className={inputCls} value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} autoComplete="one-time-code" />
-            </label>
-            {accountKind === 'protondrive' && (
-              <label>
-                <span className="mb-1 block text-[11px] text-muted">Mailbox password, if this account has one</span>
-                <input className={inputCls} type="password" value={mailbox} onChange={(e) => setMailbox(e.target.value)} autoComplete="new-password" />
-              </label>
-            )}
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void connectAccount(accountKind)}
-              className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
-            >
-              {busy === accountKind ? (note === 'Signed in.' ? 'Finishing…' : 'Connecting…') : 'Connect'}
-            </button>
-          </div>
-        )}
-
-        <div className="space-y-2 rounded-2xl border border-line/60 bg-bg/20 p-3">
-          <h4 className="text-sm font-medium">Server</h4>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {SERVERS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                disabled={!isNative() || !ready || busy !== null}
-                onClick={() => {
-                  setAccountKind(null);
-                  setServer(server === item.id ? null : item.id);
-                }}
-                className={cn(
-                  'rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition disabled:opacity-50',
-                  server === item.id
-                    ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
-                    : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
-                )}
-              >
-                {item.id === 'smb' ? 'Shared folder' : item.label}
-              </button>
-            ))}
-          </div>
-          {server && (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {server === 'webdav' ? (
-                <label className="sm:col-span-2">
-                  <span className="mb-1 block text-[11px] text-muted">Address</span>
-                  <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example/remote.php/dav/files/you/" spellCheck={false} />
-                </label>
-              ) : (
-                <label className="sm:col-span-2">
-                  <span className="mb-1 block text-[11px] text-muted">Host</span>
-                  <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="host" spellCheck={false} />
-                </label>
-              )}
-              <label>
-                <span className="mb-1 block text-[11px] text-muted">User</span>
-                <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} spellCheck={false} />
-              </label>
-              <label>
-                <span className="mb-1 block text-[11px] text-muted">Password</span>
-                <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              </label>
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => void connect(server)}
-                className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
-              >
-                {busy === server ? 'Connecting…' : 'Connect'}
-              </button>
-            </div>
-          )}
-        </div>
-
-      </section>
-
       {!isNative() && <p className="text-xs text-muted">Cloud copies need the desktop app.</p>}
-      {authUrl && !authOpened && (
-        <p className="text-xs text-muted">
-          The sign-in page should be open. If it is not,{' '}
-          <button type="button" onClick={() => void openExternal(authUrl)} className="text-accent underline-offset-2 hover:underline">
-            open it again
-          </button>
-          .
-        </p>
-      )}
       {note && <p className="text-xs text-fg">{note}</p>}
       {error && <p className="break-words text-xs text-rose-300">{error}</p>}
     </div>
@@ -885,7 +882,7 @@ export function CloudPanel({
       {open && (
         <Modal
           title="Cloud"
-          subtitle="Mark the clouds and the games. A lit card is included."
+          subtitle="Tick the clouds. Games with a save folder are listed first."
           size="xl"
           onClose={() => setOpen(false)}
         >
@@ -962,21 +959,12 @@ function CloudCard({
   const marked = account.on !== false;
 
   return (
-    <div
-      className={cn(
-        'space-y-3 rounded-2xl border p-3 transition',
-        marked
-          ? 'border-accent bg-accent/15 shadow-[0_0_24px_-12px_var(--c-accent)]'
-          : 'border-line/70 bg-bg/30',
-      )}
-    >
+    <div className="space-y-3 rounded-xl border border-line/70 bg-bg/20 p-3">
       <div className="flex items-start justify-between gap-2">
-        <button type="button" onClick={() => onIncluded(!marked)} className="min-w-0 text-left">
-          <span className="block truncate text-sm font-semibold">{title}</span>
-          <span className={cn('mt-0.5 block text-[11px]', marked ? 'text-accent' : 'text-muted')}>
-            {marked ? 'Backups go here' : 'Click to include'}
-          </span>
-        </button>
+        <label className="flex min-w-0 cursor-pointer items-center gap-2">
+          <CheckboxBox checked={marked} onChange={onIncluded} />
+          <span className="truncate text-sm font-semibold">{title}</span>
+        </label>
         {page && (
           <button
             type="button"

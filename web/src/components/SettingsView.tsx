@@ -45,7 +45,7 @@ import {
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { CopySettings } from './CopySettings';
-import { CloudAccounts, CloudTools } from './saves/CloudPanel';
+import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
@@ -301,7 +301,8 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
-  { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out server ftp' },
+  { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
+  { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
   { label: 'rclone', section: 'orbit-backups', keywords: 'rclone get update folder path check backups' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
@@ -845,7 +846,7 @@ export function SettingsView({
         id="orbit-backups"
         icon={Save}
         title="Backups"
-        lead="Clouds the copies can be sent to, and rclone. Disconnect a cloud here."
+        lead="Add a cloud here. Disconnect one here too."
       >
         <Checkbox
           checked={cloudAutoOn(settings.saves)}
@@ -853,6 +854,7 @@ export function SettingsView({
           label="Also send a backup to the cloud"
           hint="A backup saved on this PC is also sent to the clouds marked on the Cloud page. Off leaves it on this PC until you send it."
         />
+        <AddCloud settings={settings} setSettings={setSettings} />
         <CloudTools />
         <CloudAccounts settings={settings} setSettings={setSettings} />
       </Section>
