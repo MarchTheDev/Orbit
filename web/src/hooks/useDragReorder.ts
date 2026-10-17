@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import { slotAt } from '../utils/reorder';
+import { cardAt, slotAt } from '../utils/reorder';
 
 /** How far the pointer travels before a press counts as a drag. */
 const THRESHOLD = 6;
@@ -50,6 +50,20 @@ export function useDragReorder(
      * place short of where it looks.
      */
     onto?: boolean;
+    /**
+     * A grid of cards. Height alone would always land on the first card of the
+     * row. The card under the pointer, in both directions, is the target.
+     */
+    grid?: boolean;
+    /**
+     * Hold the pointer on the card.
+     *
+     * A cover is a picture inside a button, in a dialog that scrolls. The
+     * picture starts a file drag, and the scroller takes the gesture, so the
+     * pointer never becomes a reorder. Holding the pointer on the card, and
+     * refusing that file drag, is what makes the cover move.
+     */
+    hold?: boolean;
   },
 ) {
   const optionsRef = useRef(options);
@@ -61,6 +75,8 @@ export function useDragReorder(
   const overRef = useRef<{ id: string; after: boolean } | null>(null);
   const reorderRef = useRef(onReorder);
   reorderRef.current = onReorder;
+  const moveRef = useRef<(e: PointerEvent) => void>(() => {});
+  const finishRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -112,6 +128,20 @@ export function useDragReorder(
      */
     const slotUnder = (x: number, y: number, heldId: string): { id: string; after: boolean } | null => {
       const container = optionsRef.current?.container?.current ?? null;
+      if (container && optionsRef.current?.grid) {
+        const cards = [...container.querySelectorAll<HTMLElement>('[data-orbit-drop]')].map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            id: el.getAttribute('data-orbit-drop') ?? '',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          };
+        });
+        const id = cardAt(cards, x, y, heldId);
+        return id ? { id, after: false } : null;
+      }
       if (!container) {
         // Not a list: what is under the pointer is the answer, and which half of
         // it the pointer is in decides before or after. Without that, dragging a
@@ -159,14 +189,23 @@ export function useDragReorder(
       if (e.key === 'Escape' && press.current) finish();
     };
 
+    moveRef.current = move;
+    finishRef.current = finish;
+    const abandon = () => {
+      // A scroller can cancel the gesture before it has moved far enough to
+      // count. Holding the card means that cancel is not the end of the drag.
+      if (optionsRef.current?.hold && press.current && !press.current.live) return;
+      finish();
+    };
+
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', finish);
+    window.addEventListener('pointercancel', abandon);
     window.addEventListener('keydown', cancel);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('pointercancel', abandon);
       window.removeEventListener('keydown', cancel);
       document.body.style.userSelect = '';
     };
@@ -188,8 +227,24 @@ export function useDragReorder(
               // A button inside the card is being pressed, not the card.
               const interactive = (e.target as HTMLElement).closest('button, a, input, select, textarea');
               if (interactive && !optionsRef.current?.fromButtons) return;
+              if (optionsRef.current?.hold) {
+                // The dialog's scroller must not take this gesture, and the
+                // events have to keep arriving on the card even if the window
+                // listener does not see them.
+                e.currentTarget.setPointerCapture?.(e.pointerId);
+              }
               press.current = { id, x: e.clientX, y: e.clientY, live: false };
             },
+            onPointerMove: (e: ReactPointerEvent) => {
+              moveRef.current(e.nativeEvent);
+            },
+            onPointerUp: () => {
+              finishRef.current();
+            },
+            onDragStart: (e: { preventDefault: () => void }) => {
+              if (optionsRef.current?.hold) e.preventDefault();
+            },
+            style: optionsRef.current?.hold ? { touchAction: 'none' as const } : undefined,
           }
         : {},
     [onReorder],

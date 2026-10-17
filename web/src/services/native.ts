@@ -879,6 +879,10 @@ export function cloudFetch(replace = false): Promise<string> {
   });
 }
 
+export function cloudCancel(): Promise<void> {
+  return call('cloud_cancel', {}, async () => {});
+}
+
 export function cloudConnect(
   provider: string,
   fields: { host?: string; user?: string; password?: string; url?: string; extra?: boolean; folder?: string | null; name?: string | null; code?: string | null; mailbox?: string | null } = {},

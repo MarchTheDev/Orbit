@@ -1413,6 +1413,12 @@ async fn cloud_fetch(orbit: State<'_, Orbit>, replace: Option<bool>) -> Result<S
     cloud::fetch(orbit.store.root(), replace.unwrap_or(false)).await
 }
 
+/// Stop a sign-in that is still waiting. Closing the browser tab does this too.
+#[tauri::command]
+fn cloud_cancel() {
+    cloud::cancel_sign_in();
+}
+
 #[tauri::command]
 async fn cloud_connect(
     app: tauri::AppHandle,
@@ -1454,12 +1460,17 @@ async fn cloud_connect(
             &mailbox,
             &|link| {
                 // One opener. A second tab spends the sign-in and asks for it again.
-                let opened = app.opener().open_url(link, None::<&str>).is_ok();
+                // The watched window is first. The system opener is only the fallback,
+                // and only when that window was not started.
+                let opened = cloud::open_sign_in_browser(link)
+                    || app.opener().open_url(link, None::<&str>).is_ok();
                 let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
             },
             &|text| {
                 if text == "signed-in" {
                     let _ = app.emit("cloud-auth", serde_json::json!({ "signedIn": true }));
+                } else if text == "closed" {
+                    let _ = app.emit("cloud-auth", serde_json::json!({ "closed": true }));
                 } else {
                     let _ = app.emit("cloud-auth", serde_json::json!({ "note": text }));
                 }
@@ -2112,6 +2123,7 @@ pub fn run() {
             cloud_status,
             cloud_fetch,
             cloud_connect,
+            cloud_cancel,
             cloud_remotes,
             cloud_attach,
             cloud_copy,

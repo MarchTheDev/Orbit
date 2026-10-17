@@ -72,11 +72,14 @@ export function SavesView({
   const dirWrites = useRef(Promise.resolve());
   const rememberDir = (id: string, path: string) => {
     dirWrites.current = dirWrites.current.then(() => {
-      const current = settingsRef.current;
-      if (current.saves?.dirs?.[id]?.trim()) return;
-      const dirs = { ...current.saves?.dirs, [id]: path };
-      settingsRef.current = { ...current, saves: { ...current.saves, dirs } };
-      setSettings({ saves: settingsRef.current.saves });
+      const apply = setSettings as (patch: (current: Settings) => Partial<Settings>) => void;
+      apply((current) => {
+        if (current.saves?.dirs?.[id]?.trim()) return {};
+        const dirs = { ...current.saves?.dirs, [id]: path };
+        const saves = { ...current.saves, dirs };
+        settingsRef.current = { ...current, saves };
+        return { saves };
+      });
     });
   };
   const savedOrder = settings.saves?.order;

@@ -14,6 +14,7 @@ import { useDragReorder } from '../../hooks/useDragReorder';
 import { takePlace } from '../../utils/reorder';
 import {
   cloudAccounts,
+  cloudCancel,
   cloudConnect,
   cloudCopy,
   cloudFetch,
@@ -255,15 +256,13 @@ export function AddCloud({
   const accounts = cloudAccounts(settings.saves);
   const [ready, setReady] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [flight, setFlight] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [authOpened, setAuthOpened] = useState(true);
   const [server, setServer] = useState<(typeof SERVERS)[number]['id'] | null>(null);
   const [accountKind, setAccountKind] = useState<'mega' | 'protondrive' | null>(null);
-  const [driveOpen, setDriveOpen] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
   const [host, setHost] = useState('');
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
@@ -292,8 +291,18 @@ export function AddCloud({
   useEffect(() => {
     if (!isNative()) return;
     let stop: (() => void) | undefined;
-    void listen<{ url?: string; opened?: boolean; freeing?: boolean; note?: string; signedIn?: boolean } | string>('cloud-auth', (event) => {
+    void listen<{ url?: string; opened?: boolean; freeing?: boolean; note?: string; signedIn?: boolean; closed?: boolean } | string>('cloud-auth', (event) => {
       const payload = event.payload;
+      if (payload && typeof payload !== 'string' && payload.closed) {
+        connectGen.current += 1;
+        pending.current = null;
+        setBusy(null);
+        setFlight(null);
+        setNote(null);
+        setAuthUrl(null);
+        setError(null);
+        return;
+      }
       if (payload && typeof payload !== 'string' && payload.signedIn) {
         const item = pending.current;
         if (item && item.gen === connectGen.current) {
@@ -305,7 +314,10 @@ export function AddCloud({
               ],
             }),
           }));
-          setNote('Signed in.');
+          // The cloud is in the list. Do not leave the button on Finishing while
+          // the command is still returning.
+          setNote(null);
+          setBusy(null);
           setAuthUrl(null);
         }
         return;
@@ -347,7 +359,20 @@ export function AddCloud({
     }));
   };
 
-  const connect = async (provider: string, client?: { id: string; secret: string }) => {
+  const cancelSignIn = () => {
+    connectGen.current += 1;
+    pending.current = null;
+    setBusy(null);
+    setFlight(null);
+    setNote(null);
+    setAuthUrl(null);
+    setError(null);
+    void cloudCancel();
+  };
+
+  const connect = async (provider: string) => {
+    if (flight) return;
+    setFlight(provider);
     setBusy(provider);
     setError(null);
     setNote(null);
@@ -360,8 +385,8 @@ export function AddCloud({
     try {
       const label = await cloudConnect(provider, {
         host,
-        user: provider === 'drive' ? (client?.id ?? '') : user,
-        password: provider === 'drive' ? (client?.secret ?? '') : password,
+        user,
+        password,
         url,
         name,
       });
@@ -376,14 +401,23 @@ export function AddCloud({
       }));
       setNote(`Connected to ${label}.`);
       setServer(null);
-      setDriveOpen(false);
-      setClientSecret('');
     } catch (e) {
+      const message = String(e).replace(/^Error:\s*/, '');
+      if (message.includes('sign-in-closed') || connectGen.current !== gen) {
+        setBusy(null);
+        setFlight(null);
+        setNote(null);
+        setError(null);
+        return;
+      }
       dropConnect(name, gen);
       fail(e);
     } finally {
-      if (pending.current?.gen === gen) pending.current = null;
-      setBusy(null);
+      if (connectGen.current === gen) {
+        if (pending.current?.gen === gen) pending.current = null;
+        setBusy(null);
+        setFlight(null);
+      }
     }
   };
 
@@ -430,7 +464,7 @@ export function AddCloud({
     <div className="space-y-3">
       <div>
         <h4 className="text-sm font-medium">Add a cloud</h4>
-        <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again. Google is retiring the shared sign-in, so a client id and secret keep Drive working.</p>
+        <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page in your browser. MEGA and Proton Drive use the email and password. The same service can be added again.</p>
       </div>
       {!ready && isNative() && <p className="text-xs text-muted">rclone is not here yet. Get it below.</p>}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -438,68 +472,34 @@ export function AddCloud({
           <button
             key={item.id}
             type="button"
-            disabled={!isNative() || !ready || busy !== null}
+            disabled={!isNative() || !ready || (busy !== null && !(busy === item.id && item.kind === 'oauth')) || (flight === item.id && busy !== item.id)}
             onClick={() => {
-              if (item.id === 'drive') {
-                setServer(null);
-                setAccountKind(null);
-                setDriveOpen((open) => !open);
+              if (busy === item.id && item.kind === 'oauth') {
+                cancelSignIn();
                 return;
               }
-              setDriveOpen(false);
               if (item.kind === 'account') {
                 setServer(null);
                 setAccountKind(accountKind === item.id ? null : item.id);
                 return;
               }
               setAccountKind(null);
+              setServer(null);
               void connect(item.id);
             }}
             className={cn(
               'rounded-2xl border px-3 py-3 text-sm font-semibold transition disabled:opacity-50',
-              accountKind === item.id || (item.id === 'drive' && driveOpen)
+              accountKind === item.id
                 ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
                 : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
             )}
           >
-            {busy === item.id ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : item.label}
+            {busy === item.id && item.kind === 'oauth' ? 'Cancel' : item.label}
           </button>
         ))}
       </div>
-      {driveOpen && (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <p className="text-[11px] text-muted sm:col-span-2">
-            Leave both blank to use the shared sign-in for now. Your own client id and secret are the ones that keep working.{' '}
-            <button type="button" onClick={() => void openExternal('https://rclone.org/drive/#making-your-own-client-id')} className="text-accent underline-offset-2 hover:underline">
-              How to make them
-            </button>
-            .
-          </p>
-          <label>
-            <span className="mb-1 block text-[11px] text-muted">Client id, if you have one</span>
-            <input className={inputCls} value={clientId} onChange={(e) => setClientId(e.target.value)} spellCheck={false} autoComplete="off" />
-          </label>
-          <label>
-            <span className="mb-1 block text-[11px] text-muted">Client secret</span>
-            <input className={inputCls} type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="new-password" />
-          </label>
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => {
-              const id = clientId.trim();
-              const secret = clientSecret.trim();
-              if ((id && !secret) || (!id && secret)) {
-                setError('Google Drive needs both the client id and the secret, or neither.');
-                return;
-              }
-              void connect('drive', id && secret ? { id, secret } : undefined);
-            }}
-            className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
-          >
-            {busy === 'drive' ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : 'Sign in to Google Drive'}
-          </button>
-        </div>
+      {(busy === 'drive' || busy === 'dropbox') && (
+        <p className="text-xs text-muted">The sign-in page is open in your browser. Closing that tab stops the wait, or press Cancel.</p>
       )}
       {accountKind && (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -527,7 +527,7 @@ export function AddCloud({
             onClick={() => void connectAccount(accountKind)}
             className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
           >
-            {busy === accountKind ? (note === 'Signed in.' ? 'Finishing…' : 'Connecting…') : 'Connect'}
+            {busy === accountKind ? 'Connecting…' : 'Connect'}
           </button>
         </div>
       )}
@@ -641,16 +641,17 @@ export function CloudPanel({
   const [error, setError] = useState<string | null>(null);
   const [gameQuery, setGameQuery] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const gamesList = useRef<HTMLUListElement>(null);
+  const orderIds = useRef<string[]>([]);
+  orderIds.current = known.map((game) => game.id);
   const { bind: bindGame, dragging, over } = useDragReorder(
     (fromId, toId) => {
-      setSettings({
-        saves: {
-          ...settings.saves,
-          cloudOrder: takePlace(known.map((game) => game.id), fromId, toId),
-        },
-      });
+      const cloudOrder = takePlace(orderIds.current, fromId, toId);
+      (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)((current) => ({
+        saves: { ...current.saves, cloudOrder },
+      }));
     },
-    { fromButtons: true, onto: true },
+    { container: gamesList, fromButtons: true, grid: true, hold: true },
   );
 
   const refresh = () => {
@@ -843,15 +844,17 @@ export function CloudPanel({
         {known.length === 0 ? (
           <p className="text-xs text-muted">None yet. Orbit looks for save folders on its own.</p>
         ) : (
-          <ul className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
+          <ul ref={gamesList} className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
             {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
             {shown.map((game) => {
               const on = !skip.has(game.id);
               return (
-                <li key={game.id} {...bindGame(game.id)} className={cn(dragging === game.id && 'opacity-60', over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent rounded-2xl')}>
+                <li key={game.id} className={cn(dragging === game.id && 'opacity-60', over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent rounded-2xl')}>
                   <button
                     type="button"
+                    draggable={false}
                     data-orbit-save={game.id}
+                    {...bindGame(game.id)}
                     onClick={() => setSkipped(game.id, on)}
                     onContextMenu={(event) => {
                       event.preventDefault();
@@ -861,7 +864,7 @@ export function CloudPanel({
                     aria-pressed={on}
                     title={dirs[game.id]}
                     className={cn(
-                      'w-full rounded-2xl border p-1.5 text-left transition',
+                      'w-full cursor-grab rounded-2xl border p-1.5 text-left transition active:cursor-grabbing [&_img]:pointer-events-none',
                       on
                         ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
                         : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',

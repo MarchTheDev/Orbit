@@ -23,6 +23,43 @@
  * that card's place, not the slot one above or below it. Using the halfway
  * mark made Saves land one position off, so the drag had to overshoot.
  */
+/** One card in a grid, as the pointer sees it. */
+export interface CardRect {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Which card a pointer is on, in a grid.
+ *
+ * A vertical list can use height alone. A grid has several cards on the same
+ * row, so the card under the pointer is the one whose box contains it. A drop
+ * in the gap between two cards belongs to the nearer one, and a drop far from
+ * every card is not a reorder.
+ */
+export function cardAt(cards: CardRect[], x: number, y: number, heldId: string): string | null {
+  const others = cards.filter((card) => card.id !== heldId && card.width > 0 && card.height > 0);
+  if (others.length === 0) return null;
+  const hit = others.find(
+    (card) => x >= card.left && x <= card.left + card.width && y >= card.top && y <= card.top + card.height,
+  );
+  if (hit) return hit.id;
+  let best = others[0];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const card of others) {
+    const dist = Math.hypot(card.left + card.width / 2 - x, card.top + card.height / 2 - y);
+    if (dist < bestDist) {
+      best = card;
+      bestDist = dist;
+    }
+  }
+  if (bestDist > Math.max(best.width, best.height)) return null;
+  return best.id;
+}
+
 export function takePlace(ids: string[], fromId: string, toId: string): string[] {
   const from = ids.indexOf(fromId);
   const to = ids.indexOf(toId);

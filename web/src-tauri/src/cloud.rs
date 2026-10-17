@@ -19,6 +19,21 @@ use crate::saves;
 
 const FETCH_CAP: u64 = 80 * 1024 * 1024;
 const AUTH_WAIT: Duration = Duration::from_secs(300);
+/// Returned to the window when the browser tab is closed or Cancel is pressed.
+/// It is not a sentence for the player: the box just stops waiting.
+const SIGN_IN_CLOSED: &str = "sign-in-closed";
+
+struct SignInWatch {
+    browser: Option<std::process::Child>,
+    profile: PathBuf,
+    tracked: bool,
+    seen: bool,
+    started: Instant,
+    rclone: Option<u32>,
+}
+
+static SIGN_IN_CANCEL: AtomicBool = AtomicBool::new(false);
+static SIGN_IN: Mutex<Option<SignInWatch>> = Mutex::new(None);
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -708,14 +723,340 @@ fn authorize(
         let _ = fs::write(config, "");
     }
     clear_stale_sign_in(config);
+    begin_sign_in();
     // A busy port is not another sign-in. prepare_oauth_port already waited
     // it out. Try anyway, and say so only if rclone still cannot take it.
-    match auth_port() {
-        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell),
-        AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
+    let result = match auth_port() {
+        AuthPort::Blocked => authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell),
+        AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {
+            authorize_once(bin, config, provider, client_id, client_secret, open, tell).or_else(|err| {
+                // A second authorize is a second login tab. Once the browser
+                // has opened, or the player has closed it, do not start another.
+                if !retry_sign_in(&err) {
+                    return Err(err);
+                }
+                recover_authorize(bin, config, provider, client_id, client_secret, open, tell, &err)
+            })
+        }
+    };
+    finish_sign_in();
+    result
+}
+
+fn retry_sign_in(err: &str) -> bool {
+    if sign_in_stopped() || err == SIGN_IN_CLOSED || err.to_ascii_lowercase().contains("got code") {
+        return false;
     }
-    authorize_once(bin, config, provider, client_id, client_secret, open, tell)
-        .or_else(|err| recover_authorize(bin, config, provider, client_id, client_secret, open, tell, &err))
+    if sign_in_browser_opened() {
+        return false;
+    }
+    sign_in_port_failed(err) || port_still_busy(err)
+}
+
+fn begin_sign_in() {
+    SIGN_IN_CANCEL.store(false, Ordering::SeqCst);
+    finish_sign_in();
+    if let Ok(mut guard) = SIGN_IN.lock() {
+        *guard = Some(SignInWatch {
+            browser: None,
+            profile: PathBuf::new(),
+            tracked: false,
+            seen: false,
+            started: Instant::now(),
+            rclone: None,
+        });
+    }
+}
+
+fn finish_sign_in() {
+    let Some(mut sign) = SIGN_IN.lock().ok().and_then(|mut guard| guard.take()) else {
+        return;
+    };
+    if let Some(mut child) = sign.browser.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if !sign.profile.as_os_str().is_empty() {
+        let _ = fs::remove_dir_all(&sign.profile);
+    }
+}
+
+/// Stop the sign-in now. Closing the browser tab and Cancel both come here.
+pub fn cancel_sign_in() {
+    SIGN_IN_CANCEL.store(true, Ordering::SeqCst);
+    let pid = SIGN_IN.lock().ok().and_then(|guard| guard.as_ref().and_then(|sign| sign.rclone));
+    if let Some(pid) = pid {
+        kill_pid(pid);
+    }
+    for pid in rclone_authorize_pids() {
+        kill_pid(pid);
+    }
+    if let Ok(mut guard) = SIGN_IN.lock() {
+        if let Some(sign) = guard.as_mut() {
+            if let Some(child) = sign.browser.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+fn remember_rclone(pid: u32) {
+    if let Ok(mut guard) = SIGN_IN.lock() {
+        if let Some(sign) = guard.as_mut() {
+            sign.rclone = Some(pid);
+        }
+    }
+}
+
+fn sign_in_stopped() -> bool {
+    SIGN_IN_CANCEL.load(Ordering::SeqCst)
+}
+
+fn sign_in_browser_opened() -> bool {
+    SIGN_IN.lock().ok().and_then(|guard| guard.as_ref().map(|sign| sign.tracked)).unwrap_or(false)
+}
+
+/// The login window is gone, and it had actually appeared.
+///
+/// A launcher that exits at once is not that: the window's own process may
+/// still be starting. Once the profile lock has been seen, or the grace has
+/// passed with nothing running, the tab is closed.
+fn sign_in_browser_closed() -> bool {
+    let Ok(mut guard) = SIGN_IN.lock() else {
+        return false;
+    };
+    let Some(sign) = guard.as_mut() else {
+        return false;
+    };
+    if !sign.tracked {
+        return false;
+    }
+    let running = match sign.browser.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(None)),
+        None => false,
+    };
+    let locked = profile_in_use(&sign.profile);
+    if running || locked {
+        sign.seen = true;
+        return false;
+    }
+    if !sign.seen {
+        // A launcher that exits at once handed the page to a browser we are not
+        // watching. Stopping here would close a sign-in that is still on screen.
+        // Cancel still stops that one.
+        if sign.started.elapsed() >= Duration::from_secs(2) {
+            sign.tracked = false;
+        }
+        return false;
+    }
+    true
+}
+
+fn profile_in_use(dir: &Path) -> bool {
+    if dir.as_os_str().is_empty() {
+        return false;
+    }
+    ["SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile", "parent.lock"]
+        .iter()
+        .any(|name| dir.join(name).exists())
+}
+
+/// Open the provider page in the player's browser, as its own window.
+///
+/// The window is watched. Closing it is the same as Cancel: rclone is stopped
+/// and the box stops waiting. A local `/auth` address is never opened. That
+/// redirect is what asks for the login a second time.
+pub fn open_sign_in_browser(url: &str) -> bool {
+    if !may_open_sign_in(url) {
+        return false;
+    }
+    let Some(exe) = browser_executable() else {
+        return false;
+    };
+    let profile = std::env::temp_dir().join(format!("orbit-signin-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&profile);
+    if fs::create_dir_all(&profile).is_err() {
+        return false;
+    }
+    let mut command = process::command(&exe);
+    let name = exe.file_name().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    if name.contains("firefox") {
+        command.arg("-profile").arg(&profile);
+        command.arg("-no-remote");
+        command.arg("-new-instance");
+        command.arg(url);
+    } else {
+        command.arg(format!("--user-data-dir={}", profile.display()));
+        command.arg("--no-first-run");
+        command.arg("--no-default-browser-check");
+        command.arg("--disable-sync");
+        command.arg("--new-window");
+        command.arg(url);
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            let _ = fs::remove_dir_all(&profile);
+            return false;
+        }
+    };
+    let mut guard = match SIGN_IN.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(sign) = guard.as_mut() {
+        sign.browser = Some(child);
+        sign.profile = profile;
+        sign.tracked = true;
+        sign.seen = false;
+        sign.started = Instant::now();
+        return true;
+    }
+    // Nothing is waiting on this window. Kill it, or the fallback opener is a
+    // second tab.
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&profile);
+    false
+}
+
+fn may_open_sign_in(url: &str) -> bool {
+    let url = url.trim();
+    !url.is_empty()
+        && !is_local_auth(url)
+        && (url.starts_with("https://") || url.starts_with("http://"))
+}
+
+fn browser_executable() -> Option<PathBuf> {
+    if let Some(path) = registered_browser() {
+        if is_browser_family(&path) && path.is_file() {
+            return Some(path);
+        }
+    }
+    known_browsers().into_iter().find(|path| path.is_file())
+}
+
+fn is_browser_family(path: &Path) -> bool {
+    let name = path.file_name().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    name.contains("chrome")
+        || name.contains("msedge")
+        || name.contains("edge")
+        || name.contains("firefox")
+        || name.contains("brave")
+        || name.contains("chromium")
+}
+
+fn known_browsers() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    #[cfg(windows)]
+    {
+        for key in ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"] {
+            let Some(root) = std::env::var_os(key) else { continue };
+            let root = PathBuf::from(root);
+            found.push(root.join("Google").join("Chrome").join("Application").join("chrome.exe"));
+            found.push(root.join("Microsoft").join("Edge").join("Application").join("msedge.exe"));
+            found.push(root.join("Mozilla Firefox").join("firefox.exe"));
+            found.push(root.join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        for name in [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "brave-browser",
+            "firefox",
+        ] {
+            if let Some(path) = which(name) {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+#[cfg(windows)]
+fn registered_browser() -> Option<PathBuf> {
+    let output = process::command("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+            "/v",
+            "ProgId",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let prog = text.lines().find_map(|line| {
+        let line = line.trim();
+        if !line.to_ascii_lowercase().starts_with("progid") {
+            return None;
+        }
+        line.split_whitespace().last().map(|item| item.to_string())
+    })?;
+    for root in [
+        format!(r"HKCU\Software\Classes\{prog}\shell\open\command"),
+        format!(r"HKLM\Software\Classes\{prog}\shell\open\command"),
+    ] {
+        let Ok(output) = process::command("reg").args(["query", &root, "/ve"]).output() else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(path) = command_exe(&text) {
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn registered_browser() -> Option<PathBuf> {
+    let output = process::command("xdg-settings").args(["get", "default-web-browser"]).output().ok()?;
+    let desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if desktop.is_empty() || desktop.contains(' ') {
+        return None;
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    for dir in [
+        home.join(".local/share/applications"),
+        PathBuf::from("/usr/share/applications"),
+        PathBuf::from("/usr/local/share/applications"),
+    ] {
+        let path = dir.join(&desktop);
+        let Ok(text) = fs::read_to_string(&path) else { continue };
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("Exec=") else { continue };
+            let token = rest.split_whitespace().next().unwrap_or("");
+            if token.is_empty() || token.starts_with('%') {
+                continue;
+            }
+            let exe = PathBuf::from(token);
+            if exe.is_file() {
+                return Some(exe);
+            }
+            if let Some(found) = which(token) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn command_exe(text: &str) -> Option<PathBuf> {
+    let start = text.find('"')?;
+    let end = text[start + 1..].find('"')? + start + 1;
+    let path = PathBuf::from(&text[start + 1..end]);
+    if path.extension().is_some() || path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn recover_authorize(
@@ -780,10 +1121,8 @@ fn authorize_once(
     // redirects, and that redirect is requested again after the login, as a
     // second tab that asks for the account once more.
     //
-    // The flag is not enough on its own. rclone still calls the system opener
-    // unless it sees the flag, and that opener is the second login tab. The
-    // process is started paused and put in a job that cannot start another
-    // program, so that opener cannot run. Orbit opens the provider page itself.
+    // The flag has to come before the provider, or rclone opens that page
+    // itself. Orbit opens the provider page, once, and watches that window.
     let mut command = rclone(bin, Some(config));
     #[cfg(unix)]
     {
@@ -794,20 +1133,12 @@ fn authorize_once(
     if !client_id.is_empty() && !client_secret.is_empty() {
         command.arg(client_id).arg(client_secret);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const CREATE_SUSPENDED: u32 = 0x0000_0004;
-        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
-    }
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Could not start rclone: {e}"))?;
-    let _browser_lock = stop_spawned_browser(&child);
-    resume_if_paused(&child);
+    remember_rclone(child.id());
     let pid_file = config.parent().map(|dir| {
         let path = dir.join("sign-in.pid");
         let _ = fs::write(&path, child.id().to_string());
@@ -829,6 +1160,19 @@ fn authorize_once(
     let signed = AtomicBool::new(false);
     let started = Instant::now();
     let status = loop {
+        // A window closed after the code arrived is the success page going
+        // away, not an abandoned login. Killing rclone there drops the token.
+        if sign_in_stopped() || (sign_in_browser_closed() && !signed.load(Ordering::SeqCst)) {
+            let _ = child.kill();
+            for reader in readers {
+                let _ = reader.join();
+            }
+            if let Some(path) = &pid_file {
+                let _ = fs::remove_file(path);
+            }
+            tell("closed");
+            return Err(SIGN_IN_CLOSED.into());
+        }
         if let Some(url) = link.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if !opened.load(Ordering::SeqCst) {
                 opened.store(true, Ordering::SeqCst);
@@ -1123,6 +1467,14 @@ fn authorize_with_port_freed(
         scope.spawn(|| {
             let started = Instant::now();
             while !stop.load(Ordering::SeqCst) && started.elapsed() < AUTH_WAIT {
+                if sign_in_stopped() || (sign_in_browser_closed() && !signed.load(Ordering::SeqCst)) {
+                    tell("closed");
+                    SIGN_IN_CANCEL.store(true, Ordering::SeqCst);
+                    for pid in rclone_authorize_pids() {
+                        kill_pid(pid);
+                    }
+                    break;
+                }
                 if let Ok(text) = fs::read_to_string(&url_path) {
                     if let Some(url) = auth_url(text.trim()) {
                         if !opened.swap(true, Ordering::SeqCst) {
@@ -1149,6 +1501,9 @@ fn authorize_with_port_freed(
         stop.store(true, Ordering::SeqCst);
         ran
     })?;
+    if sign_in_stopped() {
+        return Err(SIGN_IN_CLOSED.into());
+    }
     if !result {
         return Err("The permission prompt was dismissed, so the sign-in port is still blocked.".into());
     }
@@ -1417,112 +1772,6 @@ fn delete_named(bin: &Path, config: &Path, name: &str) -> Result<(), String> {
     }
     Err(public_error(&output.stderr, "Could not forget that cloud."))
 }
-
-/// Stop rclone from opening a browser of its own.
-///
-/// The sign-in flag is supposed to do this. When it does not, rclone starts
-/// the system opener on the local `/auth` address. That redirect is asked for
-/// again after the login, which is the second login tab. A job that allows
-/// only this process means that opener cannot start. The handle is kept until
-/// the sign-in ends; closing it sooner would drop the limit.
-#[cfg(windows)]
-struct HeldJob(isize);
-
-#[cfg(windows)]
-impl Drop for HeldJob {
-    fn drop(&mut self) {
-        close_job(self.0);
-    }
-}
-
-#[cfg(windows)]
-fn stop_spawned_browser(child: &std::process::Child) -> Option<HeldJob> {
-    use std::os::windows::io::AsRawHandle;
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateJobObjectW(attrs: *mut core::ffi::c_void, name: *const u16) -> isize;
-        fn SetInformationJobObject(job: isize, class: i32, info: *const core::ffi::c_void, len: u32) -> i32;
-        fn AssignProcessToJobObject(job: isize, process: isize) -> i32;
-        fn CloseHandle(handle: isize) -> i32;
-    }
-    #[repr(C)]
-    struct BasicLimit {
-        per_process_user_time: i64,
-        per_job_user_time: i64,
-        limit_flags: u32,
-        minimum_working_set: usize,
-        maximum_working_set: usize,
-        active_process_limit: u32,
-        affinity: usize,
-        priority_class: u32,
-        scheduling_class: u32,
-    }
-    const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
-    const JOB_OBJECT_BASIC_LIMIT_INFORMATION: i32 = 2;
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
-        if job == 0 {
-            return None;
-        }
-        let info = BasicLimit {
-            per_process_user_time: 0,
-            per_job_user_time: 0,
-            limit_flags: JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-            minimum_working_set: 0,
-            maximum_working_set: 0,
-            active_process_limit: 1,
-            affinity: 0,
-            priority_class: 0,
-            scheduling_class: 0,
-        };
-        if SetInformationJobObject(
-            job,
-            JOB_OBJECT_BASIC_LIMIT_INFORMATION,
-            &info as *const BasicLimit as *const core::ffi::c_void,
-            std::mem::size_of::<BasicLimit>() as u32,
-        ) == 0
-        {
-            let _ = CloseHandle(job);
-            return None;
-        }
-        if AssignProcessToJobObject(job, child.as_raw_handle() as isize) == 0 {
-            let _ = CloseHandle(job);
-            return None;
-        }
-        Some(HeldJob(job))
-    }
-}
-
-#[cfg(windows)]
-fn close_job(job: isize) {
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CloseHandle(handle: isize) -> i32;
-    }
-    unsafe {
-        let _ = CloseHandle(job);
-    }
-}
-
-#[cfg(not(windows))]
-fn stop_spawned_browser(_child: &std::process::Child) -> Option<isize> {
-    None
-}
-
-#[cfg(windows)]
-fn resume_if_paused(child: &std::process::Child) {
-    use std::os::windows::io::AsRawHandle;
-    #[link(name = "ntdll")]
-    extern "system" {
-        fn NtResumeProcess(process: isize) -> i32;
-    }
-    unsafe {
-        let _ = NtResumeProcess(child.as_raw_handle() as isize);
-    }
-}
-
-#[cfg(not(windows))]
-fn resume_if_paused(_child: &std::process::Child) {}
 
 fn rclone(bin: &Path, config: Option<&Path>) -> std::process::Command {
     let mut cmd = process::command(bin);
@@ -2086,7 +2335,7 @@ fn copy_error(stdout: &[u8], stderr: &[u8]) -> String {
     if combined.is_empty() {
         let raw = format!("{} {}", String::from_utf8_lossy(stderr), String::from_utf8_lossy(stdout));
         if is_shared_client_notice(&raw) {
-            return "Google Drive needs your own client id. In Settings, under Backups, add Google Drive again and paste the client id and secret. https://rclone.org/drive/#making-your-own-client-id".into();
+            return "Google Drive's shared sign-in did not work. https://rclone.org/drive/#making-your-own-client-id".into();
         }
         return "rclone did not finish.".into();
     }
@@ -2141,7 +2390,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, is_local_auth, is_shared_client_notice, location_from, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
+    use super::{allowed_archive, clean_folder, command_exe, is_local_auth, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -2212,6 +2461,24 @@ mod tests {
         assert!(location_from("HTTP/1.1 200 OK\r\n").is_none());
     }
 
+    #[test]
+    fn the_login_is_not_opened_on_the_local_redirect() {
+        assert!(!may_open_sign_in("http://127.0.0.1:53682/auth?state=abc"));
+        assert!(!may_open_sign_in("http://localhost:53682/auth?state=abc"));
+        assert!(may_open_sign_in("https://accounts.google.com/o/oauth2/auth?state=abc"));
+        assert!(!may_open_sign_in(""));
+    }
+
+    #[test]
+    fn a_browser_command_is_the_program_not_the_argument() {
+        let text = r#"    (Default)    REG_SZ    "C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1"#;
+        assert_eq!(
+            command_exe(text).as_deref(),
+            Some(std::path::Path::new(r"C:\Program Files\Google\Chrome\Application\chrome.exe"))
+        );
+    }
+
+    #[test]
     fn a_finished_sign_in_is_not_another_sign_in() {
         assert!(port_still_busy("bind: address already in use"));
         assert!(port_still_busy("Only one usage of each socket address"));
