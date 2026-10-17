@@ -46,6 +46,27 @@ const SERVICES = [
   { id: 'protondrive', label: 'Proton Drive', kind: 'account' },
 ] as const;
 
+const CLOUD_ORDER_KEY = 'orbit.cloudOrder';
+
+function cachedCloudOrder(saved: string[] | undefined): string[] {
+  if (saved && saved.length > 0) return saved;
+  try {
+    const raw = localStorage.getItem(CLOUD_ORDER_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCloudOrder(ids: string[]) {
+  try {
+    localStorage.setItem(CLOUD_ORDER_KEY, JSON.stringify(ids));
+  } catch {
+    // The settings write is the copy that survives a cleared page. This is only the immediate cache.
+  }
+}
+
 const PROVIDER_LABEL: Record<string, string> = {
   drive: 'Google Drive',
   dropbox: 'Dropbox',
@@ -621,7 +642,7 @@ export function CloudPanel({
   const accounts = cloudAccounts(settings.saves);
   const skip = new Set(cloudSkipOf(settings.saves));
   const dirs = settings.saves?.dirs ?? {};
-  const cloudOrder = settings.saves?.cloudOrder ?? [];
+  const cloudOrder = cachedCloudOrder(settings.saves?.cloudOrder);
   const known = [...games]
     .filter((game) => !!dirs[game.id]?.trim())
     .sort((a, b) => {
@@ -677,8 +698,24 @@ export function CloudPanel({
     refresh();
   }, []);
 
+  useEffect(() => {
+    const saved = settings.saves?.cloudOrder ?? [];
+    if (saved.length > 0) {
+      rememberCloudOrder(saved);
+      return;
+    }
+    const cached = cachedCloudOrder(undefined);
+    if (cached.length === 0) return;
+    (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)((current) => {
+      if ((current.saves?.cloudOrder ?? []).length > 0) return {};
+      return { saves: { ...current.saves, cloudOrder: cached } };
+    });
+  }, [settings.saves?.cloudOrder, setSettings]);
+
   const write = (patch: { clouds?: CloudAccount[]; cloudAuto?: boolean; cloudSkip?: string[] }) => {
-    setSettings({ saves: savesWithClouds(settings.saves, patch) });
+    (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)((current) => ({
+      saves: savesWithClouds(current.saves, patch),
+    }));
   };
 
   const fail = (e: unknown) => setError(String(e).replace(/^Error:\s*/, ''));

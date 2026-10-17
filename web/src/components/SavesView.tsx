@@ -13,11 +13,9 @@ import {
   saveHintsOf,
   savePlaceOf,
   savesStatus,
-  suggestSaves,
   cloudAccounts,
   cloudGameOf,
   cloudLabel,
-  cloudSkipOf,
   chosenClouds,
   restoreCloudText,
   restoreFromCloud,
@@ -54,7 +52,7 @@ export function SavesView({
 }: {
   games: Game[];
   settings: Settings;
-  setSettings: (patch: Partial<Settings>) => void;
+  setSettings: (patch: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void;
 }) {
   const [status, setStatus] = useState<SaveStatus | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -115,12 +113,12 @@ export function SavesView({
       const order = showHidden || hidden.size === 0
         ? nextVisible
         : keepHiddenSlots(rows.map((game) => game.id), nextVisible, hiddenIds);
-      setSettings({
+      setSettings((current) => ({
         saves: {
-          ...settings.saves,
+          ...current.saves,
           order,
         },
-      });
+      }));
     },
     // The row is itself a button, so the press has to be allowed to start there.
     { container: list, fromButtons: true, onto: true },
@@ -172,10 +170,10 @@ export function SavesView({
 
   const setAuto = (id: string, on: boolean) => {
     const next = on ? [...new Set([...auto, id])] : auto.filter((item) => item !== id);
-    setSettings({ saves: { ...settings.saves, auto: next, dirs } });
+    setSettings((current) => ({ saves: { ...current.saves, auto: next, dirs: current.saves?.dirs } }));
   };
   const setDir = (id: string, dir: string) => {
-    setSettings({ saves: { ...settings.saves, auto, dirs: { ...dirs, [id]: dir } } });
+    setSettings((current) => ({ saves: { ...current.saves, dirs: { ...current.saves?.dirs, [id]: dir } } }));
   };
   const afterBackup = (only?: ReturnType<typeof cloudGameOf>[]) => {
     void sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, only).catch((e) => {
@@ -196,7 +194,7 @@ export function SavesView({
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
-    setSettings({ saves: { ...settings.saves, hidden: next } });
+    setSettings((current) => ({ saves: { ...current.saves, hidden: next } }));
     if (hide && openId === id) setOpenId(null);
   };
 
@@ -227,10 +225,11 @@ export function SavesView({
     );
   };
 
+  const gamesWithFolders = () => listed.filter((game) => !!dirs[game.id]?.trim());
+
   const backupToCloud = async (which: 'chosen' | 'all' = 'chosen') => {
     if (!isNative() || sendingCloud || clouds.length === 0) return;
-    const skip = new Set(cloudSkipOf(settings.saves));
-    const chosen = games.filter((game) => !!dirs[game.id]?.trim() && !skip.has(game.id));
+    const chosen = gamesWithFolders();
     if (chosen.length === 0) {
       say('No save folders found yet.');
       return;
@@ -443,7 +442,7 @@ export function SavesView({
               type="button"
               disabled={sendingCloud || restoringCloud}
               onClick={() => void backupToCloud('chosen')}
-              title="Backup games with a save folder, then send them to the ticked clouds."
+              title="Backup every game on this page that has a save folder, then send those copies to the ticked clouds."
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
             >
               <CloudUpload className="size-4" />
@@ -460,9 +459,7 @@ export function SavesView({
               busyLabel="Restoring…"
               onPick={(cloud) => {
                 if (cloud === 'all') return;
-                const skip = new Set(cloudSkipOf(settings.saves));
-                const chosen = games.filter((game) => !!dirs[game.id]?.trim() && !skip.has(game.id));
-                askCloudRestore(cloud, chosen);
+                askCloudRestore(cloud, gamesWithFolders());
               }}
             />
           )}
@@ -521,7 +518,7 @@ export function SavesView({
           {settings.saves?.backupRoot && (
             <button
               type="button"
-              onClick={() => setSettings({ saves: { ...settings.saves, backupRoot: '' } })}
+              onClick={() => setSettings((current) => ({ saves: { ...current.saves, backupRoot: '' } }))}
               className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-fg"
             >
               Use Orbit's folder
@@ -734,6 +731,34 @@ function keepHiddenSlots(previous: string[], nextVisible: string[], hiddenIds: s
   return result;
 }
 
+/** The time written on a copy. A profile id is not a time, so it is left out. */
+function copyWhen(backup: SaveBackup): string | null {
+  const written = backup.note
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('When: '))
+    ?.slice('When: '.length)
+    .trim();
+  if (written) return written;
+  const at = Number(backup.at);
+  if (!Number.isFinite(at) || at <= 0) return null;
+  const ms = at > 1e12 ? at : at * 1000;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000 || date.getFullYear() > 2100) return null;
+  return date.toLocaleString();
+}
+
+function copyTimes(backups: SaveBackup[]): { path: string; when: string }[] {
+  const found = backups.flatMap((backup) => {
+    const when = copyWhen(backup);
+    return when ? [{ path: backup.path, when }] : [];
+  });
+  return found.map((copy, index) => ({
+    path: copy.path,
+    when: index === 0 ? `Last copy · ${copy.when}` : copy.when,
+  }));
+}
+
 function CloudSendButton({
   clouds,
   busy,
@@ -884,7 +909,6 @@ function SaveRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState<SaveBackup[] | null>(null);
-  const [hints, setHints] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
@@ -1004,36 +1028,16 @@ function SaveRow({
           </button>
         )}
       </div>
-      <button
-        type="button"
-        disabled={busy || !isNative()}
-        onClick={() => {
-          setHints(null);
-          void suggestSaves(game.title)
-            .then(setHints)
-            .catch((e) => setError(String(e)));
-        }}
-        className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-40"
-      >
-        Wiki paths
-      </button>
       {error && <p className="text-xs text-rose-300">{error}</p>}
-      {hints && (
-        <ul className="space-y-1 rounded-lg border border-line bg-panel2 px-3 py-2 text-xs text-muted">
-          {hints.length === 0 && <li>PCGamingWiki has no save path for this name.</li>}
-          {hints.map((hint) => (
-            <li key={hint} className="break-all">{hint}</li>
-          ))}
-        </ul>
-      )}
-      {backups && backups.length > 0 && (
-        <ul className="space-y-1 text-xs text-muted">
-          {backups.slice(0, 5).map((backup) => (
-            <li key={backup.path} className="truncate">
-              {new Date(backup.at * 1000).toLocaleString()}
-            </li>
-          ))}
-        </ul>
+      {backups && copyTimes(backups).length > 0 && (
+        <div className="space-y-1 text-xs text-muted">
+          <p>Copies on this PC</p>
+          <ul className="space-y-1">
+            {copyTimes(backups).map((copy) => (
+              <li key={copy.path} className="truncate">{copy.when}</li>
+            ))}
+          </ul>
+        </div>
       )}
       {!isNative() && <p className="text-xs text-muted">Backups run in the desktop app, not in a browser tab.</p>}
     </div>

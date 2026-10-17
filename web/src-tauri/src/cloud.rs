@@ -1909,10 +1909,19 @@ fn copy_games(
     let source = saves::root_of(data_dir, backup_root);
     let mut sent = 0usize;
     let mut missing = Vec::new();
+    let mut failed = Vec::new();
     for game in games {
-        if send_live_save(bin, config, remote, folder, game)? {
-            sent += 1;
-            continue;
+        match send_live_save(bin, config, remote, folder, game) {
+            Ok(true) => {
+                sent += 1;
+                continue;
+            }
+            Ok(false) => {}
+            Err(err) if stops_the_batch(&err) => return batch_stopped(sent, err),
+            Err(_) => {
+                failed.push(game.title.clone());
+                continue;
+            }
         }
         let relatives = saves::existing_relatives(
             data_dir,
@@ -1925,6 +1934,7 @@ fn copy_games(
             missing.push(game.title.clone());
             continue;
         }
+        let mut copied = false;
         for relative in relatives {
             let Some(relative) = safe_relative(&relative) else {
                 continue;
@@ -1933,21 +1943,50 @@ fn copy_games(
             if !local.is_dir() {
                 continue;
             }
-            run_copy(bin, config, &local.to_string_lossy(), &format!("{remote}:{folder}/{relative}"))?;
+            match run_copy(bin, config, &local.to_string_lossy(), &format!("{remote}:{folder}/{relative}")) {
+                Ok(()) => copied = true,
+                Err(err) if stops_the_batch(&err) => return batch_stopped(sent, err),
+                Err(_) => {}
+            }
+        }
+        if copied {
             sent += 1;
+        } else {
+            missing.push(game.title.clone());
         }
     }
     if sent == 0 {
         return Err(if missing.len() == 1 {
             format!("Orbit could not find a save folder for {}.", missing[0])
+        } else if !failed.is_empty() {
+            format!("Orbit could not send {}.", failed.join(", "))
         } else {
             "Orbit could not find a save folder to send.".into()
         });
     }
-    if missing.is_empty() {
-        Ok("Sent the chosen copies.".into())
+    let mut message = format!("Sent {sent} {}.", if sent == 1 { "game" } else { "games" });
+    if !missing.is_empty() {
+        message.push_str(&format!(" These had no folder yet: {}.", missing.join(", ")));
+    }
+    if !failed.is_empty() {
+        message.push_str(&format!(" These did not go: {}.", failed.join(", ")));
+    }
+    Ok(message)
+}
+
+fn stops_the_batch(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("google is limiting") || lower.contains("quota exceeded") || lower.contains("shared sign-in")
+}
+
+fn batch_stopped(sent: usize, err: String) -> Result<String, String> {
+    if sent == 0 {
+        Err(err)
     } else {
-        Ok(format!("Sent the chosen copies. These had no folder yet: {}.", missing.join(", ")))
+        Err(format!(
+            "Sent {sent} {} before the cloud stopped the rest. {err}",
+            if sent == 1 { "game" } else { "games" }
+        ))
     }
 }
 
@@ -1972,7 +2011,20 @@ fn restore_games(
     let mut kept_only = Vec::new();
     let mut missing = Vec::new();
     for game in games {
-        let brought = bring_down(bin, config, data_dir, backup_root, &source, remote, folder, game)?;
+        let brought = match bring_down(bin, config, data_dir, backup_root, &source, remote, folder, game) {
+            Ok(path) => path,
+            Err(err) if stops_the_batch(&err) => {
+                return if restored.is_empty() && kept_only.is_empty() {
+                    Err(err)
+                } else {
+                    Err(format!("Restored {} games before the cloud stopped the rest. {err}", restored.len()))
+                };
+            }
+            Err(_) => {
+                missing.push(game.title.clone());
+                continue;
+            }
+        };
         let Some(temp) = brought else {
             missing.push(game.title.clone());
             continue;
@@ -1986,7 +2038,10 @@ fn restore_games(
                 }
                 let put = saves::put_back(&temp, &dest);
                 let _ = fs::remove_dir_all(&temp);
-                put?;
+                if put.is_err() {
+                    missing.push(game.title.clone());
+                    continue;
+                }
                 true
             }
             None => {

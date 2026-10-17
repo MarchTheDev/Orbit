@@ -7,6 +7,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = 'Continue',
+  cancelLabel = 'Keep it',
   confirmIcon: ConfirmIcon = Trash2,
   onConfirm,
   onCancel,
@@ -14,6 +15,7 @@ export function ConfirmDialog({
   title: string;
   description: string;
   confirmLabel?: string;
+  cancelLabel?: string;
   confirmIcon?: ComponentType<{ className?: string }>;
   onConfirm: () => void;
   onCancel: () => void;
@@ -28,7 +30,7 @@ export function ConfirmDialog({
       </div>
       <div className="mt-6 flex justify-end gap-2">
         <button type="button" className={btnGhost} onClick={onCancel}>
-          Keep it
+          {cancelLabel}
         </button>
         <button
           type="button"

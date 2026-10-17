@@ -352,7 +352,7 @@ export function SettingsView({
 }: {
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
-  setSettings: (patch: Partial<Settings>) => void;
+  setSettings: (patch: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void;
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
   onClearLibrary: () => void;
@@ -850,7 +850,7 @@ export function SettingsView({
       >
         <Checkbox
           checked={cloudAutoOn(settings.saves)}
-          onChange={(on) => setSettings({ saves: savesWithClouds(settings.saves, { cloudAuto: on }) })}
+          onChange={(on) => setSettings((current) => ({ saves: savesWithClouds(current.saves, { cloudAuto: on }) }))}
           label="Also send a backup to the cloud"
           hint="A backup saved on this PC is also sent to the clouds marked on the Cloud page. Off leaves it on this PC until you send it."
         />

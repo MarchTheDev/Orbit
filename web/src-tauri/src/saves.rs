@@ -604,9 +604,17 @@ fn legacy_child(path: &Path) -> bool {
     if kept_aside(path) {
         return true;
     }
+    // Old Orbit copies were a small number beside the saves. A profile id the
+    // game itself uses is also all digits, and reading that as a time shows
+    // "Invalid Date" above the real copy.
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()))
+        .is_some_and(numbered_backup)
+}
+
+fn numbered_backup(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    !bytes.is_empty() && bytes.len() <= 3 && bytes.iter().all(|byte| byte.is_ascii_digit()) && name != "0"
 }
 
 fn looks_like_stamp(name: &str) -> bool {
@@ -1330,6 +1338,9 @@ mod tests {
             backup_places("Red Dead Redemption 2", Some("Rockstar Games"), "red-dead")[0],
             "Rockstar Games/Red Dead Redemption 2"
         );
+        assert!(numbered_backup("1"));
+        assert!(!numbered_backup("76561198000000000"));
+        assert!(!numbered_backup("0"));
         let _ = fs::remove_dir_all(&root);
     }
 

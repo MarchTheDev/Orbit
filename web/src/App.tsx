@@ -23,6 +23,8 @@ import { useGamepad } from './hooks/useGamepad';
 import {
   backupSave,
   sendCloudAfterBackup,
+  currentCloudTransfer,
+  quitDespiteCloud,
   clearLibrary,
   savePlaceOf,
   isNative,
@@ -72,6 +74,8 @@ import { announce, onToast, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
 import { openExternal } from './services/desktop';
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast extends ToastMessage {
@@ -153,10 +157,32 @@ export default function App() {
   const order = settings?.sortOrder ?? [];
   const scale = settings?.coverScale ?? 100;
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [cloudClose, setCloudClose] = useState<'backup' | 'restore' | null>(null);
   /** The newer release, if one has been found. Settings shows and installs it. */
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+
+  useEffect(() => {
+    if (!isNative()) return;
+    let stop = () => {};
+    const ask = () => setCloudClose(currentCloudTransfer() ?? 'backup');
+    void listen('cloud-transfer-close', ask).then((unlisten) => {
+      stop = unlisten;
+    }).catch(() => undefined);
+    let stopClose = () => {};
+    void getCurrentWindow().onCloseRequested((event) => {
+      if (!currentCloudTransfer()) return;
+      event.preventDefault();
+      ask();
+    }).then((unlisten) => {
+      stopClose = unlisten;
+    }).catch(() => undefined);
+    return () => {
+      stop();
+      stopClose();
+    };
+  }, []);
 
   const receiveOpenExePaths = useCallback((paths: string[]) => {
     if (paths.length === 0) return;
@@ -1410,6 +1436,22 @@ export default function App() {
       )}
       {menu && menuGame && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+      {cloudClose && (
+        <ConfirmDialog
+          title="A cloud copy is still running"
+          description={cloudClose === 'restore'
+            ? 'Orbit is restoring a backup from the cloud. Closing now can leave a save half-written.'
+            : 'Orbit is sending a backup to the cloud. Closing now can leave that copy unfinished.'}
+          confirmLabel="Close anyway"
+          cancelLabel="Keep Orbit open"
+          confirmIcon={X}
+          onCancel={() => setCloudClose(null)}
+          onConfirm={() => {
+            setCloudClose(null);
+            void quitDespiteCloud();
+          }}
+        />
       )}
 
       {moving && settings && (

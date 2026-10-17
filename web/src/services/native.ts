@@ -959,6 +959,28 @@ export function restoreFromCloud(
   return cloudCopy(false, account.remote, account.own, backupRoot, account.folder, games);
 }
 
+let cloudDepth = 0;
+let cloudKind: 'backup' | 'restore' = 'backup';
+
+/** What a close prompt should say while a cloud copy is running. */
+export function currentCloudTransfer(): 'backup' | 'restore' | null {
+  return cloudDepth > 0 ? cloudKind : null;
+}
+
+function duringCloud<T>(kind: 'backup' | 'restore', run: () => Promise<T>): Promise<T> {
+  cloudDepth += 1;
+  cloudKind = kind;
+  if (cloudDepth === 1) void call('cloud_busy', { busy: true }, async () => undefined);
+  return run().finally(() => {
+    cloudDepth = Math.max(0, cloudDepth - 1);
+    if (cloudDepth === 0) void call('cloud_busy', { busy: false }, async () => undefined);
+  });
+}
+
+export function quitDespiteCloud(): Promise<void> {
+  return call('cloud_quit', {}, async () => undefined);
+}
+
 export function cloudCopy(
   up: boolean,
   remote: string,
@@ -967,19 +989,19 @@ export function cloudCopy(
   folder?: string | null,
   only?: CloudGame[] | null,
 ): Promise<string> {
-  return call(
+  return duringCloud(up ? 'backup' : 'restore', () => call(
     'cloud_copy',
     { up, remote, own, backupRoot: backupRoot || null, folder: folder || null, only: only ?? null },
     async () => {
       throw new Error('Cloud copies need the desktop app.');
     },
-  );
+  ));
 }
 
 export function cloudMove(remote: string, own: boolean, from: string, to: string): Promise<string> {
-  return call('cloud_move', { remote, own, from, to }, async () => {
+  return duringCloud('backup', () => call('cloud_move', { remote, own, from, to }, async () => {
     throw new Error('Cloud copies need the desktop app.');
-  });
+  }));
 }
 
 export function cloudTransfer(
@@ -989,9 +1011,9 @@ export function cloudTransfer(
   toOwn: boolean,
   folder?: string | null,
 ): Promise<string> {
-  return call('cloud_transfer', { fromRemote, fromOwn, toRemote, toOwn, folder: folder || null }, async () => {
+  return duringCloud('backup', () => call('cloud_transfer', { fromRemote, fromOwn, toRemote, toOwn, folder: folder || null }, async () => {
     throw new Error('Cloud copies need the desktop app.');
-  });
+  }));
 }
 
 export function cloudAdopt(): Promise<string> {

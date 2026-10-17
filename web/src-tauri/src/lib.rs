@@ -150,6 +150,10 @@ pub(crate) fn apply_policy(app: &tauri::AppHandle, on_launch: bool, policy: Wind
 /// with no tray is an app the player cannot get back, which is not a preference
 /// anybody asked for.
 static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// A cloud backup or restore is in progress. Closing the process then can cut a copy in half.
+static CLOUD_BUSY: AtomicBool = AtomicBool::new(false);
+/// The player chose Close anyway, so the next close is allowed to finish.
+static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
 
 /// Set once an exit has been asked for, so the minimise watcher can leave and
 /// a second exit event does not start a second watchdog.
@@ -230,12 +234,13 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => reveal_window(app),
             "quit" => {
+                if cloud_blocks_quit() {
+                    ask_to_wait(app);
+                    return;
+                }
                 // Same as closing the window by hand: the clock stops and what
                 // it counted is written down before the app goes.
-                if let Some(orbit) = app.try_state::<Orbit>() {
-                    orbit.runner.close_for_app_exit();
-                }
-                app.exit(0);
+                quit_now(app);
             }
             _ => {}
         })
@@ -1307,6 +1312,46 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
 
 /// Save the settings to disk.
 #[tauri::command]
+fn cloud_blocks_quit() -> bool {
+    CLOUD_BUSY.load(Ordering::SeqCst) && !FORCE_QUIT.load(Ordering::SeqCst)
+}
+
+fn ask_to_wait(app: &tauri::AppHandle) {
+    reveal_window(app);
+    let _ = app.emit("cloud-transfer-close", ());
+}
+
+fn quit_now(app: &tauri::AppHandle) {
+    if let Some(orbit) = app.try_state::<Orbit>() {
+        orbit.runner.close_for_app_exit();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        finish_linux_quit(app);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.exit(0);
+    }
+}
+
+/// The window says a cloud copy is running, so a close can ask before it cuts that off.
+#[tauri::command]
+fn cloud_busy(busy: bool) {
+    CLOUD_BUSY.store(busy, Ordering::SeqCst);
+    if !busy {
+        FORCE_QUIT.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Close anyway. The copy may be left unfinished.
+#[tauri::command]
+fn cloud_quit(app: tauri::AppHandle) {
+    FORCE_QUIT.store(true, Ordering::SeqCst);
+    CLOUD_BUSY.store(false, Ordering::SeqCst);
+    quit_now(&app);
+}
+
 fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), String> {
     if let Ok(mut policy) = orbit.policy.lock() {
         *policy = policy_from_settings(Some(&settings));
@@ -2017,6 +2062,13 @@ pub fn run() {
                                 .map(|current| current.on_app_close == "tray")
                                 .unwrap_or(false)
                                 && TRAY_READY.load(Ordering::SeqCst);
+                            // Hiding to the tray keeps the process, so a copy can finish.
+                            // Quitting does not. Ask before a quit that would cut one off.
+                            if !hide && cloud_blocks_quit() {
+                                api.prevent_close();
+                                ask_to_wait(&handle);
+                                return;
+                            }
                             if hide {
                                 api.prevent_close();
                                 if let Some(window) = handle.get_webview_window("main") {
@@ -2115,6 +2167,8 @@ pub fn run() {
             folder_programs,
             load_settings,
             save_settings,
+            cloud_busy,
+            cloud_quit,
             data_dir,
             data_dir_size,
             ambient_set,
