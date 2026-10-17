@@ -1662,10 +1662,12 @@ fn obscure(bin: &Path, password: &str) -> Result<String, String> {
 }
 
 fn mkdir(bin: &Path, config: Option<&Path>, remote: &str, folder: &str) -> Result<(), String> {
-    let output = rclone(bin, config)
-        .args(["mkdir", &format!("{remote}:{folder}")])
-        .output()
-        .map_err(|e| format!("Could not reach that cloud: {e}"))?;
+    let output = with_quota_retry(|| {
+        rclone(bin, config)
+            .args(["mkdir", &format!("{remote}:{folder}")])
+            .output()
+            .map_err(|e| format!("Could not reach that cloud: {e}"))
+    })?;
     if output.status.success() {
         return Ok(());
     }
@@ -1995,17 +1997,60 @@ fn run_copyto(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result
 }
 
 fn run_rclone_copy(bin: &Path, config: Option<&Path>, command: &str, from: &str, to: &str) -> Result<(), String> {
-    let output = rclone(bin, config)
-        .args(["--quiet", command, "--update", "--retries", "2", "--low-level-retries", "3", "--"])
-        .arg(from)
-        .arg(to)
-        .output()
-        .map_err(|e| format!("Could not start rclone: {e}"))?;
+    // The shared Drive client often answers 403 while opening the folder, before
+    // any file is copied. `--retries` does not cover that, so Orbit waits and
+    // tries the whole command again.
+    let output = with_quota_retry(|| {
+        rclone(bin, config)
+            .args([
+                "--quiet",
+                command,
+                "--update",
+                "--retries",
+                "3",
+                "--retries-sleep",
+                "10s",
+                "--low-level-retries",
+                "10",
+                "--tpslimit",
+                "5",
+                "--tpslimit-burst",
+                "1",
+                "--",
+            ])
+            .arg(from)
+            .arg(to)
+            .output()
+            .map_err(|e| format!("Could not start rclone: {e}"))
+    })?;
     if output.status.success() {
         Ok(())
     } else {
         Err(copy_error(&output.stdout, &output.stderr))
     }
+}
+
+/// Google's shared Drive app is limited per minute. A short wait often clears it.
+fn with_quota_retry<F>(mut run: F) -> Result<std::process::Output, String>
+where
+    F: FnMut() -> Result<std::process::Output, String>,
+{
+    const WAITS: [u64; 3] = [0, 30, 60];
+    let mut last = None;
+    for (attempt, wait) in WAITS.iter().enumerate() {
+        if *wait > 0 {
+            std::thread::sleep(Duration::from_secs(*wait));
+        }
+        let output = run()?;
+        let again = !output.status.success()
+            && is_drive_quota(&output.stdout, &output.stderr)
+            && attempt + 1 < WAITS.len();
+        if !again {
+            return Ok(output);
+        }
+        last = Some(output);
+    }
+    Ok(last.expect("a quota retry always runs once"))
 }
 
 fn show_remote(bin: &Path, config: Option<&Path>, name: &str) -> Result<String, String> {
@@ -2251,6 +2296,9 @@ fn label_of(provider: &str) -> &'static str {
 
 /// A short reason for the player. A token or a password must not ride along in it.
 fn public_error(bytes: &[u8], fallback: &str) -> String {
+    if is_drive_quota(b"", bytes) {
+        return drive_quota_message();
+    }
     let detail = useful_detail(bytes);
     if detail.is_empty() {
         fallback.into()
@@ -2262,6 +2310,9 @@ fn public_error(bytes: &[u8], fallback: &str) -> String {
 /// The shared Google client prints a notice on every command. It is not the
 /// failure, and at 180 characters it was the only thing the player could see.
 fn copy_error(stdout: &[u8], stderr: &[u8]) -> String {
+    if is_drive_quota(stdout, stderr) {
+        return drive_quota_message();
+    }
     let detail = useful_detail(stderr);
     let other = useful_detail(stdout);
     let combined = match (detail.is_empty(), other.is_empty()) {
@@ -2309,6 +2360,21 @@ fn useful_detail(bytes: &[u8]) -> String {
 fn is_shared_client_notice(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     lower.contains("shared") && lower.contains("client_id")
+}
+
+/// A 403 on the shared client while opening the folder. The "root directory"
+/// line is that refusal, not a missing game folder.
+fn is_drive_quota(stdout: &[u8], stderr: &[u8]) -> bool {
+    let text = format!("{} {}", String::from_utf8_lossy(stderr), String::from_utf8_lossy(stdout));
+    let lower = text.to_ascii_lowercase();
+    lower.contains("quota exceeded")
+        || lower.contains("ratelimitexceeded")
+        || lower.contains("rate_limit_exceeded")
+        || (lower.contains("quota") && lower.contains("403"))
+}
+
+fn drive_quota_message() -> String {
+    "Google is limiting Drive backups that use the shared sign-in, so the folder could not be opened. Orbit waited and tried again. Try once more in a minute. https://rclone.org/drive/#making-your-own-client-id".into()
 }
 
 fn strip_secret(text: &str) -> String {
@@ -2383,6 +2449,18 @@ mod tests {
         assert!(is_shared_client_notice("This remote uses rclone's shared Google Drive client_id"));
         assert_eq!(useful_detail(notice), "ERROR: directory not found");
         assert!(useful_detail(b"NOTICE: waiting\n").is_empty());
+    }
+
+    #[test]
+    fn a_drive_quota_is_not_a_missing_folder() {
+        let raw = b"2026/10/17 17:07:58 CRITICAL: Failed to create file system for destination \"orbit-2wsqt5:Orbit/Rockstar Games/Red Dead Redemption 2/\": couldn't find root directory ID: googleapi: Error 403: Quota exceeded for quota metric 'Queries' and limit 'Queries per minute'";
+        assert!(is_drive_quota(b"", raw));
+        let shown = copy_error(b"", raw);
+        assert!(!shown.to_ascii_lowercase().contains("couldn't find"));
+        assert!(!shown.contains("CRITICAL"));
+        assert!(shown.contains("shared sign-in"));
+        assert!(shown.contains("minute"));
+        assert!(!is_drive_quota(b"", b"ERROR: directory not found"));
     }
 
     #[test]
