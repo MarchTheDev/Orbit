@@ -1221,7 +1221,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn an_existing_copy_is_the_path_sent_to_the_cloud() {
         let root = std::env::temp_dir().join(format!("orbit-saves-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -1316,7 +1315,6 @@ mod tests {
         assert_eq!(utc_zone, "When: 1970-01-01 00:00:00");
     }
 
-    #[test]
     #[test]
     fn a_cloud_restore_puts_saves_back_and_leaves_the_note_out() {
         let root = std::env::temp_dir().join(format!("orbit-put-back-{}", std::process::id()));

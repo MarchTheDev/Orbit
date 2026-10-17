@@ -725,7 +725,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn a_library_capsule_is_the_cover_and_the_header_is_not() {
         let images = BonkerImages {
             library_capsule: Some("https://api.bonker.dev/api/image-cache/app_4731620_library_capsule.jpg".into()),

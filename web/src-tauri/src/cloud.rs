@@ -2576,7 +2576,13 @@ fn useful_detail(bytes: &[u8]) -> String {
     let lines: Vec<String> = text
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !is_shared_client_notice(line) && !line.to_ascii_lowercase().contains(" notice:"))
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            !line.is_empty()
+                && !is_shared_client_notice(line)
+                && !lower.contains(" notice:")
+                && !lower.starts_with("notice:")
+        })
         .map(strip_secret)
         .filter(|line| !line.is_empty())
         .collect();
