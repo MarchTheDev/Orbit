@@ -377,6 +377,7 @@ unsafe fn monitor_rect() -> (i32, i32, i32, i32) {
 
 #[cfg(target_os = "linux")]
 fn grab_screen(spec: Spec) -> Result<Frame, String> {
+    use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{get_image, ImageFormat};
     use x11rb::rust_connection::RustConnection;
 
