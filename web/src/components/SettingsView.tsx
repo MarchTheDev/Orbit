@@ -47,6 +47,7 @@ import {
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { CopySettings } from './CopySettings';
+import { AppMixer } from './AppMixer';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
@@ -305,6 +306,8 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Overlay', section: 'orbit-overlay', keywords: 'overlay alt x start select screenshot recording replay hotkey' },
   { label: 'Replay length', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 seconds custom clip' },
   { label: 'ffmpeg', section: 'orbit-overlay', keywords: 'overlay ffmpeg record screenshot path clips' },
+  { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay lighter sharper quality recording replay' },
+  { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter click sound picture saved' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -321,6 +324,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
+  { label: 'App volumes', section: 'orbit-sound', keywords: 'mixer volume apps speakers mute quieter louder' },
   { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
@@ -345,6 +349,7 @@ function OverlaySettings({
   const enabled = overlay?.enabled !== false;
   const replay = overlay?.replay !== false;
   const seconds = clampOverlaySeconds(overlay?.seconds);
+  const quality = overlay?.quality === 'lighter' || overlay?.quality === 'sharper' ? overlay.quality : 'normal';
   const [custom, setCustom] = useState(String(seconds));
   const [ffmpegError, setFfmpegError] = useState<string | null>(null);
   const [folderNote, setFolderNote] = useState<string | null>(null);
@@ -357,6 +362,8 @@ function OverlaySettings({
         enabled,
         replay,
         seconds,
+        quality,
+        shutter: overlay?.shutter !== false,
         ffmpeg: overlay?.ffmpeg ?? '',
         ...patch,
       },
@@ -425,6 +432,37 @@ function OverlaySettings({
         />
         <p className="text-xs leading-relaxed text-muted">From 5 seconds to 5 minutes. The 30, 45, and 60 second buttons stay available.</p>
       </div>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">Quality</p>
+        <div className="flex flex-wrap gap-2">
+          {([
+            ['lighter', 'Lighter'],
+            ['normal', 'Normal'],
+            ['sharper', 'Sharper'],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setOverlay({ quality: value })}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-xs',
+                quality === value ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs leading-relaxed text-muted">
+          Lighter uses less of the PC while recording. Sharper keeps more of the picture. A recording that has already started keeps the quality it began with.
+        </p>
+      </div>
+      <Checkbox
+        checked={overlay?.shutter !== false}
+        onChange={(on) => setOverlay({ shutter: on })}
+        label="Play a short sound when a picture is saved"
+        hint="A click in the overlay. Recordings stay quiet."
+      />
       {isNative() && (
         <div className="space-y-1.5">
           <p className="text-sm font-medium">ffmpeg</p>
@@ -1218,6 +1256,11 @@ export function SettingsView({
             hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
           />
         </Group>
+        <SubHead>Apps</SubHead>
+        <p className="text-xs leading-relaxed text-muted">
+          The speakers, then each program that is playing sound. The same list as the volume mixer.
+        </p>
+        <AppMixer />
       </Section>
 
       <Section

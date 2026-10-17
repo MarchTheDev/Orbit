@@ -530,6 +530,10 @@ export interface Settings {
     enabled?: boolean;
     replay?: boolean;
     seconds?: number;
+    /** lighter, normal, or sharper. Missing means normal. */
+    quality?: 'lighter' | 'normal' | 'sharper';
+    /** A short click when a picture is saved. On unless turned off. */
+    shutter?: boolean;
     /** Empty means ffmpeg on the system path. */
     ffmpeg?: string;
   };

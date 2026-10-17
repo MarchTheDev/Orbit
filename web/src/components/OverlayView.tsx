@@ -13,6 +13,7 @@ import {
   type OverlayStatus,
 } from '../services/native';
 import { cn } from '../utils/cn';
+import { AppMixer } from './AppMixer';
 
 function stamp(): string {
   const now = new Date();
@@ -24,16 +25,53 @@ function controls(): HTMLButtonElement[] {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-overlay]:not([disabled])'));
 }
 
+function markPad(next: HTMLElement) {
+  document.documentElement.classList.add('orbit-pad');
+  document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
+  next.classList.add('orbit-pad-focus');
+  next.scrollIntoView({ block: 'nearest' });
+}
+
 function move(delta: number, fromPad: boolean) {
   const list = controls();
   if (list.length === 0) return;
   const index = list.findIndex((item) => item === document.activeElement);
   const next = list[(index + delta + list.length) % list.length];
   next.focus();
-  if (!fromPad) return;
-  document.documentElement.classList.add('orbit-pad');
-  document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
-  next.classList.add('orbit-pad-focus');
+  if (fromPad) markPad(next);
+}
+
+function focusSection(name: string) {
+  const next = document.querySelector(`[data-overlay-section="${name}"] button[data-overlay]:not([disabled])`);
+  if (!(next instanceof HTMLElement)) return;
+  next.focus();
+  markPad(next);
+}
+
+function mixId(node: Element | null): string | null {
+  return node?.closest('[data-mix]')?.getAttribute('data-mix') ?? null;
+}
+
+/** A short click. It is not the background music, and it does not use a file. */
+function playShutter() {
+  const Context = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Context) return;
+  const ctx = new Context();
+  const now = ctx.currentTime;
+  const click = ctx.createOscillator();
+  const gain = ctx.createGain();
+  click.type = 'triangle';
+  click.frequency.setValueAtTime(1400, now);
+  click.frequency.exponentialRampToValueAtTime(280, now + 0.09);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.16, now + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+  click.connect(gain);
+  gain.connect(ctx.destination);
+  void ctx.resume();
+  click.start(now);
+  click.stop(now + 0.13);
+  click.onended = () => void ctx.close();
 }
 
 /**
@@ -93,10 +131,24 @@ export function OverlayView() {
         void overlayHide();
         return;
       }
+      if (action === 'page-left') {
+        focusSection('clips');
+        return;
+      }
+      if (action === 'page-right') {
+        focusSection('apps');
+        return;
+      }
       if (action === 'activate') {
         const current = document.activeElement;
         if (current instanceof HTMLButtonElement) current.click();
         else controls()[0]?.click();
+        return;
+      }
+      if ((action === 'left' || action === 'right') && mixId(document.activeElement)) {
+        window.dispatchEvent(new CustomEvent('orbit-mix', {
+          detail: { id: mixId(document.activeElement), delta: action === 'left' ? -5 : 5 },
+        }));
         return;
       }
       if (action === 'up' || action === 'left') move(-1, true);
@@ -112,12 +164,16 @@ export function OverlayView() {
     };
   }, []);
 
-  const run = async (work: () => Promise<string>) => {
+  const run = async (work: () => Promise<string>, shot = false) => {
     if (busy) return;
     setBusy(true);
     setFailed(false);
     try {
       setNote(await work());
+      if (shot) {
+        const settings = await loadSettings().catch(() => null);
+        if (settings?.overlay?.shutter !== false) playShutter();
+      }
       refresh();
     } catch (error) {
       setFailed(true);
@@ -159,11 +215,12 @@ export function OverlayView() {
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
         <p className={cn('text-xs leading-relaxed', failed || note ? 'text-fg' : 'text-muted')}>{note || standing}</p>
+        <div data-overlay-section="clips" className="flex flex-col gap-2">
         <button
           type="button"
           data-overlay
           disabled={busy}
-          onClick={() => void run(() => overlayShot(stamp()))}
+          onClick={() => void run(() => overlayShot(stamp()), true)}
           className="btn-accent flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm disabled:opacity-40"
         >
           <Camera className="size-4" />
@@ -220,6 +277,12 @@ export function OverlayView() {
           Open clips folder
         </button>
         {status?.folder && <p className="break-all font-mono text-[10px] leading-relaxed text-muted">{status.folder}</p>}
+        </div>
+        <div data-overlay-section="apps" className="mt-2 flex flex-col gap-2">
+          <p className="text-[11px] uppercase tracking-widest text-muted">Apps</p>
+          <p className="text-[11px] leading-relaxed text-muted">Left and right change the one that is highlighted. LB and RB jump between the clips and these.</p>
+          <AppMixer pad />
+        </div>
       </div>
     </div>
   );

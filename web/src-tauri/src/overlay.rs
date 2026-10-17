@@ -33,6 +33,7 @@ struct Live {
     enabled: bool,
     replay: bool,
     seconds: u32,
+    quality: String,
     ffmpeg: String,
     root: PathBuf,
     game: String,
@@ -45,12 +46,12 @@ struct Live {
 
 struct Watch {
     both: bool,
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
+    page_left: bool,
+    page_right: bool,
     a: bool,
     b: bool,
+    held: Option<&'static str>,
+    ticks: u8,
 }
 
 struct Step {
@@ -62,6 +63,7 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     enabled: true,
     replay: true,
     seconds: 30,
+    quality: String::new(),
     ffmpeg: String::new(),
     root: PathBuf::new(),
     game: String::new(),
@@ -74,12 +76,12 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
 static GATE: Mutex<()> = Mutex::new(());
 static PAD: Mutex<Watch> = Mutex::new(Watch {
     both: false,
-    up: false,
-    down: false,
-    left: false,
-    right: false,
+    page_left: false,
+    page_right: false,
     a: false,
     b: false,
+    held: None,
+    ticks: 0,
 });
 
 #[derive(Clone, Serialize)]
@@ -128,25 +130,39 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("seconds"))
         .and_then(Value::as_u64)
         .unwrap_or(30) as u32;
+    let quality = overlay
+        .and_then(|item| item.get("quality"))
+        .and_then(Value::as_str)
+        .unwrap_or("normal");
     let ffmpeg = overlay
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    configure(None, enabled, replay, seconds, ffmpeg);
+    configure(None, enabled, replay, seconds, quality, ffmpeg);
 }
 
-pub fn configure(app: Option<&AppHandle>, enabled: bool, replay: bool, seconds: u32, ffmpeg: &str) {
+pub fn configure(
+    app: Option<&AppHandle>,
+    enabled: bool,
+    replay: bool,
+    seconds: u32,
+    quality: &str,
+    ffmpeg: &str,
+) {
     let seconds = clamp_seconds(seconds);
+    let quality = quality_name(quality);
     let (changed, stop, restart, hide) = {
         let mut live = lock();
         let changed = live.enabled != enabled
             || live.replay != replay
             || live.seconds != seconds
+            || live.quality != quality
             || live.ffmpeg != ffmpeg;
         let hide = live.enabled && !enabled;
         live.enabled = enabled;
         live.replay = replay;
         live.seconds = seconds;
+        live.quality = quality;
         live.ffmpeg = ffmpeg.to_string();
         let stop = live.playing && (!replay || !enabled);
         let restart = changed && live.playing && replay && enabled && live.recording.is_none();
@@ -232,7 +248,12 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
     let step = {
         let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        take_step(&mut watch, buttons, axes)
+        let step = take_step(&mut watch, buttons, axes);
+        // A stick already held must not start stepping the moment the panel opens.
+        if !is_open() {
+            watch.ticks = 0;
+        }
+        step
     };
     if step.toggle {
         request_toggle();
@@ -418,7 +439,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     }
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
         .title("Orbit overlay")
-        .inner_size(420.0, 500.0)
+        .inner_size(440.0, 560.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
@@ -550,7 +571,10 @@ fn linux_shot(path: &Path) -> Result<(), String> {
 fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
     let mut command = process::command(ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, false)?;
+    push_grab(&mut command, None)?;
+    if let Some(scale) = quality_scale(&lock().quality) {
+        command.args(["-vf", scale]);
+    }
     command.args(["-frames:v", "1"]).arg(path);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     let status = command.status().map_err(|error| error.to_string())?;
@@ -568,18 +592,11 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
     let path = clip_path(&dir, &lock().game, stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, true)?;
-    command.args([
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+frag_keyframe+empty_moov+default_base_moof",
-    ]);
+    push_grab(&mut command, Some(quality_fps(&lock().quality)))?;
+    let quality = lock().quality.clone();
+    command.arg("-an");
+    push_encode(&mut command, &quality);
+    command.args(["-movflags", "+frag_keyframe+empty_moov+default_base_moof"]);
     command.arg(&path);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     let child = command.spawn().map_err(|error| format!("Could not start ffmpeg: {error}"))?;
@@ -621,17 +638,13 @@ fn start_buffer(clear: bool) -> Result<(), String> {
     let wrap = segment_wrap(lock().seconds);
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, true)?;
+    let quality = lock().quality.clone();
+    push_grab(&mut command, Some(quality_fps(&quality)))?;
+    command.arg("-an");
+    push_encode(&mut command, &quality);
     command.args([
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-pix_fmt",
-        "yuv420p",
         "-g",
-        "30",
+        quality_gop(&quality),
         "-f",
         "segment",
         "-segment_time",
@@ -704,10 +717,13 @@ fn concat_files(ffmpeg: &Path, files: &[PathBuf], out: &Path) -> Result<(), Stri
         text.push_str(&concat_line(file));
     }
     fs::write(&list, text).map_err(|error| error.to_string())?;
-    let status = process::command(ffmpeg)
+    let mut command = process::command(ffmpeg);
+    command
         .args(["-y", "-f", "concat", "-safe", "0", "-i"])
         .arg(&list)
-        .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-an"])
+        .arg("-an");
+    push_encode(&mut command, &lock().quality);
+    let status = command
         .arg(out)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -723,12 +739,12 @@ fn concat_files(ffmpeg: &Path, files: &[PathBuf], out: &Path) -> Result<(), Stri
     }
 }
 
-fn push_grab(command: &mut std::process::Command, timed: bool) -> Result<(), String> {
+fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(), String> {
     #[cfg(windows)]
     {
         command.args(["-f", "gdigrab"]);
-        if timed {
-            command.args(["-framerate", "30"]);
+        if let Some(fps) = fps {
+            command.args(["-framerate", fps]);
         }
         command.args(["-i", "desktop"]);
         return Ok(());
@@ -741,17 +757,25 @@ fn push_grab(command: &mut std::process::Command, timed: bool) -> Result<(), Str
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
         let source = if display.contains('.') { display } else { format!("{display}.0") };
         command.args(["-f", "x11grab"]);
-        if timed {
-            command.args(["-framerate", "30"]);
+        if let Some(fps) = fps {
+            command.args(["-framerate", fps]);
         }
         command.arg("-i").arg(source);
         return Ok(());
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (command, timed);
+        let _ = (command, fps);
         Err("Recording is not available on this system.".to_string())
     }
+}
+
+fn push_encode(command: &mut std::process::Command, quality: &str) {
+    if let Some(scale) = quality_scale(quality) {
+        command.args(["-vf", scale]);
+    }
+    let (preset, crf) = quality_encode(quality);
+    command.args(["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]);
 }
 
 fn stop_child(mut child: Child) {
@@ -786,7 +810,7 @@ fn find_ffmpeg(configured: &str) -> Option<PathBuf> {
     which("ffmpeg")
 }
 
-fn which(name: &str) -> Option<PathBuf> {
+pub(crate) fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let plain = dir.join(name);
@@ -889,7 +913,8 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 }
 
 /// The same edges the library uses: A activates, B goes back, and a stick
-/// crossing the dead zone counts once. Start+Select is the overlay itself.
+/// crossing the dead zone counts once. Holding a direction repeats. LB and RB
+/// jump between the clips and the app volumes. Start+Select is the overlay itself.
 fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
@@ -900,20 +925,28 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let down = pressed(buttons, 13) || y > 0.45;
     let left = pressed(buttons, 14) || x < -0.45;
     let right = pressed(buttons, 15) || x > 0.45;
+    let page_left = pressed(buttons, 4);
+    let page_right = pressed(buttons, 5);
     let a = pressed(buttons, 0);
     let b = pressed(buttons, 1);
+    let shoulder = if page_left && !watch.page_left {
+        Some("page-left")
+    } else if page_right && !watch.page_right {
+        Some("page-right")
+    } else {
+        None
+    };
+    watch.page_left = page_left;
+    watch.page_right = page_right;
     // A stick already over is not a press. Record it before the panel opens,
-    // or the next poll would move the first button.
+    // or the next poll would move the first button. Holding it repeats.
+    let repeated = repeating(watch, direction(up, down, left, right));
     let action = if toggle {
         None
-    } else if up && !watch.up {
-        Some("up")
-    } else if down && !watch.down {
-        Some("down")
-    } else if left && !watch.left {
-        Some("left")
-    } else if right && !watch.right {
-        Some("right")
+    } else if let Some(page) = shoulder {
+        Some(page)
+    } else if let Some(dir) = repeated {
+        Some(dir)
     } else if a && !watch.a {
         Some("activate")
     } else if b && !watch.b {
@@ -921,13 +954,67 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     } else {
         None
     };
-    watch.up = up;
-    watch.down = down;
-    watch.left = left;
-    watch.right = right;
     watch.a = a;
     watch.b = b;
     Step { toggle, action }
+}
+
+fn direction(up: bool, down: bool, left: bool, right: bool) -> Option<&'static str> {
+    if up {
+        Some("up")
+    } else if down {
+        Some("down")
+    } else if left {
+        Some("left")
+    } else if right {
+        Some("right")
+    } else {
+        None
+    }
+}
+
+/// The overlay watch polls about every 40ms. The first press is immediate.
+/// The next one waits, then it repeats quickly while the stick stays over.
+fn repeating(watch: &mut Watch, dir: Option<&'static str>) -> Option<&'static str> {
+    if dir != watch.held {
+        watch.held = dir;
+        watch.ticks = 0;
+        return dir;
+    }
+    let dir = dir?;
+    watch.ticks = watch.ticks.saturating_add(1);
+    if watch.ticks == 8 || (watch.ticks > 8 && (watch.ticks - 8) % 3 == 0) {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn quality_name(raw: &str) -> String {
+    match raw {
+        "lighter" | "sharper" => raw.to_string(),
+        _ => "normal".to_string(),
+    }
+}
+
+pub(crate) fn quality_fps(quality: &str) -> &'static str {
+    if quality == "lighter" { "15" } else { "30" }
+}
+
+pub(crate) fn quality_gop(quality: &str) -> &'static str {
+    if quality == "lighter" { "15" } else { "30" }
+}
+
+fn quality_encode(quality: &str) -> (&'static str, &'static str) {
+    match quality {
+        "lighter" => ("ultrafast", "28"),
+        "sharper" => ("veryfast", "18"),
+        _ => ("ultrafast", "23"),
+    }
+}
+
+fn quality_scale(quality: &str) -> Option<&'static str> {
+    if quality == "lighter" { Some("scale=1280:-2") } else { None }
 }
 
 pub(crate) fn clamp_seconds(value: u32) -> u32 {
@@ -993,6 +1080,8 @@ fn read_xinput(slot: &mut u32) -> Option<(Vec<bool>, Vec<f32>)> {
         let mut buttons = vec![false; 16];
         buttons[0] = flags & 0x1000 != 0;
         buttons[1] = flags & 0x2000 != 0;
+        buttons[4] = flags & 0x0100 != 0;
+        buttons[5] = flags & 0x0200 != 0;
         buttons[8] = flags & 0x0020 != 0;
         buttons[9] = flags & 0x0010 != 0;
         buttons[12] = flags & 0x0001 != 0;
@@ -1044,12 +1133,12 @@ mod tests {
     fn start_and_select_open_once_until_they_are_released() {
         let mut watch = Watch {
             both: false,
-            up: false,
-            down: false,
-            left: false,
-            right: false,
+            page_left: false,
+            page_right: false,
             a: false,
             b: false,
+            held: None,
+            ticks: 0,
         };
         let mut buttons = vec![false; 16];
         buttons[8] = true;
@@ -1067,5 +1156,34 @@ mod tests {
         assert!(!released.toggle);
         assert!(again.toggle);
         assert!(first.action.is_none());
+    }
+
+    #[test]
+    fn a_held_direction_waits_and_then_repeats() {
+        let mut watch = Watch {
+            both: false,
+            page_left: false,
+            page_right: false,
+            a: false,
+            b: false,
+            held: None,
+            ticks: 0,
+        };
+        let axes = [1.0, 0.0];
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
+        assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+        for _ in 0..6 {
+            assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+        }
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
+    }
+
+    #[test]
+    fn lighter_is_the_small_picture() {
+        assert_eq!(quality_name("sharper"), "sharper");
+        assert_eq!(quality_name("nope"), "normal");
+        assert_eq!(quality_fps("lighter"), "15");
+        assert_eq!(quality_scale("lighter"), Some("scale=1280:-2"));
+        assert_eq!(quality_scale("normal"), None);
     }
 }

@@ -5,6 +5,7 @@
 //! reading folders, and fetching metadata the browser is not allowed to reach.
 
 mod achievements;
+mod audio;
 mod ambient;
 mod db;
 #[cfg(windows)]
@@ -652,8 +653,32 @@ fn start_session(
 }
 
 #[tauri::command]
-fn overlay_configure(app: tauri::AppHandle, enabled: bool, replay: bool, seconds: u32, ffmpeg: String) {
-    overlay::configure(Some(&app), enabled, replay, seconds, &ffmpeg);
+fn overlay_configure(
+    app: tauri::AppHandle,
+    enabled: bool,
+    replay: bool,
+    seconds: u32,
+    quality: Option<String>,
+    ffmpeg: String,
+) {
+    overlay::configure(
+        Some(&app),
+        enabled,
+        replay,
+        seconds,
+        quality.as_deref().unwrap_or("normal"),
+        &ffmpeg,
+    );
+}
+
+#[tauri::command]
+fn audio_apps() -> Result<Vec<audio::AppAudio>, String> {
+    audio::list()
+}
+
+#[tauri::command]
+fn audio_set(id: String, volume: u8, muted: bool) -> Result<(), String> {
+    audio::set(&id, volume, muted)
 }
 
 #[tauri::command]
@@ -2306,6 +2331,8 @@ pub fn run() {
             reveal_in_explorer,
             open_game_folder,
             overlay_configure,
+            audio_apps,
+            audio_set,
             overlay_playing,
             overlay_status,
             overlay_shot,
@@ -2400,10 +2427,6 @@ mod tests {
         assert!(
             drives.iter().any(|d| d.total > 0),
             "at least one drive reports its size"
-        );
-    }
-}
-"at least one drive reports its size"
         );
     }
 }

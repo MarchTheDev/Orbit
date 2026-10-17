@@ -1209,9 +1209,26 @@ export function overlayConfigure(options: {
   enabled: boolean;
   replay: boolean;
   seconds: number;
+  quality?: string;
   ffmpeg: string;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
+}
+
+export interface AppAudio {
+  id: string;
+  name: string;
+  volume: number;
+  muted: boolean;
+  device: boolean;
+}
+
+export function audioApps(): Promise<AppAudio[]> {
+  return call('audio_apps', {}, () => []);
+}
+
+export function audioSet(id: string, volume: number, muted: boolean): Promise<void> {
+  return call('audio_set', { id, volume, muted }, () => undefined);
 }
 
 export function overlayPlaying(title: string): Promise<void> {

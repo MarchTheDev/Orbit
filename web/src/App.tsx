@@ -618,6 +618,7 @@ export default function App() {
       enabled: overlay?.enabled !== false,
       replay: overlay?.replay !== false,
       seconds: overlay?.seconds ?? 30,
+      quality: overlay?.quality ?? 'normal',
       ffmpeg: overlay?.ffmpeg ?? '',
     });
   }, [settings]);
