@@ -159,6 +159,7 @@ function move(direction: 'up' | 'down' | 'left' | 'right') {
 }
 
 let padActivateAt = 0;
+let overlayOpen = false;
 
 /** A confirm press on a game, recent enough that the details drawer should land on Play. */
 export function padJustActivated(withinMs = 800): boolean {
@@ -275,6 +276,12 @@ export function useGamepad() {
     const linux = /linux|x11/i.test(navigator.userAgent);
 
     const apply = (now: PadSnapshot) => {
+      // The overlay owns the pad while it is open, and Start+Select is its
+      // shortcut, not Play. Neither should move the library.
+      if (overlayOpen || (now.buttons[8] === true && now.buttons[9] === true)) {
+        previous = now;
+        return;
+      }
       const heldNow = directionsHeld(now);
       // The first snapshot is the device at rest. A stick already at the rail
       // is the same reading as holding up, and repeating it pulls every move
@@ -294,6 +301,7 @@ export function useGamepad() {
       if (current instanceof HTMLElement && current !== document.body) markPadFocus(current);
     };
     const tick = () => {
+      if (overlayOpen) return;
       if (nativeOn && native) {
         latest = native;
         const held = heldDirection(native, restHold);
@@ -351,6 +359,19 @@ export function useGamepad() {
       window.addEventListener('gamepadconnected', start);
       window.addEventListener('gamepaddisconnected', stop);
       if (webConnected()) start();
+    }
+    const eventApi = window.__TAURI__?.event;
+    let stopOverlay = () => {};
+    if (eventApi) {
+      void eventApi.listen('overlay-visible', (event) => {
+        overlayOpen = event.payload === true || event.payload === 'true';
+        if (overlayOpen) {
+          document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
+        }
+      }).then((unlisten) => {
+        if (alive) stopOverlay = unlisten;
+        else unlisten();
+      }).catch(() => undefined);
     }
     // A click is the mouse. It must not keep the controller ring on the control
     // it focused, and it must not grow one around the thing under the pointer.
@@ -412,6 +433,7 @@ export function useGamepad() {
 
     return () => {
       alive = false;
+      stopOverlay();
       window.clearInterval(pullTimer);
       window.removeEventListener('pointerdown', clearPadRing, true);
       if (!linux) {

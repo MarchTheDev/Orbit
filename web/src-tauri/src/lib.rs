@@ -14,6 +14,7 @@ mod files_menu;
 mod format;
 mod gamepad;
 mod hltb;
+mod overlay;
 mod launch;
 mod launch_target;
 mod launchers;
@@ -38,6 +39,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
 use db::{CurrentPlaythrough, GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
@@ -331,6 +333,7 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 /// Tell the front end a session finished on its own.
 pub(crate) fn emit_session_ended(view: &ActiveView, game_id: &str) {
+    overlay::game_stopped();
     let Some(app) = APP.get() else { return };
     let _ = app.emit(
         "session-ended",
@@ -636,17 +639,72 @@ fn start_session(
         .game(&game_id)?
         .ok_or_else(|| "That game is not in the library.".to_string())?;
     let target = LaunchTarget::parse(Some(&game.launch.to_string()));
-    orbit.runner.start(
+    let started = orbit.runner.start(
         &game.id,
         category.as_deref().unwrap_or("Main story"),
         &target,
-    )
+    )?;
+    // A timer with no program has nothing on screen to keep. A launched game does.
+    if !matches!(target, LaunchTarget::None) {
+        overlay::game_started(&game.title);
+    }
+    Ok(started)
+}
+
+#[tauri::command]
+fn overlay_configure(app: tauri::AppHandle, enabled: bool, replay: bool, seconds: u32, ffmpeg: String) {
+    overlay::configure(Some(&app), enabled, replay, seconds, &ffmpeg);
+}
+
+#[tauri::command]
+fn overlay_playing(title: String) {
+    overlay::game_started(&title);
+}
+
+#[tauri::command]
+fn overlay_status() -> overlay::OverlayStatus {
+    overlay::status()
+}
+
+#[tauri::command]
+async fn overlay_shot(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || overlay::shot(&app, &stamp))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn overlay_record(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || overlay::record(&app, &stamp))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn overlay_replay(app: tauri::AppHandle, seconds: u32, stamp: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || overlay::save_replay(&app, seconds, &stamp))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn overlay_hide(app: tauri::AppHandle) {
+    overlay::hide(&app);
+}
+
+#[tauri::command]
+fn overlay_folder() -> Result<String, String> {
+    overlay::open_folder()
 }
 
 /// Stop the running session and write the time into the library.
 #[tauri::command]
 fn stop_session(orbit: State<'_, Orbit>, session_id: i64) -> Result<Option<ActiveView>, String> {
-    orbit.runner.stop(session_id)
+    let stopped = orbit.runner.stop(session_id)?;
+    if stopped.is_some() {
+        overlay::game_stopped();
+    }
+    Ok(stopped)
 }
 
 /// The session in progress, so a reloaded window picks the clock back up.
@@ -1909,6 +1967,7 @@ pub fn run() {
         // The folder and file pickers behind every Browse button.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .app_name("Orbit")
@@ -1925,6 +1984,9 @@ pub fn run() {
                 db::Db::open(&store.root().join("orbit.db")).map_err(std::io::Error::other)?,
             );
             let saved_settings = store.load_settings();
+            if let Some(settings) = saved_settings.as_ref() {
+                overlay::apply_settings(settings);
+            }
             let policy = Arc::new(Mutex::new(policy_from_settings(saved_settings.as_ref())));
             remember_wine(saved_settings.as_ref());
             let start_in_background = started_by_autostart
@@ -2129,6 +2191,20 @@ pub fn run() {
                 });
             }
 
+            if let Err(error) = overlay::install(app.handle()) {
+                log::warn!("overlay was not ready: {error}");
+            }
+            // Register here, not inside the plugin builder. A refused shortcut
+            // must not stop Orbit from opening, and the handler only sets a flag:
+            // building the panel from that handler can stall its lock.
+            if let Err(error) = app.global_shortcut().on_shortcut("Alt+X", |_app, _shortcut, event| {
+                if matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
+                    overlay::request_toggle();
+                }
+            }) {
+                log::warn!("Alt+X could not be registered: {error}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2229,6 +2305,14 @@ pub fn run() {
             saves_suggest,
             reveal_in_explorer,
             open_game_folder,
+            overlay_configure,
+            overlay_playing,
+            overlay_status,
+            overlay_shot,
+            overlay_record,
+            overlay_replay,
+            overlay_hide,
+            overlay_folder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Orbit")
@@ -2251,6 +2335,7 @@ pub fn run() {
                 // process::exit below does not run destructors, and on Linux it
                 // also runs the handlers that abort. The page is killed first.
                 ambient::stop();
+                overlay::shutdown();
                 // WebKitGTK's page process aborts in its own exit, which the
                 // desktop shows as a crash. Kill that process, then end this
                 // one without those handlers if the window path did not already.
@@ -2315,6 +2400,10 @@ mod tests {
         assert!(
             drives.iter().any(|d| d.total > 0),
             "at least one drive reports its size"
+        );
+    }
+}
+"at least one drive reports its size"
         );
     }
 }

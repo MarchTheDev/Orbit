@@ -521,6 +521,19 @@ export interface Settings {
   /** The wine binary to use when a game does not name one. */
   winePath?: string;
   /**
+   * The panel opened with Alt+X or Start+Select.
+   *
+   * On unless it has been turned off. The replay length is seconds, from 5 to
+   * 300, and is what "save the last few seconds" keeps while a game is playing.
+   */
+  overlay?: {
+    enabled?: boolean;
+    replay?: boolean;
+    seconds?: number;
+    /** Empty means ffmpeg on the system path. */
+    ffmpeg?: string;
+  };
+  /**
    * Which games back themselves up, and a folder to copy when Orbit cannot
    * find one by looking.
    */

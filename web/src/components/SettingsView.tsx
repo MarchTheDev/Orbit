@@ -13,6 +13,7 @@ import {
   Heart,
   ListChecks,
   Monitor,
+  MonitorPlay,
   Palette,
   Piano,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
   savesWithClouds,
   listDrives,
   rememberMusic,
+  overlayFolder,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
@@ -300,6 +302,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
+  { label: 'Overlay', section: 'orbit-overlay', keywords: 'overlay alt x start select screenshot recording replay hotkey' },
+  { label: 'Replay length', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 seconds custom clip' },
+  { label: 'ffmpeg', section: 'orbit-overlay', keywords: 'overlay ffmpeg record screenshot path clips' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -321,6 +326,141 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
+
+function clampOverlaySeconds(value: number | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 30;
+  return Math.min(300, Math.max(5, Math.round(value)));
+}
+
+function OverlaySettings({
+  settings,
+  setSettings,
+  where,
+}: {
+  settings: Settings;
+  setSettings: (patch: Partial<Settings>) => void;
+  where: string;
+}) {
+  const overlay = settings.overlay;
+  const enabled = overlay?.enabled !== false;
+  const replay = overlay?.replay !== false;
+  const seconds = clampOverlaySeconds(overlay?.seconds);
+  const [custom, setCustom] = useState(String(seconds));
+  const [ffmpegError, setFfmpegError] = useState<string | null>(null);
+  const [folderNote, setFolderNote] = useState<string | null>(null);
+
+  useEffect(() => setCustom(String(seconds)), [seconds]);
+
+  const setOverlay = (patch: Partial<NonNullable<Settings['overlay']>>) => {
+    setSettings({
+      overlay: {
+        enabled,
+        replay,
+        seconds,
+        ffmpeg: overlay?.ffmpeg ?? '',
+        ...patch,
+      },
+    });
+  };
+
+  const chooseFfmpeg = async () => {
+    setFfmpegError(null);
+    const picked = await pickFile('Choose ffmpeg', ['exe'], overlay?.ffmpeg || undefined);
+    if (!picked) return;
+    setOverlay({ ffmpeg: picked });
+  };
+
+  const clips = where ? `${where.replace(/[\\/]+$/, '')}${where.includes('\\') ? '\\' : '/'}clips` : '';
+
+  return (
+    <>
+      <Checkbox
+        checked={enabled}
+        onChange={(on) => setOverlay({ enabled: on })}
+        label="Overlay"
+        hint="Off means Alt+X and Start+Select do nothing."
+      />
+      <Checkbox
+        checked={replay}
+        onChange={(on) => setOverlay({ replay: on })}
+        label="Keep the last few seconds while a game is playing"
+        hint="This is what the 30, 45, and 60 second buttons save. It needs ffmpeg, and it uses a little of the PC while the game is running."
+      />
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">Replay length</p>
+        <div className="flex flex-wrap gap-2">
+          {[30, 45, 60].map((length) => (
+            <button
+              key={length}
+              type="button"
+              onClick={() => setOverlay({ seconds: length })}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-xs',
+                seconds === length ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
+              )}
+            >
+              {length} seconds
+            </button>
+          ))}
+        </div>
+        <label className="block text-xs text-muted" htmlFor="overlay-seconds">
+          Custom length
+        </label>
+        <input
+          id="overlay-seconds"
+          type="number"
+          min={5}
+          max={300}
+          value={custom}
+          onChange={(event) => setCustom(event.target.value)}
+          onBlur={() => {
+            const next = Number(custom);
+            if (!Number.isFinite(next)) {
+              setCustom(String(seconds));
+              return;
+            }
+            setOverlay({ seconds: clampOverlaySeconds(next) });
+          }}
+          className={cn(inputCls, 'max-w-[8rem]')}
+        />
+        <p className="text-xs leading-relaxed text-muted">From 5 seconds to 5 minutes. The 30, 45, and 60 second buttons stay available.</p>
+      </div>
+      {isNative() && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">ffmpeg</p>
+          <div className="flex gap-2">
+            <input
+              value={overlay?.ffmpeg ?? ''}
+              onChange={(event) => setOverlay({ ffmpeg: event.target.value })}
+              placeholder="Leave empty to use ffmpeg on the system path"
+              className={inputCls}
+            />
+            <button type="button" onClick={() => void chooseFfmpeg()} className={btnBrowse}>
+              Browse
+            </button>
+          </div>
+          {ffmpegError && <p className="text-xs text-muted">{ffmpegError}</p>}
+          <p className="text-xs leading-relaxed text-muted">
+            Recording and the replay need it. A screenshot does not. Orbit does not download it.
+          </p>
+        </div>
+      )}
+      {clips && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+          <span className="min-w-0 break-all font-mono text-xs text-muted">{clips}</span>
+          <button
+            type="button"
+            onClick={() => void overlayFolder().then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
+            className={btnBrowse}
+          >
+            Open
+          </button>
+        </div>
+      )}
+      {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
+    </>
+  );
+}
 
 function withSound(
   settings: Settings,
@@ -840,6 +980,15 @@ export function SettingsView({
           ]}
         />
 
+      </Section>
+
+      <Section
+        id="orbit-overlay"
+        icon={MonitorPlay}
+        title="Overlay"
+        lead="A small panel over the game. Alt+X opens it, or Start and Select together. The picture is the screen. Sound is not included yet."
+      >
+        <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>
 
       <Section

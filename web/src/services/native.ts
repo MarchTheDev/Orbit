@@ -1193,6 +1193,73 @@ export function sendCloudAfterBackup(
   return sendToClouds(targets, 'all', backupRoot, games).then(() => undefined);
 }
 
+export interface OverlayStatus {
+  enabled: boolean;
+  recording: boolean;
+  replay: boolean;
+  playing: boolean;
+  ffmpeg: boolean;
+  seconds: number;
+  game: string;
+  folder: string;
+  note: string;
+}
+
+export function overlayConfigure(options: {
+  enabled: boolean;
+  replay: boolean;
+  seconds: number;
+  ffmpeg: string;
+}): Promise<void> {
+  return call('overlay_configure', options, () => undefined);
+}
+
+export function overlayPlaying(title: string): Promise<void> {
+  return call('overlay_playing', { title }, () => undefined);
+}
+
+export function overlayStatus(): Promise<OverlayStatus> {
+  return call('overlay_status', {}, () => ({
+    enabled: true,
+    recording: false,
+    replay: true,
+    playing: false,
+    ffmpeg: false,
+    seconds: 30,
+    game: '',
+    folder: '',
+    note: '',
+  }));
+}
+
+export function overlayShot(stamp: string): Promise<string> {
+  return call('overlay_shot', { stamp }, async () => {
+    throw new Error('A screenshot needs the desktop app.');
+  });
+}
+
+export function overlayRecord(stamp: string): Promise<string> {
+  return call('overlay_record', { stamp }, async () => {
+    throw new Error('Recording needs the desktop app.');
+  });
+}
+
+export function overlayReplay(seconds: number, stamp: string): Promise<string> {
+  return call('overlay_replay', { seconds, stamp }, async () => {
+    throw new Error('Saving a clip needs the desktop app.');
+  });
+}
+
+export function overlayHide(): Promise<void> {
+  return call('overlay_hide', {}, () => undefined);
+}
+
+export function overlayFolder(): Promise<string> {
+  return call('overlay_folder', {}, async () => {
+    throw new Error('The clips folder is in the desktop app.');
+  });
+}
+
 export function suggestSaves(title: string): Promise<string[]> {
   return call('saves_suggest', { title }, async () => {
     throw new Error('Looking up save paths needs the desktop app.');

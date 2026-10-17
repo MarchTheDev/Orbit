@@ -598,6 +598,16 @@ fn note(
     force: bool,
 ) {
     publish(state, true);
+    // Start+Select opens the overlay even when this window is not in front.
+    // Swallow that chord, and any pad input while the panel is up, so the
+    // library does not also treat Start as play.
+    crate::overlay::on_pad(app, &state.buttons, &state.axes);
+    let combo = state.buttons.get(9) == Some(&true) && state.buttons.get(8) == Some(&true);
+    if combo || crate::overlay::is_open() {
+        *sent = state.clone();
+        *last_emit = std::time::Instant::now();
+        return;
+    }
     let buttons_changed = state.buttons != sent.buttons;
     let axes_changed = state
         .axes

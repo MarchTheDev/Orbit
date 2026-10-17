@@ -37,16 +37,6 @@ export function CloudTransferOrb({
           <p className="truncate text-[11px] text-fg">{job.title}</p>
         )}
         <p className="truncate text-[11px] text-muted">{detail}</p>
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-bg">
-          {known ? (
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-all duration-500"
-              style={{ width: `${Math.round(pct * 100)}%` }}
-            />
-          ) : (
-            <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-accent to-accent2" />
-          )}
-        </div>
       </div>
 
       <div

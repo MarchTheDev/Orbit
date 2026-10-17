@@ -38,6 +38,8 @@ import {
   steamLibrary,
   takeOpenExePaths,
   windowReady,
+  overlayConfigure,
+  overlayPlaying,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -74,7 +76,7 @@ import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { inLibraryShelf, onDisk } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
-import { announce, onToast, type ToastMessage } from './utils/toast';
+import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
 import { openExternal } from './services/desktop';
@@ -174,6 +176,12 @@ export default function App() {
     // so the window then cannot be closed at all.
     let stopAsk = () => {};
     let stopPulse = () => {};
+    let stopOverlayNote = () => {};
+    void listen<string>('overlay-toast', (event) => {
+      if (event.payload) say(event.payload);
+    }).then((unlisten) => {
+      stopOverlayNote = unlisten;
+    }).catch(() => undefined);
     void listen('cloud-transfer-close', () => {
       setCloudClose(currentCloudTransfer() ?? 'backup');
     }).then((unlisten) => {
@@ -189,6 +197,7 @@ export default function App() {
     return () => {
       stopAsk();
       stopPulse();
+      stopOverlayNote();
       stopWatch();
     };
   }, []);
@@ -601,6 +610,22 @@ export default function App() {
 
   // A controller moves the real focus. It only polls after one is connected.
   useGamepad();
+
+  useEffect(() => {
+    if (!isNative() || !settings) return;
+    const overlay = settings.overlay;
+    void overlayConfigure({
+      enabled: overlay?.enabled !== false,
+      replay: overlay?.replay !== false,
+      seconds: overlay?.seconds ?? 30,
+      ffmpeg: overlay?.ffmpeg ?? '',
+    });
+  }, [settings]);
+
+  useEffect(() => {
+    if (!isNative() || !session || session.manual) return;
+    void overlayPlaying(session.gameTitle);
+  }, [session]);
 
   // Linux WebKit keeps blurring and spinning forever if we leave those styles
   // on, and the cost grows the longer the window is open. The class is the

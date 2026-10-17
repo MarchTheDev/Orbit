@@ -23,6 +23,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2.7.0"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2.5.2"
 # `rt` supports spawn/spawn_blocking and `time` drives the session watcher.
 # The macros feature is not used, so it is deliberately left out.
@@ -52,6 +53,7 @@ webkit2gtk = { version = "2.0.2", features = ["v2_40"] }
 windows = { version = "0.62.2", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Ioctl",
+    "Win32_UI_Input_XboxController",
 ] }
 
 [profile.release]
