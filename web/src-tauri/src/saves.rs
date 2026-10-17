@@ -613,6 +613,15 @@ fn clear_direct_copy(dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Where a game's saves sit under the copies folder, as `Publisher/Game`.
+///
+/// A cloud copy uses the same place, so a send does not need a local backup
+/// first and a later download still lands beside the other copies.
+pub fn cloud_place(title: &str, publisher: Option<&str>, from: &Path) -> String {
+    let (studio, game) = place_names(title, publisher, from);
+    format!("{studio}/{game}")
+}
+
 /// Publisher, then the game. A copy made from `Documents/Rockstar Games/Red
 /// Dead Redemption 2` is filed that way, not under an id and a number.
 fn place_names(title: &str, studio: Option<&str>, from: &Path) -> (String, String) {

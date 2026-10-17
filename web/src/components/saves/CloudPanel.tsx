@@ -10,6 +10,8 @@ import { ContextMenu, type MenuItem } from '../ui/ContextMenu';
 import { btnAccent } from '../ui/buttons';
 import { inputCls, Modal } from '../ui/Modal';
 import { cn } from '../../utils/cn';
+import { useDragReorder } from '../../hooks/useDragReorder';
+import { takePlace } from '../../utils/reorder';
 import {
   cloudAccounts,
   cloudConnect,
@@ -61,8 +63,7 @@ const SERVERS = [
 /**
  * Connected clouds, and nothing else.
  *
- * Signing in and choosing games stays on Saves. This is only the list, and
- * the way to disconnect one.
+ * Signing in is above this. This is the list, and the way to disconnect one.
  */
 export function CloudAccounts({
   settings,
@@ -93,7 +94,7 @@ export function CloudAccounts({
   };
 
   if (accounts.length === 0) {
-    return <p className="text-sm text-muted">None yet. Add one from Saves, under Cloud.</p>;
+    return <p className="text-sm text-muted">None yet.</p>;
   }
 
   return (
@@ -260,6 +261,9 @@ export function AddCloud({
   const [authOpened, setAuthOpened] = useState(true);
   const [server, setServer] = useState<(typeof SERVERS)[number]['id'] | null>(null);
   const [accountKind, setAccountKind] = useState<'mega' | 'protondrive' | null>(null);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [host, setHost] = useState('');
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
@@ -343,7 +347,7 @@ export function AddCloud({
     }));
   };
 
-  const connect = async (provider: string) => {
+  const connect = async (provider: string, client?: { id: string; secret: string }) => {
     setBusy(provider);
     setError(null);
     setNote(null);
@@ -354,7 +358,13 @@ export function AddCloud({
     while (used.has(name)) name = freshRemote();
     const gen = beginConnect(name, PROVIDER_LABEL[provider] ?? provider);
     try {
-      const label = await cloudConnect(provider, { host, user, password, url, name });
+      const label = await cloudConnect(provider, {
+        host,
+        user: provider === 'drive' ? (client?.id ?? '') : user,
+        password: provider === 'drive' ? (client?.secret ?? '') : password,
+        url,
+        name,
+      });
       setPassword('');
       updateSaves((current) => ({
         saves: savesWithClouds(current.saves, {
@@ -366,6 +376,8 @@ export function AddCloud({
       }));
       setNote(`Connected to ${label}.`);
       setServer(null);
+      setDriveOpen(false);
+      setClientSecret('');
     } catch (e) {
       dropConnect(name, gen);
       fail(e);
@@ -418,7 +430,7 @@ export function AddCloud({
     <div className="space-y-3">
       <div>
         <h4 className="text-sm font-medium">Add a cloud</h4>
-        <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again.</p>
+        <p className="text-[11px] text-muted">Google Drive and Dropbox open a sign-in page. MEGA and Proton Drive use the email and password. The same service can be added again. Google is retiring the shared sign-in, so a client id and secret keep Drive working.</p>
       </div>
       {!ready && isNative() && <p className="text-xs text-muted">rclone is not here yet. Get it below.</p>}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -428,6 +440,13 @@ export function AddCloud({
             type="button"
             disabled={!isNative() || !ready || busy !== null}
             onClick={() => {
+              if (item.id === 'drive') {
+                setServer(null);
+                setAccountKind(null);
+                setDriveOpen((open) => !open);
+                return;
+              }
+              setDriveOpen(false);
               if (item.kind === 'account') {
                 setServer(null);
                 setAccountKind(accountKind === item.id ? null : item.id);
@@ -438,7 +457,7 @@ export function AddCloud({
             }}
             className={cn(
               'rounded-2xl border px-3 py-3 text-sm font-semibold transition disabled:opacity-50',
-              accountKind === item.id
+              accountKind === item.id || (item.id === 'drive' && driveOpen)
                 ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
                 : 'border-line/70 bg-bg/30 text-fg hover:border-accent/40',
             )}
@@ -447,6 +466,41 @@ export function AddCloud({
           </button>
         ))}
       </div>
+      {driveOpen && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <p className="text-[11px] text-muted sm:col-span-2">
+            Leave both blank to use the shared sign-in for now. Your own client id and secret are the ones that keep working.{' '}
+            <button type="button" onClick={() => void openExternal('https://rclone.org/drive/#making-your-own-client-id')} className="text-accent underline-offset-2 hover:underline">
+              How to make them
+            </button>
+            .
+          </p>
+          <label>
+            <span className="mb-1 block text-[11px] text-muted">Client id, if you have one</span>
+            <input className={inputCls} value={clientId} onChange={(e) => setClientId(e.target.value)} spellCheck={false} autoComplete="off" />
+          </label>
+          <label>
+            <span className="mb-1 block text-[11px] text-muted">Client secret</span>
+            <input className={inputCls} type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="new-password" />
+          </label>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => {
+              const id = clientId.trim();
+              const secret = clientSecret.trim();
+              if ((id && !secret) || (!id && secret)) {
+                setError('Google Drive needs both the client id and the secret, or neither.');
+                return;
+              }
+              void connect('drive', id && secret ? { id, secret } : undefined);
+            }}
+            className={cn(btnAccent, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2 sm:justify-self-start')}
+          >
+            {busy === 'drive' ? (note === 'Signed in.' ? 'Finishing…' : 'Waiting…') : 'Sign in to Google Drive'}
+          </button>
+        </div>
+      )}
       {accountKind && (
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="sm:col-span-2">
@@ -564,9 +618,17 @@ export function CloudPanel({
   const accounts = cloudAccounts(settings.saves);
   const skip = new Set(cloudSkipOf(settings.saves));
   const dirs = settings.saves?.dirs ?? {};
+  const cloudOrder = settings.saves?.cloudOrder ?? [];
   const known = [...games]
     .filter((game) => !!dirs[game.id]?.trim())
-    .sort((a, b) => a.title.localeCompare(b.title));
+    .sort((a, b) => {
+      const ai = cloudOrder.indexOf(a.id);
+      const bi = cloudOrder.indexOf(b.id);
+      if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
   const chosen = known.filter((game) => !skip.has(game.id));
   const ticked = accounts.filter((account) => account.on !== false);
 
@@ -579,6 +641,17 @@ export function CloudPanel({
   const [error, setError] = useState<string | null>(null);
   const [gameQuery, setGameQuery] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const { bind: bindGame, dragging, over } = useDragReorder(
+    (fromId, toId) => {
+      setSettings({
+        saves: {
+          ...settings.saves,
+          cloudOrder: takePlace(known.map((game) => game.id), fromId, toId),
+        },
+      });
+    },
+    { fromButtons: true, onto: true },
+  );
 
   const refresh = () => {
     if (!isNative()) {
@@ -670,7 +743,7 @@ export function CloudPanel({
           // A game whose folder cannot be copied is left. The others still go.
         }
       }
-      setNote(await sendToClouds(targets, 'all', settings.saves?.backupRoot, gamesToSend.map(cloudGameOf)));
+      setNote(await sendToClouds(targets, 'all', settings.saves?.backupRoot, gamesToSend.map((game) => cloudGameOf(game, dirs[game.id]))));
     } catch (e) {
       fail(e);
     } finally {
@@ -691,7 +764,7 @@ export function CloudPanel({
         setError('Choose a game with a save folder.');
         return;
       }
-      setNote(await cloudCopy(true, account.remote, account.own, settings.saves?.backupRoot, account.folder, chosen.map(cloudGameOf)));
+      setNote(await cloudCopy(true, account.remote, account.own, settings.saves?.backupRoot, account.folder, chosen.map((game) => cloudGameOf(game, dirs[game.id]))));
     } catch (e) {
       fail(e);
     } finally {
@@ -749,7 +822,7 @@ export function CloudPanel({
         <div className="flex items-end justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">Games</h3>
-            <p className="text-[11px] text-muted">Click a cover to include it. Right-click one to sync it. Games with no save folder are left out.</p>
+            <p className="text-[11px] text-muted">Drag a cover to rearrange it. Click one to include it. Right-click one to sync it.</p>
           </div>
           {known.length > 0 && (
             <div className="flex gap-2">
@@ -775,7 +848,7 @@ export function CloudPanel({
             {shown.map((game) => {
               const on = !skip.has(game.id);
               return (
-                <li key={game.id}>
+                <li key={game.id} {...bindGame(game.id)} className={cn(dragging === game.id && 'opacity-60', over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent rounded-2xl')}>
                   <button
                     type="button"
                     data-orbit-save={game.id}

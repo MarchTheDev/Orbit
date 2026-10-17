@@ -43,6 +43,10 @@ pub struct CloudGame {
     pub id: String,
     pub title: String,
     pub publisher: Option<String>,
+    /// The game's own save folder. A cloud copy can be made from this even
+    /// when nothing has been backed up on this PC yet.
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 pub async fn status(data_dir: &Path) -> CloudStatus {
@@ -156,7 +160,7 @@ pub fn connect(
         prepare_oauth_port(&config, tell)?;
     }
     let label = match provider {
-        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, open, tell)?,
+        "drive" | "dropbox" | "box" => oauth(&bin, &config, provider, remote_name, user, password, open, tell)?,
         "onedrive" => oauth_onedrive(&bin, &config, remote_name, open, tell)?,
         "mega" | "protondrive" => account_login(&bin, &config, provider, remote_name, user, password, code, mailbox)?,
         "webdav" | "ftp" | "sftp" | "smb" => server(&bin, &config, provider, remote_name, host, user, password, url)?,
@@ -240,9 +244,6 @@ pub fn copy(
     let remote = checked_remote(remote)?;
     let folder = clean_folder(folder.unwrap_or("Orbit"))?;
     let source = saves::root_of(data_dir, backup_root);
-    if up && !source.is_dir() {
-        return Err("There are no copies to send yet. Back up a game first.".into());
-    }
     if !up {
         fs::create_dir_all(&source).map_err(|e| format!("Could not create the copies folder: {e}"))?;
     }
@@ -250,6 +251,9 @@ pub fn copy(
     if up {
         if let Some(games) = only {
             return copy_games(&bin, config.as_deref(), data_dir, backup_root, remote, &folder, games);
+        }
+        if !source.is_dir() {
+            return Err("There are no copies to send yet. Back up a game first.".into());
         }
     }
     let cloud = format!("{remote}:{folder}");
@@ -419,13 +423,31 @@ fn oauth(
     config: &Path,
     provider: &str,
     remote_name: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
-    let token = authorize(bin, config, provider, open, tell)?;
+    let client_id = client_id.trim();
+    let client_secret = client_secret.trim();
+    let own_client = provider == "drive" && !client_id.is_empty() && !client_secret.is_empty();
+    let token = authorize(
+        bin,
+        config,
+        provider,
+        if own_client { client_id } else { "" },
+        if own_client { client_secret } else { "" },
+        open,
+        tell,
+    )?;
     let _ = delete_named(bin, config, remote_name);
-    let output = rclone(bin, Some(config))
-        .args(["config", "create", remote_name, provider, "token"])
+    let mut command = rclone(bin, Some(config));
+    command.args(["config", "create", remote_name, provider]);
+    if own_client {
+        command.args(["client_id", client_id, "client_secret", client_secret]);
+    }
+    let output = command
+        .args(["token"])
         .arg(&token)
         .output()
         .map_err(|e| format!("Could not save that cloud: {e}"))?;
@@ -442,7 +464,7 @@ fn oauth_onedrive(
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
-    let token = authorize(bin, config, "onedrive", open, tell)?;
+    let token = authorize(bin, config, "onedrive", "", "", open, tell)?;
     let _ = delete_named(bin, config, remote_name);
     let output = rclone(bin, Some(config))
         .args(["config", "create", remote_name, "onedrive", "drive_type", "personal", "token"])
@@ -674,6 +696,8 @@ fn authorize(
     bin: &Path,
     config: &Path,
     provider: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
@@ -687,16 +711,19 @@ fn authorize(
     // A busy port is not another sign-in. prepare_oauth_port already waited
     // it out. Try anyway, and say so only if rclone still cannot take it.
     match auth_port() {
-        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open, tell),
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell),
         AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
     }
-    authorize_once(bin, config, provider, open, tell).or_else(|err| recover_authorize(bin, config, provider, open, tell, &err))
+    authorize_once(bin, config, provider, client_id, client_secret, open, tell)
+        .or_else(|err| recover_authorize(bin, config, provider, client_id, client_secret, open, tell, &err))
 }
 
 fn recover_authorize(
     bin: &Path,
     config: &Path,
     provider: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
     err: &str,
@@ -707,7 +734,7 @@ fn recover_authorize(
         return Err(err.to_string());
     }
     if sign_in_port_failed(err) {
-        return authorize_when_port_blocked(bin, config, provider, open, tell);
+        return authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell);
     }
     if !port_still_busy(err) {
         return Err(err.to_string());
@@ -715,12 +742,12 @@ fn recover_authorize(
     release_our_authorize(config);
     std::thread::sleep(Duration::from_secs(2));
     match auth_port() {
-        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, open, tell),
+        AuthPort::Blocked => return authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell),
         AuthPort::Busy | AuthPort::Free | AuthPort::Unknown => {}
     }
-    authorize_once(bin, config, provider, open, tell).or_else(|again| {
+    authorize_once(bin, config, provider, client_id, client_secret, open, tell).or_else(|again| {
         if sign_in_port_failed(&again) {
-            authorize_when_port_blocked(bin, config, provider, open, tell)
+            authorize_when_port_blocked(bin, config, provider, client_id, client_secret, open, tell)
         } else if port_still_busy(&again) {
             Err("The last sign-in is still letting go of the port. Wait a minute and try the cloud again.".into())
         } else {
@@ -740,6 +767,8 @@ fn authorize_once(
     bin: &Path,
     config: &Path,
     provider: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
@@ -750,12 +779,35 @@ fn authorize_once(
     // `/auth` address is also not what the browser should open: it only
     // redirects, and that redirect is requested again after the login, as a
     // second tab that asks for the account once more.
-    let mut child = rclone(bin, Some(config))
-        .args(["--auto-confirm", "authorize", "--auth-no-open-browser", provider])
+    //
+    // The flag is not enough on its own. rclone still calls the system opener
+    // unless it sees the flag, and that opener is the second login tab. The
+    // process is started paused and put in a job that cannot start another
+    // program, so that opener cannot run. Orbit opens the provider page itself.
+    let mut command = rclone(bin, Some(config));
+    #[cfg(unix)]
+    {
+        command.env("BROWSER", "true");
+    }
+    command
+        .args(["--auto-confirm", "authorize", "--auth-no-open-browser", provider]);
+    if !client_id.is_empty() && !client_secret.is_empty() {
+        command.arg(client_id).arg(client_secret);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Could not start rclone: {e}"))?;
+    let _browser_lock = stop_spawned_browser(&child);
+    resume_if_paused(&child);
     let pid_file = config.parent().map(|dir| {
         let path = dir.join("sign-in.pid");
         let _ = fs::write(&path, child.id().to_string());
@@ -1015,16 +1067,18 @@ fn authorize_when_port_blocked(
     bin: &Path,
     config: &Path,
     provider: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     #[cfg(windows)]
     {
-        authorize_with_port_freed(bin, config, provider, open, tell)
+        authorize_with_port_freed(bin, config, provider, client_id, client_secret, open, tell)
     }
     #[cfg(not(windows))]
     {
-        let _ = (bin, config, provider, open, tell);
+        let _ = (bin, config, provider, client_id, client_secret, open, tell);
         Err("The sign-in page could not start because its port is in use. Try again in a moment.".into())
     }
 }
@@ -1039,6 +1093,8 @@ fn authorize_with_port_freed(
     bin: &Path,
     config: &Path,
     provider: &str,
+    client_id: &str,
+    client_secret: &str,
     open: &(dyn Fn(&str) + Send + Sync),
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
@@ -1055,7 +1111,7 @@ fn authorize_with_port_freed(
     for path in [&stdout_path, &stderr_path, &url_path] {
         let _ = fs::remove_file(path);
     }
-    let body = sign_in_script(bin, config, provider, &stdout_path, &stderr_path, &url_path);
+    let body = sign_in_script(bin, config, provider, client_id, client_secret, &stdout_path, &stderr_path, &url_path);
     let mut bytes = vec![0xEF, 0xBB, 0xBF];
     bytes.extend(body.as_bytes());
     fs::write(&script, bytes).map_err(|e| format!("Could not prepare the sign-in. {e}"))?;
@@ -1129,7 +1185,7 @@ fn run_elevated(script: &Path) -> Result<bool, String> {
 }
 
 #[cfg(windows)]
-fn sign_in_script(bin: &Path, config: &Path, provider: &str, stdout_path: &Path, stderr_path: &Path, url_path: &Path) -> String {
+fn sign_in_script(bin: &Path, config: &Path, provider: &str, client_id: &str, client_secret: &str, stdout_path: &Path, stderr_path: &Path, url_path: &Path) -> String {
     // Paths are PowerShell single-quoted literals. The process argument string
     // then wraps the config in double quotes, which is what Windows itself reads.
     format!(
@@ -1144,7 +1200,11 @@ try {{ Stop-Service -Name winnat -Force -ErrorAction SilentlyContinue }} catch {
 try {{
   $p = New-Object System.Diagnostics.Process
   $p.StartInfo.FileName = $bin
-  $p.StartInfo.Arguments = '--config "' + $config.Replace('"','') + '" --auto-confirm authorize --auth-no-open-browser {provider}'
+  $clientId = {client_id}
+  $clientSecret = {client_secret}
+  $tail = ''
+  if ($clientId -and $clientSecret) {{ $tail = ' "' + $clientId.Replace('"','') + '" "' + $clientSecret.Replace('"','') + '"' }}
+  $p.StartInfo.Arguments = '--config "' + $config.Replace('"','') + '" --auto-confirm authorize --auth-no-open-browser {provider}' + $tail
   $p.StartInfo.UseShellExecute = $false
   $p.StartInfo.RedirectStandardOutput = $true
   $p.StartInfo.RedirectStandardError = $true
@@ -1181,6 +1241,8 @@ try {{
         bin = ps_single(&bin.display().to_string()),
         config = ps_single(&config.display().to_string()),
         provider = provider,
+        client_id = ps_single(client_id),
+        client_secret = ps_single(client_secret),
         url = ps_single(&url_path.display().to_string()),
         stdout = ps_single(&stdout_path.display().to_string()),
         stderr = ps_single(&stderr_path.display().to_string()),
@@ -1355,6 +1417,112 @@ fn delete_named(bin: &Path, config: &Path, name: &str) -> Result<(), String> {
     }
     Err(public_error(&output.stderr, "Could not forget that cloud."))
 }
+
+/// Stop rclone from opening a browser of its own.
+///
+/// The sign-in flag is supposed to do this. When it does not, rclone starts
+/// the system opener on the local `/auth` address. That redirect is asked for
+/// again after the login, which is the second login tab. A job that allows
+/// only this process means that opener cannot start. The handle is kept until
+/// the sign-in ends; closing it sooner would drop the limit.
+#[cfg(windows)]
+struct HeldJob(isize);
+
+#[cfg(windows)]
+impl Drop for HeldJob {
+    fn drop(&mut self) {
+        close_job(self.0);
+    }
+}
+
+#[cfg(windows)]
+fn stop_spawned_browser(child: &std::process::Child) -> Option<HeldJob> {
+    use std::os::windows::io::AsRawHandle;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(attrs: *mut core::ffi::c_void, name: *const u16) -> isize;
+        fn SetInformationJobObject(job: isize, class: i32, info: *const core::ffi::c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: isize, process: isize) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    #[repr(C)]
+    struct BasicLimit {
+        per_process_user_time: i64,
+        per_job_user_time: i64,
+        limit_flags: u32,
+        minimum_working_set: usize,
+        maximum_working_set: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+    const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
+    const JOB_OBJECT_BASIC_LIMIT_INFORMATION: i32 = 2;
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        if job == 0 {
+            return None;
+        }
+        let info = BasicLimit {
+            per_process_user_time: 0,
+            per_job_user_time: 0,
+            limit_flags: JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+            minimum_working_set: 0,
+            maximum_working_set: 0,
+            active_process_limit: 1,
+            affinity: 0,
+            priority_class: 0,
+            scheduling_class: 0,
+        };
+        if SetInformationJobObject(
+            job,
+            JOB_OBJECT_BASIC_LIMIT_INFORMATION,
+            &info as *const BasicLimit as *const core::ffi::c_void,
+            std::mem::size_of::<BasicLimit>() as u32,
+        ) == 0
+        {
+            let _ = CloseHandle(job);
+            return None;
+        }
+        if AssignProcessToJobObject(job, child.as_raw_handle() as isize) == 0 {
+            let _ = CloseHandle(job);
+            return None;
+        }
+        Some(HeldJob(job))
+    }
+}
+
+#[cfg(windows)]
+fn close_job(job: isize) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    unsafe {
+        let _ = CloseHandle(job);
+    }
+}
+
+#[cfg(not(windows))]
+fn stop_spawned_browser(_child: &std::process::Child) -> Option<isize> {
+    None
+}
+
+#[cfg(windows)]
+fn resume_if_paused(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtResumeProcess(process: isize) -> i32;
+    }
+    unsafe {
+        let _ = NtResumeProcess(child.as_raw_handle() as isize);
+    }
+}
+
+#[cfg(not(windows))]
+fn resume_if_paused(_child: &std::process::Child) {}
 
 fn rclone(bin: &Path, config: Option<&Path>) -> std::process::Command {
     let mut cmd = process::command(bin);
@@ -1581,6 +1749,10 @@ fn copy_games(
     let mut sent = 0usize;
     let mut missing = Vec::new();
     for game in games {
+        if send_live_save(bin, config, remote, folder, game)? {
+            sent += 1;
+            continue;
+        }
         let relatives = saves::existing_relatives(
             data_dir,
             backup_root,
@@ -1606,9 +1778,9 @@ fn copy_games(
     }
     if sent == 0 {
         return Err(if missing.len() == 1 {
-            format!("Back up {} on this PC first.", missing[0])
+            format!("Orbit could not find a save folder for {}.", missing[0])
         } else {
-            "Back up a chosen game on this PC first.".into()
+            "Orbit could not find a save folder to send.".into()
         });
     }
     if missing.is_empty() {
@@ -1618,9 +1790,26 @@ fn copy_games(
     }
 }
 
+/// Send the game's own save folder. A local backup is not required.
+fn send_live_save(bin: &Path, config: Option<&Path>, remote: &str, folder: &str, game: &CloudGame) -> Result<bool, String> {
+    let Some(dir) = game.dir.as_deref().map(str::trim).filter(|path| !path.is_empty()) else {
+        return Ok(false);
+    };
+    let path = PathBuf::from(dir);
+    if !path.is_dir() {
+        return Ok(false);
+    }
+    let relative = saves::cloud_place(&game.title, game.publisher.as_deref(), &path);
+    let Some(relative) = safe_relative(&relative) else {
+        return Err("That save folder could not be named on the cloud.".into());
+    };
+    run_copy(bin, config, &path.to_string_lossy(), &format!("{remote}:{folder}/{relative}"))?;
+    Ok(true)
+}
+
 fn run_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
     let output = rclone(bin, config)
-        .args(["copy", "--update", "--retries", "2", "--low-level-retries", "3", "--"])
+        .args(["--quiet", "copy", "--update", "--retries", "2", "--low-level-retries", "3", "--"])
         .arg(from)
         .arg(to)
         .output()
@@ -1628,7 +1817,7 @@ fn run_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(
     if output.status.success() {
         Ok(())
     } else {
-        Err(public_error(&output.stderr, "rclone did not finish."))
+        Err(copy_error(&output.stdout, &output.stderr))
     }
 }
 
@@ -1875,14 +2064,64 @@ fn label_of(provider: &str) -> &'static str {
 
 /// A short reason for the player. A token or a password must not ride along in it.
 fn public_error(bytes: &[u8], fallback: &str) -> String {
-    let detail = String::from_utf8_lossy(bytes);
-    let detail = strip_secret(detail.trim());
+    let detail = useful_detail(bytes);
     if detail.is_empty() {
         fallback.into()
     } else {
-        let detail: String = detail.chars().take(180).collect();
         format!("{fallback} {detail}")
     }
+}
+
+/// The shared Google client prints a notice on every command. It is not the
+/// failure, and at 180 characters it was the only thing the player could see.
+fn copy_error(stdout: &[u8], stderr: &[u8]) -> String {
+    let detail = useful_detail(stderr);
+    let other = useful_detail(stdout);
+    let combined = match (detail.is_empty(), other.is_empty()) {
+        (false, false) => format!("{detail} {other}"),
+        (false, true) => detail,
+        (true, false) => other,
+        (true, true) => String::new(),
+    };
+    if combined.is_empty() {
+        let raw = format!("{} {}", String::from_utf8_lossy(stderr), String::from_utf8_lossy(stdout));
+        if is_shared_client_notice(&raw) {
+            return "Google Drive needs your own client id. In Settings, under Backups, add Google Drive again and paste the client id and secret. https://rclone.org/drive/#making-your-own-client-id".into();
+        }
+        return "rclone did not finish.".into();
+    }
+    let combined: String = combined.chars().take(240).collect();
+    format!("rclone did not finish. {combined}")
+}
+
+fn useful_detail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_shared_client_notice(line) && !line.to_ascii_lowercase().contains(" notice:"))
+        .map(strip_secret)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let preferred: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("error") || lower.contains("failed") || lower.contains("fatal") || lower.contains("denied")
+        })
+        .collect();
+    let chosen: Vec<&str> = if preferred.is_empty() {
+        lines.iter().map(String::as_str).collect()
+    } else {
+        preferred
+    };
+    chosen.join(" ").chars().take(240).collect()
+}
+
+fn is_shared_client_notice(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("shared") && lower.contains("client_id")
 }
 
 fn strip_secret(text: &str) -> String {
@@ -1902,7 +2141,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, is_local_auth, location_from, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from};
+    use super::{allowed_archive, clean_folder, is_local_auth, is_shared_client_notice, location_from, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -1949,6 +2188,14 @@ mod tests {
         assert_eq!(page(Path::new("."), "orbit", false, "Box").as_deref(), Some("https://app.box.com/"));
         assert_eq!(page(Path::new("."), "orbit", false, "MEGA").as_deref(), Some("https://mega.nz/fm"));
         assert_eq!(page(Path::new("."), "orbit", false, "Proton Drive").as_deref(), Some("https://drive.proton.me/"));
+    }
+
+    #[test]
+    fn a_google_notice_is_not_the_failure() {
+        let notice = b"2026/10/17 01:47:00 NOTICE: orbit-2dugru: This remote uses rclone's shared Google Drive client_id, which is being retired and will stop working during 2026. Create your own client_id\nERROR: directory not found\n";
+        assert!(is_shared_client_notice("This remote uses rclone's shared Google Drive client_id"));
+        assert_eq!(useful_detail(notice), "ERROR: directory not found");
+        assert!(useful_detail(b"NOTICE: waiting\n").is_empty());
     }
 
     #[test]

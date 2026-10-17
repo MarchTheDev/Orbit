@@ -531,6 +531,8 @@ export interface Settings {
     backupRoot?: string;
     /** The Saves list, in the order it was dragged. Games not listed wait at the end. */
     order?: string[];
+    /** The cloud page's games, in the order they were dragged. */
+    cloudOrder?: string[];
     /** Games left out of the Saves list. They stay in the library, and can be shown again from Saves. */
     hidden?: string[];
     /**

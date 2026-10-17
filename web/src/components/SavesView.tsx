@@ -180,12 +180,12 @@ export function SavesView({
     if (clouds.length === 0) throw new Error('Sign in to a cloud first.');
     const list = target === 'all' ? clouds : target === 'chosen' ? chosenClouds(clouds) : [target];
     if (list.length === 0) throw new Error('Mark a cloud first, or pick one.');
-    await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
     try {
-      await sendToClouds(list, 'all', settings.saves?.backupRoot, [cloudGameOf(game)]);
-    } catch (e) {
-      throw new Error(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
+      await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+    } catch {
+      // A cloud copy uses the save folder itself. A local copy is not required.
     }
+    await sendToClouds(list, 'all', settings.saves?.backupRoot, [cloudGameOf(game, dirs[game.id])]);
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
@@ -208,7 +208,7 @@ export function SavesView({
     }
     setBackingAll(false);
     setSavedTick((n) => n + 1);
-    if (copied > 0) afterBackup(games.map(cloudGameOf));
+    if (copied > 0) afterBackup(games.map((game) => cloudGameOf(game, dirs[game.id])));
     if (copied === 0) {
       say(skipped === 0 ? 'There are no games to back up.' : 'No save folders were found to copy.');
       return;
@@ -240,10 +240,10 @@ export function SavesView({
     }
     setSavedTick((n) => n + 1);
     try {
-      const sent = await sendToClouds(which === 'all' ? clouds : chosenClouds(clouds), 'all', settings.saves?.backupRoot, chosen.map(cloudGameOf));
-      say(copied > 0 ? sent : `${sent} No new save folder was copied first.`);
+      const sent = await sendToClouds(which === 'all' ? clouds : chosenClouds(clouds), 'all', settings.saves?.backupRoot, chosen.map((game) => cloudGameOf(game, dirs[game.id])));
+      say(sent);
     } catch (e) {
-      say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
+      say(`The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
     } finally {
       setSendingCloud(false);
     }
@@ -285,7 +285,7 @@ export function SavesView({
           onSelect: () => void runGame(
             async () => {
               await backupSave(menuGame.id, menuGame.title, dirs[menuGame.id] ?? null, saveHintsOf(menuGame), savePlaceOf(menuGame, settings));
-              afterBackup([cloudGameOf(menuGame)]);
+              afterBackup([cloudGameOf(menuGame, dirs[menuGame.id])]);
             },
             `Backed up ${menuGame.title}`,
           ),
@@ -812,7 +812,7 @@ function SaveRow({
           onClick={() => void run(async () => {
             await backupSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings));
             try {
-              await sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, [cloudGameOf(game)]);
+              await sendCloudAfterBackup(settings.saves, settings.saves?.backupRoot, [cloudGameOf(game, dir)]);
             } catch (e) {
               say(`The copy is on this PC. The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
             }

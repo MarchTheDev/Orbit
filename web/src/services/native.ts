@@ -917,10 +917,15 @@ export interface CloudGame {
   id: string;
   title: string;
   publisher?: string | null;
+  /** The game's own save folder, so a cloud copy does not need a local backup first. */
+  dir?: string | null;
 }
 
-export function cloudGameOf(game: { id: string; title: string; meta?: { developer?: string | null } | null }): CloudGame {
-  return { id: game.id, title: game.title, publisher: game.meta?.developer?.trim() || null };
+export function cloudGameOf(
+  game: { id: string; title: string; meta?: { developer?: string | null } | null },
+  dir?: string | null,
+): CloudGame {
+  return { id: game.id, title: game.title, publisher: game.meta?.developer?.trim() || null, dir: dir?.trim() || null };
 }
 
 export function cloudCopy(
