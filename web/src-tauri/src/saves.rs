@@ -485,13 +485,7 @@ fn copy_folder(
     // made the copy harder to find, and a new copy replaces the last one.
     clear_direct_copy(&dest)?;
     copy_tree(from, &dest, 0, false)?;
-    // `At:` stays the unix timestamp so a list can still be sorted. The line a
-    // person reads is the PC's own clock, not UTC.
-    let when = when_line(at);
-    let note = format!(
-        "Game: {game}\nPublisher: {studio}\nCopied from: {}\n{when}\nAt: {at}\n",
-        from.display()
-    );
+    let note = note_text(&game, &studio, from, at);
     fs::write(dest.join("note.txt"), &note).map_err(|e| format!("Could not write the note: {e}"))?;
     Ok(SaveBackup {
         at,
@@ -620,6 +614,21 @@ fn clear_direct_copy(dest: &Path) -> Result<(), String> {
 pub fn cloud_place(title: &str, publisher: Option<&str>, from: &Path) -> String {
     let (studio, game) = place_names(title, publisher, from);
     format!("{studio}/{game}")
+}
+
+/// The same note a local copy writes, so a cloud send can carry it too.
+pub fn backup_note(title: &str, publisher: Option<&str>, from: &Path) -> String {
+    let at = now();
+    let (studio, game) = place_names(title, publisher, from);
+    note_text(&game, &studio, from, at)
+}
+
+fn note_text(game: &str, studio: &str, from: &Path, at: i64) -> String {
+    let when = when_line(at);
+    format!(
+        "Game: {game}\nPublisher: {studio}\nCopied from: {}\n{when}\nAt: {at}\n",
+        from.display()
+    )
 }
 
 /// Publisher, then the game. A copy made from `Documents/Rockstar Games/Red
@@ -1245,6 +1254,17 @@ mod tests {
         // A PC whose zone happens to be UTC is still not labelled as if that
         // were the only clock the note knows.
         assert_eq!(utc_zone, "When: 1970-01-01 00:00:00");
+    }
+
+    #[test]
+    fn a_cloud_send_can_use_the_same_note() {
+        let from = std::path::Path::new("C:/Users/A/Documents/Rockstar Games/Red Dead Redemption 2");
+        let note = backup_note("Red Dead Redemption 2", Some("Rockstar Games"), from);
+        assert!(note.contains("Game: Red Dead Redemption 2"), "{note}");
+        assert!(note.contains("Publisher: Rockstar Games"), "{note}");
+        assert!(note.contains("Copied from: "), "{note}");
+        assert!(note.contains("At: "), "{note}");
+        assert!(note.contains("When"), "{note}");
     }
 
     #[test]

@@ -457,20 +457,12 @@ fn oauth(
         open,
         tell,
     )?;
-    let _ = delete_named(bin, config, remote_name);
-    let mut command = rclone(bin, Some(config));
-    command.args(["config", "create", remote_name, provider]);
+    let mut fields = Vec::new();
     if own_client {
-        command.args(["client_id", client_id, "client_secret", client_secret]);
+        fields.push(("client_id", client_id));
+        fields.push(("client_secret", client_secret));
     }
-    let output = command
-        .args(["token"])
-        .arg(&token)
-        .output()
-        .map_err(|e| format!("Could not save that cloud: {e}"))?;
-    if !output.status.success() {
-        return Err(public_error(&output.stderr, "rclone could not save that sign-in."));
-    }
+    save_signed_in(bin, config, remote_name, provider, &token, &fields)?;
     Ok(label_of(provider).into())
 }
 
@@ -482,19 +474,88 @@ fn oauth_onedrive(
     tell: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, String> {
     let token = authorize(bin, config, "onedrive", "", "", open, tell)?;
+    save_signed_in(bin, config, remote_name, "onedrive", &token, &[("drive_type", "personal")])
+        .map_err(|err| format!("{err} A work account can be a remote rclone already has."))?;
+    Ok("OneDrive".into())
+}
+
+/// Keep the sign-in that just finished, without starting another browser login.
+///
+/// `config create` on its own walks the wizard. The default answer to "replace
+/// this token?" is yes, and that opens the login page again while the first
+/// tab's login is still being recognised. One non-interactive step writes the
+/// token and stops. If that step does not leave a token, the file is written
+/// here instead. Either way the browser is not opened again.
+fn save_signed_in(
+    bin: &Path,
+    config: &Path,
+    remote_name: &str,
+    provider: &str,
+    token: &str,
+    fields: &[(&str, &str)],
+) -> Result<(), String> {
     let _ = delete_named(bin, config, remote_name);
-    let output = rclone(bin, Some(config))
-        .args(["config", "create", remote_name, "onedrive", "drive_type", "personal", "token"])
-        .arg(&token)
+    let mut command = rclone(bin, Some(config));
+    command.args(["config", "create", "--non-interactive", remote_name, provider]);
+    for (key, value) in fields {
+        if !value.is_empty() {
+            command.args([key, value]);
+        }
+    }
+    let output = command
+        .args(["token"])
+        .arg(token)
         .output()
         .map_err(|e| format!("Could not save that cloud: {e}"))?;
-    if !output.status.success() {
-        return Err(public_error(
-            &output.stderr,
-            "rclone could not save that OneDrive. A work account can be a remote rclone already has.",
-        ));
+    if output.status.success() && remote_has_token(config, remote_name) {
+        return Ok(());
     }
-    Ok("OneDrive".into())
+    write_token_remote(config, remote_name, provider, token, fields)
+}
+
+fn remote_has_token(config: &Path, name: &str) -> bool {
+    let Ok(text) = fs::read_to_string(config) else {
+        return false;
+    };
+    parse_ini(&text).1.iter().any(|section| {
+        section.name == name
+            && section.lines.iter().any(|line| {
+                let line = line.trim();
+                line.starts_with("token") && line.contains('=') && line.contains('{')
+            })
+    })
+}
+
+fn write_token_remote(
+    config: &Path,
+    name: &str,
+    provider: &str,
+    token: &str,
+    fields: &[(&str, &str)],
+) -> Result<(), String> {
+    let name = orbit_name(name)?;
+    let token = token.replace(['\n', '\r'], "");
+    if !token.starts_with('{') || !token.ends_with('}') {
+        return Err("rclone did not return a sign-in.".into());
+    }
+    let text = fs::read_to_string(config).unwrap_or_default();
+    let (preamble, mut sections) = parse_ini(&text);
+    sections.retain(|section| section.name != name);
+    let mut lines = vec![format!("[{name}]"), format!("type = {provider}")];
+    for (key, value) in fields {
+        if value.is_empty() || value.contains('\n') || value.contains('\r') {
+            continue;
+        }
+        lines.push(format!("{key} = {value}"));
+    }
+    lines.push(format!("token = {token}"));
+    sections.push(IniSection { name: name.to_string(), lines });
+    if let Some(parent) = config.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Could not save that sign-in: {e}"))?;
+    }
+    fs::write(config, write_ini(&preamble, &sections)).map_err(|e| format!("Could not save that sign-in: {e}"))?;
+    set_mode(config, 0o600);
+    Ok(())
 }
 
 fn server(
@@ -1005,15 +1066,29 @@ fn authorize_once(
         }
         if let Some(url) = link.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if !opened.load(Ordering::SeqCst) {
-                opened.store(true, Ordering::SeqCst);
-                // The page is handed over and rclone is left running. Killing it
-                // here is what turned a slow browser into "the sign-in was cancelled".
-                // The local /auth address is never opened: after a login the
-                // browser asks for it again, and that second tab is another login.
-                if let Some(page) = login_page(&url) {
-                    open(&page);
+                let so_far = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                if so_far.to_ascii_lowercase().contains("got code") {
+                    // The first tab already finished. Opening now is the second login.
+                    opened.store(true, Ordering::SeqCst);
+                    signed.store(true, Ordering::SeqCst);
+                    tell("signed-in");
                 } else {
-                    tell("The sign-in page could not be opened. Try the cloud again.");
+                    opened.store(true, Ordering::SeqCst);
+                    // The page is handed over and rclone is left running. Killing it
+                    // here is what turned a slow browser into "the sign-in was cancelled".
+                    // The local /auth address is never opened: after a login the
+                    // browser asks for it again, and that second tab is another login.
+                    if let Some(page) = login_page(&url) {
+                        let so_far = text.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                        if so_far.to_ascii_lowercase().contains("got code") {
+                            signed.store(true, Ordering::SeqCst);
+                            tell("signed-in");
+                        } else {
+                            open(&page);
+                        }
+                    } else {
+                        tell("The sign-in page could not be opened. Try the cloud again.");
+                    }
                 }
             }
         }
@@ -1308,8 +1383,20 @@ fn authorize_with_port_freed(
                 if let Ok(text) = fs::read_to_string(&url_path) {
                     if let Some(url) = auth_url(text.trim()) {
                         if !opened.swap(true, Ordering::SeqCst) {
-                            if let Some(page) = login_page(&url) {
-                                open(&page);
+                            let so_far = fs::read_to_string(&stdout_path).unwrap_or_default()
+                                + &fs::read_to_string(&stderr_path).unwrap_or_default();
+                            if so_far.to_ascii_lowercase().contains("got code") {
+                                signed.store(true, Ordering::SeqCst);
+                                tell("signed-in");
+                            } else if let Some(page) = login_page(&url) {
+                                let so_far = fs::read_to_string(&stdout_path).unwrap_or_default()
+                                    + &fs::read_to_string(&stderr_path).unwrap_or_default();
+                                if so_far.to_ascii_lowercase().contains("got code") {
+                                    signed.store(true, Ordering::SeqCst);
+                                    tell("signed-in");
+                                } else {
+                                    open(&page);
+                                }
                             } else {
                                 tell("The sign-in page could not be opened. Try the cloud again.");
                             }
@@ -1882,13 +1969,34 @@ fn send_live_save(bin: &Path, config: Option<&Path>, remote: &str, folder: &str,
     let Some(relative) = safe_relative(&relative) else {
         return Err("That save folder could not be named on the cloud.".into());
     };
-    run_copy(bin, config, &path.to_string_lossy(), &format!("{remote}:{folder}/{relative}"))?;
+    let dest = format!("{remote}:{folder}/{relative}");
+    run_copy(bin, config, &path.to_string_lossy(), &dest)?;
+    // The live folder has no note. A local copy writes one beside the saves,
+    // and a cloud send should carry the same file.
+    send_note(bin, config, &dest, &saves::backup_note(&game.title, game.publisher.as_deref(), &path))?;
     Ok(true)
 }
 
+fn send_note(bin: &Path, config: Option<&Path>, dest_dir: &str, note: &str) -> Result<(), String> {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let file = std::env::temp_dir().join(format!("orbit-note-{}-{n}.txt", std::process::id()));
+    fs::write(&file, note).map_err(|e| format!("Could not write the note: {e}"))?;
+    let sent = run_copyto(bin, config, &file.to_string_lossy(), &format!("{dest_dir}/note.txt"));
+    let _ = fs::remove_file(&file);
+    sent
+}
+
 fn run_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
+    run_rclone_copy(bin, config, "copy", from, to)
+}
+
+fn run_copyto(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
+    run_rclone_copy(bin, config, "copyto", from, to)
+}
+
+fn run_rclone_copy(bin: &Path, config: Option<&Path>, command: &str, from: &str, to: &str) -> Result<(), String> {
     let output = rclone(bin, config)
-        .args(["--quiet", "copy", "--update", "--retries", "2", "--low-level-retries", "3", "--"])
+        .args(["--quiet", command, "--update", "--retries", "2", "--low-level-retries", "3", "--"])
         .arg(from)
         .arg(to)
         .output()
