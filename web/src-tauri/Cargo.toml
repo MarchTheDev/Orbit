@@ -28,6 +28,7 @@ tauri-plugin-single-instance = "2.5.2"
 # `rt` supports spawn/spawn_blocking and `time` drives the session watcher.
 # The macros feature is not used, so it is deliberately left out.
 tokio = { version = "1.53.1", features = ["rt", "time"] }
+jpeg-encoder = "0.6"
 rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.13.5", default-features = false, features = [
     "charset",
@@ -47,6 +48,7 @@ gtk = "0.18.2"
 # A real `fcntl`, not a hand-declared variadic. The hand-declared one was
 # enough to take the process down when a controller was opened.
 libc = "0.2"
+x11rb = "0.13.2"
 webkit2gtk = { version = "2.0.2", features = ["v2_40"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -59,7 +61,9 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Ioctl",
     "Win32_System_Threading",
+    "Win32_Graphics_Gdi",
     "Win32_UI_Input_XboxController",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [profile.release]

@@ -5,6 +5,7 @@
 //! reading folders, and fetching metadata the browser is not allowed to reach.
 
 mod achievements;
+mod capture;
 mod audio;
 mod ambient;
 mod db;
@@ -659,6 +660,7 @@ fn overlay_configure(
     replay: bool,
     seconds: u32,
     quality: Option<String>,
+    fps: Option<u32>,
     ffmpeg: String,
 ) {
     overlay::configure(
@@ -666,7 +668,8 @@ fn overlay_configure(
         enabled,
         replay,
         seconds,
-        quality.as_deref().unwrap_or("normal"),
+        quality.as_deref().unwrap_or("1080p"),
+        fps.unwrap_or(30),
         &ffmpeg,
     );
 }

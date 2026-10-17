@@ -39,7 +39,9 @@ import {
   takeOpenExePaths,
   windowReady,
   overlayConfigure,
+  overlayFps,
   overlayPlaying,
+  overlayQuality,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -618,7 +620,8 @@ export default function App() {
       enabled: overlay?.enabled !== false,
       replay: overlay?.replay !== false,
       seconds: overlay?.seconds ?? 30,
-      quality: overlay?.quality ?? 'normal',
+      quality: overlayQuality(overlay?.quality),
+      fps: overlayFps(overlay?.fps),
       ffmpeg: overlay?.ffmpeg ?? '',
     });
   }, [settings]);

@@ -1,4 +1,4 @@
-//! A small panel over a game: a picture, a recording, or the last few seconds.
+//! A fullscreen panel over a game: a picture, a recording, or the last few seconds.
 //!
 //! Alt+X is a global shortcut. Start+Select is read here too, because a Windows
 //! game in front does not deliver the browser pad, and asking that pad can
@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::capture;
 use crate::process;
 
 const WINDOW: &str = "overlay";
@@ -34,12 +35,15 @@ struct Live {
     replay: bool,
     seconds: u32,
     quality: String,
+    fps: u32,
     ffmpeg: String,
     root: PathBuf,
     game: String,
     playing: bool,
     recording: Option<Child>,
     buffer: Option<Child>,
+    native_recording: Option<capture::Hold>,
+    native_buffer: Option<capture::Hold>,
     recording_name: String,
     note: String,
 }
@@ -64,12 +68,15 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     replay: true,
     seconds: 30,
     quality: String::new(),
+    fps: 30,
     ffmpeg: String::new(),
     root: PathBuf::new(),
     game: String::new(),
     playing: false,
     recording: None,
     buffer: None,
+    native_recording: None,
+    native_buffer: None,
     recording_name: String::new(),
     note: String::new(),
 });
@@ -93,6 +100,8 @@ pub struct OverlayStatus {
     pub playing: bool,
     pub ffmpeg: bool,
     pub seconds: u32,
+    pub quality: String,
+    pub fps: u32,
     pub game: String,
     pub folder: String,
     pub note: String,
@@ -133,12 +142,13 @@ pub fn apply_settings(value: &Value) {
     let quality = overlay
         .and_then(|item| item.get("quality"))
         .and_then(Value::as_str)
-        .unwrap_or("normal");
+        .unwrap_or("1080p");
+    let fps = overlay.and_then(|item| item.get("fps")).and_then(Value::as_u64).unwrap_or(30) as u32;
     let ffmpeg = overlay
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    configure(None, enabled, replay, seconds, quality, ffmpeg);
+    configure(None, enabled, replay, seconds, quality, fps, ffmpeg);
 }
 
 pub fn configure(
@@ -147,25 +157,30 @@ pub fn configure(
     replay: bool,
     seconds: u32,
     quality: &str,
+    fps: u32,
     ffmpeg: &str,
 ) {
     let seconds = clamp_seconds(seconds);
     let quality = quality_name(quality);
+    let fps = picture_fps(fps);
     let (changed, stop, restart, hide) = {
         let mut live = lock();
+        let recording = live.recording.is_some() || live.native_recording.is_some();
         let changed = live.enabled != enabled
             || live.replay != replay
             || live.seconds != seconds
             || live.quality != quality
+            || live.fps != fps
             || live.ffmpeg != ffmpeg;
         let hide = live.enabled && !enabled;
         live.enabled = enabled;
         live.replay = replay;
         live.seconds = seconds;
         live.quality = quality;
+        live.fps = fps;
         live.ffmpeg = ffmpeg.to_string();
         let stop = live.playing && (!replay || !enabled);
-        let restart = changed && live.playing && replay && enabled && live.recording.is_none();
+        let restart = changed && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
     };
     if !changed && app.is_none() {
@@ -188,7 +203,9 @@ pub fn configure(
 pub fn game_started(title: &str) {
     let restart = {
         let mut live = lock();
-        let same = live.playing && live.game == safe_name(title) && live.buffer.is_some();
+        let same = live.playing
+            && live.game == safe_name(title)
+            && (live.buffer.is_some() || live.native_buffer.is_some());
         live.game = safe_name(title);
         live.playing = true;
         !same
@@ -216,13 +233,21 @@ pub fn shutdown() {
         let mut live = lock();
         let recording = live.recording.take();
         let buffer = live.buffer.take();
-        (recording, buffer)
+        let native_recording = live.native_recording.take();
+        let native_buffer = live.native_buffer.take();
+        (recording, buffer, native_recording, native_buffer)
     };
     if let Some(child) = recording.0 {
         kill_now(child);
     }
     if let Some(child) = recording.1 {
         kill_now(child);
+    }
+    if let Some(hold) = recording.2 {
+        let _ = capture::finish(hold);
+    }
+    if let Some(hold) = recording.3 {
+        let _ = capture::finish(hold);
     }
 }
 
@@ -273,14 +298,19 @@ pub fn status() -> OverlayStatus {
     let folder = clips_dir_from(&live.root);
     OverlayStatus {
         enabled: live.enabled,
-        recording: live.recording.is_some(),
+        recording: live.recording.is_some() || live.native_recording.is_some(),
         replay: live.replay,
         playing: live.playing,
-        ffmpeg: find_ffmpeg(&live.ffmpeg).is_some(),
+        ffmpeg: capture::available() || find_ffmpeg(&live.ffmpeg).is_some(),
         seconds: live.seconds,
+        quality: if live.quality.is_empty() { "1080p".to_string() } else { live.quality.clone() },
+        fps: live.fps.max(30),
         game: live.game.clone(),
         folder: folder.to_string_lossy().to_string(),
-        note: live.note.clone(),
+        note: {
+            let capture_error = capture::last_error();
+            if !capture_error.is_empty() { capture_error } else { live.note.clone() }
+        },
     }
 }
 
@@ -311,15 +341,21 @@ pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
 
 pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
     let _held = gate();
-    let running = lock().recording.is_some();
+    let running = lock().recording.is_some() || lock().native_recording.is_some();
     if running {
         let child = lock().recording.take();
+        let native = lock().native_recording.take();
         drop(_held);
         if let Some(child) = child {
             stop_child(child);
         }
+        let native_result = native.map(capture::finish);
         if should_buffer() {
             let _ = start_buffer(false);
+        }
+        if let Some(Err(error)) = native_result {
+            remember(&Err(error.clone()));
+            return Err(error);
         }
         let name = {
             let live = lock();
@@ -337,7 +373,7 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
     let was_open = is_open();
     if was_open {
         hide_window(app);
-        thread::sleep(Duration::from_millis(120));
+        thread::sleep(Duration::from_millis(180));
     }
     stop_buffer();
     let started = spawn_recording(stamp);
@@ -351,7 +387,7 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
 
 pub fn save_replay(app: &AppHandle, seconds: u32, stamp: &str) -> Result<String, String> {
     let seconds = clamp_seconds(seconds);
-    if lock().recording.is_some() {
+    if lock().recording.is_some() || lock().native_recording.is_some() {
         let message = "A recording is running. Stop it before saving the last few seconds.".to_string();
         remember(&Err(message.clone()));
         return Err(message);
@@ -362,7 +398,7 @@ pub fn save_replay(app: &AppHandle, seconds: u32, stamp: &str) -> Result<String,
         thread::sleep(Duration::from_millis(180));
     }
     stop_buffer();
-    let result = concat_replay(seconds, stamp);
+    let result = save_kept(seconds, stamp);
     if should_buffer() {
         let _ = start_buffer(false);
     }
@@ -383,7 +419,7 @@ fn remember(result: &Result<String, String>) {
 
 fn should_buffer() -> bool {
     let live = lock();
-    live.playing && live.replay && live.enabled && live.recording.is_none()
+    live.playing && live.replay && live.enabled && live.recording.is_none() && live.native_recording.is_none()
 }
 
 fn watch(app: AppHandle) {
@@ -440,22 +476,27 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     }
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
         .title("Orbit overlay")
-        .inner_size(440.0, 560.0)
+        .inner_size(1280.0, 720.0)
         .resizable(false)
         .decorations(false)
+        .transparent(true)
+        .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
         .focused(false)
         .center()
-        .background_color(tauri::window::Color(20, 18, 42, 255))
-        .initialization_script("window.__ORBIT_OVERLAY__=true")
+        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .initialization_script(
+            "window.__ORBIT_OVERLAY__=true;var orbitOverlayStyle=document.createElement('style');orbitOverlayStyle.textContent='html,body,#root{background:transparent!important;height:100%}';(document.head||document.documentElement).appendChild(orbitOverlayStyle);",
+        )
         .build()
         .map_err(|error| {
             log::warn!("overlay window was not created: {error}");
             error
         })
         .ok()?;
+    cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
         // Do not prevent this close. Holding the panel open is what left the
@@ -469,6 +510,9 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 fn show_window(app: &AppHandle) {
     let Some(window) = ensure_window(app) else { return };
+    // Pause before the panel is visible, so the replay does not keep the menu.
+    capture::set_paused(true);
+    cover_screen(&window);
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_always_on_top(true);
@@ -476,6 +520,19 @@ fn show_window(app: &AppHandle) {
     OPEN.store(true, Ordering::SeqCst);
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
+}
+
+fn cover_screen(window: &tauri::WebviewWindow) {
+    let monitor = window
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten());
+    let Some(monitor) = monitor else { return };
+    let pos = monitor.position();
+    let size = monitor.size();
+    let _ = window.set_position(tauri::PhysicalPosition::new(pos.x, pos.y));
+    let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
 
 fn hide_window(app: &AppHandle) {
@@ -487,6 +544,7 @@ fn hide_window(app: &AppHandle) {
 
 fn mark_hidden(app: &AppHandle) {
     OPEN.store(false, Ordering::SeqCst);
+    capture::set_paused(false);
     tell(app, "overlay-visible", "false");
 }
 
@@ -499,6 +557,12 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = clips_dir()?;
     fs::create_dir_all(&dir).map_err(|error| format!("Could not create the clips folder: {error}"))?;
+    if capture::available() {
+        let path = clip_path(&dir, &lock().game, stamp, "jpg");
+        if capture::save_picture(&path, current_spec()).is_ok() {
+            return Ok(saved_name("Saved the picture as", &path));
+        }
+    }
     let path = clip_path(&dir, &lock().game, stamp, "png");
     #[cfg(windows)]
     if powershell_shot(&path).is_ok() {
@@ -587,13 +651,51 @@ fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
 }
 
 fn spawn_recording(stamp: &str) -> Result<(), String> {
+    if capture::available() {
+        match spawn_native_recording(stamp) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if find_ffmpeg(&lock().ffmpeg).is_none() {
+                    return Err(error);
+                }
+                lock().note = format!("Built-in capture could not start, so ffmpeg is being used. {error}");
+            }
+        }
+    } else if find_ffmpeg(&lock().ffmpeg).is_none() {
+        return Err(capture_missing());
+    }
+    spawn_ffmpeg_recording(stamp)
+}
+
+fn spawn_native_recording(stamp: &str) -> Result<(), String> {
+    let clips = clips_dir()?;
+    fs::create_dir_all(&clips).map_err(|error| format!("Could not create the clips folder: {error}"))?;
+    let path = clip_path(&clips, &lock().game, stamp, "avi");
+    let parts = lock().root.join("recording");
+    if parts.as_os_str().is_empty() {
+        return Err("Orbit is still starting.".to_string());
+    }
+    let _ = fs::remove_dir_all(&parts);
+    let spec = current_spec();
+    let hold = capture::start_recording(parts, path.clone(), spec)?;
+    let name = path
+        .file_name()
+        .map(|item| item.to_string_lossy().to_string())
+        .unwrap_or_else(|| "recording.avi".to_string());
+    let mut live = lock();
+    live.recording_name = name;
+    live.native_recording = Some(hold);
+    Ok(())
+}
+
+fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
     let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
     let dir = clips_dir()?;
     fs::create_dir_all(&dir).map_err(|error| format!("Could not create the clips folder: {error}"))?;
     let path = clip_path(&dir, &lock().game, stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, Some(quality_fps(&lock().quality)))?;
+    push_grab(&mut command, Some(quality_fps(lock().fps)))?;
     let quality = lock().quality.clone();
     command.arg("-an");
     push_encode(&mut command, &quality);
@@ -620,12 +722,24 @@ fn start_buffer(clear: bool) -> Result<(), String> {
     let _held = gate();
     {
         let live = lock();
-        if live.buffer.is_some() || live.recording.is_some() {
+        if live.buffer.is_some() || live.native_buffer.is_some() || live.recording.is_some() || live.native_recording.is_some() {
             return Ok(());
         }
         if !live.playing || !live.replay || !live.enabled {
             return Ok(());
         }
+    }
+    if capture::available() {
+        match start_native_buffer(clear) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if find_ffmpeg(&lock().ffmpeg).is_none() {
+                    return Err(error);
+                }
+            }
+        }
+    } else if find_ffmpeg(&lock().ffmpeg).is_none() {
+        return Err(capture_missing());
     }
     let ffmpeg = match find_ffmpeg(&lock().ffmpeg) {
         Some(path) => path,
@@ -640,12 +754,12 @@ fn start_buffer(clear: bool) -> Result<(), String> {
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     let quality = lock().quality.clone();
-    push_grab(&mut command, Some(quality_fps(&quality)))?;
+    push_grab(&mut command, Some(quality_fps(lock().fps)))?;
     command.arg("-an");
     push_encode(&mut command, &quality);
     command.args([
         "-g",
-        quality_gop(&quality),
+        quality_gop(lock().fps),
         "-f",
         "segment",
         "-segment_time",
@@ -668,11 +782,72 @@ fn start_buffer(clear: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn start_native_buffer(clear: bool) -> Result<(), String> {
+    let dir = replay_dir()?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    if clear {
+        capture::clear_chunks(&dir);
+    }
+    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
+    let hold = capture::start_buffer(dir, keep, current_spec())?;
+    lock().native_buffer = Some(hold);
+    Ok(())
+}
+
 fn stop_buffer() {
     let _held = gate();
     if let Some(child) = lock().buffer.take() {
         stop_child(child);
     }
+    if let Some(hold) = lock().native_buffer.take() {
+        let _ = capture::finish(hold);
+    }
+}
+
+fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
+    let dir = replay_dir()?;
+    if capture::has_recent(&dir, seconds) {
+        let clips = clips_dir()?;
+        fs::create_dir_all(&clips).map_err(|error| format!("Could not create the clips folder: {error}"))?;
+        let path = clip_path(&clips, &format!("{} last {seconds}s", lock().game), stamp, "avi");
+        let muxed = capture::save_recent(&dir, seconds, &path)?;
+        let name = path
+            .file_name()
+            .map(|item| item.to_string_lossy().to_string())
+            .unwrap_or_else(|| "the clip".to_string());
+        let covered = muxed.frames as u32 / muxed.fps.max(1);
+        if covered + 1 < seconds {
+            return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."));
+        }
+        return Ok(format!("Saved the last {seconds} seconds as {name}."));
+    }
+    if find_ffmpeg(&lock().ffmpeg).is_some() {
+        return concat_replay(seconds, stamp);
+    }
+    let error = capture::last_error();
+    if !error.is_empty() {
+        return Err(error);
+    }
+    Err("Nothing has been kept yet. The replay starts when a game is playing.".to_string())
+}
+
+fn current_spec() -> capture::Spec {
+    let live = lock();
+    let (max_width, max_height) = picture_size(&live.quality);
+    capture::Spec {
+        max_width,
+        max_height,
+        fps: live.fps.max(1),
+        jpeg_quality: jpeg_quality(&live.quality),
+    }
+}
+
+fn capture_missing() -> String {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return "This Wayland desktop cannot be recorded without ffmpeg. An X11 session records on its own.".to_string();
+    }
+    "Orbit could not capture the screen, and ffmpeg is not installed.".to_string()
 }
 
 fn concat_replay(seconds: u32, stamp: &str) -> Result<String, String> {
@@ -993,29 +1168,60 @@ fn repeating(watch: &mut Watch, dir: Option<&'static str>) -> Option<&'static st
 
 pub(crate) fn quality_name(raw: &str) -> String {
     match raw {
-        "lighter" | "sharper" => raw.to_string(),
-        _ => "normal".to_string(),
+        "720p" | "1080p" | "1440p" | "4k" => raw.to_string(),
+        "lighter" => "720p".to_string(),
+        "sharper" => "1440p".to_string(),
+        "2160p" | "2160" => "4k".to_string(),
+        _ => "1080p".to_string(),
     }
 }
 
-pub(crate) fn quality_fps(quality: &str) -> &'static str {
-    if quality == "lighter" { "15" } else { "30" }
+pub(crate) fn picture_size(quality: &str) -> (u32, u32) {
+    match quality_name(quality).as_str() {
+        "720p" => (1280, 720),
+        "1440p" => (2560, 1440),
+        "4k" => (3840, 2160),
+        _ => (1920, 1080),
+    }
 }
 
-pub(crate) fn quality_gop(quality: &str) -> &'static str {
-    if quality == "lighter" { "15" } else { "30" }
+pub(crate) fn picture_fps(raw: u32) -> u32 {
+    if raw >= 60 { 60 } else { 30 }
+}
+
+fn jpeg_quality(quality: &str) -> u8 {
+    match quality_name(quality).as_str() {
+        "720p" => 78,
+        "1440p" => 66,
+        "4k" => 56,
+        _ => 72,
+    }
+}
+
+pub(crate) fn quality_fps(fps: u32) -> &'static str {
+    if picture_fps(fps) >= 60 { "60" } else { "30" }
+}
+
+pub(crate) fn quality_gop(fps: u32) -> &'static str {
+    quality_fps(fps)
 }
 
 fn quality_encode(quality: &str) -> (&'static str, &'static str) {
-    match quality {
-        "lighter" => ("ultrafast", "28"),
-        "sharper" => ("veryfast", "18"),
+    match quality_name(quality).as_str() {
+        "720p" => ("ultrafast", "28"),
+        "1440p" => ("veryfast", "20"),
+        "4k" => ("veryfast", "23"),
         _ => ("ultrafast", "23"),
     }
 }
 
 fn quality_scale(quality: &str) -> Option<&'static str> {
-    if quality == "lighter" { Some("scale=1280:-2") } else { None }
+    match quality_name(quality).as_str() {
+        "720p" => Some("scale=1280:-2"),
+        "1440p" => Some("scale=2560:-2"),
+        "4k" => Some("scale=3840:-2"),
+        _ => Some("scale=1920:-2"),
+    }
 }
 
 pub(crate) fn clamp_seconds(value: u32) -> u32 {
@@ -1180,11 +1386,18 @@ mod tests {
     }
 
     #[test]
-    fn lighter_is_the_small_picture() {
-        assert_eq!(quality_name("sharper"), "sharper");
-        assert_eq!(quality_name("nope"), "normal");
-        assert_eq!(quality_fps("lighter"), "15");
-        assert_eq!(quality_scale("lighter"), Some("scale=1280:-2"));
-        assert_eq!(quality_scale("normal"), None);
+    fn quality_picks_a_resolution() {
+        assert_eq!(quality_name("lighter"), "720p");
+        assert_eq!(quality_name("normal"), "1080p");
+        assert_eq!(quality_name("sharper"), "1440p");
+        assert_eq!(quality_name("4k"), "4k");
+        assert_eq!(quality_name("nope"), "1080p");
+        assert_eq!(picture_size("4k"), (3840, 2160));
+        assert_eq!(picture_size("1080p"), (1920, 1080));
+        assert_eq!(picture_fps(60), 60);
+        assert_eq!(picture_fps(15), 30);
+        assert_eq!(quality_fps(60), "60");
+        assert_eq!(quality_scale("720p"), Some("scale=1280:-2"));
+        assert_eq!(quality_scale("1080p"), Some("scale=1920:-2"));
     }
 }

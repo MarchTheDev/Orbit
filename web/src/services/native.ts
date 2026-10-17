@@ -1200,9 +1200,22 @@ export interface OverlayStatus {
   playing: boolean;
   ffmpeg: boolean;
   seconds: number;
+  quality?: string;
+  fps?: number;
   game: string;
   folder: string;
   note: string;
+}
+
+export function overlayQuality(value?: string): '720p' | '1080p' | '1440p' | '4k' {
+  if (value === '720p' || value === '1080p' || value === '1440p' || value === '4k') return value;
+  if (value === 'lighter') return '720p';
+  if (value === 'sharper') return '1440p';
+  return '1080p';
+}
+
+export function overlayFps(value?: number): 30 | 60 {
+  return value === 60 ? 60 : 30;
 }
 
 export function overlayConfigure(options: {
@@ -1210,6 +1223,7 @@ export function overlayConfigure(options: {
   replay: boolean;
   seconds: number;
   quality?: string;
+  fps?: number;
   ffmpeg: string;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);

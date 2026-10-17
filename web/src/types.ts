@@ -530,11 +530,16 @@ export interface Settings {
     enabled?: boolean;
     replay?: boolean;
     seconds?: number;
-    /** lighter, normal, or sharper. Missing means normal. */
-    quality?: 'lighter' | 'normal' | 'sharper';
+    /**
+     * 720p, 1080p, 1440p, or 4k. Older lighter, normal, and sharper values
+     * still read as 720p, 1080p, and 1440p. Missing means 1080p.
+     */
+    quality?: '720p' | '1080p' | '1440p' | '4k' | 'lighter' | 'normal' | 'sharper';
+    /** 30 or 60. Missing means 30. */
+    fps?: number;
     /** A short click when a picture is saved. On unless turned off. */
     shutter?: boolean;
-    /** Empty means ffmpeg on the system path. */
+    /** Empty means the built-in recorder. A path is only a fallback. */
     ffmpeg?: string;
   };
   /**

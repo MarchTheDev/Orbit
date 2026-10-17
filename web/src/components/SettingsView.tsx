@@ -40,6 +40,8 @@ import {
   listDrives,
   rememberMusic,
   overlayFolder,
+  overlayFps,
+  overlayQuality,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
@@ -277,6 +279,7 @@ const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
   { id: 'orbit-playing', label: 'Playing' },
+  { id: 'orbit-overlay', label: 'Overlay' },
   { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
@@ -306,7 +309,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Overlay', section: 'orbit-overlay', keywords: 'overlay alt x start select screenshot recording replay hotkey' },
   { label: 'Replay length', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 seconds custom clip' },
   { label: 'ffmpeg', section: 'orbit-overlay', keywords: 'overlay ffmpeg record screenshot path clips' },
-  { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay lighter sharper quality recording replay' },
+  { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
   { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter click sound picture saved' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
@@ -349,7 +352,8 @@ function OverlaySettings({
   const enabled = overlay?.enabled !== false;
   const replay = overlay?.replay !== false;
   const seconds = clampOverlaySeconds(overlay?.seconds);
-  const quality = overlay?.quality === 'lighter' || overlay?.quality === 'sharper' ? overlay.quality : 'normal';
+  const quality = overlayQuality(overlay?.quality);
+  const fps = overlayFps(overlay?.fps);
   const [custom, setCustom] = useState(String(seconds));
   const [ffmpegError, setFfmpegError] = useState<string | null>(null);
   const [folderNote, setFolderNote] = useState<string | null>(null);
@@ -363,6 +367,7 @@ function OverlaySettings({
         replay,
         seconds,
         quality,
+        fps,
         shutter: overlay?.shutter !== false,
         ffmpeg: overlay?.ffmpeg ?? '',
         ...patch,
@@ -391,7 +396,7 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="This is what the 30, 45, and 60 second buttons save. It needs ffmpeg, and it uses a little of the PC while the game is running."
+        hint="This is what the 30, 45, and 60 second buttons save. It uses a little of the PC while the game is running. ffmpeg is not required."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay length</p>
@@ -436,25 +441,42 @@ function OverlaySettings({
         <p className="text-sm font-medium">Quality</p>
         <div className="flex flex-wrap gap-2">
           {([
-            ['lighter', 'Lighter'],
-            ['normal', 'Normal'],
-            ['sharper', 'Sharper'],
-          ] as const).map(([value, label]) => (
+            ['720p', '720p', '1280 × 720'],
+            ['1080p', '1080p', '1920 × 1080'],
+            ['1440p', '1440p', '2560 × 1440'],
+            ['4k', '4K', '3840 × 2160'],
+          ] as const).map(([value, label, detail]) => (
             <button
               key={value}
               type="button"
               onClick={() => setOverlay({ quality: value })}
               className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs',
+                'rounded-lg border px-3 py-1.5 text-left',
                 quality === value ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
               )}
             >
-              {label}
+              <span className="block text-xs font-medium">{label}</span>
+              <span className="block text-[10px] text-muted">{detail}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {([30, 60] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setOverlay({ fps: value })}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-xs',
+                fps === value ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
+              )}
+            >
+              {value} fps
             </button>
           ))}
         </div>
         <p className="text-xs leading-relaxed text-muted">
-          Lighter uses less of the PC while recording. Sharper keeps more of the picture. A recording that has already started keeps the quality it began with.
+          Orbit records up to this size. A smaller screen is not stretched to 4K. 4K and 60 use more of the PC. A recording that has already started keeps the size it began with.
         </p>
       </div>
       <Checkbox
@@ -479,7 +501,7 @@ function OverlaySettings({
           </div>
           {ffmpegError && <p className="text-xs text-muted">{ffmpegError}</p>}
           <p className="text-xs leading-relaxed text-muted">
-            Recording and the replay need it. A screenshot does not. Orbit does not download it.
+            Optional. Only used if the built-in recorder cannot capture this desktop. Orbit does not download it.
           </p>
         </div>
       )}
@@ -1024,7 +1046,7 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A small panel over the game. Alt+X opens it, or Start and Select together. The picture is the screen. Sound is not included yet."
+        lead="A fullscreen panel over the game, like a capture overlay. Alt+X opens it, or Start and Select together. Recording is built in, so ffmpeg is not required. Sound is not included yet."
       >
         <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>

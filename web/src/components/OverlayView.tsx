@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Camera, Circle, FolderOpen, Square, Video, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Camera, Circle, FolderOpen, Square, X } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { applyFont, applyTheme } from '../data/themes';
 import { loadSettings } from '../services/storage';
@@ -91,7 +92,8 @@ export function OverlayView() {
   };
 
   useEffect(() => {
-    document.body.style.background = 'var(--c-panel)';
+    document.documentElement.style.background = 'transparent';
+    document.body.style.background = 'transparent';
     void loadSettings().then((settings) => {
       applyTheme(settings.theme);
       applyFont(settings.fontFamily ?? 'system');
@@ -185,105 +187,145 @@ export function OverlayView() {
 
   const seconds = status?.seconds ?? 30;
   const custom = seconds !== 30 && seconds !== 45 && seconds !== 60;
+  const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
+  const fps = status?.fps === 60 ? 60 : 30;
   const standing = !status
     ? 'Opening…'
     : status.recording
-      ? 'Recording. Open this again and press Stop.'
-      : !status.ffmpeg
-        ? 'A screenshot still works. Recording needs ffmpeg.'
-        : status.playing && status.replay
-          ? `Keeping the last ${seconds} seconds${status.game ? ` of ${status.game}` : ''}.`
-          : 'No game is playing. A screenshot or a recording still works.';
-
-  const row = 'w-full rounded-xl border border-line bg-panel2 px-3 py-2.5 text-left text-sm transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40';
+      ? 'Recording. Press the red button to stop.'
+      : status.playing && status.replay
+        ? `Keeping the last ${seconds} seconds${status.game ? ` of ${status.game}` : ''}.`
+        : 'Screenshot, record, or save the last few seconds.';
+  const shown = note || status?.note || standing;
 
   return (
-    <div className="flex h-full flex-col bg-panel text-fg">
-      <header data-tauri-drag-region className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <div data-tauri-drag-region className="min-w-0">
-          <p data-tauri-drag-region className="text-sm font-semibold">Overlay</p>
-          <p data-tauri-drag-region className="truncate text-[11px] text-muted">{status?.game || 'No game playing'}</p>
-        </div>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={() => void overlayHide()}
-          className="grid size-8 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
-        >
-          <X className="size-4" />
-        </button>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
-        <p className={cn('text-xs leading-relaxed', failed || note ? 'text-fg' : 'text-muted')}>{note || standing}</p>
-        <div data-overlay-section="clips" className="flex flex-col gap-2">
-        <button
-          type="button"
-          data-overlay
-          disabled={busy}
-          onClick={() => void run(() => overlayShot(stamp()), true)}
-          className="btn-accent flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm disabled:opacity-40"
-        >
-          <Camera className="size-4" />
-          Screenshot
-        </button>
-        <button
-          type="button"
-          data-overlay
-          disabled={busy || status?.ffmpeg === false}
-          onClick={() => void run(() => overlayRecord(stamp()))}
-          className={cn(row, 'flex items-center gap-2')}
-        >
-          {status?.recording ? <Square className="size-4 text-accent2" /> : <Video className="size-4 text-accent" />}
-          {status?.recording ? 'Stop recording' : 'Start recording'}
-          {status?.recording && <Circle className="ml-auto size-2.5 fill-accent2 text-accent2" />}
-        </button>
-        <p className="pt-1 text-[11px] uppercase tracking-widest text-muted">Save the last</p>
-        <div className="grid grid-cols-3 gap-2">
-          {[30, 45, 60].map((length) => (
+    <div className="relative h-full text-white">
+      <div className="absolute inset-0 bg-black/55" onClick={() => void overlayHide()} />
+      <div className="pointer-events-none relative flex h-full items-center justify-center p-6">
+        <div className="pointer-events-auto flex max-h-full w-full max-w-3xl flex-col items-center gap-4 overflow-y-auto">
+          <div data-overlay-section="clips" className="flex w-full flex-col items-center gap-4">
+            <div className="w-full rounded-3xl border border-white/10 bg-[#141416]/92 px-6 py-5 shadow-2xl backdrop-blur-md">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <p className="truncate text-xs text-white/70">{status?.game || 'No game playing'}</p>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => void overlayHide()}
+                  className="grid size-8 shrink-0 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="flex items-start justify-center gap-6 sm:gap-10">
+                <CaptureButton
+                  label="Screenshot"
+                  disabled={busy}
+                  onClick={() => void run(() => overlayShot(stamp()), true)}
+                >
+                  <Camera className="size-7" />
+                </CaptureButton>
+                <CaptureButton
+                  label={status?.recording ? 'Stop' : 'Record'}
+                  hot
+                  disabled={busy}
+                  onClick={() => void run(() => overlayRecord(stamp()))}
+                >
+                  {status?.recording ? <Square className="size-6 fill-white" /> : <Circle className="size-6 fill-white" />}
+                </CaptureButton>
+                <CaptureButton
+                  label="Last"
+                  disabled={busy}
+                  onClick={() => void run(() => overlayReplay(seconds, stamp()))}
+                >
+                  <span className="text-2xl font-semibold tabular-nums leading-none">{seconds}</span>
+                </CaptureButton>
+              </div>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                {[30, 45, 60].map((length) => (
+                  <button
+                    key={length}
+                    type="button"
+                    data-overlay
+                    disabled={busy}
+                    onClick={() => void run(() => overlayReplay(length, stamp()))}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-[11px] tabular-nums',
+                      seconds === length ? 'border-white bg-white text-black' : 'border-white/25 text-white/80 hover:border-white/60',
+                    )}
+                  >
+                    {length}s
+                  </button>
+                ))}
+                {custom && (
+                  <button
+                    type="button"
+                    data-overlay
+                    disabled={busy}
+                    onClick={() => void run(() => overlayReplay(seconds, stamp()))}
+                    className="rounded-full border border-white bg-white px-3 py-1 text-[11px] tabular-nums text-black"
+                  >
+                    {seconds}s
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className={cn('max-w-md text-center text-xs leading-relaxed', failed ? 'text-red-200' : 'text-white/80')}>{shown}</p>
+            <p className="text-[11px] tabular-nums text-white/50">{quality} · {fps} fps</p>
             <button
-              key={length}
               type="button"
               data-overlay
-              disabled={busy || status?.ffmpeg === false}
-              onClick={() => void run(() => overlayReplay(length, stamp()))}
-              className={row + ' text-center'}
+              disabled={busy}
+              onClick={() => void run(async () => {
+                await overlayFolder();
+                return 'Opened the clips folder.';
+              })}
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-[11px] text-white/75 hover:border-white/40"
             >
-              {length}s
+              <FolderOpen className="size-3.5" />
+              Clips folder
             </button>
-          ))}
-        </div>
-        {custom && (
-          <button
-            type="button"
-            data-overlay
-            disabled={busy || status?.ffmpeg === false}
-            onClick={() => void run(() => overlayReplay(seconds, stamp()))}
-            className={row}
-          >
-            Save the last {seconds} seconds
-          </button>
-        )}
-        <button
-          type="button"
-          data-overlay
-          disabled={busy}
-          onClick={() => void run(async () => {
-            await overlayFolder();
-            return 'Opened the clips folder.';
-          })}
-          className={cn(row, 'flex items-center gap-2')}
-        >
-          <FolderOpen className="size-4 text-muted" />
-          Open clips folder
-        </button>
-        {status?.folder && <p className="break-all font-mono text-[10px] leading-relaxed text-muted">{status.folder}</p>}
-        </div>
-        <div data-overlay-section="apps" className="mt-2 flex flex-col gap-2">
-          <p className="text-[11px] uppercase tracking-widest text-muted">Apps</p>
-          <p className="text-[11px] leading-relaxed text-muted">Left and right change the one that is highlighted. LB and RB jump between the clips and these.</p>
-          <AppMixer pad />
+          </div>
+          <div data-overlay-section="apps" className="w-full max-w-md rounded-3xl border border-white/10 bg-[#141416]/92 p-4 text-fg shadow-2xl backdrop-blur-md">
+            <p className="text-[11px] uppercase tracking-widest text-white/50">Apps</p>
+            <p className="mb-2 text-[11px] leading-relaxed text-white/45">Left and right change the one that is highlighted. LB and RB jump between the clips and these.</p>
+            <AppMixer pad />
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function CaptureButton({
+  label,
+  hot = false,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  hot?: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-overlay
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-24 flex-col items-center gap-2 rounded-full focus:outline-none disabled:opacity-40"
+    >
+      <span
+        className={cn(
+          'grid size-[4.75rem] place-items-center rounded-full border-2 shadow-lg',
+          hot ? 'border-red-500 bg-red-600 text-white' : 'border-white/80 bg-black/35 text-white',
+        )}
+      >
+        {children}
+      </span>
+      <span className="text-[11px] font-medium tracking-wide text-white">{label}</span>
+    </button>
   );
 }
