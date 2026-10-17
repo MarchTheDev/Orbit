@@ -266,7 +266,6 @@ fn signal_ready(ready: &Mutex<Option<String>>, message: &str) {
 }
 
 fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mutex<Option<String>>>) -> Result<(), String> {
-    let mut size = None;
     let first = match grab(spec) {
         Ok(frame) => frame,
         Err(error) => {
@@ -669,11 +668,16 @@ enum Writer {
 
 impl Writer {
     fn push_bgra(&mut self, bgra: &[u8]) -> Result<(), String> {
-        match self {
-            #[cfg(windows)]
-            Writer::Windows(writer) => writer.push_bgra(bgra),
-            #[cfg(not(windows))]
-            Writer::Missing => Err("This desktop records with ffmpeg.".to_string()),
+        #[cfg(windows)]
+        {
+            match self {
+                Writer::Windows(writer) => writer.push_bgra(bgra),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (self, bgra);
+            Err("This desktop records with ffmpeg.".to_string())
         }
     }
 
