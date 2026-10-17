@@ -1300,6 +1300,66 @@ export function audioSet(id: string, volume: number, muted: boolean): Promise<vo
   return call('audio_set', { id, volume, muted }, () => undefined);
 }
 
+export interface AudioDevice {
+  id: string;
+  name: string;
+  kind: 'output' | 'input' | string;
+  current: boolean;
+}
+
+export function audioDevices(): Promise<AudioDevice[]> {
+  return call('audio_devices', {}, () => []);
+}
+
+export function audioUseDevice(id: string, kind: string): Promise<void> {
+  return call('audio_use_device', { id, kind }, async () => {
+    throw new Error('Switching audio devices needs the desktop app.');
+  });
+}
+
+/** Set an app's volume by its name, when the mixer has not handed over an id yet. */
+export function audioSetNamed(name: string, volume: number, muted: boolean): Promise<void> {
+  return call('audio_set_named', { name, volume, muted }, async () => {
+    throw new Error('That app is not playing sound.');
+  });
+}
+
+export interface MachineStats {
+  cpu: number | null;
+  ram: number | null;
+  ramUsed: number;
+  ramTotal: number;
+  gpu: number | null;
+  vram: number | null;
+  vramUsed: number;
+  vramTotal: number;
+  fps: number | null;
+}
+
+export function machineStats(): Promise<MachineStats> {
+  return call('machine_stats', {}, () => ({
+    cpu: null,
+    ram: null,
+    ramUsed: 0,
+    ramTotal: 0,
+    gpu: null,
+    vram: null,
+    vramUsed: 0,
+    vramTotal: 0,
+    fps: null,
+  }));
+}
+
+export function appendPlaythroughNotes(notes: string): Promise<void> {
+  return call('append_playthrough_notes', { notes }, async () => {
+    throw new Error('Saving a note needs the desktop app.');
+  });
+}
+
+export function overlayOpenSettings(): Promise<void> {
+  return call('overlay_open_settings', {}, () => undefined);
+}
+
 export function overlayPlaying(title: string): Promise<void> {
   return call('overlay_playing', { title }, () => undefined);
 }

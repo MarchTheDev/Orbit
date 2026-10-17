@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Volume2, VolumeX } from 'lucide-react';
-import { audioApps, audioSet, type AppAudio } from '../services/native';
+import { audioApps, audioDevices, audioSet, audioUseDevice, type AppAudio, type AudioDevice } from '../services/native';
 
 type Pending = { volume: number; muted: boolean };
 
@@ -110,6 +110,7 @@ export function AppMixer({ pad = false, game = '', compact = false }: { pad?: bo
 
   return (
     <div className="space-y-2">
+      <DevicePick pad={pad} />
       {apps.length === 0 && <p className="text-xs text-muted">No apps are playing sound.</p>}
       {arranged.missing && (
         <p className="rounded-xl border border-line bg-panel2 px-3 py-2 text-sm">
@@ -179,5 +180,76 @@ export function AppMixer({ pad = false, game = '', compact = false }: { pad?: bo
       )}
       {error && <p className="text-xs text-muted">{error}</p>}
     </div>
+  );
+}
+
+function DevicePick({ pad }: { pad: boolean }) {
+  const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [error, setError] = useState('');
+
+  const refresh = () => {
+    void audioDevices()
+      .then((next) => {
+        setDevices(next);
+        setError('');
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+  };
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 4000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const choose = (kind: string, id: string) => {
+    setDevices((list) => list.map((item) => (item.kind === kind ? { ...item, current: item.id === id } : item)));
+    void audioUseDevice(id, kind).then(refresh).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      refresh();
+    });
+  };
+
+  const outputs = devices.filter((item) => item.kind === 'output');
+  const inputs = devices.filter((item) => item.kind === 'input');
+  if (outputs.length === 0 && inputs.length === 0 && !error) return null;
+
+  return (
+    <div className="space-y-2">
+      <DeviceSelect label="Output" devices={outputs} pad={pad} onChoose={(id) => choose('output', id)} />
+      <DeviceSelect label="Microphone" devices={inputs} pad={pad} onChoose={(id) => choose('input', id)} />
+      {error && <p className="text-[11px] text-muted">{error}</p>}
+    </div>
+  );
+}
+
+function DeviceSelect({
+  label,
+  devices,
+  pad,
+  onChoose,
+}: {
+  label: string;
+  devices: AudioDevice[];
+  pad: boolean;
+  onChoose: (id: string) => void;
+}) {
+  if (devices.length === 0) return null;
+  const current = devices.find((item) => item.current)?.id ?? devices[0].id;
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] text-muted">{label}</span>
+      <select
+        value={current}
+        aria-label={label}
+        data-overlay={pad ? '' : undefined}
+        onChange={(event) => onChoose(event.target.value)}
+        className="w-full rounded-xl border border-line bg-panel2 px-2 py-1.5 text-xs text-fg"
+      >
+        {devices.map((item) => (
+          <option key={item.id} value={item.id}>{item.name}</option>
+        ))}
+      </select>
+    </label>
   );
 }

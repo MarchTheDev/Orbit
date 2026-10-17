@@ -8,6 +8,7 @@ mod achievements;
 mod capture;
 mod audio;
 mod media;
+mod stats;
 mod ambient;
 mod db;
 #[cfg(windows)]
@@ -717,6 +718,56 @@ fn audio_apps() -> Result<Vec<audio::AppAudio>, String> {
 #[tauri::command]
 fn audio_set(id: String, volume: u8, muted: bool) -> Result<(), String> {
     audio::set(&id, volume, muted)
+}
+
+#[tauri::command]
+fn audio_devices() -> Result<Vec<audio::AudioDevice>, String> {
+    audio::devices()
+}
+
+#[tauri::command]
+fn audio_use_device(id: String, kind: String) -> Result<(), String> {
+    audio::use_device(&id, &kind)
+}
+
+#[tauri::command]
+fn audio_set_named(name: String, volume: u8, muted: bool) -> Result<(), String> {
+    audio::set_named(&name, volume, muted)
+}
+
+#[tauri::command]
+fn machine_stats() -> stats::MachineStats {
+    stats::sample()
+}
+
+/// Add the overlay's notes under the journal notes for the game that is running.
+///
+/// The words are not kept on the overlay. Closing the game throws the draft
+/// away. Saving puts them under what was already written, with a blank line
+/// between, so an earlier note is not replaced.
+#[tauri::command]
+fn append_playthrough_notes(app: tauri::AppHandle, orbit: State<'_, Orbit>, notes: String) -> Result<(), String> {
+    let notes = notes.trim().to_string();
+    if notes.is_empty() {
+        return Ok(());
+    }
+    let active = orbit.runner.active()?.ok_or_else(|| "Start the game before saving a note.".to_string())?;
+    let existing = orbit.db.game(&active.game_id)?.map(|game| game.notes).unwrap_or_default();
+    let joined = db::Db::join_notes(&existing, &notes);
+    orbit.db.write_playthrough_notes(&active.game_id, None, &joined)?;
+    let _ = app.emit(
+        "playthrough-notes",
+        serde_json::json!({ "gameId": active.game_id, "notes": joined }),
+    );
+    Ok(())
+}
+
+/// The overlay cannot write settings. It asks the main window to open them.
+#[tauri::command]
+fn overlay_open_settings(app: tauri::AppHandle) {
+    overlay::hide(&app);
+    reveal_window(&app);
+    let _ = app.emit("overlay-open-settings", ());
 }
 
 #[tauri::command]
@@ -2415,6 +2466,12 @@ pub fn run() {
             media_control,
             audio_apps,
             audio_set,
+            audio_devices,
+            audio_use_device,
+            audio_set_named,
+            machine_stats,
+            append_playthrough_notes,
+            overlay_open_settings,
             overlay_playing,
             overlay_status,
             overlay_shot,

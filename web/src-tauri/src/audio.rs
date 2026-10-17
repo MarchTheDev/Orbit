@@ -33,6 +33,73 @@ pub fn list() -> Result<Vec<AppAudio>, String> {
     }
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+    /// `output` or `input`.
+    pub kind: String,
+    pub current: bool,
+}
+
+pub fn devices() -> Result<Vec<AudioDevice>, String> {
+    #[cfg(windows)]
+    {
+        return unsafe { windows_devices() };
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return linux_devices();
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        Err("Audio devices are not available on this system.".to_string())
+    }
+}
+
+pub fn use_device(id: &str, kind: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("Choose a device.".to_string());
+    }
+    #[cfg(windows)]
+    {
+        return unsafe { windows_use_device(id) };
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return linux_use_device(id, kind);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (id, kind);
+        Err("Audio devices are not available on this system.".to_string())
+    }
+}
+
+/// Set the volume of the app whose name matches, so the player does not have to open the mixer.
+pub fn set_named(name: &str, volume: u8, muted: bool) -> Result<(), String> {
+    let needle = fold(name);
+    if needle.len() < 3 {
+        return Err("That app is not playing sound.".to_string());
+    }
+    let hit = list()?.into_iter().find(|app| {
+        if app.device {
+            return false;
+        }
+        let item = fold(&app.name);
+        item.len() >= 3 && (item.contains(&needle) || needle.contains(&item))
+    });
+    let Some(hit) = hit else {
+        return Err("That app is not playing sound.".to_string());
+    };
+    set(&hit.id, volume, muted)
+}
+
+fn fold(value: &str) -> String {
+    value.chars().filter(|ch| ch.is_ascii_alphanumeric()).flat_map(|ch| ch.to_lowercase()).collect()
+}
+
 pub fn set(id: &str, volume: u8, muted: bool) -> Result<(), String> {
     let volume = volume.min(100);
     #[cfg(windows)]
@@ -520,6 +587,253 @@ fn com_err(error: windows::core::Error) -> String {
     }
 }
 
+pub(crate) fn parse_pactl_blocks(text: &str, header: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in text.split(header).skip(1) {
+        let mut name = String::new();
+        let mut description = String::new();
+        for line in block.lines() {
+            let line = line.trim();
+            if let Some(value) = line.strip_prefix("Name:") {
+                name = value.trim().to_string();
+            } else if let Some(value) = line.strip_prefix("Description:") {
+                description = value.trim().to_string();
+            }
+        }
+        if name.is_empty() || name.ends_with(".monitor") {
+            continue;
+        }
+        let label = if description.is_empty() { name.clone() } else { description };
+        out.push((name, label));
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn linux_devices() -> Result<Vec<AudioDevice>, String> {
+    let mut devices = Vec::new();
+    if let Some(list) = pactl_kind("sinks", "output") {
+        devices.extend(list);
+    }
+    if let Some(list) = pactl_kind("sources", "input") {
+        devices.extend(list);
+    }
+    if devices.is_empty() {
+        devices.extend(wpctl_devices());
+    }
+    if devices.is_empty() {
+        return Err("No audio devices were found.".to_string());
+    }
+    Ok(devices)
+}
+
+#[cfg(target_os = "linux")]
+fn pactl_kind(which: &str, kind: &str) -> Option<Vec<AudioDevice>> {
+    let output = crate::process::command("pactl").args(["list", which]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let header = if which == "sources" { "Source #" } else { "Sink #" };
+    let default_name = crate::process::command("pactl")
+        .args([if which == "sources" { "get-default-source" } else { "get-default-sink" }])
+        .output()
+        .ok()
+        .filter(|item| item.status.success())
+        .map(|item| String::from_utf8_lossy(&item.stdout).trim().to_string())
+        .unwrap_or_default();
+    let devices = parse_pactl_blocks(&text, header)
+        .into_iter()
+        .map(|(id, name)| AudioDevice {
+            current: id == default_name,
+            id,
+            name,
+            kind: kind.to_string(),
+        })
+        .collect::<Vec<_>>();
+    if devices.is_empty() { None } else { Some(devices) }
+}
+
+#[cfg(target_os = "linux")]
+fn wpctl_devices() -> Vec<AudioDevice> {
+    let Ok(output) = crate::process::command("wpctl").arg("status").output() else { return Vec::new() };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_wpctl_devices(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub(crate) fn parse_wpctl_devices(text: &str) -> Vec<AudioDevice> {
+    let mut out = Vec::new();
+    let mut kind = "";
+    for line in text.lines() {
+        let trimmed = line.trim().trim_start_matches(['├', '└', '─', '│', ' ']);
+        if trimmed.starts_with("Sinks:") {
+            kind = "output";
+            continue;
+        }
+        if trimmed.starts_with("Sources:") {
+            kind = "input";
+            continue;
+        }
+        if trimmed.ends_with(':') && !trimmed.contains('.') {
+            kind = "";
+            continue;
+        }
+        if kind.is_empty() {
+            continue;
+        }
+        let current = trimmed.starts_with('*');
+        let trimmed = trimmed.trim_start_matches(['*', ' ']);
+        let mut chars = trimmed.chars().peekable();
+        if !chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+        let id: String = chars.by_ref().take_while(|ch| ch.is_ascii_digit()).collect();
+        let name = chars.collect::<String>().trim().trim_start_matches('.').trim().to_string();
+        if id.is_empty() || name.is_empty() || name.ends_with(".monitor") {
+            continue;
+        }
+        out.push(AudioDevice { id, name, kind: kind.to_string(), current });
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn linux_use_device(id: &str, kind: &str) -> Result<(), String> {
+    if !id.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '@' | ':' | '/' | '+')) {
+        return Err("That device is not in the list any more.".to_string());
+    }
+    let verb = if kind == "input" { "set-default-source" } else { "set-default-sink" };
+    let pactl = crate::process::command("pactl").args([verb, id]).status();
+    if pactl.map(|status| status.success()).unwrap_or(false) {
+        return Ok(());
+    }
+    let wp = crate::process::command("wpctl").args(["set-default", id]).status();
+    if wp.map(|status| status.success()).unwrap_or(false) {
+        Ok(())
+    } else {
+        Err("Could not switch to that device.".to_string())
+    }
+}
+
+#[cfg(windows)]
+unsafe fn windows_devices() -> Result<Vec<AudioDevice>, String> {
+    use windows::Win32::Media::Audio::{
+        eCapture, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
+    };
+    use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+
+    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let enumerator: IMMDeviceEnumerator =
+        windows::Win32::System::Com::CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(com_err)?;
+    let mut devices = Vec::new();
+    devices.extend(endpoint_list(&enumerator, eRender, "output")?);
+    devices.extend(endpoint_list(&enumerator, eCapture, "input")?);
+    if devices.is_empty() {
+        return Err("No audio devices were found.".to_string());
+    }
+    Ok(devices)
+}
+
+#[cfg(windows)]
+unsafe fn endpoint_list(
+    enumerator: &windows::Win32::Media::Audio::IMMDeviceEnumerator,
+    flow: windows::Win32::Media::Audio::EDataFlow,
+    kind: &str,
+) -> Result<Vec<AudioDevice>, String> {
+    use windows::Win32::Media::Audio::{eConsole, DEVICE_STATE_ACTIVE};
+    use windows::core::Interface;
+
+    let current = enumerator
+        .GetDefaultAudioEndpoint(flow, eConsole)
+        .ok()
+        .and_then(|device| device.GetId().ok())
+        .map(pwstr)
+        .unwrap_or_default();
+    let collection = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE).map_err(com_err)?;
+    let count = collection.GetCount().map_err(com_err)?;
+    let mut devices = Vec::new();
+    for index in 0..count {
+        let Ok(device) = collection.Item(index) else { continue };
+        let Ok(id_ptr) = device.GetId() else { continue };
+        let id = pwstr(id_ptr);
+        if id.is_empty() {
+            continue;
+        }
+        let name = friendly_name(&device).unwrap_or_else(|| id.clone());
+        devices.push(AudioDevice {
+            current: id == current,
+            id,
+            name,
+            kind: kind.to_string(),
+        });
+    }
+    Ok(devices)
+}
+
+#[cfg(windows)]
+unsafe fn friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> Option<String> {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+    use windows::Win32::System::Com::STGM_READ;
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::core::GUID;
+
+    let store: IPropertyStore = device.OpenPropertyStore(STGM(0)).ok()?;
+    let key = PROPERTYKEY {
+        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+        pid: 14,
+    };
+    let value = store.GetValue(&key).ok()?;
+    let text = PropVariantToStringAlloc(&value).ok()?;
+    let name = pwstr(text);
+    if name.trim().is_empty() { None } else { Some(name) }
+}
+
+#[cfg(windows)]
+unsafe fn windows_use_device(id: &str) -> Result<(), String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::core::{Interface, IUnknown, PCWSTR, GUID, HRESULT};
+
+    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+    let name = PCWSTR(wide.as_ptr());
+    let client = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+    let policy: IUnknown = CoCreateInstance(&client, None, CLSCTX_ALL).map_err(|_| "Could not switch to that device.".to_string())?;
+    let iid = GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
+    let mut raw = std::ptr::null_mut();
+    let vtable = *(policy.as_raw() as *const *const IUnknownVtbl);
+    let hr = ((*vtable).query)(policy.as_raw(), &iid, &mut raw);
+    if hr.is_err() || raw.is_null() {
+        return Err("Could not switch to that device.".to_string());
+    }
+    let slots = *(raw as *const *const usize);
+    let set_default: unsafe extern "system" fn(*mut core::ffi::c_void, PCWSTR, i32) -> HRESULT =
+        std::mem::transmute(*slots.add(13));
+    let mut failed = false;
+    for role in [0, 1, 2] {
+        if (set_default)(raw, name, role).is_err() {
+            failed = true;
+        }
+    }
+    let release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32 = std::mem::transmute(*slots.add(2));
+    release(raw);
+    if failed {
+        Err("Could not switch to that device.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct IUnknownVtbl {
+    query: unsafe extern "system" fn(*mut core::ffi::c_void, *const windows::core::GUID, *mut *mut core::ffi::c_void) -> windows::core::HRESULT,
+    add_ref: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,5 +880,12 @@ Settings
     fn a_volume_line_without_a_percent_is_left_alone() {
         assert_eq!(parse_sink_volume("Volume: front-left: 0"), None);
         assert_eq!(parse_sink_volume("Volume: front-left: 1 /  7%"), Some(7));
+    }
+
+    #[test]
+    fn pactl_names_the_speakers_and_skips_monitors() {
+        let text = "Sink #1\n\tName: alsa_output.speakers\n\tDescription: Speakers\nSource #2\n\tName: alsa_input.mic\n\tDescription: USB mic\nSource #3\n\tName: alsa_output.speakers.monitor\n\tDescription: Monitor\n";
+        assert_eq!(parse_pactl_blocks(text, "Sink #"), vec![("alsa_output.speakers".to_string(), "Speakers".to_string())]);
+        assert_eq!(parse_pactl_blocks(text, "Source #"), vec![("alsa_input.mic".to_string(), "USB mic".to_string())]);
     }
 }

@@ -27,7 +27,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { FontChoice, LauncherId, Page, Settings } from '../types';
+import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, type Page, type Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
@@ -313,6 +313,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Replay lengths', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 90 120 seconds custom clip lengths' },
   { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
   { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter chime sound picture saved volume' },
+  { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -371,6 +372,7 @@ function OverlaySettings({
         shutterVolume,
         ffmpeg: overlay?.ffmpeg ?? '',
         layout: overlay?.layout,
+        hidden: overlay?.hidden ?? [],
         ...patch,
       },
     });
@@ -534,6 +536,34 @@ function OverlaySettings({
           className="w-full max-w-xs accent-[var(--c-accent)] disabled:opacity-40"
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
+      </div>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">Overlay boxes</p>
+        <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>
+        <div className="flex flex-wrap gap-2">
+          {OVERLAY_BOXES.map((box) => {
+            const shown = !(overlay?.hidden ?? []).includes(box.id);
+            return (
+              <button
+                key={box.id}
+                type="button"
+                aria-pressed={shown}
+                onClick={() => {
+                  const hidden = new Set(overlay?.hidden ?? []);
+                  if (shown) hidden.add(box.id);
+                  else hidden.delete(box.id);
+                  setOverlay({ hidden: [...hidden] as OverlayBoxId[] });
+                }}
+                className={cn(
+                  'rounded-lg border px-3 py-1.5 text-xs',
+                  shown ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
+                )}
+              >
+                {shown ? box.label : `${box.label} hidden`}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {captureFolders.map((folder) => (
         <div key={folder.kind} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">

@@ -327,6 +327,20 @@ export interface Stats {
   lastPlay: number | null;
 }
 
+/** Boxes the overlay can show. Hidden ones stay out until Settings turns them back on. */
+export const OVERLAY_BOXES = [
+  { id: 'fps', label: 'FPS' },
+  { id: 'performance', label: 'Performance' },
+  { id: 'clock', label: 'Clock' },
+  { id: 'notes', label: 'Notes' },
+  { id: 'player', label: 'Playing' },
+  { id: 'audio', label: 'Audio' },
+  { id: 'gallery', label: 'Gallery' },
+  { id: 'capture', label: 'Capture' },
+] as const;
+
+export type OverlayBoxId = (typeof OVERLAY_BOXES)[number]['id'];
+
 export interface Settings {
   theme: string;
   /** The system font stack used throughout the interface. */
@@ -547,7 +561,9 @@ export interface Settings {
      */
     lengths?: number[];
     /** Where the overlay boxes were dragged, and which ones stay up. */
-    layout?: Partial<Record<'audio' | 'gallery' | 'capture' | 'player', { x: number; y: number; pinned?: boolean }>>;
+    layout?: Partial<Record<OverlayBoxId, { x: number; y: number; pinned?: boolean }>>;
+    /** Boxes the player turned off. Missing means every box is shown. */
+    hidden?: OverlayBoxId[];
     /** Empty means the built-in recorder. A path is only a fallback, and it is not shown in Settings. */
     ffmpeg?: string;
   };

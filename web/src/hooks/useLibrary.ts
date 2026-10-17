@@ -146,6 +146,17 @@ export function useLibrary() {
     [save],
   );
 
+  /**
+   * The overlay already wrote these notes. Keep them on the game in memory so a
+   * later save does not put the old text back, but do not write them again.
+   */
+  const adoptNotes = useCallback((id: string, notes: string) => {
+    const current = gamesRef.current;
+    if (!current.some((game) => game.id === id)) return;
+    gamesRef.current = current.map((game) => (game.id === id ? { ...game, notes } : game));
+    setGames(gamesRef.current);
+  }, []);
+
   const removeGame = useCallback((id: string) => {
     queue.current = queue.current.then(() => removeFromDb(id)).catch(console.error);
     gamesRef.current = gamesRef.current.filter((g) => g.id !== id);
@@ -194,7 +205,7 @@ export function useLibrary() {
       .catch(console.error);
   }, []);
 
-  return { games, settings, setSettings, updateGame, addGame, addGames, removeGame, reload, flush, resetEverything, ready };
+  return { games, settings, setSettings, updateGame, adoptNotes, addGame, addGames, removeGame, reload, flush, resetEverything, ready };
 }
 
 export type Library = ReturnType<typeof useLibrary>;

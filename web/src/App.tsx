@@ -100,6 +100,7 @@ export default function App() {
     settings,
     setSettings,
     updateGame,
+    adoptNotes,
     addGame,
     addGames,
     removeGame,
@@ -181,6 +182,13 @@ export default function App() {
     let stopPulse = () => {};
     let stopOverlayNote = () => {};
     let stopOverlaySettings = () => {};
+    let stopNotes = () => {};
+    void listen<{ gameId?: string; notes?: string }>('playthrough-notes', (event) => {
+      const gameId = event.payload?.gameId;
+      if (gameId && typeof event.payload.notes === 'string') adoptNotes(gameId, event.payload.notes);
+    }).then((unlisten) => {
+      stopNotes = unlisten;
+    }).catch(() => undefined);
     void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
       setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
     }).then((unlisten) => {
@@ -208,6 +216,7 @@ export default function App() {
       stopPulse();
       stopOverlayNote();
       stopOverlaySettings();
+      stopNotes();
       stopWatch();
     };
   }, []);
@@ -1074,6 +1083,15 @@ export default function App() {
     setSettingsJump(at ? { id: at, token: ++settingsJumpToken.current } : null);
     setPage('settings');
   }, []);
+
+  useEffect(() => {
+    if (!isNative()) return;
+    let stop = () => {};
+    void listen('overlay-open-settings', () => openSettings('orbit-overlay')).then((unlisten) => {
+      stop = unlisten;
+    }).catch(() => undefined);
+    return () => stop();
+  }, [openSettings]);
 
   const showHome = page === 'library' && !query;
 

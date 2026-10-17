@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { fileSrc } from '../services/desktop';
-import { audioSet, mediaControl, mediaNow, type NowPlaying } from '../services/native';
+import { audioSet, audioSetNamed, mediaControl, mediaNow, type NowPlaying } from '../services/native';
 
 function artSrc(art: string): string {
   if (!art) return '';
@@ -19,14 +19,28 @@ export function MediaPlayer({ pad = false }: { pad?: boolean }) {
   const [picked, setPicked] = useState('');
   const [error, setError] = useState('');
   const pending = useRef<{ id: string; volume: number; muted: boolean } | null>(null);
+  const pendingNamed = useRef<{ name: string; volume: number; muted: boolean } | null>(null);
+  const heldPlay = useRef<{ id: string; playing: boolean; until: number } | null>(null);
 
   const refresh = () => {
     void mediaNow()
       .then((next) => {
         const held = pending.current;
-        setItems(held
-          ? next.map((item) => (item.volumeId === held.id ? { ...item, volume: held.volume, muted: held.muted } : item))
-          : next);
+        const named = pendingNamed.current;
+        const play = heldPlay.current;
+        if (play && Date.now() > play.until) heldPlay.current = null;
+        setItems(next.map((item) => {
+          let copy = item;
+          if (held && item.volumeId === held.id) copy = { ...copy, volume: held.volume, muted: held.muted };
+          if (named && !item.volumeId && (item.app === named.name || item.title === named.name)) {
+            copy = { ...copy, volume: named.volume, muted: named.muted };
+          }
+          if (play && item.id === play.id && Date.now() <= play.until) {
+            if (item.playing === play.playing) heldPlay.current = null;
+            else copy = { ...copy, playing: play.playing };
+          }
+          return copy;
+        }));
         setError('');
         setPicked((current) => (next.some((item) => item.id === current) ? current : next.find((item) => item.playing)?.id || next[0]?.id || ''));
       })
@@ -43,18 +57,38 @@ export function MediaPlayer({ pad = false }: { pad?: boolean }) {
 
   const act = (action: 'toggle' | 'next' | 'previous') => {
     if (!current) return;
+    if (action === 'toggle') {
+      const playing = !current.playing;
+      const id = current.id;
+      heldPlay.current = { id, playing, until: Date.now() + 2500 };
+      setItems((list) => list.map((item) => (item.id === id ? { ...item, playing } : item)));
+      void mediaControl(id, action).catch((reason) => {
+        if (heldPlay.current?.id === id) heldPlay.current = null;
+        setItems((list) => list.map((item) => (item.id === id ? { ...item, playing: !playing } : item)));
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+      return;
+    }
     void mediaControl(current.id, action).then(refresh).catch((reason) => {
       setError(reason instanceof Error ? reason.message : String(reason));
     });
   };
 
   const setVolume = (volume: number) => {
-    if (!current?.volumeId) return;
+    if (!current) return;
     const next = Math.min(100, Math.max(0, Math.round(volume)));
-    pending.current = { id: current.volumeId, volume: next, muted: current.muted };
-    setItems((list) => list.map((item) => (item.id === current.id ? { ...item, volume: next } : item)));
-    void audioSet(current.volumeId, next, current.muted).finally(() => {
+    const id = current.id;
+    setItems((list) => list.map((item) => (item.id === id ? { ...item, volume: next } : item)));
+    const apply = current.volumeId
+      ? audioSet(current.volumeId, next, current.muted)
+      : audioSetNamed(current.app || current.title, next, current.muted);
+    if (current.volumeId) pending.current = { id: current.volumeId, volume: next, muted: current.muted };
+    else pendingNamed.current = { name: current.app || current.title, volume: next, muted: current.muted };
+    void apply.catch((reason) => {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }).finally(() => {
       if (pending.current?.volume === next) pending.current = null;
+      if (pendingNamed.current?.volume === next) pendingNamed.current = null;
     });
   };
 
@@ -109,20 +143,16 @@ export function MediaPlayer({ pad = false }: { pad?: boolean }) {
           </div>
         </div>
       </div>
-      {current.volumeId ? (
-        <input
-          tabIndex={-1}
-          type="range"
-          min={0}
-          max={100}
-          value={current.volume}
-          aria-label={`${current.app || 'App'} volume`}
-          onChange={(event) => setVolume(Number(event.target.value))}
-          className="w-full accent-white"
-        />
-      ) : (
-        <p className="text-[11px] text-white/40">Volume for this one is in Audio, once it is playing sound.</p>
-      )}
+      <input
+        tabIndex={-1}
+        type="range"
+        min={0}
+        max={100}
+        value={current.volume}
+        aria-label={`${current.app || current.title || 'App'} volume`}
+        onChange={(event) => setVolume(Number(event.target.value))}
+        className="w-full accent-white"
+      />
       {error && <p className="text-[11px] text-white/50">{error}</p>}
     </div>
   );

@@ -1603,6 +1603,19 @@ impl Db {
         Ok(())
     }
 
+    /// Add a note under what is already there, with a blank line between them.
+    pub(crate) fn join_notes(existing: &str, added: &str) -> String {
+        let added = added.trim();
+        let existing = existing.trim_end();
+        if added.is_empty() {
+            return existing.to_string();
+        }
+        if existing.is_empty() {
+            return added.to_string();
+        }
+        format!("{existing}\n\n{added}")
+    }
+
     /// Record time by hand, for playing on a console or a handheld.
     pub fn log_manual_session(
         &self,
@@ -2399,5 +2412,12 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].note, "still on fresh");
         assert!(db.clear_playthrough_logs("g2", &second.id).is_err());
+    }
+
+    #[test]
+    fn a_note_is_added_under_what_was_already_written() {
+        assert_eq!(Db::join_notes("", "  boss door  "), "boss door");
+        assert_eq!(Db::join_notes("Ares build\n", "died at the door"), "Ares build\n\ndied at the door");
+        assert_eq!(Db::join_notes("kept", "   "), "kept");
     }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { Camera, Circle, FolderOpen, Image, Pin, Square, X } from 'lucide-react';
+import { Camera, Circle, FolderOpen, Image, Pin, Settings2, Square, X } from 'lucide-react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { applyFont, applyTheme } from '../data/themes';
 import { loadSettings } from '../services/storage';
@@ -22,17 +22,22 @@ import {
   overlayReplay,
   overlayShot,
   overlayStatus,
+  overlayOpenSettings,
+  appendPlaythroughNotes,
+  machineStats,
   clampOverlaySeconds,
   type GalleryItem,
+  type MachineStats,
   type OverlayStatus,
 } from '../services/native';
-import type { Settings } from '../types';
+import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
 import { cn } from '../utils/cn';
 import { AppMixer } from './AppMixer';
 import { MediaPlayer } from './MediaPlayer';
 
-type BoxId = 'audio' | 'gallery' | 'capture' | 'player';
+type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; pinned?: boolean };
+const PAGE_SIZE = 4;
 
 function stamp(): string {
   const now = new Date();
@@ -73,10 +78,14 @@ function mixId(node: Element | null): string | null {
 
 function defaults(width: number, height: number): Record<BoxId, Place> {
   return {
-    audio: { x: 24, y: 24 },
+    fps: { x: 24, y: 24 },
+    performance: { x: 24, y: 132 },
+    clock: { x: Math.max(24, width - 220), y: Math.max(24, height - 120) },
+    notes: { x: 24, y: Math.max(24, height - 280) },
+    audio: { x: 24, y: 280 },
     player: { x: Math.min(width - 344, 360), y: 24 },
     gallery: { x: Math.max(24, width - 344), y: 24 },
-    capture: { x: Math.max(24, (width - 640) / 2), y: Math.max(24, height - 250) },
+    capture: { x: Math.max(24, (width - 640) / 2), y: Math.max(24, height - 220) },
   };
 }
 
@@ -86,8 +95,14 @@ function placeOf(layout: NonNullable<Settings['overlay']>['layout'], id: BoxId, 
   return { x: saved.x, y: saved.y, pinned: !!saved.pinned };
 }
 
-function anyPinned(places: Record<BoxId, Place>): boolean {
-  return Object.values(places).some((place) => place.pinned);
+function anyPinned(places: Record<BoxId, Place>, hidden: BoxId[]): boolean {
+  return (Object.entries(places) as [BoxId, Place][]).some(([id, place]) => place.pinned && !hidden.includes(id));
+}
+
+function gigabytes(bytes: number): string {
+  if (!bytes) return '0';
+  const value = bytes / 1024 / 1024 / 1024;
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function physicalHits(): { x: number; y: number; w: number; h: number }[] {
@@ -120,12 +135,22 @@ export function OverlayView() {
   const [resting, setResting] = useState(false);
   const [awake, setAwake] = useState(true);
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
+  const [hidden, setHidden] = useState<BoxId[]>([]);
   const [shutterOn, setShutterOn] = useState(true);
   const [shutterVolume, setShutterVolume] = useState(40);
   const [front, setFront] = useState<BoxId>('capture');
+  const [page, setPage] = useState(0);
+  const [boxesOpen, setBoxesOpen] = useState(false);
+  const [stats, setStats] = useState<MachineStats | null>(null);
+  const [draft, setDraft] = useState('');
+  const [noteError, setNoteError] = useState('');
+  const [clock, setClock] = useState(() => new Date());
   const settingsRef = useRef<Settings | null>(null);
   const placesRef = useRef(places);
+  const hiddenRef = useRef(hidden);
+  const gameKey = useRef('');
   placesRef.current = places;
+  hiddenRef.current = hidden;
 
   const refresh = () => {
     void overlayStatus().then(setStatus).catch(() => undefined);
@@ -144,7 +169,7 @@ export function OverlayView() {
   const rememberLayout = async (next: Record<BoxId, Place>) => {
     setPlaces(next);
     patchOverlay({ layout: next });
-    await overlayPins(anyPinned(next));
+    await overlayPins(anyPinned(next, hiddenRef.current));
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
   };
 
@@ -158,18 +183,30 @@ export function OverlayView() {
       settingsRef.current = settings;
       const base = size();
       const layout = settings.overlay?.layout;
+      const savedFps = placeOf(layout, 'fps', base.fps);
+      const fps = layout?.fps
+        ? savedFps
+        : (layout?.audio && Math.abs(layout.audio.x - savedFps.x) < 48 && Math.abs(layout.audio.y - savedFps.y) < 48)
+          ? { ...savedFps, y: savedFps.y + 108 }
+          : savedFps;
       const next = {
+        fps,
+        performance: placeOf(layout, 'performance', base.performance),
+        clock: placeOf(layout, 'clock', base.clock),
+        notes: placeOf(layout, 'notes', base.notes),
         audio: placeOf(layout, 'audio', base.audio),
         player: placeOf(layout, 'player', base.player),
         gallery: placeOf(layout, 'gallery', base.gallery),
         capture: placeOf(layout, 'capture', base.capture),
       };
+      const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
       setPlaces(next);
+      setHidden(hiddenBoxes);
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
       setResting(mode.resting && !mode.open);
       setAwake(mode.open || mode.resting);
-      void overlayPins(anyPinned(next));
+      void overlayPins(anyPinned(next, hiddenBoxes));
       setReady(true);
     }).catch(() => setReady(true));
     refresh();
@@ -200,6 +237,14 @@ export function OverlayView() {
       setAwake(true);
       setResting(false);
       refresh();
+      void loadSettings().then((settings) => {
+        settingsRef.current = settings;
+        const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
+        setHidden(hiddenBoxes);
+        hiddenRef.current = hiddenBoxes;
+        setShutterOn(settings.overlay?.shutter !== false);
+        setShutterVolume(settings.overlay?.shutterVolume ?? 40);
+      }).catch(() => undefined);
       window.setTimeout(() => {
         const next = document.querySelector('[data-overlay-section="capture"] button[data-overlay]:not([disabled])');
         if (next instanceof HTMLElement) next.focus();
@@ -281,12 +326,13 @@ export function OverlayView() {
     };
   }, [ready, resting, places]);
 
-  const run = async (work: () => Promise<string>, shot = false) => {
+  const run = async (work: () => Promise<void>, shot = false) => {
     if (busy) return;
     setBusy(true);
     setFailed(false);
+    setNote('');
     try {
-      setNote(await work());
+      await work();
       if (shot) {
         const fresh = await loadSettings().catch(() => settingsRef.current);
         const on = fresh ? fresh.overlay?.shutter !== false : shutterOn;
@@ -353,9 +399,47 @@ export function OverlayView() {
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
-      if (resting && !anyPinned(next)) void overlayHide();
+      if (resting && !anyPinned(next, hiddenRef.current)) void overlayHide();
     });
   };
+
+  useEffect(() => {
+    if (!status) return;
+    const key = status.playing ? status.game : '';
+    if (gameKey.current === '' && key !== '') {
+      gameKey.current = key;
+      return;
+    }
+    if (key === gameKey.current) return;
+    gameKey.current = key;
+    setDraft('');
+    setNoteError('');
+  }, [status]);
+
+  const wantStats = awake && (
+    (!hidden.includes('fps') && (!resting || places.fps.pinned))
+    || (!hidden.includes('performance') && (!resting || places.performance.pinned))
+  );
+  useEffect(() => {
+    if (!wantStats) return;
+    const pull = () => void machineStats().then(setStats).catch(() => undefined);
+    pull();
+    const timer = window.setInterval(pull, 1000);
+    return () => window.clearInterval(timer);
+  }, [wantStats]);
+
+  useEffect(() => {
+    const count = items.filter((item) => item.kind === tab).length;
+    const last = Math.max(0, Math.ceil(count / PAGE_SIZE) - 1);
+    setPage((current) => (current > last ? last : current));
+  }, [items, tab]);
+
+  const wantClock = awake && !hidden.includes('clock') && (!resting || places.clock.pinned);
+  useEffect(() => {
+    if (!wantClock) return;
+    const timer = window.setInterval(() => setClock(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, [wantClock]);
 
   if (!ready) return <div className="h-full" />;
 
@@ -363,16 +447,28 @@ export function OverlayView() {
   const lengths = overlayLengths(status?.lengths);
   const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
   const fps = status?.fps === 60 ? 60 : 30;
-  const standing = !status
-    ? 'Opening…'
-    : status.recording
-      ? 'Recording. The red button stops it. The picture keeps moving while this is open.'
-      : status.playing && status.replay
-        ? `Keeping the last ${seconds} seconds${status.game ? ` of ${status.game}` : ''}.`
-        : 'Screenshot, record, or save the last few seconds.';
-  const shown = note || status?.note || standing;
   const shownItems = items.filter((item) => item.kind === tab);
-  const visible = (id: BoxId) => awake && (!resting || places[id].pinned);
+  const pages = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, pages - 1);
+  const pageItems = shownItems.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const visible = (id: BoxId) => awake && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
+  const toggleBox = (id: BoxId) => {
+    const next = hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id];
+    setHidden(next);
+    hiddenRef.current = next;
+    patchOverlay({ hidden: next });
+    void overlayPins(anyPinned(placesRef.current, next));
+  };
+  const saveNote = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setNoteError('');
+    void appendPlaythroughNotes(text).then(() => {
+      setDraft('');
+    }).catch((error) => {
+      setNoteError(error instanceof Error ? error.message : String(error));
+    });
+  };
 
   return (
     <div className="relative h-full text-white">
@@ -427,7 +523,7 @@ export function OverlayView() {
                 key={kind}
                 type="button"
                 data-overlay
-                onClick={() => setTab(kind)}
+                onClick={() => { setTab(kind); setPage(0); }}
                 className={cn(
                   'rounded-full border px-2.5 py-1 text-[11px]',
                   tab === kind ? 'border-white bg-white text-black' : 'border-white/20 text-white/75 hover:border-white/50',
@@ -437,19 +533,16 @@ export function OverlayView() {
               </button>
             ))}
           </div>
-          <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-2">
             {shownItems.length === 0 && (
               <p className="col-span-2 px-1 py-6 text-center text-[11px] leading-relaxed text-white/45">Nothing here yet. A capture is filed under the game it came from.</p>
             )}
-            {shownItems.map((item) => (
+            {pageItems.map((item) => (
               <button
                 key={item.path}
                 type="button"
                 data-overlay
-                onClick={() => void run(async () => {
-                  await overlayOpen(item.path);
-                  return `Opened ${item.name}.`;
-                })}
+                onClick={() => void run(async () => { await overlayOpen(item.path); })}
                 className="overflow-hidden rounded-2xl bg-black/30 text-left hover:bg-white/10"
               >
                 <Preview item={item} />
@@ -457,12 +550,34 @@ export function OverlayView() {
               </button>
             ))}
           </div>
+          {pages > 1 && (
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                data-overlay
+                disabled={safePage === 0}
+                onClick={() => setPage(safePage - 1)}
+                className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/80 disabled:opacity-30"
+              >
+                Previous
+              </button>
+              <span className="text-[11px] tabular-nums text-white/50">{safePage + 1} / {pages}</span>
+              <button
+                type="button"
+                data-overlay
+                disabled={safePage >= pages - 1}
+                onClick={() => setPage(safePage + 1)}
+                className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/80 disabled:opacity-30"
+              >
+                Next
+              </button>
+            </div>
+          )}
           <button
             type="button"
             data-overlay
             onClick={() => void run(async () => {
               await overlayOpenKind(tab === 'screenshot' ? 'screenshots' : tab === 'replay' ? 'replays' : 'recordings');
-              return 'Opened the folder.';
             })}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-[11px] text-white/75 hover:border-white/40"
           >
@@ -495,18 +610,18 @@ export function OverlayView() {
         >
           <p className="mb-3 text-center text-[11px] tabular-nums text-white/45">{quality} · {fps} fps</p>
           <div className="flex items-start justify-center gap-6 sm:gap-10">
-            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(() => overlayShot(stamp()), true); }}>
+            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(async () => { await overlayShot(stamp()); }, true); }}>
               <Camera className="size-7" />
             </CaptureButton>
             <CaptureButton
               label={status?.recording ? 'Stop' : 'Record'}
               hot={!!status?.recording}
               disabled={busy}
-              onClick={() => void run(() => overlayRecord(stamp()))}
+              onClick={() => void run(async () => { await overlayRecord(stamp()); })}
             >
               {status?.recording ? <Square className="size-6 fill-white" /> : <Circle className="size-6 fill-white" />}
             </CaptureButton>
-            <CaptureButton label="Last" disabled={busy} onClick={() => void run(() => overlayReplay(seconds, stamp()))}>
+            <CaptureButton label="Last" disabled={busy} onClick={() => void run(async () => { await overlayReplay(seconds, stamp()); })}>
               <span className="text-2xl font-semibold tabular-nums leading-none">{seconds}</span>
             </CaptureButton>
           </div>
@@ -527,9 +642,93 @@ export function OverlayView() {
               </button>
             ))}
           </div>
-          <p className={cn('mt-3 text-center text-xs leading-relaxed', failed ? 'text-red-200' : 'text-white/75')}>{shown}</p>
-          {!resting && <p className="mt-1 text-center text-[11px] text-white/40">Drag a title to move a box. Pin keeps it on screen after this closes.</p>}
+          {failed && note && <p className="mt-3 text-center text-xs leading-relaxed text-red-200">{note}</p>}
         </Box>
+      )}
+      {visible('fps') && (
+        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onPin={pin} section="fps" size="slim">
+          <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
+        </Box>
+      )}
+      {visible('performance') && (
+        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onPin={pin} section="performance" size="meter">
+          <Meter label="GPU" value={stats?.gpu} />
+          <Meter label="CPU" value={stats?.cpu} />
+          <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
+          <Meter label="VRAM" value={stats?.vram} detail={stats ? `${gigabytes(stats.vramUsed)} / ${gigabytes(stats.vramTotal)} GB` : ''} />
+        </Box>
+      )}
+      {visible('clock') && (
+        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onPin={pin} section="clock" size="slim">
+          <p className="text-center text-2xl font-medium tabular-nums">{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        </Box>
+      )}
+      {visible('notes') && (
+        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onPin={pin} section="notes">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            rows={5}
+            placeholder={status?.playing ? 'These go away when the game closes.' : 'Start the game to keep a note.'}
+            className="w-full resize-none rounded-2xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/35"
+          />
+          <button
+            type="button"
+            data-overlay
+            disabled={!draft.trim() || !status?.playing}
+            onClick={saveNote}
+            className="mt-2 w-full rounded-full border border-white/20 px-3 py-1.5 text-[11px] text-white/80 disabled:opacity-30"
+          >
+            Save to journal
+          </button>
+          {noteError && <p className="mt-1 text-[11px] text-red-200">{noteError}</p>}
+        </Box>
+      )}
+      {!resting && (
+        <div className="pointer-events-auto absolute left-1/2 top-4 z-40 -translate-x-1/2">
+          <button
+            type="button"
+            data-overlay
+            aria-expanded={boxesOpen}
+            onClick={() => setBoxesOpen((open) => !open)}
+            className="flex items-center gap-1.5 rounded-full border border-white/15 bg-[#141416]/92 px-3 py-1.5 text-[11px] text-white/80 backdrop-blur-md"
+          >
+            <Settings2 className="size-3.5" />
+            Boxes
+          </button>
+          {boxesOpen && (
+            <div className="mt-2 w-56 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
+              <div className="flex flex-wrap gap-1.5">
+                {OVERLAY_BOXES.map((box) => {
+                  const shown = !hidden.includes(box.id);
+                  return (
+                    <button
+                      key={box.id}
+                      type="button"
+                      data-overlay
+                      aria-pressed={shown}
+                      onClick={() => toggleBox(box.id)}
+                      className={cn(
+                        'rounded-full border px-2.5 py-1 text-[11px]',
+                        shown ? 'border-white bg-white text-black' : 'border-white/20 text-white/60',
+                      )}
+                    >
+                      {box.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                data-overlay
+                onClick={() => void overlayOpenSettings()}
+                className="mt-3 w-full rounded-full border border-white/20 px-3 py-1.5 text-[11px] text-white/80"
+              >
+                Open settings
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -544,6 +743,7 @@ function Box({
   onPin,
   section,
   wide = false,
+  size = 'normal',
   extra,
   children,
 }: {
@@ -555,6 +755,7 @@ function Box({
   onPin: (id: BoxId) => void;
   section: string;
   wide?: boolean;
+  size?: 'normal' | 'slim' | 'meter';
   extra?: ReactNode;
   children: ReactNode;
 }) {
@@ -564,7 +765,7 @@ function Box({
       data-pin={place.pinned ? '1' : '0'}
       className={cn(
         'pointer-events-auto absolute flex max-h-[calc(100%-3rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
-        wide ? 'w-[min(40rem,calc(100%-3rem))]' : 'w-80',
+        wide ? 'w-[min(40rem,calc(100%-3rem))]' : size === 'slim' ? 'w-36' : size === 'meter' ? 'w-56' : 'w-80',
       )}
       style={{ left: place.x, top: place.y, zIndex: front ? 30 : 20 }}
     >
@@ -592,6 +793,22 @@ function Box({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-2">{children}</div>
     </aside>
+  );
+}
+
+function Meter({ label, value, detail = '' }: { label: string; value: number | null | undefined; detail?: string }) {
+  const shown = value == null ? '—' : `${value}%`;
+  return (
+    <div className="mb-2">
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="text-white/50">{label}</span>
+        <span className="tabular-nums text-white">{shown}</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full bg-white/80" style={{ width: `${Math.min(100, value ?? 0)}%` }} />
+      </div>
+      {detail && <p className="mt-0.5 text-[10px] tabular-nums text-white/40">{detail}</p>}
+    </div>
   );
 }
 
