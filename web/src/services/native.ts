@@ -935,6 +935,30 @@ export function cloudGameOf(
   return { id: game.id, title: game.title, publisher: game.meta?.developer?.trim() || null, dir: dir?.trim() || null };
 }
 
+export function restoreCloudText(titles: string[], cloud: string): { title: string; description: string } {
+  if (titles.length === 1) {
+    const title = titles[0] || 'this game';
+    return {
+      title: `Restore ${title}?`,
+      description: `The copy of ${title} on ${cloud} is put back into the save folder. The files there now are replaced. The copy on the cloud is kept.`,
+    };
+  }
+  const count = titles.length;
+  return {
+    title: `Restore ${count} games?`,
+    description: `The copies of ${count} games on ${cloud} are put back into their save folders. The files there now are replaced. The copies on the cloud are kept.`,
+  };
+}
+
+export function restoreFromCloud(
+  account: CloudAccount,
+  backupRoot: string | null | undefined,
+  games: CloudGame[],
+): Promise<string> {
+  if (games.length === 0) return Promise.reject(new Error('Choose a game to restore.'));
+  return cloudCopy(false, account.remote, account.own, backupRoot, account.folder, games);
+}
+
 export function cloudCopy(
   up: boolean,
   remote: string,

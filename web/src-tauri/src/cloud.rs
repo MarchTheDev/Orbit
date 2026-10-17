@@ -265,26 +265,19 @@ pub fn copy(
         fs::create_dir_all(&source).map_err(|e| format!("Could not create the copies folder: {e}"))?;
     }
     let config = config_for(data_dir, own)?;
-    if up {
-        if let Some(games) = only {
-            return copy_games(&bin, config.as_deref(), data_dir, backup_root, remote, &folder, games);
-        }
-        if !source.is_dir() {
-            return Err("There are no copies to send yet. Back up a game first.".into());
-        }
+    if !up {
+        let games = only.ok_or_else(|| "Choose a game to restore.".to_string())?;
+        return restore_games(&bin, config.as_deref(), data_dir, backup_root, remote, &folder, games);
+    }
+    if let Some(games) = only {
+        return copy_games(&bin, config.as_deref(), data_dir, backup_root, remote, &folder, games);
+    }
+    if !source.is_dir() {
+        return Err("There are no copies to send yet. Back up a game first.".into());
     }
     let cloud = format!("{remote}:{folder}");
-    let (from, to) = if up {
-        (source.to_string_lossy().into_owned(), cloud)
-    } else {
-        (format!("{cloud}/"), source.to_string_lossy().into_owned())
-    };
-    run_copy(&bin, config.as_deref(), &from, &to)?;
-    Ok(if up {
-        format!("Sent the copies to {remote}.")
-    } else {
-        format!("Brought the copies down into {}.", source.display())
-    })
+    run_copy(&bin, config.as_deref(), &source.to_string_lossy(), &cloud)?;
+    Ok(format!("Sent the copies to {remote}."))
 }
 
 /// Move the copies from one path to another on the same cloud.
@@ -1958,6 +1951,172 @@ fn copy_games(
     }
 }
 
+const CLOUD_MISSING: &str = "cloud-copy-missing";
+
+/// Bring the chosen games down and put them back into their save folders.
+fn restore_games(
+    bin: &Path,
+    config: Option<&Path>,
+    data_dir: &Path,
+    backup_root: Option<&str>,
+    remote: &str,
+    folder: &str,
+    games: &[CloudGame],
+) -> Result<String, String> {
+    if games.is_empty() {
+        return Err("Choose a game to restore.".into());
+    }
+    let source = saves::root_of(data_dir, backup_root);
+    fs::create_dir_all(&source).map_err(|e| format!("Could not create the copies folder: {e}"))?;
+    let mut restored = Vec::new();
+    let mut kept_only = Vec::new();
+    let mut missing = Vec::new();
+    for game in games {
+        let brought = bring_down(bin, config, data_dir, backup_root, &source, remote, folder, game)?;
+        let Some(temp) = brought else {
+            missing.push(game.title.clone());
+            continue;
+        };
+        let saved = match game.dir.as_deref().map(str::trim).filter(|path| !path.is_empty()) {
+            Some(dir) => {
+                let dest = PathBuf::from(dir);
+                if dest.starts_with(&source) {
+                    let _ = fs::remove_dir_all(&temp);
+                    return Err("That folder is a backup Orbit already made, not the game's saves.".into());
+                }
+                let put = saves::put_back(&temp, &dest);
+                let _ = fs::remove_dir_all(&temp);
+                put?;
+                true
+            }
+            None => {
+                let _ = fs::remove_dir_all(&temp);
+                false
+            }
+        };
+        if saved {
+            restored.push(game.title.clone());
+        } else {
+            kept_only.push(game.title.clone());
+        }
+    }
+    if restored.is_empty() && kept_only.is_empty() {
+        return Err(if missing.len() == 1 {
+            format!("Orbit could not find a cloud copy for {}.", missing[0])
+        } else {
+            "Orbit could not find a cloud copy for the chosen games.".into()
+        });
+    }
+    let mut message = if restored.len() == 1 && kept_only.is_empty() && missing.is_empty() {
+        format!("Restored {}.", restored[0])
+    } else if restored.len() == 1 {
+        format!("Restored {}.", restored[0])
+    } else if restored.len() > 1 {
+        format!("Restored {} games.", restored.len())
+    } else {
+        "Brought the copies down onto this PC.".into()
+    };
+    if !kept_only.is_empty() {
+        message.push_str(&format!(
+            " These had no save folder, so they were not put back into the game: {}.",
+            kept_only.join(", ")
+        ));
+    }
+    if !missing.is_empty() {
+        message.push_str(&format!(" No cloud copy for: {}.", missing.join(", ")));
+    }
+    Ok(message)
+}
+
+/// Download one game. The returned folder is temporary and still holds the files.
+fn bring_down(
+    bin: &Path,
+    config: Option<&Path>,
+    data_dir: &Path,
+    backup_root: Option<&str>,
+    source: &Path,
+    remote: &str,
+    folder: &str,
+    game: &CloudGame,
+) -> Result<Option<PathBuf>, String> {
+    let places = restore_places(data_dir, backup_root, game);
+    for (index, relative) in places.iter().enumerate() {
+        let Some(relative) = safe_relative(relative) else {
+            continue;
+        };
+        let temp = std::env::temp_dir().join(format!("orbit-restore-{}-{index}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).map_err(|e| format!("Could not prepare the restore: {e}"))?;
+        let remote_path = format!("{remote}:{folder}/{relative}");
+        match download_copy(bin, config, &remote_path, &temp.to_string_lossy()) {
+            Ok(()) if has_save_files(&temp) => {
+                let local = under(source, &relative);
+                if let Err(err) = saves::keep_downloaded(&temp, &local) {
+                    let _ = fs::remove_dir_all(&temp);
+                    return Err(err);
+                }
+                return Ok(Some(temp));
+            }
+            Ok(()) => {
+                let _ = fs::remove_dir_all(&temp);
+            }
+            Err(err) if err == CLOUD_MISSING => {
+                let _ = fs::remove_dir_all(&temp);
+            }
+            Err(err) => {
+                let _ = fs::remove_dir_all(&temp);
+                return Err(err);
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn restore_places(data_dir: &Path, backup_root: Option<&str>, game: &CloudGame) -> Vec<String> {
+    let mut places = Vec::new();
+    if let Some(dir) = game.dir.as_deref().map(str::trim).filter(|path| !path.is_empty()) {
+        places.push(saves::cloud_place(&game.title, game.publisher.as_deref(), Path::new(dir)));
+    }
+    places.extend(saves::backup_places(&game.title, game.publisher.as_deref(), &game.id));
+    places.extend(saves::existing_relatives(
+        data_dir,
+        backup_root,
+        &game.id,
+        &game.title,
+        game.publisher.as_deref(),
+    ));
+    let mut seen = std::collections::HashSet::new();
+    places.retain(|place| safe_relative(place).is_some() && seen.insert(place.clone()));
+    places
+}
+
+fn has_save_files(dir: &Path) -> bool {
+    fn walk(dir: &Path, depth: i32) -> bool {
+        if depth > 8 || !dir.is_dir() {
+            return false;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == "note.txt" || name == ".orbit-note" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                if walk(&path, depth + 1) {
+                    return true;
+                }
+            } else if path.is_file() {
+                return true;
+            }
+        }
+        false
+    }
+    walk(dir, 0)
+}
+
 /// Send the game's own save folder. A local backup is not required.
 fn send_live_save(bin: &Path, config: Option<&Path>, remote: &str, folder: &str, game: &CloudGame) -> Result<bool, String> {
     let Some(dir) = game.dir.as_deref().map(str::trim).filter(|path| !path.is_empty()) else {
@@ -1989,45 +2148,70 @@ fn send_note(bin: &Path, config: Option<&Path>, dest_dir: &str, note: &str) -> R
 }
 
 fn run_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
-    run_rclone_copy(bin, config, "copy", from, to)
+    run_rclone_copy(bin, config, "copy", from, to, true)
 }
 
 fn run_copyto(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
-    run_rclone_copy(bin, config, "copyto", from, to)
+    run_rclone_copy(bin, config, "copyto", from, to, true)
 }
 
-fn run_rclone_copy(bin: &Path, config: Option<&Path>, command: &str, from: &str, to: &str) -> Result<(), String> {
-    // The shared Drive client often answers 403 while opening the folder, before
-    // any file is copied. `--retries` does not cover that, so Orbit waits and
-    // tries the whole command again.
-    let output = with_quota_retry(|| {
-        rclone(bin, config)
-            .args([
-                "--quiet",
-                command,
-                "--update",
-                "--retries",
-                "3",
-                "--retries-sleep",
-                "10s",
-                "--low-level-retries",
-                "10",
-                "--tpslimit",
-                "5",
-                "--tpslimit-burst",
-                "1",
-                "--",
-            ])
-            .arg(from)
-            .arg(to)
-            .output()
-            .map_err(|e| format!("Could not start rclone: {e}"))
-    })?;
+fn run_rclone_copy(bin: &Path, config: Option<&Path>, command: &str, from: &str, to: &str, update: bool) -> Result<(), String> {
+    let output = rclone_transfer(bin, config, command, from, to, update)?;
     if output.status.success() {
         Ok(())
     } else {
         Err(copy_error(&output.stdout, &output.stderr))
     }
+}
+
+/// A download that should replace older files. A missing folder is not fatal:
+/// the caller tries the next place this game may have been stored.
+fn download_copy(bin: &Path, config: Option<&Path>, from: &str, to: &str) -> Result<(), String> {
+    let output = rclone_transfer(bin, config, "copy", from, to, false)?;
+    if output.status.success() {
+        return Ok(());
+    }
+    if is_missing_remote(&output.stdout, &output.stderr) {
+        return Err(CLOUD_MISSING.into());
+    }
+    Err(copy_error(&output.stdout, &output.stderr))
+}
+
+fn rclone_transfer(
+    bin: &Path,
+    config: Option<&Path>,
+    command: &str,
+    from: &str,
+    to: &str,
+    update: bool,
+) -> Result<std::process::Output, String> {
+    // The shared Drive client often answers 403 while opening the folder, before
+    // any file is copied. `--retries` does not cover that, so Orbit waits and
+    // tries the whole command again.
+    with_quota_retry(|| {
+        let mut cmd = rclone(bin, config);
+        cmd.arg("--quiet").arg(command);
+        if update {
+            cmd.arg("--update");
+        }
+        cmd.args([
+            "--retries",
+            "3",
+            "--retries-sleep",
+            "10s",
+            "--low-level-retries",
+            "10",
+            "--tpslimit",
+            "5",
+            "--tpslimit-burst",
+            "1",
+            "--",
+        ])
+        .arg(from)
+        .arg(to)
+        .output()
+        .map_err(|e| format!("Could not start rclone: {e}"))
+    })
 }
 
 /// Google's shared Drive app is limited per minute. A short wait often clears it.
@@ -2364,6 +2548,19 @@ fn is_shared_client_notice(line: &str) -> bool {
 
 /// A 403 on the shared client while opening the folder. The "root directory"
 /// line is that refusal, not a missing game folder.
+fn is_missing_remote(stdout: &[u8], stderr: &[u8]) -> bool {
+    if is_drive_quota(stdout, stderr) {
+        return false;
+    }
+    let text = format!("{} {}", String::from_utf8_lossy(stderr), String::from_utf8_lossy(stdout));
+    let lower = text.to_ascii_lowercase();
+    lower.contains("directory not found")
+        || lower.contains("doesn't exist")
+        || lower.contains("does not exist")
+        || lower.contains("object not found")
+        || lower.contains("not found")
+}
+
 fn is_drive_quota(stdout: &[u8], stderr: &[u8]) -> bool {
     let text = format!("{} {}", String::from_utf8_lossy(stderr), String::from_utf8_lossy(stdout));
     let lower = text.to_ascii_lowercase();
@@ -2461,6 +2658,25 @@ mod tests {
         assert!(shown.contains("shared sign-in"));
         assert!(shown.contains("minute"));
         assert!(!is_drive_quota(b"", b"ERROR: directory not found"));
+        assert!(!is_missing_remote(b"", raw));
+        assert!(is_missing_remote(b"", b"ERROR: directory not found"));
+    }
+
+    #[test]
+    fn a_restore_looks_where_the_send_put_the_game() {
+        let root = std::env::temp_dir().join(format!("orbit-restore-places-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let game = CloudGame {
+            id: "red-dead".into(),
+            title: "Red Dead Redemption 2".into(),
+            publisher: Some("Rockstar Games".into()),
+            dir: Some("C:/Users/A/Documents/Rockstar Games/Red Dead Redemption 2".into()),
+        };
+        let places = restore_places(&root, None, &game);
+        assert_eq!(places.first().map(String::as_str), Some("Rockstar Games/Red Dead Redemption 2"));
+        assert!(places.iter().any(|place| place == "Unknown/Red Dead Redemption 2"));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

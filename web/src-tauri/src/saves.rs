@@ -83,8 +83,60 @@ pub fn restore(
         return Err("There is no backup to restore.".into());
     };
     let dest = resolve(title, save_dir, hints)?;
-    copy_tree(&PathBuf::from(&latest.path), &dest, 0, true)?;
+    copy_tree(&PathBuf::from(&latest.path), &dest, 0, true, true)?;
     Ok(format!("Restored the copy into {}.", dest.display()))
+}
+
+/// Put a downloaded cloud copy back into the game's save folder.
+///
+/// The note stays out of the game. A file with the same name is replaced. Files
+/// the cloud copy does not have are left where the game wrote them.
+pub fn put_back(from: &Path, dest: &Path) -> Result<(), String> {
+    if !from.is_dir() {
+        return Err("There is no cloud copy to restore.".into());
+    }
+    if dest.as_os_str().is_empty() {
+        return Err("This game has no save folder to restore into.".into());
+    }
+    if dest.is_file() {
+        return Err(format!("{} is a file, not the save folder.", dest.display()));
+    }
+    if dest.starts_with(from) || from.starts_with(dest) {
+        return Err("That save folder is the copy itself.".into());
+    }
+    copy_tree(from, dest, 0, true, true)
+}
+
+/// Keep a downloaded cloud copy beside the other copies on this PC, note included.
+pub fn keep_downloaded(from: &Path, dest: &Path) -> Result<(), String> {
+    if !from.is_dir() {
+        return Err("There is no cloud copy to keep.".into());
+    }
+    if dest.starts_with(from) || from.starts_with(dest) {
+        return Err("The copy and the folder are the same place.".into());
+    }
+    if dest.exists() {
+        fs::remove_dir_all(dest).map_err(|e| format!("Could not replace {}: {e}", dest.display()))?;
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Could not create {}: {e}", parent.display()))?;
+    }
+    copy_tree(from, dest, 0, false, false)
+}
+
+/// Places a cloud copy of this game may already be using.
+pub fn backup_places(title: &str, publisher: Option<&str>, id: &str) -> Vec<String> {
+    let game = folder_name(title);
+    let mut places = Vec::new();
+    if let Some(publisher) = publisher.map(str::trim).filter(|name| !name.is_empty()) {
+        places.push(format!("{}/{}", folder_name(publisher), game));
+    }
+    places.push(format!("Unknown/{game}"));
+    let id = id.trim();
+    if !id.is_empty() {
+        places.push(safe_name(id));
+    }
+    places
 }
 
 pub fn list(
@@ -484,7 +536,7 @@ fn copy_folder(
     // The date lives in the note. Another folder named after the clock only
     // made the copy harder to find, and a new copy replaces the last one.
     clear_direct_copy(&dest)?;
-    copy_tree(from, &dest, 0, false)?;
+    copy_tree(from, &dest, 0, false, true)?;
     let note = note_text(&game, &studio, from, at);
     fs::write(dest.join("note.txt"), &note).map_err(|e| format!("Could not write the note: {e}"))?;
     Ok(SaveBackup {
@@ -740,7 +792,7 @@ fn generic_folder(name: &str) -> bool {
     )
 }
 
-fn copy_tree(from: &Path, to: &Path, depth: i32, skip_snapshots: bool) -> Result<(), String> {
+fn copy_tree(from: &Path, to: &Path, depth: i32, skip_snapshots: bool, skip_notes: bool) -> Result<(), String> {
     if depth > 16 {
         return Ok(());
     }
@@ -748,7 +800,7 @@ fn copy_tree(from: &Path, to: &Path, depth: i32, skip_snapshots: bool) -> Result
     for entry in fs::read_dir(from).map_err(|e| format!("Could not read {}: {e}", from.display()))? {
         let entry = entry.map_err(|e| format!("Could not read {}: {e}", from.display()))?;
         let file_name = entry.file_name();
-        if file_name == ".orbit-note" || file_name == "note.txt" {
+        if skip_notes && (file_name == ".orbit-note" || file_name == "note.txt") {
             continue;
         }
         let dest = to.join(entry.file_name());
@@ -766,7 +818,7 @@ fn copy_tree(from: &Path, to: &Path, depth: i32, skip_snapshots: bool) -> Result
             continue;
         }
         if kind.is_dir() {
-            copy_tree(&entry.path(), &dest, depth + 1, skip_snapshots)?;
+            copy_tree(&entry.path(), &dest, depth + 1, skip_snapshots, skip_notes)?;
         } else if kind.is_file() {
             fs::copy(entry.path(), &dest).map_err(|e| {
                 format!(
@@ -1254,6 +1306,31 @@ mod tests {
         // A PC whose zone happens to be UTC is still not labelled as if that
         // were the only clock the note knows.
         assert_eq!(utc_zone, "When: 1970-01-01 00:00:00");
+    }
+
+    #[test]
+    #[test]
+    fn a_cloud_restore_puts_saves_back_and_leaves_the_note_out() {
+        let root = std::env::temp_dir().join(format!("orbit-put-back-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let from = root.join("cloud");
+        let dest = root.join("game");
+        fs::create_dir_all(&from).unwrap();
+        fs::write(from.join("save.dat"), b"cloud").unwrap();
+        fs::write(from.join("note.txt"), b"note").unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("save.dat"), b"old").unwrap();
+        put_back(&from, &dest).unwrap();
+        assert_eq!(fs::read(dest.join("save.dat")).unwrap(), b"cloud");
+        assert!(!dest.join("note.txt").exists());
+        let kept = root.join("kept");
+        keep_downloaded(&from, &kept).unwrap();
+        assert_eq!(fs::read(kept.join("note.txt")).unwrap(), b"note");
+        assert_eq!(
+            backup_places("Red Dead Redemption 2", Some("Rockstar Games"), "red-dead")[0],
+            "Rockstar Games/Red Dead Redemption 2"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArchiveRestore, ChevronDown, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, Search } from 'lucide-react';
+import { ArchiveRestore, ChevronDown, CloudDownload, CloudUpload, Eye, EyeOff, FolderOpen, GripVertical, HardDriveDownload, List, Search } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { pickFolder } from '../services/desktop';
 import {
@@ -19,6 +19,8 @@ import {
   cloudLabel,
   cloudSkipOf,
   chosenClouds,
+  restoreCloudText,
+  restoreFromCloud,
   sendCloudAfterBackup,
   sendToClouds,
   type CloudAccount,
@@ -58,9 +60,11 @@ export function SavesView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [backingAll, setBackingAll] = useState(false);
   const [sendingCloud, setSendingCloud] = useState(false);
+  const [restoringCloud, setRestoringCloud] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; copies: SaveBackup[] | null } | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<Game | null>(null);
+  const [cloudRestore, setCloudRestore] = useState<{ games: Game[]; cloud: CloudAccount } | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [browsing, setBrowsing] = useState(false);
@@ -252,6 +256,37 @@ export function SavesView({
     }
   };
 
+  const restoreChosenFromCloud = async (cloud: CloudAccount, list: Game[]) => {
+    if (!isNative() || restoringCloud) return;
+    if (list.length === 0) {
+      say('No save folders found yet.');
+      return;
+    }
+    setRestoringCloud(true);
+    setMenuError(null);
+    try {
+      const note = await restoreFromCloud(
+        cloud,
+        settings.saves?.backupRoot,
+        list.map((game) => cloudGameOf(game, dirs[game.id])),
+      );
+      say(note);
+      setSavedTick((n) => n + 1);
+    } catch (e) {
+      say(`The cloud copy was not restored. ${String(e).replace(/^Error:\s*/, '')}`);
+    } finally {
+      setRestoringCloud(false);
+    }
+  };
+
+  const askCloudRestore = (cloud: CloudAccount, list: Game[]) => {
+    if (list.length === 0) {
+      say('No save folders found yet.');
+      return;
+    }
+    setCloudRestore({ games: list, cloud });
+  };
+
   const runGame = async (fn: () => Promise<unknown>, done: string) => {
     setMenuError(null);
     try {
@@ -327,6 +362,24 @@ export function SavesView({
           disabled: !isNative(),
           onSelect: () => setRestoreTarget(menuGame),
         },
+        ...(clouds.length > 1
+          ? [
+              { kind: 'label' as const, label: 'Restore from the cloud' },
+              ...clouds.map((cloud) => ({
+                label: cloudLabel(cloud, clouds),
+                icon: CloudDownload,
+                disabled: !isNative() || sendingCloud || restoringCloud,
+                onSelect: () => askCloudRestore(cloud, [menuGame]),
+              })),
+            ]
+          : clouds.length === 1
+            ? [{
+                label: 'Restore from the cloud',
+                icon: CloudDownload,
+                disabled: !isNative() || sendingCloud || restoringCloud,
+                onSelect: () => askCloudRestore(clouds[0], [menuGame]),
+              }]
+            : []),
         {
           label: 'Find save folder',
           icon: Search,
@@ -377,7 +430,7 @@ export function SavesView({
           {isNative() && listed.length > 0 && (
             <button
               type="button"
-              disabled={backingAll}
+              disabled={backingAll || restoringCloud}
               onClick={() => void backupAll()}
               className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-4 py-2 text-sm')}
             >
@@ -388,7 +441,7 @@ export function SavesView({
           {isNative() && clouds.length > 0 && (
             <button
               type="button"
-              disabled={sendingCloud}
+              disabled={sendingCloud || restoringCloud}
               onClick={() => void backupToCloud('chosen')}
               title="Backup games with a save folder, then send them to the ticked clouds."
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
@@ -396,6 +449,22 @@ export function SavesView({
               <CloudUpload className="size-4" />
               {sendingCloud ? 'Backing up…' : 'Backup to the cloud'}
             </button>
+          )}
+          {isNative() && clouds.length > 0 && (
+            <CloudActionButton
+              clouds={clouds}
+              busy={restoringCloud}
+              disabled={sendingCloud || backingAll}
+              icon={CloudDownload}
+              label="Restore from the cloud"
+              busyLabel="Restoring…"
+              onPick={(cloud) => {
+                if (cloud === 'all') return;
+                const skip = new Set(cloudSkipOf(settings.saves));
+                const chosen = games.filter((game) => !!dirs[game.id]?.trim() && !skip.has(game.id));
+                askCloudRestore(cloud, chosen);
+              }}
+            />
           )}
           <CloudPanel settings={settings} setSettings={setSettings} games={games} />
           {rows.length > 0 && (
@@ -549,6 +618,8 @@ export function SavesView({
                     onDir={(dir) => setDir(game.id, dir)}
                     clouds={clouds}
                     onCloud={(target) => sendGameToCloud(game, target)}
+                    onRestore={(cloud) => askCloudRestore(cloud, [game])}
+                    cloudBusy={sendingCloud || restoringCloud}
                     looked={looked.has(game.id)}
                   />
                 </div>
@@ -616,6 +687,20 @@ export function SavesView({
           }}
         />
       )}
+      {cloudRestore && (
+        <ConfirmDialog
+          title={restoreCloudText(cloudRestore.games.map((game) => game.title), cloudLabel(cloudRestore.cloud, clouds)).title}
+          description={restoreCloudText(cloudRestore.games.map((game) => game.title), cloudLabel(cloudRestore.cloud, clouds)).description}
+          confirmLabel="Restore"
+          confirmIcon={ArchiveRestore}
+          onCancel={() => setCloudRestore(null)}
+          onConfirm={() => {
+            const ask = cloudRestore;
+            setCloudRestore(null);
+            void restoreChosenFromCloud(ask.cloud, ask.games);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -660,6 +745,42 @@ function CloudSendButton({
   disabled: boolean;
   onSend: (target: CloudAccount | 'all') => void;
 }) {
+  return (
+    <CloudActionButton
+      clouds={clouds}
+      busy={busy}
+      disabled={disabled}
+      icon={CloudUpload}
+      label="To the cloud"
+      busyLabel="Sending…"
+      allowAll
+      compact
+      onPick={onSend}
+    />
+  );
+}
+
+function CloudActionButton({
+  clouds,
+  busy,
+  disabled,
+  icon: Icon,
+  label,
+  busyLabel,
+  allowAll = false,
+  compact = false,
+  onPick,
+}: {
+  clouds: CloudAccount[];
+  busy: boolean;
+  disabled: boolean;
+  icon: typeof CloudUpload;
+  label: string;
+  busyLabel: string;
+  allowAll?: boolean;
+  compact?: boolean;
+  onPick: (target: CloudAccount | 'all') => void;
+}) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -671,16 +792,20 @@ function CloudSendButton({
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
+  const className = compact
+    ? 'flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40'
+    : 'inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50';
+
   if (clouds.length <= 1) {
     return (
       <button
         type="button"
-        disabled={disabled || busy}
-        onClick={() => onSend(clouds[0] ?? 'all')}
-        className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
+        disabled={disabled || busy || clouds.length === 0}
+        onClick={() => onPick(clouds[0] ?? 'all')}
+        className={className}
       >
-        <CloudUpload className="size-3.5" />
-        To the cloud
+        <Icon className={compact ? 'size-3.5' : 'size-4'} />
+        {busy ? busyLabel : label}
       </button>
     );
   }
@@ -691,11 +816,11 @@ function CloudSendButton({
         type="button"
         disabled={disabled || busy}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-40"
+        className={className}
       >
-        <CloudUpload className="size-3.5" />
-        To the cloud
-        <ChevronDown className="size-3.5" />
+        <Icon className={compact ? 'size-3.5' : 'size-4'} />
+        {busy ? busyLabel : label}
+        <ChevronDown className={compact ? 'size-3.5' : 'size-4'} />
       </button>
       {open && (
         <div className="absolute left-0 z-30 mt-1 min-w-52 rounded-xl border border-line bg-panel p-1 shadow-xl">
@@ -706,22 +831,24 @@ function CloudSendButton({
               className="block w-full rounded-lg px-3 py-1.5 text-left text-xs text-fg hover:bg-accent/15"
               onClick={() => {
                 setOpen(false);
-                onSend(cloud);
+                onPick(cloud);
               }}
             >
               {cloudLabel(cloud, clouds)}
             </button>
           ))}
-          <button
-            type="button"
-            className="block w-full rounded-lg px-3 py-1.5 text-left text-xs font-semibold text-fg hover:bg-accent/15"
-            onClick={() => {
-              setOpen(false);
-              onSend('all');
-            }}
-          >
-            All clouds
-          </button>
+          {allowAll && (
+            <button
+              type="button"
+              className="block w-full rounded-lg px-3 py-1.5 text-left text-xs font-semibold text-fg hover:bg-accent/15"
+              onClick={() => {
+                setOpen(false);
+                onPick('all');
+              }}
+            >
+              All clouds
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -738,6 +865,8 @@ function SaveRow({
   onDir,
   clouds,
   onCloud,
+  onRestore,
+  cloudBusy,
   looked,
 }: {
   game: Game;
@@ -749,6 +878,8 @@ function SaveRow({
   onDir: (dir: string) => void;
   clouds: CloudAccount[];
   onCloud: (target: CloudAccount | 'all') => Promise<void>;
+  onRestore: (cloud: CloudAccount) => void;
+  cloudBusy: boolean;
   looked: boolean;
 }) {
   const [busy, setBusy] = useState(false);
@@ -827,7 +958,7 @@ function SaveRow({
         </button>
         <CloudSendButton
           clouds={clouds}
-          busy={busy}
+          busy={busy || cloudBusy}
           disabled={!isNative()}
           onSend={(target) => void run(
             () => onCloud(target),
@@ -835,13 +966,27 @@ function SaveRow({
           )}
         />
         <button
-          disabled={busy || !isNative()}
+          disabled={busy || cloudBusy || !isNative()}
           onClick={() => void run(() => restoreSave(game.id, game.title, dir || null, saveHintsOf(game), savePlaceOf(game, settings)), `Restored ${game.title}`)}
           className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-40"
         >
           <ArchiveRestore className="size-3.5" />
           Restore latest
         </button>
+        {clouds.length > 0 && (
+          <CloudActionButton
+            clouds={clouds}
+            busy={busy || cloudBusy}
+            disabled={!isNative()}
+            icon={CloudDownload}
+            label="From the cloud"
+            busyLabel="Restoring…"
+            compact
+            onPick={(target) => {
+              if (target !== 'all') onRestore(target);
+            }}
+          />
+        )}
         {!dir && (
           <button
             disabled={busy || !isNative()}

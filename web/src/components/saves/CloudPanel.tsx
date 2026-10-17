@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
-import { Cloud, CloudDownload, CloudUpload, ExternalLink, LoaderCircle } from 'lucide-react';
+import { ArchiveRestore, Cloud, CloudDownload, CloudUpload, ExternalLink, LoaderCircle } from 'lucide-react';
 import type { Game, Settings } from '../../types';
 import { openExternal } from '../../services/desktop';
 import { CheckboxBox } from '../ui/Checkbox';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Cover } from '../ui/Cover';
 import { ContextMenu, type MenuItem } from '../ui/ContextMenu';
 import { btnAccent } from '../ui/buttons';
@@ -18,6 +19,8 @@ import {
   cloudConnect,
   cloudCopy,
   cloudFetch,
+  restoreCloudText,
+  restoreFromCloud,
   cloudForget,
   cloudGameOf,
   cloudLabel,
@@ -641,6 +644,8 @@ export function CloudPanel({
   const [error, setError] = useState<string | null>(null);
   const [gameQuery, setGameQuery] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [restoreAsk, setRestoreAsk] = useState<{ account: CloudAccount; games: Game[] } | null>(null);
+  const [picking, setPicking] = useState(false);
   const gamesList = useRef<HTMLUListElement>(null);
   const orderIds = useRef<string[]>([]);
   orderIds.current = known.map((game) => game.id);
@@ -752,20 +757,43 @@ export function CloudPanel({
     }
   };
 
-  const sendOne = async (account: CloudAccount, up: boolean) => {
-    setBusy(up ? `send-${account.remote}` : `down-${account.remote}`);
+  const sendOne = async (account: CloudAccount) => {
+    setBusy(`send-${account.remote}`);
     setError(null);
     setNote(null);
     try {
-      if (!up) {
-        setNote(await cloudCopy(false, account.remote, account.own, settings.saves?.backupRoot, account.folder));
-        return;
-      }
       if (chosen.length === 0) {
         setError('Choose a game with a save folder.');
         return;
       }
       setNote(await cloudCopy(true, account.remote, account.own, settings.saves?.backupRoot, account.folder, chosen.map((game) => cloudGameOf(game, dirs[game.id]))));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const askRestore = (account: CloudAccount, gamesToRestore: Game[]) => {
+    if (gamesToRestore.length === 0) {
+      setError('Choose a game to restore.');
+      return;
+    }
+    setError(null);
+    setPicking(false);
+    setRestoreAsk({ account, games: gamesToRestore });
+  };
+
+  const restoreChosen = async (account: CloudAccount, gamesToRestore: Game[]) => {
+    setBusy(`down-${account.remote}`);
+    setError(null);
+    setNote(null);
+    try {
+      setNote(await restoreFromCloud(
+        account,
+        settings.saves?.backupRoot,
+        gamesToRestore.map((game) => cloudGameOf(game, dirs[game.id])),
+      ));
     } catch (e) {
       fail(e);
     } finally {
@@ -807,13 +835,30 @@ export function CloudPanel({
                 disabled: !isNative() || busy !== null,
                 onSelect: () => void backupTo(accounts, [menuGame]),
               },
+              { kind: 'label' as const, label: 'Restore from the cloud' },
+              ...accounts.map((cloud) => ({
+                label: cloudLabel(cloud, accounts),
+                icon: CloudDownload,
+                disabled: !isNative() || busy !== null,
+                onSelect: () => askRestore(cloud, [menuGame]),
+              })),
             ]
-          : [{
-              label: 'Sync to the cloud',
-              icon: CloudUpload,
-              disabled: !isNative() || busy !== null,
-              onSelect: () => void backupTo(accounts.slice(0, 1), [menuGame]),
-            }]),
+          : [
+              {
+                label: 'Sync to the cloud',
+                icon: CloudUpload,
+                disabled: !isNative() || busy !== null,
+                onSelect: () => void backupTo(accounts.slice(0, 1), [menuGame]),
+              },
+              ...(accounts.length === 1
+                ? [{
+                    label: 'Restore from the cloud',
+                    icon: CloudDownload,
+                    disabled: !isNative() || busy !== null,
+                    onSelect: () => askRestore(accounts[0], [menuGame]),
+                  }]
+                : []),
+            ]),
       ]
     : [];
 
@@ -823,7 +868,7 @@ export function CloudPanel({
         <div className="flex items-end justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">Games</h3>
-            <p className="text-[11px] text-muted">Drag a cover to rearrange it. Click one to include it. Right-click one to sync it.</p>
+            <p className="text-[11px] text-muted">Drag a cover to rearrange it. Click one to include it. Right-click one to sync it or restore it.</p>
           </div>
           {known.length > 0 && (
             <div className="flex gap-2">
@@ -917,15 +962,50 @@ export function CloudPanel({
           </div>
         </div>
         {accounts.length === 0 && <p className="text-xs text-muted">None yet.</p>}
-        <button
-          type="button"
-          disabled={!isNative() || ticked.length === 0 || chosen.length === 0 || busy !== null}
-          onClick={() => void backupTo(ticked)}
-          className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
-        >
-          {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-          {busy === 'up' ? 'Backing up…' : 'Backup'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!isNative() || ticked.length === 0 || chosen.length === 0 || busy !== null}
+            onClick={() => void backupTo(ticked)}
+            className={cn(btnAccent, 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50')}
+          >
+            {busy === 'up' ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+            {busy === 'up' ? 'Backing up…' : 'Backup'}
+          </button>
+          <button
+            type="button"
+            disabled={!isNative() || accounts.length === 0 || chosen.length === 0 || busy !== null}
+            title={chosen.length === 0 ? 'Choose a game to restore.' : 'Put the chosen games back into their save folders.'}
+            onClick={() => {
+              const sources = ticked.length > 0 ? ticked : accounts;
+              if (sources.length === 1) {
+                const cloud = sources[0];
+                if (cloud) askRestore(cloud, chosen);
+              } else {
+                setPicking((on) => !on);
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-fg hover:border-accent disabled:opacity-50"
+          >
+            {busy?.startsWith('down-') ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
+            {busy?.startsWith('down-') ? 'Restoring…' : restoreCount(chosen.length)}
+          </button>
+        </div>
+        {picking && (ticked.length > 1 || (ticked.length === 0 && accounts.length > 1)) && (
+          <div className="flex flex-wrap gap-2">
+            {(ticked.length > 0 ? ticked : accounts).map((cloud) => (
+              <button
+                key={cloud.remote}
+                type="button"
+                disabled={busy !== null}
+                onClick={() => askRestore(cloud, chosen)}
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+              >
+                {cloudLabel(cloud, accounts)}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="grid gap-2">
           {accounts.map((account) => (
             <CloudCard
@@ -936,7 +1016,9 @@ export function CloudPanel({
               busy={busy}
               onIncluded={(on) => setIncluded(account.remote, on)}
               onFolder={(folder) => setFolder(account.remote, folder)}
-              onSend={(up) => void sendOne(account, up)}
+              selected={chosen.length}
+              onSend={() => void sendOne(account)}
+              onRestore={() => askRestore(account, chosen)}
               onCopyFrom={(from) => void copyFrom(from, account)}
               fail={fail}
             />
@@ -977,8 +1059,28 @@ export function CloudPanel({
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} className="z-[70]" />,
         document.body,
       )}
+      {restoreAsk && (
+        <ConfirmDialog
+          title={restoreCloudText(restoreAsk.games.map((game) => game.title), cloudLabel(restoreAsk.account, accounts)).title}
+          description={restoreCloudText(restoreAsk.games.map((game) => game.title), cloudLabel(restoreAsk.account, accounts)).description}
+          confirmLabel="Restore"
+          confirmIcon={ArchiveRestore}
+          onCancel={() => setRestoreAsk(null)}
+          onConfirm={() => {
+            const ask = restoreAsk;
+            setRestoreAsk(null);
+            void restoreChosen(ask.account, ask.games);
+          }}
+        />
+      )}
     </>
   );
+}
+
+function restoreCount(count: number): string {
+  if (count <= 0) return 'Restore';
+  if (count === 1) return 'Restore 1 game';
+  return `Restore ${count} games`;
 }
 
 function CloudCard({
@@ -986,9 +1088,11 @@ function CloudCard({
   account,
   others,
   busy,
+  selected,
   onIncluded,
   onFolder,
   onSend,
+  onRestore,
   onCopyFrom,
   fail,
 }: {
@@ -996,9 +1100,11 @@ function CloudCard({
   account: CloudAccount;
   others: CloudAccount[];
   busy: string | null;
+  selected: number;
   onIncluded: (on: boolean) => void;
   onFolder: (folder: string | undefined) => void;
-  onSend: (up: boolean) => void;
+  onSend: () => void;
+  onRestore: () => void;
   onCopyFrom: (from: CloudAccount) => void;
   fail: (e: unknown) => void;
 }) {
@@ -1083,21 +1189,23 @@ function CloudCard({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={busy !== null}
-          onClick={() => onSend(true)}
+          disabled={busy !== null || selected === 0}
+          title={selected === 0 ? 'Choose a game first.' : undefined}
+          onClick={onSend}
           className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-accent disabled:opacity-50"
         >
           {busy === `send-${account.remote}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
-          Send copies
+          {selected === 1 ? 'Send 1 game' : selected > 1 ? `Send ${selected} games` : 'Send'}
         </button>
         <button
           type="button"
-          disabled={busy !== null}
-          onClick={() => onSend(false)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+          disabled={busy !== null || selected === 0}
+          title={selected === 0 ? 'Choose a game to restore.' : 'Put the chosen games back into their save folders.'}
+          onClick={onRestore}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-accent disabled:opacity-50"
         >
           {busy === `down-${account.remote}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudDownload className="size-3.5" />}
-          Copy to this PC
+          {busy === `down-${account.remote}` ? 'Restoring…' : restoreCount(selected)}
         </button>
         {others.length > 0 && (
           <button
