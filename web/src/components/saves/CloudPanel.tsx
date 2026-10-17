@@ -499,7 +499,7 @@ export function AddCloud({
         ))}
       </div>
       {(busy === 'drive' || busy === 'dropbox') && (
-        <p className="text-xs text-muted">The sign-in page is open in your browser. Closing that tab stops the wait, or press Cancel.</p>
+        <p className="text-xs text-muted">The sign-in page is a tab in your browser. Press Cancel if you close it.</p>
       )}
       {accountKind && (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -844,12 +844,13 @@ export function CloudPanel({
         {known.length === 0 ? (
           <p className="text-xs text-muted">None yet. Orbit looks for save folders on its own.</p>
         ) : (
-          <ul ref={gamesList} className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-5">
+          <ul ref={gamesList} className="grid max-h-80 grid-cols-3 gap-2 overflow-y-auto p-1 sm:grid-cols-4 md:grid-cols-5">
             {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
             {shown.map((game) => {
               const on = !skip.has(game.id);
+              const drop = over === game.id && dragging && dragging !== game.id;
               return (
-                <li key={game.id} className={cn(dragging === game.id && 'opacity-60', over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent rounded-2xl')}>
+                <li key={game.id} className={cn(dragging === game.id && 'opacity-60')}>
                   <button
                     type="button"
                     draggable={false}
@@ -866,11 +867,18 @@ export function CloudPanel({
                     className={cn(
                       'w-full cursor-grab rounded-2xl border p-1.5 text-left transition active:cursor-grabbing [&_img]:pointer-events-none',
                       on
-                        ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+                        ? 'border-accent bg-accent/15 text-fg'
                         : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
                     )}
                   >
-                    <Cover game={game} className="aspect-[2/3] w-full rounded-lg" />
+                    <span
+                      className={cn(
+                        'relative block overflow-hidden rounded-lg',
+                        drop && 'ring-2 ring-inset ring-accent',
+                      )}
+                    >
+                      <Cover game={game} className="aspect-[2/3] w-full [clip-path:inset(0_round_0.5rem)]" />
+                    </span>
                     <span className="mt-1 block truncate text-xs font-semibold">{game.title}</span>
                     <span className="mt-0.5 block break-all text-[10px] leading-snug text-muted line-clamp-2">{dirs[game.id]}</span>
                     <span className={cn('mt-0.5 block text-[10px]', on ? 'text-accent' : 'text-muted')}>

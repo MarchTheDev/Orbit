@@ -28,6 +28,8 @@ struct SignInWatch {
     profile: PathBuf,
     tracked: bool,
     seen: bool,
+    /// A tab was handed to the normal browser. A retry must not open another.
+    page: bool,
     started: Instant,
     rclone: Option<u32>,
 }
@@ -762,6 +764,7 @@ fn begin_sign_in() {
             profile: PathBuf::new(),
             tracked: false,
             seen: false,
+            page: false,
             started: Instant::now(),
             rclone: None,
         });
@@ -813,7 +816,24 @@ fn sign_in_stopped() -> bool {
 }
 
 fn sign_in_browser_opened() -> bool {
-    SIGN_IN.lock().ok().and_then(|guard| guard.as_ref().map(|sign| sign.tracked)).unwrap_or(false)
+    SIGN_IN
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|sign| sign.page || sign.tracked))
+        .unwrap_or(false)
+}
+
+/// The provider page was handed to the player's own browser, as a tab.
+///
+/// That tab is not a process Orbit started, so closing it cannot be seen from
+/// here. Cancel still stops the wait. Remembering the handoff is what keeps a
+/// later retry from opening the login a second time.
+pub fn remember_sign_in_page() {
+    if let Ok(mut guard) = SIGN_IN.lock() {
+        if let Some(sign) = guard.as_mut() {
+            sign.page = true;
+        }
+    }
 }
 
 /// The login window is gone, and it had actually appeared.
@@ -861,202 +881,12 @@ fn profile_in_use(dir: &Path) -> bool {
         .any(|name| dir.join(name).exists())
 }
 
-/// Open the provider page in the player's browser, as its own window.
-///
-/// The window is watched. Closing it is the same as Cancel: rclone is stopped
-/// and the box stops waiting. A local `/auth` address is never opened. That
-/// redirect is what asks for the login a second time.
-pub fn open_sign_in_browser(url: &str) -> bool {
-    if !may_open_sign_in(url) {
-        return false;
-    }
-    let Some(exe) = browser_executable() else {
-        return false;
-    };
-    let profile = std::env::temp_dir().join(format!("orbit-signin-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&profile);
-    if fs::create_dir_all(&profile).is_err() {
-        return false;
-    }
-    let mut command = process::command(&exe);
-    let name = exe.file_name().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
-    if name.contains("firefox") {
-        command.arg("-profile").arg(&profile);
-        command.arg("-no-remote");
-        command.arg("-new-instance");
-        command.arg(url);
-    } else {
-        command.arg(format!("--user-data-dir={}", profile.display()));
-        command.arg("--no-first-run");
-        command.arg("--no-default-browser-check");
-        command.arg("--disable-sync");
-        command.arg("--new-window");
-        command.arg(url);
-    }
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(_) => {
-            let _ = fs::remove_dir_all(&profile);
-            return false;
-        }
-    };
-    let mut guard = match SIGN_IN.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(sign) = guard.as_mut() {
-        sign.browser = Some(child);
-        sign.profile = profile;
-        sign.tracked = true;
-        sign.seen = false;
-        sign.started = Instant::now();
-        return true;
-    }
-    // Nothing is waiting on this window. Kill it, or the fallback opener is a
-    // second tab.
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = fs::remove_dir_all(&profile);
-    false
-}
-
-fn may_open_sign_in(url: &str) -> bool {
+/// A local `/auth` address is never opened. That redirect asks for the login again.
+pub fn may_open_sign_in(url: &str) -> bool {
     let url = url.trim();
     !url.is_empty()
         && !is_local_auth(url)
         && (url.starts_with("https://") || url.starts_with("http://"))
-}
-
-fn browser_executable() -> Option<PathBuf> {
-    if let Some(path) = registered_browser() {
-        if is_browser_family(&path) && path.is_file() {
-            return Some(path);
-        }
-    }
-    known_browsers().into_iter().find(|path| path.is_file())
-}
-
-fn is_browser_family(path: &Path) -> bool {
-    let name = path.file_name().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
-    name.contains("chrome")
-        || name.contains("msedge")
-        || name.contains("edge")
-        || name.contains("firefox")
-        || name.contains("brave")
-        || name.contains("chromium")
-}
-
-fn known_browsers() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    #[cfg(windows)]
-    {
-        for key in ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"] {
-            let Some(root) = std::env::var_os(key) else { continue };
-            let root = PathBuf::from(root);
-            found.push(root.join("Google").join("Chrome").join("Application").join("chrome.exe"));
-            found.push(root.join("Microsoft").join("Edge").join("Application").join("msedge.exe"));
-            found.push(root.join("Mozilla Firefox").join("firefox.exe"));
-            found.push(root.join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"));
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        for name in [
-            "google-chrome",
-            "google-chrome-stable",
-            "chromium",
-            "chromium-browser",
-            "microsoft-edge",
-            "brave-browser",
-            "firefox",
-        ] {
-            if let Some(path) = which(name) {
-                found.push(path);
-            }
-        }
-    }
-    found
-}
-
-#[cfg(windows)]
-fn registered_browser() -> Option<PathBuf> {
-    let output = process::command("reg")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
-            "/v",
-            "ProgId",
-        ])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let prog = text.lines().find_map(|line| {
-        let line = line.trim();
-        if !line.to_ascii_lowercase().starts_with("progid") {
-            return None;
-        }
-        line.split_whitespace().last().map(|item| item.to_string())
-    })?;
-    for root in [
-        format!(r"HKCU\Software\Classes\{prog}\shell\open\command"),
-        format!(r"HKLM\Software\Classes\{prog}\shell\open\command"),
-    ] {
-        let Ok(output) = process::command("reg").args(["query", &root, "/ve"]).output() else {
-            continue;
-        };
-        let text = String::from_utf8_lossy(&output.stdout);
-        if let Some(path) = command_exe(&text) {
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(not(windows))]
-fn registered_browser() -> Option<PathBuf> {
-    let output = process::command("xdg-settings").args(["get", "default-web-browser"]).output().ok()?;
-    let desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if desktop.is_empty() || desktop.contains(' ') {
-        return None;
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    for dir in [
-        home.join(".local/share/applications"),
-        PathBuf::from("/usr/share/applications"),
-        PathBuf::from("/usr/local/share/applications"),
-    ] {
-        let path = dir.join(&desktop);
-        let Ok(text) = fs::read_to_string(&path) else { continue };
-        for line in text.lines() {
-            let Some(rest) = line.strip_prefix("Exec=") else { continue };
-            let token = rest.split_whitespace().next().unwrap_or("");
-            if token.is_empty() || token.starts_with('%') {
-                continue;
-            }
-            let exe = PathBuf::from(token);
-            if exe.is_file() {
-                return Some(exe);
-            }
-            if let Some(found) = which(token) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-fn command_exe(text: &str) -> Option<PathBuf> {
-    let start = text.find('"')?;
-    let end = text[start + 1..].find('"')? + start + 1;
-    let path = PathBuf::from(&text[start + 1..end]);
-    if path.extension().is_some() || path.is_file() {
-        Some(path)
-    } else {
-        None
-    }
 }
 
 fn recover_authorize(
@@ -1122,7 +952,7 @@ fn authorize_once(
     // second tab that asks for the account once more.
     //
     // The flag has to come before the provider, or rclone opens that page
-    // itself. Orbit opens the provider page, once, and watches that window.
+    // itself. Orbit opens the provider page once, as a tab in the normal browser.
     let mut command = rclone(bin, Some(config));
     #[cfg(unix)]
     {
@@ -2390,7 +2220,7 @@ fn strip_secret(text: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, command_exe, is_local_auth, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
+    use super::{allowed_archive, clean_folder, is_local_auth, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -2467,15 +2297,6 @@ mod tests {
         assert!(!may_open_sign_in("http://localhost:53682/auth?state=abc"));
         assert!(may_open_sign_in("https://accounts.google.com/o/oauth2/auth?state=abc"));
         assert!(!may_open_sign_in(""));
-    }
-
-    #[test]
-    fn a_browser_command_is_the_program_not_the_argument() {
-        let text = r#"    (Default)    REG_SZ    "C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1"#;
-        assert_eq!(
-            command_exe(text).as_deref(),
-            Some(std::path::Path::new(r"C:\Program Files\Google\Chrome\Application\chrome.exe"))
-        );
     }
 
     #[test]

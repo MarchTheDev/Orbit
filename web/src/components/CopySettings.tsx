@@ -50,7 +50,8 @@ export function CopySettings({
     setBusy(true);
     try {
       const info = await exportCopy(path, settings, journal, sessions);
-      const parts = ['Saved. Settings are in the file.'];
+      const clouds = info.clouds ?? 0;
+      const parts = [clouds > 0 ? `Saved. Settings are in the file, including ${count(clouds, 'signed-in cloud')}.` : 'Saved. Settings are in the file.'];
       if (journal) parts.push(`${count(info.playthroughs, 'playthrough')} and ${count(info.logs, 'journal entry', 'journal entries')}.`);
       else parts.push('Journal was left out.');
       if (sessions) parts.push(`${count(info.sessions, 'session')}.`);
@@ -91,7 +92,7 @@ export function CopySettings({
     }
     if (bringSettings) {
       const ok = await ask(
-        'Replace the settings on this computer with the ones in the file? Themes, folders, and saved keys are overwritten. The library of games is not.',
+        'Replace the settings on this computer with the ones in the file? Themes, folders, saved keys, and signed-in clouds are overwritten. The library of games is not.',
         { title: 'Orbit', kind: 'warning' },
       );
       if (!ok) return;
@@ -100,7 +101,7 @@ export function CopySettings({
     setError(null);
     setNotice(null);
     try {
-      const result = await importCopy(preview.path, bringJournal, bringSessions);
+      const result = await importCopy(preview.path, bringJournal, bringSessions, bringSettings);
       if (bringSettings && result.settings) {
         const imported = result.settings as Partial<Settings>;
         setSettings(imported);
@@ -127,7 +128,7 @@ export function CopySettings({
   return (
     <div className="space-y-4">
       <div className="grid gap-2 sm:grid-cols-3">
-        <Piece title="Settings" detail="Always in the file" on locked />
+        <Piece title="Settings" detail="Always in the file, with signed-in clouds" on locked />
         <Piece
           title="Journal"
           detail={journal ? 'In the file' : 'Click to include'}
@@ -144,7 +145,7 @@ export function CopySettings({
         />
       </div>
       <p className="text-xs leading-relaxed text-muted">
-        A lit box goes into the file. Games, and the games' save files, do not. Settings includes keys, so keep the file somewhere you trust.
+        A lit box goes into the file. Games, and the games' save files, do not. Settings includes keys and signed-in clouds, so keep the file somewhere you trust.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -280,7 +281,12 @@ function count(n: number, one: string, many = `${one}s`): string {
 }
 
 function describePreview(file: CopyPreview): string {
-  const settingsLine = file.hasSettings ? 'Settings are in this file.' : 'Settings are not in this file.';
+  const clouds = file.clouds ?? 0;
+  const settingsLine = file.hasSettings
+    ? clouds > 0
+      ? `Settings are in this file, with ${count(clouds, 'signed-in cloud')}.`
+      : 'Settings are in this file.'
+    : 'Settings are not in this file.';
   const when = file.exportedAt ? ` Saved ${file.exportedAt.slice(0, 10)}.` : '';
   const newer = file.version > 1 ? ' This copy is from a newer Orbit. What this version understands can still come in.' : '';
   return `${settingsLine} ${count(file.playthroughs, 'playthrough')}, ${count(file.logs, 'journal entry', 'journal entries')}, ${count(file.sessions, 'session')}.${when}${newer}`;
@@ -289,7 +295,7 @@ function describePreview(file: CopyPreview): string {
 function describe(result: CopyResult, settings: boolean): string {
   const parts: string[] = [];
   if (settings && result.settings) {
-    parts.push('Settings on this computer were replaced.');
+    parts.push(result.cloudsRestored ? 'Settings on this computer were replaced, including signed-in clouds.' : 'Settings on this computer were replaced.');
     const file = (result.settings as { sound?: { file?: string | null } }).sound?.file;
     if (file) parts.push('A music file from another computer plays only if that file is on this one too. Otherwise the default chord is used.');
   }

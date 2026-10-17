@@ -1363,7 +1363,8 @@ fn preview_copy(path: String) -> Result<transfer::CopyPreview, String> {
     transfer::preview(&path)
 }
 
-/// Write a copy. Settings always. Journal and sessions only when asked.
+/// Write a copy. Settings always, including signed-in clouds. Journal and
+/// sessions only when asked.
 #[tauri::command]
 fn export_copy(
     orbit: State<'_, Orbit>,
@@ -1372,19 +1373,21 @@ fn export_copy(
     journal: bool,
     sessions: bool,
 ) -> Result<transfer::ExportInfo, String> {
-    transfer::export_file(&orbit.db, &path, settings, journal, sessions)
+    transfer::export_file(&orbit.db, orbit.store.root(), &path, settings, journal, sessions)
 }
 
 /// Bring a copy in. Settings are applied by the caller after a confirm, so
-/// this command never replaces them on its own.
+/// this command never replaces them on its own. Cloud sign-in is written only
+/// when the caller is bringing settings in, so the list and the login stay together.
 #[tauri::command]
 fn import_copy(
     orbit: State<'_, Orbit>,
     path: String,
     journal: bool,
     sessions: bool,
+    clouds: bool,
 ) -> Result<transfer::CopyResult, String> {
-    transfer::import_file(&orbit.db, &path, journal, sessions)
+    transfer::import_file(&orbit.db, orbit.store.root(), &path, journal, sessions, clouds)
 }
 
 /// Copy a picked music file into Orbit's own folder and return that path.
@@ -1459,11 +1462,14 @@ async fn cloud_connect(
             &code,
             &mailbox,
             &|link| {
-                // One opener. A second tab spends the sign-in and asks for it again.
-                // The watched window is first. The system opener is only the fallback,
-                // and only when that window was not started.
-                let opened = cloud::open_sign_in_browser(link)
-                    || app.opener().open_url(link, None::<&str>).is_ok();
+                // One opener, and it is the normal browser: a tab, not a separate
+                // window. A second open spends the sign-in and asks for it again.
+                let opened = if cloud::may_open_sign_in(link) {
+                    cloud::remember_sign_in_page();
+                    app.opener().open_url(link, None::<&str>).is_ok()
+                } else {
+                    false
+                };
                 let _ = app.emit("cloud-auth", serde_json::json!({ "url": link, "opened": opened }));
             },
             &|text| {

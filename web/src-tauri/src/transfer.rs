@@ -1,7 +1,8 @@
 //! A copy of Orbit the player can keep.
 //!
-//! Settings always go in the file. Journal and sessions go in only when asked,
-//! and they come back only when asked. The library of games is not in the file:
+//! Settings always go in the file, and so does the rclone sign-in for clouds
+//! already connected. Journal and sessions go in only when asked, and they come
+//! back only when asked. The library of games is not in the file:
 //! a row is matched to a game already here, by id and then by title, and a row
 //! for a game that is not here is left out.
 
@@ -29,6 +30,8 @@ pub struct CopyPreview {
     pub playthroughs: i64,
     pub logs: i64,
     pub sessions: i64,
+    /// Signed-in clouds in the file. The tokens themselves are not in this summary.
+    pub clouds: i64,
 }
 
 #[derive(Serialize)]
@@ -37,6 +40,7 @@ pub struct ExportInfo {
     pub playthroughs: i64,
     pub logs: i64,
     pub sessions: i64,
+    pub clouds: i64,
 }
 
 #[derive(Clone, Serialize)]
@@ -60,6 +64,8 @@ pub struct CopyResult {
     pub unmatched_count: i64,
     /// Current-playthrough notes that changed, so the open editor can catch up.
     pub notes_updated: Vec<NoteUpdate>,
+    /// True when the file's cloud sign-in was written into Orbit's rclone config.
+    pub clouds_restored: bool,
 }
 
 pub fn preview(path: &str) -> Result<CopyPreview, String> {
@@ -67,7 +73,14 @@ pub fn preview(path: &str) -> Result<CopyPreview, String> {
     Ok(summarise(&value))
 }
 
-pub fn export_file(db: &Db, path: &str, settings: Value, journal: bool, sessions: bool) -> Result<ExportInfo, String> {
+pub fn export_file(
+    db: &Db,
+    data_dir: &Path,
+    path: &str,
+    settings: Value,
+    journal: bool,
+    sessions: bool,
+) -> Result<ExportInfo, String> {
     let settings = if settings.is_object() { settings } else { json!({}) };
     let mut body = json!({
         "kind": KIND,
@@ -75,7 +88,12 @@ pub fn export_file(db: &Db, path: &str, settings: Value, journal: bool, sessions
         "exportedAt": db::iso8601(db::now()),
         "settings": settings,
     });
-    let mut info = ExportInfo { playthroughs: 0, logs: 0, sessions: 0 };
+    let rclone = read_rclone(data_dir)?;
+    let clouds = rclone.as_deref().map(cloud_sections).unwrap_or(0);
+    if let Some(text) = rclone {
+        body["rclone"] = json!(text);
+    }
+    let mut info = ExportInfo { playthroughs: 0, logs: 0, sessions: 0, clouds };
     if journal {
         let (playthroughs, logs) = export_journal(db)?;
         info.playthroughs = playthroughs.len() as i64;
@@ -91,7 +109,14 @@ pub fn export_file(db: &Db, path: &str, settings: Value, journal: bool, sessions
     Ok(info)
 }
 
-pub fn import_file(db: &Db, path: &str, journal: bool, sessions: bool) -> Result<CopyResult, String> {
+pub fn import_file(
+    db: &Db,
+    data_dir: &Path,
+    path: &str,
+    journal: bool,
+    sessions: bool,
+    clouds: bool,
+) -> Result<CopyResult, String> {
     let value = read_copy(path)?;
     let mut result = CopyResult {
         settings_applied: false,
@@ -104,6 +129,7 @@ pub fn import_file(db: &Db, path: &str, journal: bool, sessions: bool) -> Result
         unmatched: Vec::new(),
         unmatched_count: 0,
         notes_updated: Vec::new(),
+        clouds_restored: false,
     };
     let mut unmatched = BTreeSet::new();
     if journal {
@@ -114,6 +140,14 @@ pub fn import_file(db: &Db, path: &str, journal: bool, sessions: bool) -> Result
     }
     result.unmatched_count = unmatched.len() as i64;
     result.unmatched = unmatched.into_iter().take(12).collect();
+    // Clouds travel with settings. The list is in settings; the sign-in is the
+    // rclone config. Write it last, and only when settings are coming in, so a
+    // failed journal import does not replace the sign-in on its own.
+    if clouds {
+        if let Some(text) = value.get("rclone").and_then(|v| v.as_str()) {
+            result.clouds_restored = restore_rclone(data_dir, text)?;
+        }
+    }
     Ok(result)
 }
 
@@ -173,7 +207,46 @@ fn summarise(value: &Value) -> CopyPreview {
         playthroughs,
         logs,
         sessions,
+        clouds: value.get("rclone").and_then(|v| v.as_str()).map(cloud_sections).unwrap_or(0),
     }
+}
+
+/// Orbit's own rclone config, not the one in the player's home folder.
+fn read_rclone(data_dir: &Path) -> Result<Option<String>, String> {
+    let path = data_dir.join("rclone.conf");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&path).map_err(|e| format!("Could not read the cloud sign-in: {e}"))?;
+    if text.trim().is_empty() { Ok(None) } else { Ok(Some(text)) }
+}
+
+fn cloud_sections(text: &str) -> i64 {
+    text.lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.starts_with('[') && line.ends_with(']') && line.len() > 2
+        })
+        .count() as i64
+}
+
+fn restore_rclone(data_dir: &Path, text: &str) -> Result<bool, String> {
+    if text.len() > 1_000_000 {
+        return Err("That cloud sign-in is too large to bring in.".into());
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() || !trimmed.contains('[') {
+        return Ok(false);
+    }
+    fs::create_dir_all(data_dir).map_err(|e| format!("Could not keep the cloud sign-in: {e}"))?;
+    let path = data_dir.join("rclone.conf");
+    fs::write(&path, text).map_err(|e| format!("Could not keep the cloud sign-in: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(true)
 }
 
 fn read_copy(path: &str) -> Result<Value, String> {
@@ -611,7 +684,15 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::match_game;
+    use super::{cloud_sections, match_game};
+
+    #[test]
+    fn a_cloud_sign_in_is_counted_by_its_sections() {
+        let text = "[orbit-abc]\ntype = drive\ntoken = {}\n\n[orbit-def]\ntype = dropbox\n";
+        assert_eq!(cloud_sections(text), 2);
+        assert_eq!(cloud_sections("type = drive\n"), 0);
+        assert_eq!(cloud_sections(""), 0);
+    }
 
     #[test]
     fn a_copy_matches_id_before_title() {

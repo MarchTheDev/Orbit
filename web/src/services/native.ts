@@ -732,12 +732,14 @@ export interface CopyPreview {
   playthroughs: number;
   logs: number;
   sessions: number;
+  clouds?: number;
 }
 
 export interface ExportInfo {
   playthroughs: number;
   logs: number;
   sessions: number;
+  clouds?: number;
 }
 
 export interface CopyResult {
@@ -751,6 +753,7 @@ export interface CopyResult {
   unmatched: string[];
   unmatchedCount: number;
   notesUpdated: { gameId: string; notes: string }[];
+  cloudsRestored?: boolean;
 }
 
 export function previewCopy(path: string): Promise<CopyPreview> {
@@ -765,8 +768,8 @@ export function exportCopy(path: string, settings: unknown, journal: boolean, se
   });
 }
 
-export function importCopy(path: string, journal: boolean, sessions: boolean): Promise<CopyResult> {
-  return call('import_copy', { path, journal, sessions }, async () => {
+export function importCopy(path: string, journal: boolean, sessions: boolean, clouds: boolean): Promise<CopyResult> {
+  return call('import_copy', { path, journal, sessions, clouds }, async () => {
     throw new Error('Saving or bringing in a file needs the desktop app.');
   });
 }
