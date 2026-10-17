@@ -1310,8 +1310,6 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
     orbit.store.load_settings()
 }
 
-/// Save the settings to disk.
-#[tauri::command]
 fn cloud_blocks_quit() -> bool {
     CLOUD_BUSY.load(Ordering::SeqCst) && !FORCE_QUIT.load(Ordering::SeqCst)
 }
@@ -1352,6 +1350,8 @@ fn cloud_quit(app: tauri::AppHandle) {
     quit_now(&app);
 }
 
+/// Save the settings to disk.
+#[tauri::command]
 fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), String> {
     if let Ok(mut policy) = orbit.policy.lock() {
         *policy = policy_from_settings(Some(&settings));

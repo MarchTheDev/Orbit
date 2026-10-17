@@ -2644,9 +2644,10 @@ fn strip_secret(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, is_local_auth, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, sign_in_failure, token_from, useful_detail};
+    use super::{allowed_archive, clean_folder, copy_error, is_drive_quota, is_local_auth, is_missing_remote, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, restore_places, sign_in_failure, token_from, useful_detail, CloudGame};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
