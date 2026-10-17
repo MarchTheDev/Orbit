@@ -766,8 +766,9 @@ impl WindowsWriter {
             MFStartup(0x0002_0070, 0).map_err(|error| format!("The video encoder could not start: {error}"))?;
         }
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        // `Param` is implemented for `Option<&T>`, not `Option<T>`.
         let writer = unsafe {
-            MFCreateSinkWriterFromURL(PCWSTR(wide.as_ptr()), None::<IMFByteStream>, None::<IMFAttributes>)
+            MFCreateSinkWriterFromURL(PCWSTR(wide.as_ptr()), None::<&IMFByteStream>, None::<&IMFAttributes>)
         }
         .map_err(mf_fail)?;
         let bitrate = ((width as u64).saturating_mul(height as u64).saturating_mul(fps as u64) / 8)
@@ -786,7 +787,7 @@ impl WindowsWriter {
             in_type
                 .SetUINT32(&MF_MT_SAMPLE_SIZE, width.saturating_mul(height).saturating_mul(4))
                 .map_err(mf_fail)?;
-            writer.SetInputMediaType(stream, &in_type, None::<IMFAttributes>).map_err(mf_fail)?;
+            writer.SetInputMediaType(stream, &in_type, None::<&IMFAttributes>).map_err(mf_fail)?;
             writer.BeginWriting().map_err(mf_fail)?;
             stream
         };
