@@ -42,12 +42,15 @@ import {
   overlayOpenKind,
   overlayFps,
   overlayQuality,
+  clampOverlaySeconds,
+  overlayLengths,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
   type DriveInfo,
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
+import { playShutter } from '../services/shutter';
 import { CopySettings } from './CopySettings';
 import { AppMixer } from './AppMixer';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
@@ -307,10 +310,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Window when a game closes', section: 'orbit-playing', keywords: 'show quit restore session' },
   { label: 'Close button', section: 'orbit-playing', keywords: 'quit tray hide close button exit' },
   { label: 'Overlay', section: 'orbit-overlay', keywords: 'overlay alt x start select screenshot recording replay hotkey' },
-  { label: 'Replay length', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 seconds custom clip' },
-  { label: 'ffmpeg', section: 'orbit-overlay', keywords: 'overlay ffmpeg record screenshot path clips' },
+  { label: 'Replay lengths', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 90 120 seconds custom clip lengths' },
   { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
-  { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter click sound picture saved' },
+  { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter chime sound picture saved volume' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -327,17 +329,12 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
-  { label: 'App volumes', section: 'orbit-sound', keywords: 'mixer volume apps speakers mute quieter louder' },
+  { label: 'Audio', section: 'orbit-sound', keywords: 'mixer volume audio apps speakers mute quieter louder' },
   { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
-
-function clampOverlaySeconds(value: number | undefined): number {
-  if (value == null || !Number.isFinite(value)) return 30;
-  return Math.min(300, Math.max(5, Math.round(value)));
-}
 
 function OverlaySettings({
   settings,
@@ -352,13 +349,14 @@ function OverlaySettings({
   const enabled = overlay?.enabled !== false;
   const replay = overlay?.replay !== false;
   const seconds = clampOverlaySeconds(overlay?.seconds);
+  const lengths = overlayLengths(overlay?.lengths);
+  const extras = (overlay?.lengths ?? []).map((item) => clampOverlaySeconds(item)).filter((item) => item !== 30 && item !== 45 && item !== 60);
   const quality = overlayQuality(overlay?.quality);
   const fps = overlayFps(overlay?.fps);
-  const [custom, setCustom] = useState(String(seconds));
-  const [ffmpegError, setFfmpegError] = useState<string | null>(null);
+  const shutterOn = overlay?.shutter !== false;
+  const shutterVolume = overlay?.shutterVolume ?? 40;
+  const [draft, setDraft] = useState('90');
   const [folderNote, setFolderNote] = useState<string | null>(null);
-
-  useEffect(() => setCustom(String(seconds)), [seconds]);
 
   const setOverlay = (patch: Partial<NonNullable<Settings['overlay']>>) => {
     setSettings({
@@ -366,20 +364,26 @@ function OverlaySettings({
         enabled,
         replay,
         seconds,
+        lengths: overlay?.lengths ?? [],
         quality,
         fps,
-        shutter: overlay?.shutter !== false,
+        shutter: shutterOn,
+        shutterVolume,
         ffmpeg: overlay?.ffmpeg ?? '',
+        layout: overlay?.layout,
         ...patch,
       },
     });
   };
 
-  const chooseFfmpeg = async () => {
-    setFfmpegError(null);
-    const picked = await pickFile('Choose ffmpeg', ['exe'], overlay?.ffmpeg || undefined);
-    if (!picked) return;
-    setOverlay({ ffmpeg: picked });
+  const addLength = () => {
+    const next = clampOverlaySeconds(Number(draft));
+    if (!Number.isFinite(Number(draft))) return;
+    if (lengths.includes(next) && (next === 30 || next === 45 || next === 60 || extras.includes(next))) {
+      setOverlay({ seconds: next });
+      return;
+    }
+    setOverlay({ lengths: [...extras, next].sort((a, b) => a - b), seconds: next });
   };
 
   const sep = where?.includes('\\') ? '\\' : '/';
@@ -404,46 +408,59 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="This is what the 30, 45, and 60 second buttons save. It stays in memory while the game is running, so it does not fill the disk. Nothing is written until you save it."
+        hint="This stays in memory while the game is running, so it does not fill the disk. The overlay buttons choose how much of it to save. Nothing is written until you save it."
       />
       <div className="space-y-1.5">
-        <p className="text-sm font-medium">Replay length</p>
+        <p className="text-sm font-medium">Replay lengths</p>
         <div className="flex flex-wrap gap-2">
-          {[30, 45, 60].map((length) => (
-            <button
-              key={length}
-              type="button"
-              onClick={() => setOverlay({ seconds: length })}
-              className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs',
-                seconds === length ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
-              )}
-            >
-              {length} seconds
-            </button>
-          ))}
+          {lengths.map((length) => {
+            const extra = length !== 30 && length !== 45 && length !== 60;
+            return (
+              <span key={length} className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setOverlay({ seconds: length })}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs',
+                    seconds === length ? 'border-accent bg-accent/15 text-fg' : 'border-line bg-panel2 text-muted hover:border-accent',
+                  )}
+                >
+                  {length} seconds
+                </button>
+                {extra && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${length} seconds`}
+                    onClick={() => setOverlay({
+                      lengths: extras.filter((item) => item !== length),
+                      seconds: seconds === length ? 30 : seconds,
+                    })}
+                    className="grid size-7 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </span>
+            );
+          })}
         </div>
-        <label className="block text-xs text-muted" htmlFor="overlay-seconds">
-          Custom length
-        </label>
-        <input
-          id="overlay-seconds"
-          type="number"
-          min={5}
-          max={300}
-          value={custom}
-          onChange={(event) => setCustom(event.target.value)}
-          onBlur={() => {
-            const next = Number(custom);
-            if (!Number.isFinite(next)) {
-              setCustom(String(seconds));
-              return;
-            }
-            setOverlay({ seconds: clampOverlaySeconds(next) });
-          }}
-          className={cn(inputCls, 'max-w-[8rem]')}
-        />
-        <p className="text-xs leading-relaxed text-muted">From 5 seconds to 5 minutes. The 30, 45, and 60 second buttons stay available.</p>
+        <div className="flex items-center gap-2 pt-1">
+          <label className="text-xs text-muted" htmlFor="overlay-length">Add a length</label>
+          <input
+            id="overlay-length"
+            type="number"
+            min={5}
+            max={300}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') addLength();
+            }}
+            className={cn(inputCls, 'max-w-[6rem]')}
+          />
+          <button type="button" onClick={addLength} className={btnBrowse}>Add</button>
+        </div>
+        <p className="text-xs leading-relaxed text-muted">30, 45, and 60 stay. Add others, such as 90 or 120, and they show up in the overlay too. The highlighted one is selected until you pick another there. From 5 seconds to 5 minutes.</p>
       </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Quality</p>
@@ -488,31 +505,36 @@ function OverlaySettings({
         </p>
       </div>
       <Checkbox
-        checked={overlay?.shutter !== false}
+        checked={shutterOn}
         onChange={(on) => setOverlay({ shutter: on })}
-        label="Play a short sound when a picture is saved"
-        hint="A click in the overlay. Recordings stay quiet."
+        label="Play a sound when a picture is saved"
+        hint="A short chime, the same kind of tone as the library. Recordings stay quiet."
       />
-      {isNative() && (
-        <div className="space-y-1.5">
-          <p className="text-sm font-medium">ffmpeg</p>
-          <div className="flex gap-2">
-            <input
-              value={overlay?.ffmpeg ?? ''}
-              onChange={(event) => setOverlay({ ffmpeg: event.target.value })}
-              placeholder="Leave empty to use ffmpeg on the system path"
-              className={inputCls}
-            />
-            <button type="button" onClick={() => void chooseFfmpeg()} className={btnBrowse}>
-              Browse
-            </button>
-          </div>
-          {ffmpegError && <p className="text-xs text-muted">{ffmpegError}</p>}
-          <p className="text-xs leading-relaxed text-muted">
-            Optional. Only used if the built-in recorder cannot capture this desktop. Orbit does not download it.
-          </p>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium" htmlFor="shutter-volume">Screenshot sound</label>
+          <button
+            type="button"
+            disabled={!shutterOn}
+            onClick={() => playShutter(shutterVolume)}
+            className="text-xs text-muted hover:text-fg disabled:opacity-40"
+          >
+            Preview
+          </button>
         </div>
-      )}
+        <input
+          id="shutter-volume"
+          type="range"
+          min={0}
+          max={100}
+          disabled={!shutterOn}
+          value={shutterVolume}
+          aria-label="Screenshot sound volume"
+          onChange={(event) => setOverlay({ shutterVolume: Number(event.target.value) })}
+          className="w-full max-w-xs accent-[var(--c-accent)] disabled:opacity-40"
+        />
+        <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
+      </div>
       {captureFolders.map((folder) => (
         <div key={folder.kind} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">
           <span className="min-w-0">
@@ -1057,7 +1079,7 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game, like a capture overlay. Alt+X opens it, or Start and Select together. Recording is built in, so ffmpeg is not required. Sound is not included yet."
+        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Game sound is not recorded yet."
       >
         <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>
@@ -1289,9 +1311,9 @@ export function SettingsView({
             hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
           />
         </Group>
-        <SubHead>Apps</SubHead>
+        <SubHead>Audio</SubHead>
         <p className="text-xs leading-relaxed text-muted">
-          The speakers, then each program that is playing sound. The same list as the volume mixer.
+          The speakers, then each program that is playing sound. The same list as the volume mixer. The overlay shows three of these, and More for the rest.
         </p>
         <AppMixer />
       </Section>

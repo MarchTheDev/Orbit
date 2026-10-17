@@ -1200,11 +1200,27 @@ export interface OverlayStatus {
   playing: boolean;
   ffmpeg: boolean;
   seconds: number;
+  lengths?: number[];
   quality?: string;
   fps?: number;
   game: string;
   folder: string;
   note: string;
+}
+
+export function clampOverlaySeconds(value: number | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 30;
+  return Math.min(300, Math.max(5, Math.round(value)));
+}
+
+/** 30, 45, and 60, plus any lengths the player added. */
+export function overlayLengths(extra?: number[]): number[] {
+  const all = new Set([30, 45, 60]);
+  for (const length of extra ?? []) {
+    if (!Number.isFinite(length)) continue;
+    all.add(clampOverlaySeconds(length));
+  }
+  return [...all].sort((a, b) => a - b);
 }
 
 export function overlayQuality(value?: string): '720p' | '1080p' | '1440p' | '4k' {
@@ -1222,11 +1238,50 @@ export function overlayConfigure(options: {
   enabled: boolean;
   replay: boolean;
   seconds: number;
+  lengths?: number[];
   quality?: string;
   fps?: number;
   ffmpeg: string;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
+}
+
+export interface NowPlaying {
+  id: string;
+  title: string;
+  artist: string;
+  app: string;
+  playing: boolean;
+  art: string;
+  volumeId: string;
+  volume: number;
+  muted: boolean;
+}
+
+export function mediaNow(): Promise<NowPlaying[]> {
+  return call('media_now', {}, () => []);
+}
+
+export function mediaControl(id: string, action: 'toggle' | 'next' | 'previous'): Promise<void> {
+  return call('media_control', { id, action }, async () => {
+    throw new Error('Media controls need the desktop app.');
+  });
+}
+
+export function overlayMode(): Promise<{ open: boolean; resting: boolean }> {
+  return call('overlay_mode', {}, () => ({ open: true, resting: false }));
+}
+
+export function overlayPins(has: boolean): Promise<void> {
+  return call('overlay_pins', { has }, () => undefined);
+}
+
+export function overlayHits(boxes: { x: number; y: number; w: number; h: number }[]): Promise<void> {
+  return call('overlay_hits', { boxes }, () => undefined);
+}
+
+export function overlayShowPins(): Promise<void> {
+  return call('overlay_show_pins', {}, () => undefined);
 }
 
 export interface AppAudio {
@@ -1257,6 +1312,7 @@ export function overlayStatus(): Promise<OverlayStatus> {
     playing: false,
     ffmpeg: false,
     seconds: 30,
+    lengths: [30, 45, 60],
     game: '',
     folder: '',
     note: '',

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Volume2, VolumeX } from 'lucide-react';
 import { audioApps, audioSet, type AppAudio } from '../services/native';
 
@@ -9,7 +9,25 @@ type Pending = { volume: number; muted: boolean };
  * that is playing sound. A controller uses the quieter and louder buttons.
  * Left and right, while one of those is highlighted, change it too.
  */
-export function AppMixer({ pad = false }: { pad?: boolean }) {
+function fold(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function matchGame(apps: AppAudio[], game: string): AppAudio | undefined {
+  const needle = fold(game);
+  if (needle.length < 3) return undefined;
+  return apps.find((app) => {
+    if (app.device) return false;
+    const name = fold(app.name);
+    return name.length >= 3 && (name.includes(needle) || needle.includes(name));
+  });
+}
+
+/**
+ * The overlay shows the game, the speakers, and one other source.
+ * More opens the rest. Settings shows the whole list.
+ */
+export function AppMixer({ pad = false, game = '', compact = false }: { pad?: boolean; game?: string; compact?: boolean }) {
   const [apps, setApps] = useState<AppAudio[]>([]);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<Record<string, Pending>>({});
@@ -67,6 +85,25 @@ export function AppMixer({ pad = false }: { pad?: boolean }) {
     remember(id, Math.min(100, Math.max(0, Math.round(volume))), muted);
   };
 
+  const [more, setMore] = useState(false);
+  const arranged = useMemo(() => {
+    if (!compact) return { top: apps, rest: [] as AppAudio[], missing: false };
+    const speakers = apps.find((app) => app.device);
+    const others = apps.filter((app) => !app.device);
+    const gameApp = matchGame(others, game);
+    const top: AppAudio[] = [];
+    if (gameApp) top.push(gameApp);
+    if (speakers) top.push(speakers);
+    for (const app of others) {
+      if (top.length >= 3) break;
+      if (top.some((item) => item.id === app.id)) continue;
+      top.push(app);
+    }
+    const ids = new Set(top.map((app) => app.id));
+    return { top, rest: apps.filter((app) => !ids.has(app.id)), missing: Boolean(game.trim()) && !gameApp };
+  }, [apps, compact, game]);
+  const shown = !compact ? apps : more ? [...arranged.top, ...arranged.rest] : arranged.top;
+
   if (error && apps.length === 0) {
     return <p className="text-xs leading-relaxed text-muted">{error}</p>;
   }
@@ -74,7 +111,13 @@ export function AppMixer({ pad = false }: { pad?: boolean }) {
   return (
     <div className="space-y-2">
       {apps.length === 0 && <p className="text-xs text-muted">No apps are playing sound.</p>}
-      {apps.map((app) => (
+      {arranged.missing && (
+        <p className="rounded-xl border border-line bg-panel2 px-3 py-2 text-sm">
+          {game}
+          <span className="text-muted"> · not playing sound</span>
+        </p>
+      )}
+      {shown.map((app) => (
         <div key={app.id} className="rounded-xl border border-line bg-panel2 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm">{app.name}</span>
@@ -124,6 +167,16 @@ export function AppMixer({ pad = false }: { pad?: boolean }) {
           </div>
         </div>
       ))}
+      {compact && arranged.rest.length > 0 && (
+        <button
+          type="button"
+          data-overlay={pad ? '' : undefined}
+          onClick={() => setMore((open) => !open)}
+          className="w-full rounded-xl border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+        >
+          {more ? 'Less' : `More · ${arranged.rest.length}`}
+        </button>
+      )}
       {error && <p className="text-xs text-muted">{error}</p>}
     </div>
   );

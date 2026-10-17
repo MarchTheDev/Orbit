@@ -7,6 +7,7 @@
 mod achievements;
 mod capture;
 mod audio;
+mod media;
 mod ambient;
 mod db;
 #[cfg(windows)]
@@ -659,6 +660,7 @@ fn overlay_configure(
     enabled: bool,
     replay: bool,
     seconds: u32,
+    lengths: Option<Vec<u32>>,
     quality: Option<String>,
     fps: Option<u32>,
     ffmpeg: String,
@@ -668,10 +670,43 @@ fn overlay_configure(
         enabled,
         replay,
         seconds,
+        lengths.as_deref(),
         quality.as_deref().unwrap_or("1080p"),
         fps.unwrap_or(30),
         &ffmpeg,
     );
+}
+
+#[tauri::command]
+async fn media_now() -> Vec<media::NowPlaying> {
+    tauri::async_runtime::spawn_blocking(media::now).await.unwrap_or_default()
+}
+
+#[tauri::command]
+async fn media_control(id: String, action: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || media::control(&id, &action))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn overlay_mode() -> overlay::OverlayMode {
+    overlay::mode()
+}
+
+#[tauri::command]
+fn overlay_pins(has: bool) {
+    overlay::set_pins(has);
+}
+
+#[tauri::command]
+fn overlay_hits(boxes: Vec<overlay::HitBox>) {
+    overlay::set_hits(boxes);
+}
+
+#[tauri::command]
+fn overlay_show_pins(app: tauri::AppHandle) {
+    overlay::show_pins(&app);
 }
 
 #[tauri::command]
@@ -1485,6 +1520,7 @@ fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), Stri
         .filter(|file| !file.is_empty())
         .map(str::to_string);
     transfer::forget_unused_music(orbit.store.root(), music.as_deref());
+    overlay::apply_settings(&settings);
     orbit.store.save_settings(&settings)
 }
 
@@ -2371,6 +2407,12 @@ pub fn run() {
             reveal_in_explorer,
             open_game_folder,
             overlay_configure,
+            overlay_mode,
+            overlay_pins,
+            overlay_hits,
+            overlay_show_pins,
+            media_now,
+            media_control,
             audio_apps,
             audio_set,
             overlay_playing,

@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "linux")]
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -26,14 +26,21 @@ use crate::process;
 const WINDOW: &str = "overlay";
 
 static OPEN: AtomicBool = AtomicBool::new(false);
+static RESTING: AtomicBool = AtomicBool::new(false);
+static HAS_PINS: AtomicBool = AtomicBool::new(false);
+static IGNORE: AtomicBool = AtomicBool::new(false);
+static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
+static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
     enabled: bool,
     replay: bool,
     seconds: u32,
+    lengths: Vec<u32>,
+    keep: u32,
     quality: String,
     fps: u32,
     ffmpeg: String,
@@ -70,6 +77,8 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     enabled: true,
     replay: true,
     seconds: 30,
+    lengths: Vec::new(),
+    keep: 60,
     quality: String::new(),
     fps: 30,
     ffmpeg: String::new(),
@@ -106,6 +115,7 @@ pub struct OverlayStatus {
     pub playing: bool,
     pub ffmpeg: bool,
     pub seconds: u32,
+    pub lengths: Vec<u32>,
     pub quality: String,
     pub fps: u32,
     pub game: String,
@@ -145,6 +155,11 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("seconds"))
         .and_then(Value::as_u64)
         .unwrap_or(30) as u32;
+    let lengths = overlay
+        .and_then(|item| item.get("lengths"))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(|item| item.as_u64()).map(|item| item as u32).collect::<Vec<_>>())
+        .unwrap_or_default();
     let quality = overlay
         .and_then(|item| item.get("quality"))
         .and_then(Value::as_str)
@@ -154,7 +169,7 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    configure(None, enabled, replay, seconds, quality, fps, ffmpeg);
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg);
 }
 
 pub fn configure(
@@ -162,31 +177,39 @@ pub fn configure(
     enabled: bool,
     replay: bool,
     seconds: u32,
+    lengths: Option<&[u32]>,
     quality: &str,
     fps: u32,
     ffmpeg: &str,
 ) {
     let seconds = clamp_seconds(seconds);
+    let lengths = lengths.map(|items| {
+        items.iter().copied().map(clamp_seconds).filter(|item| ![30, 45, 60].contains(item)).collect::<Vec<_>>()
+    });
     let quality = quality_name(quality);
     let fps = picture_fps(fps);
     let (changed, stop, restart, hide) = {
         let mut live = lock();
         let recording = live.recording.is_some() || live.native_recording.is_some();
-        let changed = live.enabled != enabled
-            || live.replay != replay
-            || live.seconds != seconds
-            || live.quality != quality
-            || live.fps != fps
-            || live.ffmpeg != ffmpeg;
+        // None means the extra lengths stay. A chip only changes what is saved.
+        let lengths = match lengths {
+            Some(items) => items,
+            None => live.lengths.clone(),
+        };
+        let keep = keep_seconds(&lengths, seconds);
+        let must_restart = live.keep != keep || live.quality != quality || live.fps != fps || live.replay != replay || live.enabled != enabled;
+        let changed = must_restart || live.seconds != seconds || live.lengths != lengths || live.ffmpeg != ffmpeg;
         let hide = live.enabled && !enabled;
         live.enabled = enabled;
         live.replay = replay;
         live.seconds = seconds;
+        live.lengths = lengths;
+        live.keep = keep;
         live.quality = quality;
         live.fps = fps;
         live.ffmpeg = ffmpeg.to_string();
         let stop = live.playing && (!replay || !enabled);
-        let restart = changed && live.playing && replay && enabled && !recording;
+        let restart = must_restart && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
     };
     if !changed && app.is_none() {
@@ -269,6 +292,8 @@ pub fn shutdown() {
 /// is still a window, and that is what left the panel up after Orbit closed.
 pub fn close_panel(app: &AppHandle) {
     OPEN.store(false, Ordering::SeqCst);
+    RESTING.store(false, Ordering::SeqCst);
+    HAS_PINS.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
@@ -331,6 +356,7 @@ pub fn status() -> OverlayStatus {
         playing: live.playing,
         ffmpeg: capture::available() || find_ffmpeg(&live.ffmpeg).is_some(),
         seconds: live.seconds,
+        lengths: replay_lengths(&live.lengths),
         quality: if live.quality.is_empty() { "1080p".to_string() } else { live.quality.clone() },
         fps: live.fps.max(30),
         game: live.game.clone(),
@@ -391,15 +417,21 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
+    // Windows leaves the panel out of the capture, so it can stay up. Other
+    // desktops still step aside for the one picture, then come back.
+    #[cfg(not(windows))]
     let was_open = is_open();
+    #[cfg(not(windows))]
     if was_open {
-        hide_window(app);
+        conceal(app);
         thread::sleep(Duration::from_millis(180));
     }
     let result = take_shot(stamp);
+    #[cfg(not(windows))]
     if was_open {
         show_window(app);
     }
+    let _ = app;
     remember(&result);
     result
 }
@@ -442,16 +474,11 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
         return Ok(message);
     }
     drop(_held);
-    let was_open = is_open();
-    if was_open {
-        hide_window(app);
-        thread::sleep(Duration::from_millis(180));
-    }
+    // The panel stays up. Hiding it used to look like the overlay reloaded, and
+    // pausing the grab made the game look frozen for as long as it was open.
+    let _ = app;
     stop_buffer();
     let started = spawn_recording(stamp);
-    if started.is_err() && was_open {
-        show_window(app);
-    }
     let message = started.map(|_| "Recording.".to_string());
     remember(&message);
     message
@@ -464,16 +491,10 @@ pub fn save_replay(app: &AppHandle, seconds: u32, stamp: &str) -> Result<String,
         remember(&Err(message.clone()));
         return Err(message);
     }
-    let was_open = is_open();
-    if was_open {
-        hide_window(app);
-        thread::sleep(Duration::from_millis(180));
-    }
-    // The frames stay in memory. Stopping the buffer first would discard them.
+    // The frames are already in memory. Hiding the panel does not change them,
+    // and it was what made a length button look like a reload.
+    let _ = app;
     let result = save_kept(seconds, stamp);
-    if was_open {
-        show_window(app);
-    }
     remember(&result);
     result
 }
@@ -502,6 +523,19 @@ fn watch(app: AppHandle) {
             // The call borrows this thread's handle. The callback needs its own.
             let panel = app.clone();
             let _ = app.run_on_main_thread(move || toggle_on_main(&panel));
+        }
+        if RESTING.load(Ordering::SeqCst)
+            && !OPEN.load(Ordering::SeqCst)
+            && !CHECKING.swap(true, Ordering::SeqCst)
+        {
+            let panel = app.clone();
+            let posted = app.run_on_main_thread(move || {
+                sync_click_through(&panel);
+                CHECKING.store(false, Ordering::SeqCst);
+            });
+            if posted.is_err() {
+                CHECKING.store(false, Ordering::SeqCst);
+            }
         }
         #[cfg(windows)]
         {
@@ -535,7 +569,8 @@ fn toggle_on_main(app: &AppHandle) {
     };
     let visible = window.is_visible().unwrap_or(false);
     let focused = window.is_focused().unwrap_or(false);
-    if visible && focused {
+    // A pinned panel is visible but not the opened overlay. Alt+X should open it.
+    if visible && focused && !RESTING.load(Ordering::SeqCst) {
         hide_window(app);
     } else {
         show_window(app);
@@ -558,12 +593,13 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        .content_protected(true)
         .visible(false)
         .focused(false)
         .center()
         .background_color(tauri::window::Color(0, 0, 0, 0))
         .initialization_script(
-            "window.__ORBIT_OVERLAY__=true;var orbitOverlayStyle=document.createElement('style');orbitOverlayStyle.textContent='html,body,#root{background:transparent!important;height:100%}';(document.head||document.documentElement).appendChild(orbitOverlayStyle);",
+            "window.__ORBIT_OVERLAY__=true;var orbitOverlayStyle=document.createElement('style');orbitOverlayStyle.textContent='html,body,#root{background:transparent!important;height:100%}body::before{display:none!important}';(document.head||document.documentElement).appendChild(orbitOverlayStyle);",
         )
         .build()
         .map_err(|error| {
@@ -571,6 +607,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
+    exclude_from_capture(&window);
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
@@ -585,8 +622,14 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 fn show_window(app: &AppHandle) {
     let Some(window) = ensure_window(app) else { return };
-    // Pause before the panel is visible, so the replay does not keep the menu.
-    capture::set_paused(true);
+    // The panel is left out of the capture, so the grab keeps running. Pausing
+    // it used to repeat one frame for as long as the panel stayed open.
+    RESTING.store(false, Ordering::SeqCst);
+    IGNORE.store(false, Ordering::SeqCst);
+    capture::set_paused(false);
+    exclude_from_capture(&window);
+    let _ = window.set_ignore_cursor_events(false);
+    let _ = window.set_focusable(true);
     cover_screen(&window);
     let _ = window.show();
     let _ = window.unminimize();
@@ -610,17 +653,53 @@ fn cover_screen(window: &tauri::WebviewWindow) {
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
 
-fn hide_window(app: &AppHandle) {
+/// Hide even a pinned panel, for the one moment a picture is taken.
+#[cfg(not(windows))]
+fn conceal(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
     }
+}
+
+fn hide_window(app: &AppHandle) {
+    if HAS_PINS.load(Ordering::SeqCst) {
+        rest_window(app);
+        return;
+    }
+    RESTING.store(false, Ordering::SeqCst);
+    IGNORE.store(false, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_focusable(true);
+        let _ = window.hide();
+    }
     mark_hidden(app);
+}
+
+fn rest_window(app: &AppHandle) {
+    OPEN.store(false, Ordering::SeqCst);
+    RESTING.store(true, Ordering::SeqCst);
+    capture::set_paused(false);
+    if let Some(window) = ensure_window(app) {
+        exclude_from_capture(&window);
+        cover_screen(&window);
+        let _ = window.show();
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focusable(false);
+        let _ = window.set_ignore_cursor_events(true);
+        IGNORE.store(true, Ordering::SeqCst);
+        let _ = window.emit("overlay-rest", ());
+    }
+    tell(app, "overlay-visible", "false");
 }
 
 fn mark_hidden(app: &AppHandle) {
     OPEN.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     tell(app, "overlay-visible", "false");
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.emit("overlay-hidden", ());
+    }
 }
 
 fn tell(app: &AppHandle, event: &str, payload: &str) {
@@ -814,7 +893,7 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
 }
 
 fn start_native_buffer() -> Result<(), String> {
-    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
+    let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
     let hold = capture::start_buffer(keep, current_spec())?;
     lock().native_buffer = Some(hold);
     Ok(())
@@ -826,7 +905,7 @@ fn start_pipe_buffer() -> Result<(), String> {
         Some(path) => path,
         None => return Ok(()),
     };
-    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
+    let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
     let fps = lock().fps.max(1);
     let buffer = capture::Buffer::new(fps, keep);
     let mut command = process::command(&ffmpeg);
@@ -1357,8 +1436,107 @@ fn quality_scale(quality: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HitBox {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayMode {
+    pub open: bool,
+    pub resting: bool,
+}
+
+pub fn mode() -> OverlayMode {
+    OverlayMode {
+        open: OPEN.load(Ordering::SeqCst),
+        resting: RESTING.load(Ordering::SeqCst),
+    }
+}
+
+pub fn set_pins(has: bool) {
+    HAS_PINS.store(has, Ordering::SeqCst);
+}
+
+pub fn set_hits(boxes: Vec<HitBox>) {
+    *HITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = boxes;
+}
+
+/// A pinned box should already be on screen when Orbit opens, without Alt+X.
+pub fn show_pins(app: &AppHandle) {
+    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+        return;
+    }
+    HAS_PINS.store(true, Ordering::SeqCst);
+    rest_window(app);
+}
+
+fn exclude_from_capture(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+
+        let Ok(hwnd) = window.hwnd() else { return };
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+    }
+}
+
+fn sync_click_through(app: &AppHandle) {
+    if !RESTING.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(window) = app.get_webview_window(WINDOW) else { return };
+    let over = cursor_over_hits(&window);
+    let ignore = !over;
+    if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
+        return;
+    }
+    let _ = window.set_ignore_cursor_events(ignore);
+    let _ = window.set_focusable(!ignore);
+}
+
+fn cursor_over_hits(window: &tauri::WebviewWindow) -> bool {
+    let Ok(cursor) = window.cursor_position() else { return false };
+    let Ok(origin) = window.outer_position() else { return false };
+    let x = cursor.x - origin.x as f64;
+    let y = cursor.y - origin.y as f64;
+    let hits = HITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    hits.iter().any(|hit| x >= hit.x && y >= hit.y && x <= hit.x + hit.w && y <= hit.y + hit.h)
+}
+
+fn replay_lengths(extra: &[u32]) -> Vec<u32> {
+    let mut all = vec![30u32, 45, 60];
+    for length in extra {
+        let length = clamp_seconds(*length);
+        if !all.contains(&length) {
+            all.push(length);
+        }
+    }
+    all.sort_unstable();
+    all
+}
+
 pub(crate) fn clamp_seconds(value: u32) -> u32 {
     value.clamp(5, 300)
+}
+
+/// How many seconds to keep in memory. Switching among lengths that already fit
+/// must not restart the grab.
+pub(crate) fn keep_seconds(lengths: &[u32], selected: u32) -> u32 {
+    let mut keep = clamp_seconds(selected).max(60);
+    for length in lengths {
+        keep = keep.max(clamp_seconds(*length));
+    }
+    keep
 }
 
 pub(crate) fn buffer_seconds(chosen: u32) -> u32 {
@@ -1455,6 +1633,8 @@ mod tests {
         assert_eq!(buffer_seconds(30), 60);
         assert_eq!(buffer_seconds(45), 60);
         assert_eq!(buffer_seconds(90), 90);
+        assert_eq!(keep_seconds(&[], 30), 60);
+        assert_eq!(keep_seconds(&[90, 120], 30), 120);
         assert_eq!(clamp_seconds(1), 5);
         assert_eq!(clamp_seconds(900), 300);
     }

@@ -16,7 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, LauncherGame, OtherLauncher, Page, SortKey, ViewMode } from './types';
+import type { Game, LauncherGame, OtherLauncher, Page, Settings, SortKey, ViewMode } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { useGamepad } from './hooks/useGamepad';
@@ -42,6 +42,7 @@ import {
   overlayFps,
   overlayPlaying,
   overlayQuality,
+  overlayShowPins,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -179,6 +180,12 @@ export default function App() {
     let stopAsk = () => {};
     let stopPulse = () => {};
     let stopOverlayNote = () => {};
+    let stopOverlaySettings = () => {};
+    void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
+      setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
+    }).then((unlisten) => {
+      stopOverlaySettings = unlisten;
+    }).catch(() => undefined);
     void listen<string>('overlay-toast', (event) => {
       if (event.payload) say(event.payload);
     }).then((unlisten) => {
@@ -200,6 +207,7 @@ export default function App() {
       stopAsk();
       stopPulse();
       stopOverlayNote();
+      stopOverlaySettings();
       stopWatch();
     };
   }, []);
@@ -620,11 +628,20 @@ export default function App() {
       enabled: overlay?.enabled !== false,
       replay: overlay?.replay !== false,
       seconds: overlay?.seconds ?? 30,
+      lengths: overlay?.lengths ?? [],
       quality: overlayQuality(overlay?.quality),
       fps: overlayFps(overlay?.fps),
       ffmpeg: overlay?.ffmpeg ?? '',
     });
   }, [settings]);
+
+  const pinsShown = useRef(false);
+  useEffect(() => {
+    if (!booted || !isNative() || !settings || pinsShown.current) return;
+    pinsShown.current = true;
+    const layout = settings.overlay?.layout;
+    if (layout && Object.values(layout).some((box) => box?.pinned)) void overlayShowPins();
+  }, [booted, settings]);
 
   useEffect(() => {
     if (!isNative() || !session || session.manual) return;

@@ -537,9 +537,18 @@ export interface Settings {
     quality?: '720p' | '1080p' | '1440p' | '4k' | 'lighter' | 'normal' | 'sharper';
     /** 30 or 60. Missing means 30. */
     fps?: number;
-    /** A short click when a picture is saved. On unless turned off. */
+    /** A short chime when a picture is saved. On unless turned off. */
     shutter?: boolean;
-    /** Empty means the built-in recorder. A path is only a fallback. */
+    /** 0 to 100. Missing means a quiet 40. */
+    shutterVolume?: number;
+    /**
+     * Lengths added beside 30, 45, and 60. Each one shows up in the overlay.
+     * 5 to 300 seconds.
+     */
+    lengths?: number[];
+    /** Where the overlay boxes were dragged, and which ones stay up. */
+    layout?: Partial<Record<'audio' | 'gallery' | 'capture' | 'player', { x: number; y: number; pinned?: boolean }>>;
+    /** Empty means the built-in recorder. A path is only a fallback, and it is not shown in Settings. */
     ffmpeg?: string;
   };
   /**
