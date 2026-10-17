@@ -394,8 +394,9 @@ fn watch(app: AppHandle) {
             break;
         }
         if ASKED.swap(false, Ordering::SeqCst) {
-            let app = app.clone();
-            let _ = app.run_on_main_thread(move || toggle_on_main(&app));
+            // The call borrows this thread's handle. The callback needs its own.
+            let panel = app.clone();
+            let _ = app.run_on_main_thread(move || toggle_on_main(&panel));
         }
         #[cfg(windows)]
         {
