@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
@@ -177,10 +177,37 @@ pub fn remember_music(root: &Path, source: &str) -> Result<String, String> {
     let safe = sanitize_name(raw_name);
     let dest = dir.join(safe);
     if same_file(src, &dest) {
-        return Ok(dest.to_string_lossy().into_owned());
+        let kept = dest.to_string_lossy().into_owned();
+        forget_unused_music(root, Some(&kept));
+        return Ok(kept);
     }
     fs::copy(src, &dest).map_err(|e| format!("Could not keep that music: {e}"))?;
-    Ok(dest.to_string_lossy().into_owned())
+    let kept = dest.to_string_lossy().into_owned();
+    forget_unused_music(root, Some(&kept));
+    Ok(kept)
+}
+
+/// The music folder holds only the file that is playing. The default chord
+/// keeps no file there.
+pub fn forget_unused_music(root: &Path, keep: Option<&str>) {
+    let dir = root.join("music");
+    let Ok(entries) = fs::read_dir(&dir) else { return };
+    let keep_path = keep.map(PathBuf::from).filter(|path| path.is_file());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(keep) = &keep_path {
+            if same_file(&path, keep) {
+                continue;
+            }
+        }
+        let _ = fs::remove_file(path);
+    }
+    if keep_path.is_none() {
+        let _ = fs::remove_dir(&dir);
+    }
 }
 
 fn summarise(value: &Value) -> CopyPreview {

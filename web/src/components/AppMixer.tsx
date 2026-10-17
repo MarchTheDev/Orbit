@@ -95,7 +95,7 @@ export function AppMixer({ pad = false }: { pad?: boolean }) {
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Quieter ${app.name}`}
-              onClick={() => nudge(app.id, -5)}
+              onClick={() => nudge(app.id, -1)}
               className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
             >
               <Minus className="size-3.5" />
@@ -116,7 +116,7 @@ export function AppMixer({ pad = false }: { pad?: boolean }) {
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Louder ${app.name}`}
-              onClick={() => nudge(app.id, 5)}
+              onClick={() => nudge(app.id, 1)}
               className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
             >
               <Plus className="size-3.5" />

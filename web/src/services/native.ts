@@ -1291,6 +1291,29 @@ export function overlayFolder(): Promise<string> {
   });
 }
 
+export interface GalleryItem {
+  kind: 'screenshot' | 'recording' | 'replay' | string;
+  name: string;
+  game: string;
+  path: string;
+}
+
+export function overlayGallery(): Promise<GalleryItem[]> {
+  return call('overlay_gallery', {}, () => []);
+}
+
+export function overlayOpen(path: string): Promise<void> {
+  return call('overlay_open', { path }, async () => {
+    throw new Error('Opening a capture needs the desktop app.');
+  });
+}
+
+export function overlayOpenKind(kind: string): Promise<string> {
+  return call('overlay_open_kind', { kind }, async () => {
+    throw new Error('Opening a capture folder needs the desktop app.');
+  });
+}
+
 export function suggestSaves(title: string): Promise<string[]> {
   return call('saves_suggest', { title }, async () => {
     throw new Error('Looking up save paths needs the desktop app.');

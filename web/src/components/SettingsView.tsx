@@ -39,7 +39,7 @@ import {
   savesWithClouds,
   listDrives,
   rememberMusic,
-  overlayFolder,
+  overlayOpenKind,
   overlayFps,
   overlayQuality,
   revealInExplorer,
@@ -382,7 +382,15 @@ function OverlaySettings({
     setOverlay({ ffmpeg: picked });
   };
 
-  const clips = where ? `${where.replace(/[\\/]+$/, '')}${where.includes('\\') ? '\\' : '/'}clips` : '';
+  const sep = where?.includes('\\') ? '\\' : '/';
+  const captureRoot = where ? where.replace(/[\\/]+$/, '') : '';
+  const captureFolders = captureRoot
+    ? [
+        { kind: 'screenshots', label: 'Screenshots', path: `${captureRoot}${sep}screenshots` },
+        { kind: 'recordings', label: 'Recordings', path: `${captureRoot}${sep}recordings` },
+        { kind: 'replays', label: 'Replays', path: `${captureRoot}${sep}replays` },
+      ]
+    : [];
 
   return (
     <>
@@ -396,7 +404,7 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="This is what the 30, 45, and 60 second buttons save. It uses a little of the PC while the game is running. ffmpeg is not required."
+        hint="This is what the 30, 45, and 60 second buttons save. It stays in memory while the game is running, so it does not fill the disk. Nothing is written until you save it."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay length</p>
@@ -505,18 +513,21 @@ function OverlaySettings({
           </p>
         </div>
       )}
-      {clips && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">
-          <span className="min-w-0 break-all font-mono text-xs text-muted">{clips}</span>
+      {captureFolders.map((folder) => (
+        <div key={folder.kind} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+          <span className="min-w-0">
+            <span className="block text-xs text-fg">{folder.label}</span>
+            <span className="block break-all font-mono text-[11px] text-muted">{folder.path}</span>
+          </span>
           <button
             type="button"
-            onClick={() => void overlayFolder().then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
+            onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
             className={btnBrowse}
           >
             Open
           </button>
         </div>
-      )}
+      ))}
       {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
     </>
   );

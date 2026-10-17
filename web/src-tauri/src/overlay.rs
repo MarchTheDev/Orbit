@@ -6,10 +6,11 @@
 //! panel from inside that handler can stall the shortcut lock.
 
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "linux")]
@@ -23,7 +24,6 @@ use crate::capture;
 use crate::process;
 
 const WINDOW: &str = "overlay";
-const SEGMENT_SECS: u32 = 5;
 
 static OPEN: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
@@ -44,7 +44,10 @@ struct Live {
     buffer: Option<Child>,
     native_recording: Option<capture::Hold>,
     native_buffer: Option<capture::Hold>,
+    replay_frames: Option<capture::Buffer>,
+    pipe_stop: Option<Arc<AtomicBool>>,
     recording_name: String,
+    recording_path: PathBuf,
     note: String,
 }
 
@@ -77,7 +80,10 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     buffer: None,
     native_recording: None,
     native_buffer: None,
+    replay_frames: None,
+    pipe_stop: None,
     recording_name: String::new(),
+    recording_path: PathBuf::new(),
     note: String::new(),
 });
 static GATE: Mutex<()> = Mutex::new(());
@@ -211,6 +217,10 @@ pub fn game_started(title: &str) {
         !same
     };
     if restart {
+        let root = lock().root.clone();
+        if !root.as_os_str().is_empty() {
+            capture::sweep_replay_files(&root);
+        }
         if let Err(error) = start_buffer(true) {
             if !error.is_empty() {
                 lock().note = error;
@@ -235,6 +245,10 @@ pub fn shutdown() {
         let buffer = live.buffer.take();
         let native_recording = live.native_recording.take();
         let native_buffer = live.native_buffer.take();
+        if let Some(stop) = live.pipe_stop.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+        live.replay_frames = None;
         (recording, buffer, native_recording, native_buffer)
     };
     if let Some(child) = recording.0 {
@@ -251,8 +265,22 @@ pub fn shutdown() {
     }
 }
 
+/// Hide and destroy the overlay window. Hiding is not enough: a hidden window
+/// is still a window, and that is what left the panel up after Orbit closed.
+pub fn close_panel(app: &AppHandle) {
+    OPEN.store(false, Ordering::SeqCst);
+    capture::set_paused(false);
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.hide();
+        if window.destroy().is_err() {
+            let _ = window.close();
+        }
+    }
+}
+
 pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Ok(dir) = app.path().app_data_dir() {
+        capture::sweep_replay_files(&dir);
         let mut live = lock();
         live.root = dir;
     }
@@ -295,7 +323,7 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
 
 pub fn status() -> OverlayStatus {
     let live = lock();
-    let folder = clips_dir_from(&live.root);
+    let folder = kind_dir_from(&live.root, "recordings");
     OverlayStatus {
         enabled: live.enabled,
         recording: live.recording.is_some() || live.native_recording.is_some(),
@@ -319,10 +347,47 @@ pub fn hide(app: &AppHandle) {
 }
 
 pub fn open_folder() -> Result<String, String> {
-    let dir = clips_dir()?;
-    fs::create_dir_all(&dir).map_err(|error| format!("Could not create the clips folder: {error}"))?;
-    open_dir(&dir)?;
+    open_kind("recordings")
+}
+
+pub fn open_kind(kind: &str) -> Result<String, String> {
+    let dir = kind_dir(kind_name(kind))?;
+    fs::create_dir_all(&dir).map_err(|error| format!("Could not create the folder: {error}"))?;
+    launch_path(&dir)?;
     Ok(dir.to_string_lossy().to_string())
+}
+
+pub fn open_item(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !allowed_capture(&path) {
+        return Err("That file is not one of Orbit's captures.".to_string());
+    }
+    if !path.is_file() {
+        return Err("That file is not there.".to_string());
+    }
+    launch_path(&path)
+}
+
+pub fn gallery() -> Vec<GalleryItem> {
+    let root = lock().root.clone();
+    if root.as_os_str().is_empty() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    collect_kind(&root.join("screenshots"), "screenshot", &mut found);
+    collect_kind(&root.join("recordings"), "recording", &mut found);
+    collect_kind(&root.join("replays"), "replay", &mut found);
+    found.sort_by(|left, right| right.0.cmp(&left.0));
+    found.into_iter().take(36).map(|(_, item)| item).collect()
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GalleryItem {
+    pub kind: String,
+    pub name: String,
+    pub game: String,
+    pub path: String,
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
@@ -356,6 +421,13 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
         if let Some(Err(error)) = native_result {
             remember(&Err(error.clone()));
             return Err(error);
+        }
+        let path = lock().recording_path.clone();
+        if !path.as_os_str().is_empty() {
+            if let Err(error) = require_video(&path) {
+                remember(&Err(error.clone()));
+                return Err(error);
+            }
         }
         let name = {
             let live = lock();
@@ -397,11 +469,8 @@ pub fn save_replay(app: &AppHandle, seconds: u32, stamp: &str) -> Result<String,
         hide_window(app);
         thread::sleep(Duration::from_millis(180));
     }
-    stop_buffer();
+    // The frames stay in memory. Stopping the buffer first would discard them.
     let result = save_kept(seconds, stamp);
-    if should_buffer() {
-        let _ = start_buffer(false);
-    }
     if was_open {
         show_window(app);
     }
@@ -453,6 +522,9 @@ fn watch(app: AppHandle) {
 }
 
 fn toggle_on_main(app: &AppHandle) {
+    if STOP.load(Ordering::SeqCst) {
+        return;
+    }
     if !lock().enabled {
         tell(app, "overlay-toast", "The overlay is off. Turn it on in Settings.");
         return;
@@ -471,6 +543,9 @@ fn toggle_on_main(app: &AppHandle) {
 }
 
 fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    if STOP.load(Ordering::SeqCst) {
+        return None;
+    }
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
@@ -555,8 +630,7 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 }
 
 fn take_shot(stamp: &str) -> Result<String, String> {
-    let dir = clips_dir()?;
-    fs::create_dir_all(&dir).map_err(|error| format!("Could not create the clips folder: {error}"))?;
+    let dir = game_dir("screenshots")?;
     if capture::available() {
         let path = clip_path(&dir, &lock().game, stamp, "jpg");
         if capture::save_picture(&path, current_spec()).is_ok() {
@@ -656,7 +730,7 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
             Ok(()) => return Ok(()),
             Err(error) => {
                 if find_ffmpeg(&lock().ffmpeg).is_none() {
-                    return Err(error);
+                    return Err(if capture::can_encode() { error } else { ffmpeg_missing() });
                 }
                 lock().note = format!("Built-in capture could not start, so ffmpeg is being used. {error}");
             }
@@ -668,30 +742,24 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
 }
 
 fn spawn_native_recording(stamp: &str) -> Result<(), String> {
-    let clips = clips_dir()?;
-    fs::create_dir_all(&clips).map_err(|error| format!("Could not create the clips folder: {error}"))?;
-    let path = clip_path(&clips, &lock().game, stamp, "avi");
-    let parts = lock().root.join("recording");
-    if parts.as_os_str().is_empty() {
-        return Err("Orbit is still starting.".to_string());
-    }
-    let _ = fs::remove_dir_all(&parts);
+    let dir = game_dir("recordings")?;
+    let path = clip_path(&dir, &lock().game, stamp, "mp4");
     let spec = current_spec();
-    let hold = capture::start_recording(parts, path.clone(), spec)?;
+    let hold = capture::start_recording(path.clone(), spec)?;
     let name = path
         .file_name()
         .map(|item| item.to_string_lossy().to_string())
-        .unwrap_or_else(|| "recording.avi".to_string());
+        .unwrap_or_else(|| "recording.mp4".to_string());
     let mut live = lock();
     live.recording_name = name;
+    live.recording_path = path;
     live.native_recording = Some(hold);
     Ok(())
 }
 
 fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
     let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
-    let dir = clips_dir()?;
-    fs::create_dir_all(&dir).map_err(|error| format!("Could not create the clips folder: {error}"))?;
+    let dir = game_dir("recordings")?;
     let path = clip_path(&dir, &lock().game, stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
@@ -714,11 +782,12 @@ fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
         .file_name()
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "recording.mp4".to_string());
+    live.recording_path = path;
     live.recording = Some(child);
     Ok(())
 }
 
-fn start_buffer(clear: bool) -> Result<(), String> {
+fn start_buffer(_clear: bool) -> Result<(), String> {
     let _held = gate();
     {
         let live = lock();
@@ -730,7 +799,7 @@ fn start_buffer(clear: bool) -> Result<(), String> {
         }
     }
     if capture::available() {
-        match start_native_buffer(clear) {
+        match start_native_buffer() {
             Ok(()) => return Ok(()),
             Err(error) => {
                 if find_ffmpeg(&lock().ffmpeg).is_none() {
@@ -741,94 +810,194 @@ fn start_buffer(clear: bool) -> Result<(), String> {
     } else if find_ffmpeg(&lock().ffmpeg).is_none() {
         return Err(capture_missing());
     }
+    start_pipe_buffer()
+}
+
+fn start_native_buffer() -> Result<(), String> {
+    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
+    let hold = capture::start_buffer(keep, current_spec())?;
+    lock().native_buffer = Some(hold);
+    Ok(())
+}
+
+/// ffmpeg's pictures stay in memory. Nothing is written until the player saves.
+fn start_pipe_buffer() -> Result<(), String> {
     let ffmpeg = match find_ffmpeg(&lock().ffmpeg) {
         Some(path) => path,
         None => return Ok(()),
     };
-    let dir = replay_dir()?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    if clear {
-        clear_segments(&dir);
-    }
-    let wrap = segment_wrap(lock().seconds);
+    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
+    let fps = lock().fps.max(1);
+    let buffer = capture::Buffer::new(fps, keep);
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    let quality = lock().quality.clone();
-    push_grab(&mut command, Some(quality_fps(lock().fps)))?;
+    push_grab(&mut command, Some(quality_fps(fps)))?;
     command.arg("-an");
-    push_encode(&mut command, &quality);
-    command.args([
-        "-g",
-        quality_gop(lock().fps),
-        "-f",
-        "segment",
-        "-segment_time",
-        &SEGMENT_SECS.to_string(),
-        "-segment_wrap",
-        &wrap.to_string(),
-        "-reset_timestamps",
-        "1",
-        "-segment_format",
-        "matroska",
-        "seg_%03d.mkv",
-    ]);
-    command
-        .current_dir(&dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let child = command.spawn().map_err(|error| error.to_string())?;
-    lock().buffer = Some(child);
-    Ok(())
-}
-
-fn start_native_buffer(clear: bool) -> Result<(), String> {
-    let dir = replay_dir()?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    if clear {
-        capture::clear_chunks(&dir);
+    if let Some(scale) = quality_scale(&lock().quality) {
+        command.args(["-vf", scale]);
     }
-    let keep = Duration::from_secs(buffer_seconds(lock().seconds) as u64 + 2);
-    let hold = capture::start_buffer(dir, keep, current_spec())?;
-    lock().native_buffer = Some(hold);
+    command.args(["-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let Some(stdout) = child.stdout.take() else {
+        kill_now(child);
+        return Err("ffmpeg did not open a picture stream.".to_string());
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let shared = buffer.clone();
+    thread::Builder::new()
+        .name("orbit-replay".to_string())
+        .spawn(move || read_jpeg_pipe(stdout, shared, flag))
+        .map_err(|error| error.to_string())?;
+    let mut live = lock();
+    live.buffer = Some(child);
+    live.pipe_stop = Some(stop);
+    live.replay_frames = Some(buffer);
     Ok(())
 }
 
 fn stop_buffer() {
     let _held = gate();
+    if let Some(stop) = lock().pipe_stop.take() {
+        stop.store(true, Ordering::SeqCst);
+    }
     if let Some(child) = lock().buffer.take() {
         stop_child(child);
     }
     if let Some(hold) = lock().native_buffer.take() {
         let _ = capture::finish(hold);
     }
+    lock().replay_frames = None;
 }
 
 fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
-    let dir = replay_dir()?;
-    if capture::has_recent(&dir, seconds) {
-        let clips = clips_dir()?;
-        fs::create_dir_all(&clips).map_err(|error| format!("Could not create the clips folder: {error}"))?;
-        let path = clip_path(&clips, &format!("{} last {seconds}s", lock().game), stamp, "avi");
-        let muxed = capture::save_recent(&dir, seconds, &path)?;
-        let name = path
-            .file_name()
-            .map(|item| item.to_string_lossy().to_string())
-            .unwrap_or_else(|| "the clip".to_string());
-        let covered = muxed.frames as u32 / muxed.fps.max(1);
-        if covered + 1 < seconds {
-            return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."));
+    let kept = {
+        let live = lock();
+        if let Some(hold) = live.native_buffer.as_ref() {
+            hold.snapshot(seconds)
+        } else if let Some(buffer) = live.replay_frames.as_ref() {
+            buffer.snapshot(seconds)
+        } else {
+            Err("Nothing has been kept yet. The replay starts when a game is playing.".to_string())
         }
-        return Ok(format!("Saved the last {seconds} seconds as {name}."));
+    }?;
+    let dir = game_dir("replays")?;
+    let path = clip_path(&dir, &format!("{} last {seconds}s", lock().game), stamp, "mp4");
+    encode_kept(&path, &kept)?;
+    let name = path
+        .file_name()
+        .map(|item| item.to_string_lossy().to_string())
+        .unwrap_or_else(|| "the clip".to_string());
+    let covered = kept.frames.len() as u32 / kept.fps.max(1);
+    if covered + 1 < seconds {
+        return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."));
     }
-    if find_ffmpeg(&lock().ffmpeg).is_some() {
-        return concat_replay(seconds, stamp);
+    Ok(format!("Saved the last {seconds} seconds as {name}."))
+}
+
+fn encode_kept(path: &Path, kept: &capture::Kept) -> Result<(), String> {
+    if capture::can_encode() {
+        match capture::write_mp4(path, kept) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                let _ = fs::remove_file(path);
+                if find_ffmpeg(&lock().ffmpeg).is_none() {
+                    return Err(error);
+                }
+            }
+        }
     }
-    let error = capture::last_error();
-    if !error.is_empty() {
+    let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(|| {
+        "The video could not be saved. Orbit could not encode it, and ffmpeg is not installed.".to_string()
+    })?;
+    ffmpeg_from_jpegs(&ffmpeg, path, kept)
+}
+
+fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let rate = kept.fps.max(1).to_string();
+    let mut command = process::command(ffmpeg);
+    command.args(["-y", "-f", "image2pipe", "-framerate"]);
+    command.arg(&rate);
+    command.args([
+        "-i",
+        "pipe:0",
+        "-an",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+    ]);
+    command.arg(path);
+    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = command.spawn().map_err(|error| format!("Could not start ffmpeg: {error}"))?;
+    let write_result = child.stdin.as_mut().ok_or_else(|| "ffmpeg did not accept the pictures.".to_string()).and_then(|stdin| {
+        for frame in &kept.frames {
+            stdin.write_all(frame).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    });
+    drop(child.stdin.take());
+    let status = child.wait().map_err(|error| error.to_string());
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(path);
         return Err(error);
     }
-    Err("Nothing has been kept yet. The replay starts when a game is playing.".to_string())
+    if status.map(|item| item.success()).unwrap_or(false) && !missing_video(path) {
+        return Ok(());
+    }
+    let _ = fs::remove_file(path);
+    Err("The video file was empty.".to_string())
+}
+
+fn read_jpeg_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<AtomicBool>) {
+    let mut pending = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    while !stop.load(Ordering::SeqCst) {
+        let read = match stdout.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(_) => break,
+        };
+        pending.extend_from_slice(&chunk[..read]);
+        while let Some(jpeg) = take_jpeg(&mut pending) {
+            if let Some((width, height)) = capture::jpeg_size(&jpeg) {
+                buffer.push_jpeg(jpeg, width, height);
+            }
+        }
+        if pending.len() > 8 * 1024 * 1024 {
+            pending.clear();
+        }
+    }
+}
+
+fn take_jpeg(bytes: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let start = bytes.windows(2).position(|window| window == [0xFF, 0xD8])?;
+    let rest = bytes.get(start + 2..)?;
+    let end = rest.windows(2).position(|window| window == [0xFF, 0xD9])?;
+    let until = start + 2 + end + 2;
+    let jpeg = bytes[start..until].to_vec();
+    bytes.drain(..until);
+    Some(jpeg)
+}
+
+fn require_video(path: &Path) -> Result<(), String> {
+    if missing_video(path) {
+        let _ = fs::remove_file(path);
+        return Err("The recording file was empty.".to_string());
+    }
+    Ok(())
+}
+
+fn missing_video(path: &Path) -> bool {
+    fs::metadata(path).map(|meta| meta.len() < 32).unwrap_or(true)
 }
 
 fn current_spec() -> capture::Spec {
@@ -848,71 +1017,6 @@ fn capture_missing() -> String {
         return "This Wayland desktop cannot be recorded without ffmpeg. An X11 session records on its own.".to_string();
     }
     "Orbit could not capture the screen, and ffmpeg is not installed.".to_string()
-}
-
-fn concat_replay(seconds: u32, stamp: &str) -> Result<String, String> {
-    let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
-    let dir = replay_dir()?;
-    let mut files = segment_files(&dir);
-    if files.is_empty() {
-        return Err("Nothing has been kept yet. The replay starts when a game is playing.".to_string());
-    }
-    let need = segments_needed(seconds);
-    let short = files.len() < need;
-    if files.len() > need {
-        files = files.split_off(files.len() - need);
-    }
-    let clips = clips_dir()?;
-    fs::create_dir_all(&clips).map_err(|error| format!("Could not create the clips folder: {error}"))?;
-    let path = clip_path(&clips, &format!("{} last {seconds}s", lock().game), stamp, "mp4");
-    if let Err(error) = concat_files(&ffmpeg, &files, &path) {
-        if files.len() < 2 {
-            return Err(error);
-        }
-        files.pop();
-        concat_files(&ffmpeg, &files, &path)?;
-    }
-    let name = path
-        .file_name()
-        .map(|item| item.to_string_lossy().to_string())
-        .unwrap_or_else(|| "the clip".to_string());
-    if short {
-        Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."))
-    } else {
-        Ok(format!("Saved the last {seconds} seconds as {name}."))
-    }
-}
-
-fn concat_files(ffmpeg: &Path, files: &[PathBuf], out: &Path) -> Result<(), String> {
-    if files.is_empty() {
-        return Err("Nothing has been kept yet.".to_string());
-    }
-    let list = out.with_extension("list.txt");
-    let mut text = String::new();
-    for file in files {
-        text.push_str(&concat_line(file));
-    }
-    fs::write(&list, text).map_err(|error| error.to_string())?;
-    let mut command = process::command(ffmpeg);
-    command
-        .args(["-y", "-f", "concat", "-safe", "0", "-i"])
-        .arg(&list)
-        .arg("-an");
-    push_encode(&mut command, &lock().quality);
-    let status = command
-        .arg(out)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| error.to_string())?;
-    let _ = fs::remove_file(&list);
-    if status.success() && out.is_file() {
-        Ok(())
-    } else {
-        let _ = fs::remove_file(out);
-        Err("The last few seconds could not be saved.".to_string())
-    }
 }
 
 fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(), String> {
@@ -1004,53 +1108,91 @@ pub(crate) fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn clips_dir() -> Result<PathBuf, String> {
+fn data_root() -> Result<PathBuf, String> {
     let root = lock().root.clone();
     if root.as_os_str().is_empty() {
         return Err("Orbit is still starting.".to_string());
     }
-    Ok(clips_dir_from(&root))
+    Ok(root)
 }
 
-fn clips_dir_from(root: &Path) -> PathBuf {
-    root.join("clips")
-}
-
-fn replay_dir() -> Result<PathBuf, String> {
-    let root = lock().root.clone();
-    if root.as_os_str().is_empty() {
-        return Err("Orbit is still starting.".to_string());
+fn kind_name(kind: &str) -> &'static str {
+    match kind {
+        "screenshots" | "screenshot" | "shots" => "screenshots",
+        "replays" | "replay" => "replays",
+        _ => "recordings",
     }
-    Ok(root.join("replay"))
 }
 
-fn clear_segments(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("mkv") {
-            let _ = fs::remove_file(path);
+fn kind_dir(kind: &str) -> Result<PathBuf, String> {
+    Ok(kind_dir_from(&data_root()?, kind_name(kind)))
+}
+
+fn kind_dir_from(root: &Path, kind: &str) -> PathBuf {
+    root.join(kind_name(kind))
+}
+
+fn game_dir(kind: &str) -> Result<PathBuf, String> {
+    let game = {
+        let name = lock().game.clone();
+        if name.trim().is_empty() {
+            "Desktop".to_string()
+        } else {
+            name
         }
-    }
+    };
+    let dir = kind_dir(kind)?.join(safe_name(&game));
+    fs::create_dir_all(&dir).map_err(|error| format!("Could not create the folder: {error}"))?;
+    Ok(dir)
 }
 
-fn segment_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
-    let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("mkv") {
+fn collect_kind(dir: &Path, kind: &str, found: &mut Vec<(SystemTime, GalleryItem)>) {
+    let Ok(games) = fs::read_dir(dir) else { return };
+    for game in games.flatten() {
+        let game_path = game.path();
+        if !game_path.is_dir() {
             continue;
         }
-        let len = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
-        if len < 1024 {
-            continue;
+        let game_name = game.file_name().to_string_lossy().to_string();
+        let Ok(files) = fs::read_dir(&game_path) else { continue };
+        for file in files.flatten() {
+            let path = file.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+            let kept = if kind == "screenshot" {
+                ext == "jpg" || ext == "jpeg" || ext == "png"
+            } else {
+                ext == "mp4"
+            };
+            if !kept {
+                continue;
+            }
+            let modified = file.metadata().and_then(|meta| meta.modified()).unwrap_or(UNIX_EPOCH);
+            found.push((
+                modified,
+                GalleryItem {
+                    kind: kind.to_string(),
+                    name: path.file_name().map(|item| item.to_string_lossy().to_string()).unwrap_or_default(),
+                    game: game_name.clone(),
+                    path: path.to_string_lossy().to_string(),
+                },
+            ));
         }
-        let modified = entry.metadata().and_then(|meta| meta.modified()).unwrap_or(UNIX_EPOCH);
-        files.push((modified, path));
     }
-    files.sort_by_key(|(modified, _)| *modified);
-    files.into_iter().map(|(_, path)| path).collect()
+}
+
+fn allowed_capture(path: &Path) -> bool {
+    let Ok(path) = path.canonicalize() else { return false };
+    let Ok(root) = data_root() else { return false };
+    for folder in ["screenshots", "recordings", "replays"] {
+        let Ok(base) = root.join(folder).canonicalize() else { continue };
+        if path.starts_with(&base) {
+            return true;
+        }
+    }
+    false
 }
 
 fn clip_path(dir: &Path, name: &str, stamp: &str, ext: &str) -> PathBuf {
@@ -1065,19 +1207,14 @@ fn saved_name(prefix: &str, path: &Path) -> String {
     format!("{prefix} {name}.")
 }
 
-fn concat_line(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
-    format!("file '{text}'\n")
-}
-
-fn open_dir(folder: &Path) -> Result<(), String> {
+fn launch_path(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
-    let result = process::command("explorer").arg(folder).spawn();
+    let result = process::command("cmd").arg("/C").arg("start").arg("").arg(path).spawn();
     #[cfg(target_os = "macos")]
-    let result = process::command("open").arg(folder).spawn();
+    let result = process::command("open").arg(path).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
-    let result = process::command("xdg-open").arg(folder).spawn();
-    result.map(|_| ()).map_err(|error| format!("Could not open the clips folder: {error}"))
+    let result = process::command("xdg-open").arg(path).spawn();
+    result.map(|_| ()).map_err(|error| format!("Could not open that: {error}"))
 }
 
 fn ffmpeg_missing() -> String {
@@ -1089,8 +1226,8 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 }
 
 /// The same edges the library uses: A activates, B goes back, and a stick
-/// crossing the dead zone counts once. Holding a direction repeats. LB and RB
-/// jump between the clips and the app volumes. Start+Select is the overlay itself.
+/// crossing the dead zone counts once. Holding a direction repeats. LB jumps to
+/// the app volumes and RB jumps to the gallery. Start+Select is the overlay itself.
 fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
@@ -1202,10 +1339,6 @@ pub(crate) fn quality_fps(fps: u32) -> &'static str {
     if picture_fps(fps) >= 60 { "60" } else { "30" }
 }
 
-pub(crate) fn quality_gop(fps: u32) -> &'static str {
-    quality_fps(fps)
-}
-
 fn quality_encode(quality: &str) -> (&'static str, &'static str) {
     match quality_name(quality).as_str() {
         "720p" => ("ultrafast", "28"),
@@ -1230,14 +1363,6 @@ pub(crate) fn clamp_seconds(value: u32) -> u32 {
 
 pub(crate) fn buffer_seconds(chosen: u32) -> u32 {
     clamp_seconds(chosen).max(60)
-}
-
-pub(crate) fn segment_wrap(chosen: u32) -> u32 {
-    buffer_seconds(chosen) / SEGMENT_SECS + 2
-}
-
-pub(crate) fn segments_needed(seconds: u32) -> usize {
-    (clamp_seconds(seconds) as usize) / SEGMENT_SECS as usize + 1
 }
 
 pub(crate) fn safe_name(raw: &str) -> String {
@@ -1330,8 +1455,6 @@ mod tests {
         assert_eq!(buffer_seconds(30), 60);
         assert_eq!(buffer_seconds(45), 60);
         assert_eq!(buffer_seconds(90), 90);
-        assert_eq!(segment_wrap(30), 14);
-        assert_eq!(segments_needed(30), 7);
         assert_eq!(clamp_seconds(1), 5);
         assert_eq!(clamp_seconds(900), 300);
     }

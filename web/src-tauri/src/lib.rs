@@ -725,6 +725,21 @@ fn overlay_folder() -> Result<String, String> {
     overlay::open_folder()
 }
 
+#[tauri::command]
+fn overlay_open_kind(kind: String) -> Result<String, String> {
+    overlay::open_kind(&kind)
+}
+
+#[tauri::command]
+fn overlay_open(path: String) -> Result<(), String> {
+    overlay::open_item(&path)
+}
+
+#[tauri::command]
+fn overlay_gallery() -> Vec<overlay::GalleryItem> {
+    overlay::gallery()
+}
+
 /// Stop the running session and write the time into the library.
 #[tauri::command]
 fn stop_session(orbit: State<'_, Orbit>, session_id: i64) -> Result<Option<ActiveView>, String> {
@@ -1433,6 +1448,7 @@ fn ask_to_wait(app: &tauri::AppHandle) {
 }
 
 fn quit_now(app: &tauri::AppHandle) {
+    overlay::close_panel(app);
     if let Some(orbit) = app.try_state::<Orbit>() {
         orbit.runner.close_for_app_exit();
     }
@@ -1461,6 +1477,14 @@ fn save_settings(orbit: State<'_, Orbit>, settings: Settings) -> Result<(), Stri
         remember_minimize_policy(&policy);
     }
     remember_wine(Some(&settings));
+    let music = settings
+        .get("sound")
+        .and_then(|sound| sound.get("file"))
+        .and_then(|file| file.as_str())
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+        .map(str::to_string);
+    transfer::forget_unused_music(orbit.store.root(), music.as_deref());
     orbit.store.save_settings(&settings)
 }
 
@@ -2015,6 +2039,16 @@ pub fn run() {
             if let Some(settings) = saved_settings.as_ref() {
                 overlay::apply_settings(settings);
             }
+            let music = saved_settings.as_ref().and_then(|settings| {
+                settings
+                    .get("sound")
+                    .and_then(|sound| sound.get("file"))
+                    .and_then(|file| file.as_str())
+                    .map(str::trim)
+                    .filter(|file| !file.is_empty())
+                    .map(str::to_string)
+            });
+            transfer::forget_unused_music(store.root(), music.as_deref());
             let policy = Arc::new(Mutex::new(policy_from_settings(saved_settings.as_ref())));
             remember_wine(saved_settings.as_ref());
             let start_in_background = started_by_autostart
@@ -2188,6 +2222,9 @@ pub fn run() {
                                 ask_to_wait(&handle);
                                 return;
                             }
+                            // The overlay is its own window. Closing Orbit has to close it too,
+                            // or the panel stays up and keeps working on its own.
+                            overlay::close_panel(&handle);
                             if hide {
                                 api.prevent_close();
                                 if let Some(window) = handle.get_webview_window("main") {
@@ -2343,6 +2380,9 @@ pub fn run() {
             overlay_replay,
             overlay_hide,
             overlay_folder,
+            overlay_open_kind,
+            overlay_open,
+            overlay_gallery,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Orbit")
@@ -2365,6 +2405,7 @@ pub fn run() {
                 // process::exit below does not run destructors, and on Linux it
                 // also runs the handlers that abort. The page is killed first.
                 ambient::stop();
+                overlay::close_panel(app);
                 overlay::shutdown();
                 // WebKitGTK's page process aborts in its own exit, which the
                 // desktop shows as a crash. Kill that process, then end this
