@@ -743,7 +743,6 @@ unsafe fn endpoint_list(
     kind: &str,
 ) -> Result<Vec<AudioDevice>, String> {
     use windows::Win32::Media::Audio::{eConsole, DEVICE_STATE_ACTIVE};
-    use windows::core::Interface;
 
     let current = enumerator
         .GetDefaultAudioEndpoint(flow, eConsole)
@@ -780,7 +779,7 @@ unsafe fn friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> Opt
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     use windows::core::GUID;
 
-    let store: IPropertyStore = device.OpenPropertyStore(STGM(0)).ok()?;
+    let store: IPropertyStore = device.OpenPropertyStore(STGM_READ).ok()?;
     let key = PROPERTYKEY {
         fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
         pid: 14,

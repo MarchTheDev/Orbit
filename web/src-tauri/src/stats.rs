@@ -24,7 +24,7 @@ pub struct MachineStats {
 
 struct Cache {
     stats: MachineStats,
-    asked: Instant,
+    asked: Option<Instant>,
 }
 
 static CACHE: Mutex<Cache> = Mutex::new(Cache {
@@ -39,14 +39,14 @@ static CACHE: Mutex<Cache> = Mutex::new(Cache {
         vram_total: 0,
         fps: None,
     },
-    asked: Instant::now(),
+    asked: None,
 });
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn sample() -> MachineStats {
     {
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.asked = Instant::now();
+        cache.asked = Some(Instant::now());
         // A first look should not wait for the thread to start.
         if cache.stats.ram.is_none() {
             cache.stats = read_now();
@@ -64,7 +64,8 @@ fn ensure_running() {
     std::thread::spawn(|| {
         let mut frames = watch_frames();
         loop {
-            if CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).asked.elapsed() > Duration::from_secs(4) {
+            let idle = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4));
+            if idle {
                 RUNNING.store(false, Ordering::SeqCst);
                 break;
             }
