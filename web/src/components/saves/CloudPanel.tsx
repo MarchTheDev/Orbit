@@ -32,6 +32,7 @@ import {
   freshRemote,
   savesWithClouds,
   sendToClouds,
+  trackCloud,
   backupSave,
   isNative,
   saveHintsOf,
@@ -779,14 +780,16 @@ export function CloudPanel({
     setError(null);
     setNote(null);
     try {
-      for (const game of gamesToSend) {
-        try {
-          await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
-        } catch {
-          // A game whose folder cannot be copied is left. The others still go.
+      await trackCloud('backup', async () => {
+        for (const game of gamesToSend) {
+          try {
+            await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+          } catch {
+            // A game whose folder cannot be copied is left. The others still go.
+          }
         }
-      }
-      setNote(await sendToClouds(targets, 'all', settings.saves?.backupRoot, gamesToSend.map((game) => cloudGameOf(game, dirs[game.id]))));
+        setNote(await sendToClouds(targets, 'all', settings.saves?.backupRoot, gamesToSend.map((game) => cloudGameOf(game, dirs[game.id]))));
+      });
     } catch (e) {
       fail(e);
     } finally {

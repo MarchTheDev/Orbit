@@ -24,7 +24,10 @@ import {
   backupSave,
   sendCloudAfterBackup,
   currentCloudTransfer,
+  cloudTransferActive,
+  watchCloudTransfer,
   quitDespiteCloud,
+  type CloudPulse,
   clearLibrary,
   savePlaceOf,
   isNative,
@@ -63,6 +66,7 @@ import { AddGameModal } from './components/modals/AddGameModal';
 import { ImportModal } from './components/ImportModal';
 import { MoveDriveModal } from './components/modals/MoveDriveModal';
 import { MoveProgressOrb } from './components/MoveProgressOrb';
+import { CloudTransferOrb } from './components/CloudTransferOrb';
 import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
 import { Startup } from './components/Startup';
@@ -75,7 +79,6 @@ import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
 import { openExternal } from './services/desktop';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast extends ToastMessage {
@@ -158,6 +161,7 @@ export default function App() {
   const scale = settings?.coverScale ?? 100;
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudClose, setCloudClose] = useState<'backup' | 'restore' | null>(null);
+  const [cloudJob, setCloudJob] = useState<CloudPulse | null>(null);
   /** The newer release, if one has been found. Settings shows and installs it. */
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
@@ -165,22 +169,27 @@ export default function App() {
 
   useEffect(() => {
     if (!isNative()) return;
-    let stop = () => {};
-    const ask = () => setCloudClose(currentCloudTransfer() ?? 'backup');
-    void listen('cloud-transfer-close', ask).then((unlisten) => {
-      stop = unlisten;
-    }).catch(() => undefined);
-    let stopClose = () => {};
-    void getCurrentWindow().onCloseRequested((event) => {
-      if (!currentCloudTransfer()) return;
-      event.preventDefault();
-      ask();
+    // Do not listen with onCloseRequested. That makes every close wait for the
+    // page, and finishing the close needs a permission this app does not have,
+    // so the window then cannot be closed at all.
+    let stopAsk = () => {};
+    let stopPulse = () => {};
+    void listen('cloud-transfer-close', () => {
+      setCloudClose(currentCloudTransfer() ?? 'backup');
     }).then((unlisten) => {
-      stopClose = unlisten;
+      stopAsk = unlisten;
     }).catch(() => undefined);
+    void listen<CloudPulse>('cloud-transfer', (event) => {
+      if (!cloudTransferActive()) return;
+      setCloudJob(event.payload);
+    }).then((unlisten) => {
+      stopPulse = unlisten;
+    }).catch(() => undefined);
+    const stopWatch = watchCloudTransfer(setCloudJob);
     return () => {
-      stop();
-      stopClose();
+      stopAsk();
+      stopPulse();
+      stopWatch();
     };
   }, []);
 
@@ -274,7 +283,9 @@ export default function App() {
     // Long enough to read, short enough not to pile up. A toast with buttons is
     // asking something, so it waits for the answer.
     if (!message.actions?.length && !message.sticky) {
-      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 6000);
+      // A short note should not sit as long as a long one.
+      const stay = Math.min(6000, Math.max(2200, 1600 + message.text.length * 24));
+      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), stay);
     }
   }, []);
 
@@ -1251,11 +1262,11 @@ export default function App() {
 
       {/* Bottom left, the way the app talks to the player: out of the way of the
           player bar in the middle and the Stop button at the top right. */}
-      <div className="pointer-events-none fixed bottom-5 left-5 z-50 flex w-80 flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-5 left-5 z-50 flex w-fit max-w-xs flex-col items-start gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-xl ${
+            className={`pointer-events-auto flex w-fit max-w-full items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-xl ${
               t.tone === 'error'
                 ? 'border-rose-400/40 bg-rose-500/15 text-rose-100'
                 : 'border-line bg-panel/95 text-fg'
@@ -1266,8 +1277,8 @@ export default function App() {
             ) : (
               <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-400" />
             )}
-            <div className="flex-1">
-              <span>{t.text}</span>
+            <div className="min-w-0 flex-1">
+              <span className="break-words">{t.text}</span>
               {t.actions?.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {t.actions.map((action) => (
@@ -1467,6 +1478,9 @@ export default function App() {
 
       {move.job && moveId !== move.job.gameId && (
         <MoveProgressOrb job={move.job} onOpen={setMoveId} onDismiss={move.dismiss} />
+      )}
+      {cloudJob && (
+        <CloudTransferOrb job={cloudJob} lift={!!move.job && moveId !== move.job.gameId} />
       )}
 
       {!isNative() && (

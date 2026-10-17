@@ -962,19 +962,64 @@ export function restoreFromCloud(
 let cloudDepth = 0;
 let cloudKind: 'backup' | 'restore' = 'backup';
 
+/** What the corner ring is showing while a cloud copy runs. */
+export interface CloudPulse {
+  up: boolean;
+  heading: string;
+  title: string;
+  percent: number | null;
+  detail: string;
+}
+
+type CloudWatch = (pulse: CloudPulse | null) => void;
+let cloudWatch: CloudWatch | null = null;
+let cloudActive = false;
+
 /** What a close prompt should say while a cloud copy is running. */
 export function currentCloudTransfer(): 'backup' | 'restore' | null {
   return cloudDepth > 0 ? cloudKind : null;
 }
 
+export function cloudTransferActive(): boolean {
+  return cloudActive;
+}
+
+export function watchCloudTransfer(fn: CloudWatch): () => void {
+  cloudWatch = fn;
+  return () => {
+    if (cloudWatch === fn) cloudWatch = null;
+  };
+}
+
+function showCloud(kind: 'backup' | 'restore') {
+  cloudActive = true;
+  cloudWatch?.({
+    up: kind === 'backup',
+    heading: kind === 'backup' ? 'Sending to the cloud' : 'Restoring from the cloud',
+    title: '',
+    percent: null,
+    detail: 'Starting…',
+  });
+}
+
+function hideCloud() {
+  cloudActive = false;
+  cloudWatch?.(null);
+}
+
 function duringCloud<T>(kind: 'backup' | 'restore', run: () => Promise<T>): Promise<T> {
   cloudDepth += 1;
   cloudKind = kind;
-  if (cloudDepth === 1) void call('cloud_busy', { busy: true }, async () => undefined);
+  if (cloudDepth === 1) showCloud(kind);
   return run().finally(() => {
     cloudDepth = Math.max(0, cloudDepth - 1);
-    if (cloudDepth === 0) void call('cloud_busy', { busy: false }, async () => undefined);
+    if (cloudDepth === 0) hideCloud();
   });
+}
+
+/** Keep the corner ring up for a whole backup, including the copy that stays on this PC. */
+export function trackCloud<T>(kind: 'backup' | 'restore', run: () => Promise<T>): Promise<T> {
+  return duringCloud(kind, run);
 }
 
 export function quitDespiteCloud(): Promise<void> {

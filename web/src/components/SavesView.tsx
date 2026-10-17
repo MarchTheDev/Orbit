@@ -21,6 +21,7 @@ import {
   restoreFromCloud,
   sendCloudAfterBackup,
   sendToClouds,
+  trackCloud,
   type CloudAccount,
   type SaveBackup,
   type SaveStatus,
@@ -185,12 +186,14 @@ export function SavesView({
     if (clouds.length === 0) throw new Error('Sign in to a cloud first.');
     const list = target === 'all' ? clouds : target === 'chosen' ? chosenClouds(clouds) : [target];
     if (list.length === 0) throw new Error('Mark a cloud first, or pick one.');
-    try {
-      await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
-    } catch {
-      // A cloud copy uses the save folder itself. A local copy is not required.
-    }
-    await sendToClouds(list, 'all', settings.saves?.backupRoot, [cloudGameOf(game, dirs[game.id])]);
+    await trackCloud('backup', async () => {
+      try {
+        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+      } catch {
+        // A cloud copy uses the save folder itself. A local copy is not required.
+      }
+      await sendToClouds(list, 'all', settings.saves?.backupRoot, [cloudGameOf(game, dirs[game.id])]);
+    });
   };
   const setHidden = (id: string, hide: boolean) => {
     const next = hide ? [...new Set([...hiddenIds, id])] : hiddenIds.filter((item) => item !== id);
@@ -235,21 +238,21 @@ export function SavesView({
       return;
     }
     setSendingCloud(true);
-    let copied = 0;
-    for (const game of chosen) {
-      try {
-        await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
-        copied += 1;
-      } catch {
-        // A game with no save folder is skipped. The others still go up.
-      }
-    }
-    setSavedTick((n) => n + 1);
     try {
-      const sent = await sendToClouds(which === 'all' ? clouds : chosenClouds(clouds), 'all', settings.saves?.backupRoot, chosen.map((game) => cloudGameOf(game, dirs[game.id])));
-      say(sent);
+      await trackCloud('backup', async () => {
+        for (const game of chosen) {
+          try {
+            await backupSave(game.id, game.title, dirs[game.id] ?? null, saveHintsOf(game), savePlaceOf(game, settings));
+          } catch {
+            // A game with no save folder is skipped. The others still go up.
+          }
+        }
+        setSavedTick((n) => n + 1);
+        const sent = await sendToClouds(which === 'all' ? clouds : chosenClouds(clouds), 'all', settings.saves?.backupRoot, chosen.map((game) => cloudGameOf(game, dirs[game.id])));
+        say(sent);
+      });
     } catch (e) {
-      say(`The cloud did not take it. ${String(e).replace(/^Error:\\s*/, '')}`);
+      say(`The cloud did not take it. ${String(e).replace(/^Error:\s*/, '')}`);
     } finally {
       setSendingCloud(false);
     }
@@ -264,11 +267,11 @@ export function SavesView({
     setRestoringCloud(true);
     setMenuError(null);
     try {
-      const note = await restoreFromCloud(
+      const note = await trackCloud('restore', () => restoreFromCloud(
         cloud,
         settings.saves?.backupRoot,
         list.map((game) => cloudGameOf(game, dirs[game.id])),
-      );
+      ));
       say(note);
       setSavedTick((n) => n + 1);
     } catch (e) {

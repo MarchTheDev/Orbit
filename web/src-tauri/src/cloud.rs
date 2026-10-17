@@ -37,6 +37,116 @@ struct SignInWatch {
 static SIGN_IN_CANCEL: AtomicBool = AtomicBool::new(false);
 static SIGN_IN: Mutex<Option<SignInWatch>> = Mutex::new(None);
 
+/// What the corner ring shows while rclone is copying.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudPulse {
+    pub up: bool,
+    pub heading: String,
+    pub title: String,
+    pub percent: Option<u8>,
+    pub detail: String,
+}
+
+type PulseSink = Arc<dyn Fn(CloudPulse) + Send + Sync>;
+static PULSE: Mutex<Option<PulseSink>> = Mutex::new(None);
+static PULSE_UP: AtomicBool = AtomicBool::new(true);
+static PULSE_HEADING: Mutex<String> = Mutex::new(String::new());
+static PULSE_TITLE: Mutex<String> = Mutex::new(String::new());
+
+/// Start reporting a copy. A later copy replaces this; the last one to finish clears it.
+pub fn begin_pulse(up: bool, heading: &str, sink: PulseSink) {
+    PULSE_UP.store(up, Ordering::SeqCst);
+    if let Ok(mut slot) = PULSE_HEADING.lock() {
+        *slot = heading.to_string();
+    }
+    if let Ok(mut slot) = PULSE_TITLE.lock() {
+        slot.clear();
+    }
+    if let Ok(mut slot) = PULSE.lock() {
+        *slot = Some(sink);
+    }
+    tell_pulse(None, "Starting…");
+}
+
+pub fn end_pulse() {
+    if let Ok(mut slot) = PULSE.lock() {
+        *slot = None;
+    }
+}
+
+/// The game whose files are being copied now, so the ring is not an unnamed spinner.
+pub fn note_game(title: &str) {
+    if let Ok(mut slot) = PULSE_TITLE.lock() {
+        *slot = title.to_string();
+    }
+    tell_pulse(None, "Copying…");
+}
+
+pub fn note_wait(detail: &str) {
+    tell_pulse(None, detail);
+}
+
+fn tell_pulse(percent: Option<u8>, detail: &str) {
+    let sink = PULSE.lock().ok().and_then(|slot| slot.clone());
+    let Some(sink) = sink else {
+        return;
+    };
+    let heading = PULSE_HEADING
+        .lock()
+        .ok()
+        .map(|slot| slot.clone())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| {
+            if PULSE_UP.load(Ordering::SeqCst) {
+                "Sending to the cloud".into()
+            } else {
+                "Restoring from the cloud".into()
+            }
+        });
+    let title = PULSE_TITLE.lock().ok().map(|slot| slot.clone()).unwrap_or_default();
+    sink(CloudPulse {
+        up: PULSE_UP.load(Ordering::SeqCst),
+        heading,
+        title,
+        percent,
+        detail: detail.to_string(),
+    });
+}
+
+fn note_stats_line(line: &str) {
+    let Some(percent) = transfer_percent(line) else {
+        return;
+    };
+    tell_pulse(Some(percent), &short_stats(line));
+}
+
+fn transfer_percent(line: &str) -> Option<u8> {
+    let lower = line.to_ascii_lowercase();
+    if !(lower.contains("transferred") || lower.contains("eta")) {
+        return None;
+    }
+    let idx = line.rfind('%')?;
+    let bytes = line.as_bytes();
+    let mut start = idx;
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    if start == idx {
+        return None;
+    }
+    let n: u8 = line[start..idx].parse().ok()?;
+    if n > 100 { None } else { Some(n) }
+}
+
+fn short_stats(line: &str) -> String {
+    let text = line.trim();
+    let text = text.rsplit("NOTICE:").next().unwrap_or(text).trim();
+    let text = text.strip_prefix("Transferred:").unwrap_or(text).trim();
+    let text: String = text.chars().take(72).collect();
+    if text.is_empty() { "Copying…".into() } else { text }
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudStatus {
@@ -1911,6 +2021,7 @@ fn copy_games(
     let mut missing = Vec::new();
     let mut failed = Vec::new();
     for game in games {
+        note_game(&game.title);
         match send_live_save(bin, config, remote, folder, game) {
             Ok(true) => {
                 sent += 1;
@@ -2011,6 +2122,7 @@ fn restore_games(
     let mut kept_only = Vec::new();
     let mut missing = Vec::new();
     for game in games {
+        note_game(&game.title);
         let brought = match bring_down(bin, config, data_dir, backup_root, &source, remote, folder, game) {
             Ok(path) => path,
             Err(err) if stops_the_batch(&err) => {
@@ -2243,13 +2355,20 @@ fn rclone_transfer(
     // The shared Drive client often answers 403 while opening the folder, before
     // any file is copied. `--retries` does not cover that, so Orbit waits and
     // tries the whole command again.
+    //
+    // `--quiet` is left off on purpose. A quiet copy looks frozen. Stats once a
+    // second are what the corner ring fills from, and the error text still drops
+    // those lines.
     with_quota_retry(|| {
         let mut cmd = rclone(bin, config);
-        cmd.arg("--quiet").arg(command);
+        cmd.arg(command);
         if update {
             cmd.arg("--update");
         }
         cmd.args([
+            "--stats",
+            "1s",
+            "--stats-one-line",
             "--retries",
             "3",
             "--retries-sleep",
@@ -2263,10 +2382,56 @@ fn rclone_transfer(
             "--",
         ])
         .arg(from)
-        .arg(to)
-        .output()
-        .map_err(|e| format!("Could not start rclone: {e}"))
+        .arg(to);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| format!("Could not start rclone: {e}"))?;
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let out_thread = stdout.map(|pipe| std::thread::spawn(move || read_cloud_pipe(pipe, false)));
+        let err_thread = stderr.map(|pipe| std::thread::spawn(move || read_cloud_pipe(pipe, true)));
+        let status = child.wait().map_err(|e| format!("rclone did not finish: {e}"));
+        let stdout = out_thread.and_then(|handle| handle.join().ok()).unwrap_or_default();
+        let stderr = err_thread.and_then(|handle| handle.join().ok()).unwrap_or_default();
+        Ok(std::process::Output {
+            status: status?,
+            stdout,
+            stderr,
+        })
     })
+}
+
+fn read_cloud_pipe(pipe: impl Read, progress: bool) -> Vec<u8> {
+    let mut reader = BufReader::new(pipe);
+    let mut all = Vec::new();
+    let mut pending = Vec::new();
+    let mut chunk = [0u8; 2048];
+    loop {
+        let n = match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        all.extend_from_slice(&chunk[..n]);
+        if !progress {
+            continue;
+        }
+        pending.extend_from_slice(&chunk[..n]);
+        while let Some(pos) = pending.iter().position(|byte| *byte == b'\n' || *byte == b'\r') {
+            let line = String::from_utf8_lossy(&pending[..pos]).trim().to_string();
+            pending.drain(..=pos);
+            if !line.is_empty() {
+                note_stats_line(&line);
+            }
+        }
+    }
+    if progress && !pending.is_empty() {
+        let line = String::from_utf8_lossy(&pending).trim().to_string();
+        if !line.is_empty() {
+            note_stats_line(&line);
+        }
+    }
+    all
 }
 
 /// Google's shared Drive app is limited per minute. A short wait often clears it.
@@ -2278,6 +2443,7 @@ where
     let mut last = None;
     for (attempt, wait) in WAITS.iter().enumerate() {
         if *wait > 0 {
+            note_wait("Waiting for Google Drive, then trying again.");
             std::thread::sleep(Duration::from_secs(*wait));
         }
         let output = run()?;
@@ -2582,6 +2748,7 @@ fn useful_detail(bytes: &[u8]) -> String {
                 && !is_shared_client_notice(line)
                 && !lower.contains(" notice:")
                 && !lower.starts_with("notice:")
+                && !lower.contains("transferred:")
         })
         .map(strip_secret)
         .filter(|line| !line.is_empty())
@@ -2653,7 +2820,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{allowed_archive, clean_folder, copy_error, is_drive_quota, is_local_auth, is_missing_remote, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, restore_places, sign_in_failure, token_from, useful_detail, CloudGame};
+    use super::{allowed_archive, clean_folder, copy_error, is_drive_quota, is_local_auth, is_missing_remote, is_shared_client_notice, location_from, may_open_sign_in, orbit_name, page, port_still_busy, rename_remote_text, restore_places, sign_in_failure, token_from, transfer_percent, useful_detail, CloudGame};
 
     #[test]
     fn a_cloud_path_stays_inside_the_cloud() {
@@ -2722,6 +2889,20 @@ mod tests {
         assert!(!is_drive_quota(b"", b"ERROR: directory not found"));
         assert!(!is_missing_remote(b"", raw));
         assert!(is_missing_remote(b"", b"ERROR: directory not found"));
+    }
+
+    #[test]
+    fn a_transfer_line_is_progress_not_the_failure() {
+        assert_eq!(
+            transfer_percent("Transferred: 1 MiB / 8 MiB, 12%, 1 MiB/s, ETA 7s"),
+            Some(12)
+        );
+        assert!(transfer_percent("ERROR: directory not found").is_none());
+        assert!(transfer_percent("NOTICE: Transferred: 0 B / 0 B, -, 0 B/s, ETA -").is_none());
+        let raw = b"NOTICE: Transferred: 1 MiB / 8 MiB, 12%, 1 MiB/s\nERROR: directory not found\n";
+        let shown = useful_detail(raw);
+        assert!(shown.contains("directory not found"));
+        assert!(!shown.to_ascii_lowercase().contains("transferred"));
     }
 
     #[test]

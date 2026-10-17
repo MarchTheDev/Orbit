@@ -33,7 +33,7 @@ mod transfer;
 mod update;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
@@ -150,10 +150,37 @@ pub(crate) fn apply_policy(app: &tauri::AppHandle, on_launch: bool, policy: Wind
 /// with no tray is an app the player cannot get back, which is not a preference
 /// anybody asked for.
 static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// A cloud backup or restore is in progress. Closing the process then can cut a copy in half.
-static CLOUD_BUSY: AtomicBool = AtomicBool::new(false);
+/// How many cloud copies are running. Closing the process then can cut a copy in half.
+static CLOUD_JOBS: AtomicUsize = AtomicUsize::new(0);
 /// The player chose Close anyway, so the next close is allowed to finish.
 static FORCE_QUIT: AtomicBool = AtomicBool::new(false);
+
+/// Counts a cloud copy, and clears the corner ring when the last one ends.
+///
+/// The count lives on the command, not on a separate message from the window.
+/// A message can arrive late, or not at all, and then every later close is refused.
+struct CloudJob;
+impl CloudJob {
+    fn start() -> Self {
+        CLOUD_JOBS.fetch_add(1, Ordering::SeqCst);
+        CloudJob
+    }
+}
+impl Drop for CloudJob {
+    fn drop(&mut self) {
+        let left = CLOUD_JOBS.fetch_sub(1, Ordering::SeqCst);
+        if left == 1 {
+            cloud::end_pulse();
+        }
+    }
+}
+
+fn watch_cloud(app: &tauri::AppHandle, up: bool, heading: &str) {
+    let app = app.clone();
+    cloud::begin_pulse(up, heading, Arc::new(move |pulse| {
+        let _ = app.emit("cloud-transfer", &pulse);
+    }));
+}
 
 /// Set once an exit has been asked for, so the minimise watcher can leave and
 /// a second exit event does not start a second watchdog.
@@ -1311,7 +1338,7 @@ fn load_settings(orbit: State<'_, Orbit>) -> Option<Settings> {
 }
 
 fn cloud_blocks_quit() -> bool {
-    CLOUD_BUSY.load(Ordering::SeqCst) && !FORCE_QUIT.load(Ordering::SeqCst)
+    CLOUD_JOBS.load(Ordering::SeqCst) > 0 && !FORCE_QUIT.load(Ordering::SeqCst)
 }
 
 fn ask_to_wait(app: &tauri::AppHandle) {
@@ -1333,20 +1360,10 @@ fn quit_now(app: &tauri::AppHandle) {
     }
 }
 
-/// The window says a cloud copy is running, so a close can ask before it cuts that off.
-#[tauri::command]
-fn cloud_busy(busy: bool) {
-    CLOUD_BUSY.store(busy, Ordering::SeqCst);
-    if !busy {
-        FORCE_QUIT.store(false, Ordering::SeqCst);
-    }
-}
-
 /// Close anyway. The copy may be left unfinished.
 #[tauri::command]
 fn cloud_quit(app: tauri::AppHandle) {
     FORCE_QUIT.store(true, Ordering::SeqCst);
-    CLOUD_BUSY.store(false, Ordering::SeqCst);
     quit_now(&app);
 }
 
@@ -1548,6 +1565,7 @@ async fn cloud_attach(orbit: State<'_, Orbit>, remote: String, folder: Option<St
 
 #[tauri::command]
 async fn cloud_copy(
+    app: tauri::AppHandle,
     orbit: State<'_, Orbit>,
     up: bool,
     remote: String,
@@ -1557,7 +1575,10 @@ async fn cloud_copy(
     only: Option<Vec<cloud::CloudGame>>,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
+    let heading = if up { "Sending to the cloud" } else { "Restoring from the cloud" };
     tokio::task::spawn_blocking(move || {
+        let _job = CloudJob::start();
+        watch_cloud(&app, up, heading);
         cloud::copy(
             &data,
             backup_root.as_deref(),
@@ -1575,6 +1596,7 @@ async fn cloud_copy(
 /// Move the copies to another path on the same cloud.
 #[tauri::command]
 async fn cloud_move(
+    app: tauri::AppHandle,
     orbit: State<'_, Orbit>,
     remote: String,
     own: bool,
@@ -1582,14 +1604,19 @@ async fn cloud_move(
     to: String,
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
-    tokio::task::spawn_blocking(move || cloud::move_folder(&data, &remote, own, &from, &to))
-        .await
-        .map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || {
+        let _job = CloudJob::start();
+        watch_cloud(&app, true, "Moving on the cloud");
+        cloud::move_folder(&data, &remote, own, &from, &to)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Copy the cloud folder onto another remote. Neither sign-in is replaced.
 #[tauri::command]
 async fn cloud_transfer(
+    app: tauri::AppHandle,
     orbit: State<'_, Orbit>,
     from_remote: String,
     from_own: bool,
@@ -1599,6 +1626,8 @@ async fn cloud_transfer(
 ) -> Result<String, String> {
     let data = orbit.store.root().to_path_buf();
     tokio::task::spawn_blocking(move || {
+        let _job = CloudJob::start();
+        watch_cloud(&app, true, "Copying between clouds");
         cloud::transfer(
             &data,
             &from_remote,
@@ -2167,7 +2196,6 @@ pub fn run() {
             folder_programs,
             load_settings,
             save_settings,
-            cloud_busy,
             cloud_quit,
             data_dir,
             data_dir_size,
