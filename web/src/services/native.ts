@@ -1206,6 +1206,7 @@ export interface OverlayStatus {
   game: string;
   folder: string;
   note: string;
+  readyNotice?: string | null;
 }
 
 export function clampOverlaySeconds(value: number | undefined): number {
@@ -1367,6 +1368,10 @@ export function overlayPlaying(title: string): Promise<void> {
   return call('overlay_playing', { title }, () => undefined);
 }
 
+export function overlayReadyNotice(title: string): Promise<void> {
+  return call('overlay_ready_notice', { title }, () => undefined);
+}
+
 export function overlayStatus(): Promise<OverlayStatus> {
   return call('overlay_status', {}, () => ({
     enabled: true,
@@ -1430,6 +1435,12 @@ export function overlayOpen(path: string): Promise<void> {
 export function overlayDelete(path: string): Promise<void> {
   return call('overlay_delete', { path }, async () => {
     throw new Error('Deleting a capture needs the desktop app.');
+  });
+}
+
+export function overlayCopy(path: string): Promise<void> {
+  return call('overlay_copy', { path }, async () => {
+    throw new Error('Copying a screenshot needs the desktop app.');
   });
 }
 

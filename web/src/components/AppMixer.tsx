@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Volume2, VolumeX } from 'lucide-react';
 import { audioApps, audioDevices, audioSet, audioUseDevice, type AppAudio, type AudioDevice } from '../services/native';
-import { cn } from '../utils/cn';
 
 type Pending = { volume: number; muted: boolean };
 
@@ -87,7 +86,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
 
   const [more, setMore] = useState(false);
   const arranged = useMemo(() => {
-    if (!compact) return { top: apps, rest: [] as AppAudio[], missing: false };
+    if (!compact) return { top: apps, rest: [] as AppAudio[] };
     const speakers = apps.find((app) => app.device);
     const others = apps.filter((app) => !app.device);
     const gameApp = matchGame(others, game);
@@ -95,12 +94,12 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
     if (gameApp) top.push(gameApp);
     if (speakers) top.push(speakers);
     for (const app of others) {
-      if (top.length >= 2) break;
+      if (top.length >= 3) break;
       if (top.some((item) => item.id === app.id)) continue;
       top.push(app);
     }
     const ids = new Set(top.map((app) => app.id));
-    return { top, rest: apps.filter((app) => !ids.has(app.id)), missing: Boolean(game.trim()) && !gameApp };
+    return { top, rest: apps.filter((app) => !ids.has(app.id)) };
   }, [apps, compact, game]);
   const shown = !compact ? apps : more ? [...arranged.top, ...arranged.rest] : arranged.top;
 
@@ -116,38 +115,32 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
   }
 
   return (
-    <div className={compact ? 'space-y-1' : 'space-y-2'}>
-      <DevicePick pad={pad} compact={compact} />
+    <div className="space-y-2">
+      <DevicePick pad={pad} />
       {apps.length === 0 && <p className="text-xs text-muted">No apps are playing sound.</p>}
-      {arranged.missing && (
-        <p className={cn('rounded-xl border border-line bg-panel2', compact ? 'px-2 py-1 text-[10px] leading-tight text-muted' : 'px-3 py-2 text-sm')}>
-          {game}
-          <span className="text-muted"> · not playing sound</span>
-        </p>
-      )}
       {shown.map((app) => (
-        <div key={app.id} className={cn('rounded-xl border border-line bg-panel2', compact ? 'px-2 py-1.5' : 'px-3 py-2')}>
+        <div key={app.id} className="rounded-xl border border-line bg-panel2 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <span className={cn('min-w-0 truncate', compact ? 'text-xs' : 'text-sm')}>{app.name}</span>
+            <span className="min-w-0 truncate text-sm">{app.name}</span>
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={app.muted ? `Unmute ${app.name}` : `Mute ${app.name}`}
               onClick={() => setVolume(app.id, app.volume, !app.muted)}
-              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
+              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
             >
               {app.muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
             </button>
           </div>
-          <div className={cn('flex items-center', compact ? 'mt-1 gap-1.5' : 'mt-1.5 gap-2')}>
+          <div className="mt-1.5 flex items-center gap-2">
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Quieter ${app.name}`}
               onClick={() => nudge(app.id, -1)}
-              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
+              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
             >
               <Minus className="size-3.5" />
             </button>
@@ -161,14 +154,14 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
               onChange={(event) => setVolume(app.id, Number(event.target.value), app.muted)}
               className="min-w-0 flex-1 accent-[var(--c-accent)]"
             />
-            <span className={cn('shrink-0 text-right tabular-nums text-muted', compact ? 'w-7 text-[10px]' : 'w-8 text-[11px]')}>{app.volume}</span>
+            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted">{app.volume}</span>
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Louder ${app.name}`}
               onClick={() => nudge(app.id, 1)}
-              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
+              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
             >
               <Plus className="size-3.5" />
             </button>
@@ -184,7 +177,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
             setMore(open);
             onMore?.(open);
           }}
-          className={cn('w-full rounded-xl border border-line text-muted hover:border-accent hover:text-fg', compact ? 'px-3 py-1 text-[11px]' : 'px-3 py-1.5 text-xs')}
+          className="w-full rounded-xl border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
         >
           {more ? 'Less' : `More · ${arranged.rest.length}`}
         </button>
@@ -194,7 +187,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
   );
 }
 
-function DevicePick({ pad, compact }: { pad: boolean; compact: boolean }) {
+function DevicePick({ pad }: { pad: boolean }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [error, setError] = useState('');
 
@@ -226,10 +219,10 @@ function DevicePick({ pad, compact }: { pad: boolean; compact: boolean }) {
   if (outputs.length === 0 && inputs.length === 0 && !error) return null;
 
   return (
-    <div className={compact ? 'grid grid-cols-2 gap-2' : 'space-y-2'}>
-      <DeviceSelect label="Output" devices={outputs} pad={pad} compact={compact} onChoose={(id) => choose('output', id)} />
-      <DeviceSelect label="Microphone" devices={inputs} pad={pad} compact={compact} onChoose={(id) => choose('input', id)} />
-      {error && <p className={cn('text-[11px] text-muted', compact && 'col-span-2')}>{error}</p>}
+    <div className="space-y-2">
+      <DeviceSelect label="Output" devices={outputs} pad={pad} onChoose={(id) => choose('output', id)} />
+      <DeviceSelect label="Microphone" devices={inputs} pad={pad} onChoose={(id) => choose('input', id)} />
+      {error && <p className="text-[11px] text-muted">{error}</p>}
     </div>
   );
 }
@@ -238,26 +231,24 @@ function DeviceSelect({
   label,
   devices,
   pad,
-  compact,
   onChoose,
 }: {
   label: string;
   devices: AudioDevice[];
   pad: boolean;
-  compact: boolean;
   onChoose: (id: string) => void;
 }) {
   if (devices.length === 0) return null;
   const current = devices.find((item) => item.current)?.id ?? devices[0].id;
   return (
     <label className="block min-w-0">
-      <span className={cn('mb-0.5 block text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>{label}</span>
+      <span className="mb-1 block text-[11px] text-muted">{label}</span>
       <select
         value={current}
         aria-label={label}
         data-overlay={pad ? '' : undefined}
         onChange={(event) => onChoose(event.target.value)}
-        className={cn('w-full rounded-xl border border-line bg-panel2 text-fg', compact ? 'px-1.5 py-1 text-[10px]' : 'px-2 py-1.5 text-xs')}
+        className="w-full rounded-xl border border-line bg-panel2 px-2 py-1.5 text-xs text-fg"
       >
         {devices.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>

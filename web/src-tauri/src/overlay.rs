@@ -9,7 +9,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +33,7 @@ static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
+static READY_NOTICE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
@@ -51,6 +52,7 @@ struct Live {
     recording_root: PathBuf,
     replay_root: PathBuf,
     game: String,
+    ready_notice: Option<String>,
     playing: bool,
     recording: Option<Child>,
     buffer: Option<Child>,
@@ -92,6 +94,7 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     recording_root: PathBuf::new(),
     replay_root: PathBuf::new(),
     game: String::new(),
+    ready_notice: None,
     playing: false,
     recording: None,
     buffer: None,
@@ -129,6 +132,7 @@ pub struct OverlayStatus {
     pub game: String,
     pub folder: String,
     pub note: String,
+    pub ready_notice: Option<String>,
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Live> {
@@ -275,6 +279,68 @@ pub fn game_started(title: &str) {
     }
 }
 
+/// Show a short, click-through overlay notice after Orbit successfully starts a game.
+/// The main window may already be minimized or hidden by the launch policy.
+pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
+    let title = safe_name(title);
+    {
+        let mut live = lock();
+        if !live.enabled {
+            return Ok(());
+        }
+        live.ready_notice = Some(title.clone());
+    }
+
+    let Some(window) = ensure_window(app) else {
+        lock().ready_notice = None;
+        return Err("The overlay window could not be created.".to_string());
+    };
+    if OPEN.load(Ordering::SeqCst) {
+        // The full overlay is already visible; its regular status refresh will
+        // pick up the notice without disturbing the player's current layout.
+        return Ok(());
+    }
+    if window.is_visible().unwrap_or(false) && HAS_PINS.load(Ordering::SeqCst) {
+        // Keep pinned widgets exactly as they are; the notice can appear above them.
+        return Ok(());
+    }
+
+    RESTING.store(true, Ordering::SeqCst);
+    IGNORE.store(true, Ordering::SeqCst);
+    capture::set_paused(false);
+    cover_screen(&window);
+    let _ = window.set_focusable(false);
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_always_on_top(true);
+    if let Err(error) = window.show() {
+        lock().ready_notice = None;
+        return Err(format!("The overlay window could not be shown: {error}"));
+    }
+
+    let generation = READY_NOTICE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-ready-notice".to_string())
+        .spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            let panel = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if READY_NOTICE_GENERATION.load(Ordering::SeqCst) != generation
+                    || OPEN.load(Ordering::SeqCst)
+                {
+                    return;
+                }
+                lock().ready_notice = None;
+                if HAS_PINS.load(Ordering::SeqCst) {
+                    rest_window(&panel);
+                } else {
+                    close_panel(&panel);
+                }
+            });
+        });
+    Ok(())
+}
+
 pub fn game_stopped() {
     {
         let mut live = lock();
@@ -316,6 +382,7 @@ pub fn shutdown() {
 pub fn close_panel(app: &AppHandle) {
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
+    lock().ready_notice = None;
     HAS_PINS.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     crate::stats::release();
@@ -381,12 +448,13 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
 }
 
 pub fn status() -> OverlayStatus {
-    let live = lock();
+    let mut live = lock();
     let folder = if live.recording_root.as_os_str().is_empty() {
         kind_dir_from(&live.root, "recordings")
     } else {
         live.recording_root.clone()
     };
+    let ready_notice = live.ready_notice.take();
     OverlayStatus {
         enabled: live.enabled,
         recording: live.recording.is_some() || live.native_recording.is_some(),
@@ -403,6 +471,7 @@ pub fn status() -> OverlayStatus {
             let capture_error = capture::last_error();
             if !capture_error.is_empty() { capture_error } else { live.note.clone() }
         },
+        ready_notice,
     }
 }
 
@@ -441,6 +510,30 @@ pub fn delete_item(path: &str) -> Result<(), String> {
         return Err("That file is not there any more.".to_string());
     }
     fs::remove_file(&path).map_err(|error| format!("Could not delete that capture: {error}"))
+}
+
+pub fn copy_item(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !allowed_capture(&path) {
+        return Err("That file is not one of Orbit's captures.".to_string());
+    }
+    if !path.is_file() {
+        return Err("That capture is not there any more.".to_string());
+    }
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!(extension.as_str(), "jpg" | "jpeg" | "png") {
+        return Err("Only screenshots can be copied as images.".to_string());
+    }
+    #[cfg(windows)]
+    {
+        if extension == "png" {
+            return copy_png_image_with_powershell(&path);
+        }
+        if screenshot_dib(&path).is_none() {
+            return Err("Orbit could not read that screenshot as an image.".to_string());
+        }
+    }
+    copy_capture_to_clipboard(&path)
 }
 
 pub fn gallery() -> Vec<GalleryItem> {
@@ -758,12 +851,12 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = game_dir("screenshots")?;
     if capture::available() {
-        let path = clip_path(&dir, &lock().game, stamp, "jpg");
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
         if capture::save_picture(&path, current_spec()).is_ok() {
             return saved_picture(&path);
         }
     }
-    let path = clip_path(&dir, &lock().game, stamp, "png");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
     #[cfg(windows)]
     if powershell_shot(&path).is_ok() {
         return saved_picture(&path);
@@ -869,7 +962,7 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
 
 fn spawn_native_recording(stamp: &str) -> Result<(), String> {
     let dir = game_dir("recordings")?;
-    let path = clip_path(&dir, &lock().game, stamp, "mp4");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let spec = current_spec();
     let hold = capture::start_recording(path.clone(), spec)?;
     let name = path
@@ -886,7 +979,7 @@ fn spawn_native_recording(stamp: &str) -> Result<(), String> {
 fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
     let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
     let dir = game_dir("recordings")?;
-    let path = clip_path(&dir, &lock().game, stamp, "mp4");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(lock().fps)))?;
@@ -1009,7 +1102,7 @@ fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
         }
     }?;
     let dir = game_dir("replays")?;
-    let path = clip_path(&dir, &format!("{} last {seconds}s", lock().game), stamp, "mp4");
+    let path = clip_path(&dir, &format!("{} last {seconds}s", capture_name_for_dir(&dir)), stamp, "mp4");
     encode_kept(&path, &kept)?;
     let name = path
         .file_name()
@@ -1272,16 +1365,25 @@ fn kind_dir_from(root: &Path, kind: &str) -> PathBuf {
     root.join(kind_name(kind))
 }
 
+fn capture_label(game: &str, playing: bool) -> String {
+    if playing && !game.trim().is_empty() {
+        game.to_string()
+    } else {
+        "Desktop".to_string()
+    }
+}
+
+fn capture_name() -> String {
+    let live = lock();
+    capture_label(&live.game, live.playing)
+}
+
+fn capture_name_for_dir(dir: &Path) -> String {
+    dir.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(capture_name)
+}
+
 fn game_dir(kind: &str) -> Result<PathBuf, String> {
-    let game = {
-        let name = lock().game.clone();
-        if name.trim().is_empty() {
-            "Desktop".to_string()
-        } else {
-            name
-        }
-    };
-    let dir = kind_dir(kind)?.join(safe_name(&game));
+    let dir = kind_dir(kind)?.join(safe_name(&capture_name()));
     fs::create_dir_all(&dir).map_err(|error| format!("Could not create the folder: {error}"))?;
     Ok(dir)
 }
@@ -1412,6 +1514,24 @@ fn dib_24bit(width: u32, height: u32, bgra: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[cfg(windows)]
+fn copy_png_image_with_powershell(path: &Path) -> Result<(), String> {
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "Add-Type -AssemblyName System.Drawing; Add-Type -AssemblyName System.Windows.Forms; $image = [System.Drawing.Image]::FromFile('{escaped}'); try {{ [System.Windows.Forms.Clipboard]::SetImage($image) }} finally {{ $image.Dispose() }}"
+    );
+    let output = process::command("powershell")
+        .args(["-NoProfile", "-STA", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|error| format!("Could not start PowerShell to copy the image: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() { "PowerShell could not copy the image.".to_string() } else { detail })
+    }
+}
+
+#[cfg(windows)]
 fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
@@ -1461,7 +1581,13 @@ fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
         file_data.extend_from_slice(&unit.to_le_bytes());
     }
     let file_memory = allocate(&file_data)?;
-    let image_memory = screenshot_dib(path).and_then(|dib| allocate(&dib).ok()).unwrap_or(std::ptr::null_mut());
+    let image_dib = screenshot_dib(path);
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    if image_dib.is_none() && extension == "png" && copy_png_image_with_powershell(path).is_ok() {
+        unsafe { GlobalFree(file_memory); }
+        return Ok(());
+    }
+    let image_memory = image_dib.and_then(|dib| allocate(&dib).ok()).unwrap_or(std::ptr::null_mut());
     if unsafe { OpenClipboard(std::ptr::null_mut()) } == 0 {
         unsafe {
             GlobalFree(file_memory);
@@ -1537,12 +1663,20 @@ fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
     let escaped = path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("set the clipboard to (POSIX file \"{escaped}\" as alias)");
-    let output = process::command("osascript").arg("-e").arg(script).output();
-    if let Ok(output) = output {
-        if output.status.success() {
+    let image_class = match path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => Some("PNGf"),
+        "jpg" | "jpeg" => Some("JPEG"),
+        _ => None,
+    };
+    if let Some(class) = image_class {
+        let script = format!("set the clipboard to (read (POSIX file \"{escaped}\") as «class {class}»)");
+        if process::command("osascript").arg("-e").arg(script).output().is_ok_and(|output| output.status.success()) {
             return Ok(());
         }
+    }
+    let script = format!("set the clipboard to (POSIX file \"{escaped}\" as alias)");
+    if process::command("osascript").arg("-e").arg(script).output().is_ok_and(|output| output.status.success()) {
+        return Ok(());
     }
     let uri = file_uri(path)?;
     send_clipboard("pbcopy", &[], uri.as_bytes())
@@ -1909,6 +2043,13 @@ fn read_xinput(slot: &mut u32) -> Option<(Vec<bool>, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_desktop_capture_does_not_reuse_the_last_game_title() {
+        assert_eq!(capture_label("Previously Opened", false), "Desktop");
+        assert_eq!(capture_label("", true), "Desktop");
+        assert_eq!(capture_label("Currently Playing", true), "Currently Playing");
+    }
 
     #[test]
     fn a_name_cannot_leave_the_clips_folder() {

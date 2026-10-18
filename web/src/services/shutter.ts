@@ -1,11 +1,9 @@
 /**
- * A short chime for a saved picture.
- *
- * A quiet, rounded two-note chime with a slow, gentle fade. Recordings stay
- * quiet. The volume is 0 to 100.
+ * A short, gentle three-note chime for a saved picture—not a song or jingle.
+ * The volume is 0 to 100.
  */
 
-const ROOT = 392.0;
+const ROOT = 293.66; // D4
 
 function frequency(semitones: number): number {
   return ROOT * Math.pow(2, semitones / 12);
@@ -34,28 +32,29 @@ export function playShutter(volume = 40) {
   if (!ctx) return;
   const now = ctx.currentTime;
   const master = ctx.createGain();
-  master.gain.setValueAtTime(level * 0.14, now);
+  master.gain.setValueAtTime(level * 0.09, now);
   master.connect(ctx.destination);
 
-  const voice = (semitones: number, peak: number, attack: number, release: number, glide?: number) => {
+  const voice = (semitones: number, peak: number, delay: number) => {
+    const start = now + delay;
+    const attack = 0.035;
+    const release = 0.58;
     const tone = ctx.createOscillator();
     const gain = ctx.createGain();
     tone.type = 'sine';
-    tone.frequency.setValueAtTime(frequency(semitones), now);
-    if (glide != null) tone.frequency.exponentialRampToValueAtTime(frequency(glide), now + release);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(peak, now + attack);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + release);
+    tone.frequency.setValueAtTime(frequency(semitones), start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(peak, start + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + release);
     tone.connect(gain);
     gain.connect(master);
-    tone.start(now);
-    tone.stop(now + release + 0.05);
-    return tone;
+    tone.start(start);
+    tone.stop(start + release + 0.05);
   };
 
-  // A soft fifth that blooms together, then settles without a sharp attack.
-  voice(0, 0.18, 0.045, 0.72);
-  voice(7, 0.09, 0.075, 0.88);
-  voice(12, 0.025, 0.06, 0.55, 7);
+  // A soft, unhurried D-major arpeggio; each note blooms and fades independently.
+  voice(0, 0.13, 0);
+  voice(4, 0.10, 0.11);
+  voice(7, 0.075, 0.22);
   void ctx.resume();
 }

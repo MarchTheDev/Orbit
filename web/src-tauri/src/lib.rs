@@ -782,6 +782,11 @@ fn overlay_playing(title: String) {
 }
 
 #[tauri::command]
+fn overlay_ready_notice(app: tauri::AppHandle, title: String) -> Result<(), String> {
+    overlay::ready_notice(&app, &title)
+}
+
+#[tauri::command]
 fn overlay_status() -> overlay::OverlayStatus {
     overlay::status()
 }
@@ -830,6 +835,11 @@ fn overlay_open(path: String) -> Result<(), String> {
 #[tauri::command]
 fn overlay_delete(path: String) -> Result<(), String> {
     overlay::delete_item(&path)
+}
+
+#[tauri::command]
+fn overlay_copy(path: String) -> Result<(), String> {
+    overlay::copy_item(&path)
 }
 
 #[tauri::command]
@@ -2484,6 +2494,7 @@ pub fn run() {
             append_playthrough_notes,
             overlay_open_settings,
             overlay_playing,
+            overlay_ready_notice,
             overlay_status,
             overlay_shot,
             overlay_record,
@@ -2493,6 +2504,7 @@ pub fn run() {
             overlay_open_kind,
             overlay_open,
             overlay_delete,
+            overlay_copy,
             overlay_gallery,
         ])
         .build(tauri::generate_context!())

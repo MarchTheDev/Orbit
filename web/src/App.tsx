@@ -41,6 +41,7 @@ import {
   overlayConfigure,
   overlayFps,
   overlayPlaying,
+  overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
 } from './services/native';
@@ -953,11 +954,14 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
-    if (!started.manual && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
-      announce({
+    const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
+    if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
+      const fallbackNotice = () => announce({
         text: 'Orbit Overlay is working',
         detail: 'Ready for captures. Press Alt+X to open it.',
       });
+      if (isNative()) void overlayReadyNotice(g.title).catch(fallbackNotice);
+      else fallbackNotice();
     }
     updateGame(g.id, {
       lastPlayed: new Date().toISOString(),
