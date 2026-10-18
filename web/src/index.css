@@ -688,12 +688,81 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 @keyframes orbit-toast {
-  0% { opacity: 0; transform: translate3d(-50%, 8px, 0); }
-  12% { opacity: 1; transform: translate3d(-50%, 0, 0); }
-  82% { opacity: 1; transform: translate3d(-50%, 0, 0); }
-  100% { opacity: 0; transform: translate3d(-50%, 6px, 0); }
+  0% { opacity: 0; transform: translate3d(0, -10px, 0) scale(.985); }
+  12% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  82% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, -5px, 0) scale(.995); }
 }
 .orbit-toast {
-  left: 50%;
   animation: orbit-toast 4.2s cubic-bezier(.2, .8, .2, 1) both;
+}
+.orbit-toast-card {
+  --toast-accent: var(--c-accent);
+  --toast-secondary: var(--c-accent2);
+  isolation: isolate;
+  border-color: color-mix(in srgb, var(--toast-accent) 42%, var(--c-border));
+  background:
+    radial-gradient(ellipse 85% 150% at -8% -30%, color-mix(in srgb, var(--toast-accent) 24%, transparent), transparent 72%),
+    linear-gradient(145deg, color-mix(in srgb, var(--c-panel) 96%, #080711 4%), color-mix(in srgb, var(--c-bg) 96%, #000 4%));
+  box-shadow:
+    0 20px 58px rgba(0, 0, 0, .62),
+    0 0 28px color-mix(in srgb, var(--toast-accent) 13%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.orbit-toast-card--recording,
+.orbit-toast-card--gallery {
+  --toast-accent: var(--c-accent2);
+  --toast-secondary: var(--c-accent);
+}
+.orbit-toast-edge {
+  background: linear-gradient(180deg, var(--toast-accent), var(--toast-secondary));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--toast-accent) 58%, transparent);
+}
+.orbit-toast-icon {
+  color: color-mix(in srgb, var(--toast-accent) 74%, white);
+  border-color: color-mix(in srgb, var(--toast-accent) 34%, var(--c-border));
+  background: color-mix(in srgb, var(--toast-accent) 13%, var(--c-panel));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 18px color-mix(in srgb, var(--toast-accent) 12%, transparent);
+}
+.orbit-toast-indicator {
+  background: linear-gradient(135deg, var(--toast-accent), var(--toast-secondary));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--toast-accent) 60%, transparent);
+}
+.orbit-toast-kicker {
+  color: color-mix(in srgb, var(--toast-accent) 78%, white);
+}
+.orbit-toast-orbit {
+  border-color: color-mix(in srgb, var(--toast-accent) 19%, transparent);
+  box-shadow: inset 0 0 26px color-mix(in srgb, var(--toast-accent) 7%, transparent);
+}
+.orbit-toast-orbit::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid color-mix(in srgb, var(--toast-secondary) 18%, transparent);
+  border-radius: inherit;
+}
+.orbit-toast-orbit::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  right: 20px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--toast-secondary);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--toast-secondary) 76%, transparent);
+}
+.orbit-toast-progress {
+  background: linear-gradient(90deg, var(--toast-accent), var(--toast-secondary), var(--toast-accent));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--toast-accent) 42%, transparent);
+  animation: orbit-toast-progress 4.2s linear both;
+}
+@keyframes orbit-toast-progress {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-toast { animation: none; }
+  .orbit-toast-progress { animation: none; opacity: .5; }
 }

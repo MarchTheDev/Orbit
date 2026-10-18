@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { Camera, CheckCircle2, Circle, Copy, ExternalLink, FolderOpen, Image, Pin, Settings2, Square, Trash2, X } from 'lucide-react';
+import { Camera, Circle, Copy, ExternalLink, FolderOpen, Image, Pin, RotateCcw, Settings2, Sparkles, Square, Trash2, Video, X } from 'lucide-react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { applyFont, applyTheme } from '../data/themes';
 import { loadSettings } from '../services/storage';
@@ -43,6 +43,8 @@ import { MediaPlayer } from './MediaPlayer';
 type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
 type GalleryMenuState = { x: number; y: number; item: GalleryItem };
+type OverlayToastKind = 'screenshot' | 'recording' | 'replay' | 'gallery' | 'ready';
+type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
 const LAYOUT_REVISION = 4;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
@@ -197,7 +199,7 @@ export function OverlayView() {
   const [draft, setDraft] = useState('');
   const [noteError, setNoteError] = useState('');
   const [clock, setClock] = useState(() => new Date());
-  const [toast, setToast] = useState<{ title: string; detail: string } | null>(null);
+  const [toast, setToast] = useState<OverlayToast | null>(null);
   const [galleryMenu, setGalleryMenu] = useState<GalleryMenuState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
   const [galleryError, setGalleryError] = useState('');
@@ -231,9 +233,9 @@ export function OverlayView() {
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
   };
 
-  const flash = (title: string, detail: string) => {
+  const flash = (title: string, detail: string, kind: OverlayToastKind = 'screenshot') => {
     if (settingsRef.current?.overlay?.captureToast === false) return;
-    setToast({ title, detail });
+    setToast({ title, detail, kind });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 4200);
   };
@@ -402,7 +404,7 @@ export function OverlayView() {
   useEffect(() => {
     const title = status?.readyNotice;
     if (!title) return;
-    setToast({ title: 'Game started', detail: `${title} is running. Press Alt+X to open Orbit Overlay.` });
+    setToast({ title: 'Game started', detail: `${title} is running. Press Alt+X to open Orbit Overlay.`, kind: 'ready' });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 4200);
   }, [status?.readyNotice]);
@@ -446,7 +448,12 @@ export function OverlayView() {
         const detail = saved
           ? copyFailed ? 'Saved to Gallery · clipboard copy was not available' : 'Saved to Gallery · copied to clipboard'
           : 'Your recording is underway';
-        flash(done, detail);
+        const kind: OverlayToastKind = /recording/i.test(done)
+          ? 'recording'
+          : /replay/i.test(done)
+            ? 'replay'
+            : 'screenshot';
+        flash(done, detail, kind);
       }
       refresh();
     } catch (error) {
@@ -631,18 +638,55 @@ export function OverlayView() {
     });
   };
 
+  const ToastIcon = toast ? ({
+    screenshot: Camera,
+    recording: Video,
+    replay: RotateCcw,
+    gallery: Copy,
+    ready: Sparkles,
+  })[toast.kind] : null;
+  const toastLabel = toast ? ({
+    screenshot: 'ORBIT · SCREENSHOT',
+    recording: 'ORBIT · RECORDING',
+    replay: 'ORBIT · REPLAY',
+    gallery: 'ORBIT · GALLERY',
+    ready: 'ORBIT · READY',
+  })[toast.kind] : '';
+  const toastStateLabel = toast?.kind === 'recording' && /started/i.test(toast.title)
+    ? 'LIVE'
+    : toast?.kind === 'ready'
+      ? 'READY'
+      : toast?.kind === 'gallery'
+        ? 'COPIED'
+        : 'SAVED';
+
   return (
     <div className="relative h-full text-white">
       {!resting && <div className="absolute inset-0 bg-black/45" onClick={() => void overlayHide()} />}
-      {toast && (
-        <div role="status" aria-live="polite" className="orbit-toast pointer-events-none absolute top-7 left-1/2 z-50 flex max-w-[calc(100%-2rem)] min-w-[16rem] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-200/35 bg-gradient-to-br from-[#14221a]/98 via-[#111615]/98 to-[#111318]/98 px-4 py-3 text-white shadow-[0_18px_60px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-xl">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-emerald-200/25 bg-emerald-300/10 text-emerald-100">
-            <CheckCircle2 className="size-5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold">{toast.title}</span>
-            <span className="mt-0.5 block truncate text-[11px] text-white/60">{toast.detail}</span>
-          </span>
+      {toast && ToastIcon && (
+        <div className="pointer-events-none fixed inset-x-0 top-12 z-[100] flex justify-center px-4">
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn('orbit-toast orbit-toast-card relative flex w-full max-w-[26rem] items-center gap-3.5 overflow-hidden rounded-[1.25rem] border px-4 py-3.5 text-white shadow-2xl backdrop-blur-2xl', `orbit-toast-card--${toast.kind}`)}
+          >
+            <span className="orbit-toast-edge absolute inset-y-3 left-0 z-10 w-[2px]" aria-hidden="true" />
+            <span className="orbit-toast-orbit pointer-events-none absolute -right-5 -top-8 z-0 size-24 rounded-full border" aria-hidden="true" />
+            <span className="orbit-toast-icon relative z-10 grid size-11 shrink-0 place-items-center rounded-2xl border">
+              <ToastIcon className="size-[19px]" aria-hidden="true" />
+              <span className="orbit-toast-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full border-2 border-[#11101b]" aria-hidden="true" />
+            </span>
+            <span className="relative z-10 min-w-0 flex-1">
+              <span className="mb-1 flex min-w-0 items-center gap-1.5">
+                <span className="orbit-toast-kicker truncate text-[9px] font-bold uppercase tracking-[.18em]">{toastLabel}</span>
+                <span className="size-1 shrink-0 rounded-full bg-white/30" aria-hidden="true" />
+                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[.12em] text-white/45">{toastStateLabel}</span>
+              </span>
+              <span className="block truncate text-sm font-semibold">{toast.title}</span>
+              <span className="mt-0.5 block truncate text-[11px] text-white/60">{toast.detail}</span>
+            </span>
+            <span className="orbit-toast-progress absolute inset-x-0 bottom-0 z-20 h-[2px] origin-left" aria-hidden="true" />
+          </div>
         </div>
       )}
       {visible('audio') && (
@@ -920,7 +964,7 @@ export function OverlayView() {
           items={[
             { label: 'Open', icon: ExternalLink, onSelect: () => void overlayOpen(galleryMenu.item.path).then(() => setGalleryError('')).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) },
             { label: 'Open path', icon: FolderOpen, onSelect: () => void revealInExplorer(galleryMenu.item.path).then(() => setGalleryError('')).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) },
-            ...(galleryMenu.item.kind === 'screenshot' ? [{ label: 'Copy image', icon: Copy, onSelect: () => void overlayCopy(galleryMenu.item.path).then(() => { setGalleryError(''); flash('Image copied to clipboard', 'Ready to paste.'); }).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) }] : []),
+            ...(galleryMenu.item.kind === 'screenshot' ? [{ label: 'Copy image', icon: Copy, onSelect: () => void overlayCopy(galleryMenu.item.path).then(() => { setGalleryError(''); flash('Image copied to clipboard', 'Ready to paste.', 'gallery'); }).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) }] : []),
             { kind: 'sep' },
             { label: 'Delete…', icon: Trash2, danger: true, onSelect: () => setDeleteTarget(galleryMenu.item) },
           ] as MenuItem[]}
