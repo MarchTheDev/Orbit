@@ -1192,8 +1192,8 @@ fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
 
 #[cfg(windows)]
 struct SystemAudio {
-    client: windows::Win32::Media::Audio::IAudioClient,
-    capture: windows::Win32::Media::Audio::IAudioCaptureClient,
+    client: Option<windows::Win32::Media::Audio::IAudioClient>,
+    capture: Option<windows::Win32::Media::Audio::IAudioCaptureClient>,
     sample_rate: u32,
     channels: usize,
     bits: u16,
@@ -1283,8 +1283,8 @@ impl SystemAudio {
         let capture: IAudioCaptureClient = client.GetService().map_err(audio_error)?;
         client.Start().map_err(audio_error)?;
         Ok(Self {
-            client,
-            capture,
+            client: Some(client),
+            capture: Some(capture),
             sample_rate,
             channels,
             bits,
@@ -1297,7 +1297,13 @@ impl SystemAudio {
 
     fn drain(&mut self, mut emit: impl FnMut(Vec<u8>, usize) -> Result<(), String>) -> Result<(), String> {
         loop {
-            let frames = unsafe { self.capture.GetNextPacketSize() }.map_err(audio_error)?;
+            let frames = unsafe {
+                self.capture
+                    .as_ref()
+                    .ok_or_else(|| "System audio capture is no longer available.".to_string())?
+                    .GetNextPacketSize()
+            }
+            .map_err(audio_error)?;
             if frames == 0 {
                 break;
             }
@@ -1306,6 +1312,8 @@ impl SystemAudio {
             let mut flags = 0u32;
             unsafe {
                 self.capture
+                    .as_ref()
+                    .ok_or_else(|| "System audio capture is no longer available.".to_string())?
                     .GetBuffer(&mut data, &mut available, &mut flags, None, None)
                     .map_err(audio_error)?;
             }
@@ -1319,7 +1327,13 @@ impl SystemAudio {
                 self.convert_packet(Some(source), available as usize)
             };
             let no_data = available == 0;
-            let released = unsafe { self.capture.ReleaseBuffer(available) }.map_err(audio_error);
+            let released = unsafe {
+                self.capture
+                    .as_ref()
+                    .ok_or_else(|| "System audio capture is no longer available.".to_string())?
+                    .ReleaseBuffer(available)
+            }
+            .map_err(audio_error);
             released?;
             if no_data {
                 break;
@@ -1428,10 +1442,15 @@ impl Drop for SystemAudio {
     fn drop(&mut self) {
         use windows::Win32::System::Com::CoUninitialize;
 
-        unsafe {
-            let _ = self.client.Stop();
-            CoUninitialize();
+        if let Some(client) = self.client.as_ref() {
+            unsafe {
+                let _ = client.Stop();
+            }
         }
+        // Release every COM interface while the apartment is still initialized.
+        drop(self.capture.take());
+        drop(self.client.take());
+        unsafe { CoUninitialize(); }
     }
 }
 
@@ -1449,40 +1468,14 @@ fn audio_error(error: windows::core::Error) -> String {
 }
 
 #[cfg(windows)]
-struct WindowsWriter {
-    writer: windows::Win32::Media::MediaFoundation::IMFSinkWriter,
-    stream: u32,
-    audio_stream: u32,
-    width: u32,
-    height: u32,
-    fps: u32,
-    index: u64,
-    audio_index: u64,
-    audio_offset: i64,
-    open: bool,
-    com_initialized: bool,
-}
+struct MfRuntime;
 
 #[cfg(windows)]
-impl WindowsWriter {
-    fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
-        use std::os::windows::ffi::OsStrExt;
-
-        use windows::core::PCWSTR;
-        use windows::Win32::Media::MediaFoundation::{
-            MFCreateMediaType, MFCreateSinkWriterFromURL, MFStartup, IMFAttributes, IMFByteStream,
-            MFAudioFormat_AAC, MFAudioFormat_PCM, MFMediaType_Audio, MFVideoFormat_H264, MFVideoFormat_RGB32,
-            MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
-            MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
-            MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES,
-            MF_MT_MAJOR_TYPE, MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE,
-        };
+impl MfRuntime {
+    fn start() -> Result<Self, String> {
+        use windows::Win32::Media::MediaFoundation::MFStartup;
         use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
-        if width < 2 || height < 2 || width % 2 == 1 || height % 2 == 1 {
-            return Err("The picture size could not be used.".to_string());
-        }
-        let fps = fps.max(1);
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED)
                 .ok()
@@ -1492,6 +1485,59 @@ impl WindowsWriter {
                 return Err(format!("The video encoder could not start: {error}"));
             }
         }
+        Ok(Self)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for MfRuntime {
+    fn drop(&mut self) {
+        use windows::Win32::Media::MediaFoundation::MFShutdown;
+        use windows::Win32::System::Com::CoUninitialize;
+
+        unsafe {
+            let _ = MFShutdown();
+            CoUninitialize();
+        }
+    }
+}
+
+#[cfg(windows)]
+struct WindowsWriter {
+    writer: Option<windows::Win32::Media::MediaFoundation::IMFSinkWriter>,
+    runtime: Option<MfRuntime>,
+    stream: u32,
+    audio_stream: u32,
+    width: u32,
+    height: u32,
+    fps: u32,
+    index: u64,
+    audio_index: u64,
+    audio_offset: i64,
+    open: bool,
+}
+
+#[cfg(windows)]
+impl WindowsWriter {
+    fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        use std::os::windows::ffi::OsStrExt;
+
+        use windows::core::PCWSTR;
+        use windows::Win32::Media::MediaFoundation::{
+            MFCreateMediaType, MFCreateSinkWriterFromURL, IMFAttributes, IMFByteStream,
+            MFAudioFormat_AAC, MFAudioFormat_PCM, MFMediaType_Audio, MFVideoFormat_H264, MFVideoFormat_RGB32,
+            MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
+            MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
+            MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES,
+            MF_MT_MAJOR_TYPE, MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE,
+        };
+        if width < 2 || height < 2 || width % 2 == 1 || height % 2 == 1 {
+            return Err("The picture size could not be used.".to_string());
+        }
+        let fps = fps.max(1);
+        // This guard outlives the sink writer. If setup fails partway through,
+        // local COM interfaces are released before Media Foundation shuts down.
+        let runtime = MfRuntime::start()?;
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         // `Param` is implemented for `Option<&T>`, not `Option<T>`.
         let writer = unsafe {
@@ -1544,7 +1590,8 @@ impl WindowsWriter {
             (stream, audio_stream)
         };
         Ok(Self {
-            writer,
+            writer: Some(writer),
+            runtime: Some(runtime),
             stream,
             audio_stream,
             width,
@@ -1554,7 +1601,6 @@ impl WindowsWriter {
             audio_index: 0,
             audio_offset: 0,
             open: true,
-            com_initialized: true,
         })
     }
 
@@ -1582,7 +1628,11 @@ impl WindowsWriter {
             let when = self.index as i64 * duration;
             sample.SetSampleTime(when).map_err(|error| error.to_string())?;
             sample.SetSampleDuration(duration).map_err(|error| error.to_string())?;
-            self.writer.WriteSample(self.stream, &sample).map_err(|error| error.to_string())?;
+            self.writer
+                .as_ref()
+                .ok_or_else(|| "The video writer is no longer available.".to_string())?
+                .WriteSample(self.stream, &sample)
+                .map_err(|error| error.to_string())?;
         }
         self.index += 1;
         Ok(())
@@ -1621,47 +1671,53 @@ impl WindowsWriter {
             let duration = (frames as i64).saturating_mul(scale) / rate;
             sample.SetSampleTime(when).map_err(|error| error.to_string())?;
             sample.SetSampleDuration(duration.max(1)).map_err(|error| error.to_string())?;
-            self.writer.WriteSample(self.audio_stream, &sample).map_err(|error| error.to_string())?;
+            self.writer
+                .as_ref()
+                .ok_or_else(|| "The video writer is no longer available.".to_string())?
+                .WriteSample(self.audio_stream, &sample)
+                .map_err(|error| error.to_string())?;
         }
         self.audio_index = self.audio_index.saturating_add(frames as u64);
         Ok(())
     }
 
     fn finish(mut self) -> Result<(), String> {
-        use windows::Win32::Media::MediaFoundation::MFShutdown;
-        use windows::Win32::System::Com::CoUninitialize;
-
         if !self.open {
+            self.release_runtime();
             return Ok(());
         }
         self.open = false;
-        let result = unsafe { self.writer.Finalize() }.map_err(|error| format!("The video could not be finished: {error}"));
-        unsafe {
-            let _ = MFShutdown();
-            if self.com_initialized {
-                CoUninitialize();
-                self.com_initialized = false;
-            }
-        }
+        let result = self
+            .writer
+            .as_ref()
+            .ok_or_else(|| "The video writer is no longer available.".to_string())
+            .and_then(|writer| unsafe { writer.Finalize() }.map_err(|error| format!("The video could not be finished: {error}")));
+        self.release_runtime();
         result
     }
 
     fn abandon(&mut self) {
-        use windows::Win32::Media::MediaFoundation::MFShutdown;
-        use windows::Win32::System::Com::CoUninitialize;
-
-        if !self.open {
-            return;
-        }
-        self.open = false;
-        unsafe {
-            let _ = self.writer.Finalize();
-            let _ = MFShutdown();
-            if self.com_initialized {
-                CoUninitialize();
-                self.com_initialized = false;
+        if self.open {
+            self.open = false;
+            if let Some(writer) = self.writer.as_ref() {
+                let _ = unsafe { writer.Finalize() };
             }
         }
+        self.release_runtime();
+    }
+
+    fn release_runtime(&mut self) {
+        // The sink writer owns encoder and sample buffers. Release it before
+        // shutting Media Foundation down or leaving its COM apartment.
+        drop(self.writer.take());
+        drop(self.runtime.take());
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsWriter {
+    fn drop(&mut self) {
+        self.abandon();
     }
 }
 
@@ -1692,13 +1748,6 @@ fn set_video(
 
 #[cfg(windows)]
 fn mf_fail(error: windows::core::Error) -> String {
-    use windows::Win32::Media::MediaFoundation::MFShutdown;
-    use windows::Win32::System::Com::CoUninitialize;
-
-    unsafe {
-        let _ = MFShutdown();
-        CoUninitialize();
-    }
     format!("The video file could not be opened: {error}")
 }
 

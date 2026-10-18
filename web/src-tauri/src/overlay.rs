@@ -599,8 +599,8 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // Windows marks the panel as excluded from display capture. Other desktops
-    // still step aside for the one in-app picture, then come back.
+    // Windows desktop capture includes the panel just like system screenshot
+    // tools. Other desktops still step aside for the one in-app picture.
     #[cfg(not(windows))]
     let was_open = is_open();
     #[cfg(not(windows))]
@@ -767,6 +767,8 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
+    // Leave capture protection off so Windows screenshot tools can include the
+    // overlay. Orbit's own screen captures can include it as well.
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
         .title("Orbit overlay")
         .inner_size(1280.0, 720.0)
@@ -776,7 +778,6 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .content_protected(true)
         .visible(false)
         .focused(false)
         .center()
@@ -790,7 +791,6 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
-    exclude_from_capture(&window);
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
@@ -805,12 +805,11 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 fn show_window(app: &AppHandle) {
     let Some(window) = ensure_window(app) else { return };
-    // Windows excludes the panel from capture, so the grab can keep running.
-    // Pausing it would repeat one frame for as long as the panel stayed open.
+    // Keep the capture loop running while the panel is visible; pausing it
+    // would repeat one frame for as long as the panel stayed open.
     RESTING.store(false, Ordering::SeqCst);
     IGNORE.store(false, Ordering::SeqCst);
     capture::set_paused(false);
-    exclude_from_capture(&window);
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_focusable(true);
     cover_screen(&window);
@@ -836,20 +835,6 @@ fn cover_screen(window: &tauri::WebviewWindow) {
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
 
-fn exclude_from_capture(window: &tauri::WebviewWindow) {
-    #[cfg(windows)]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
-
-        let Ok(hwnd) = window.hwnd() else { return };
-        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = window;
-    }
-}
-
 /// Hide even a pinned panel, for the one moment a picture is taken.
 #[cfg(not(windows))]
 fn conceal(app: &AppHandle) {
@@ -873,7 +858,6 @@ fn rest_window(app: &AppHandle) {
     RESTING.store(true, Ordering::SeqCst);
     capture::set_paused(false);
     if let Some(window) = ensure_window(app) {
-        exclude_from_capture(&window);
         cover_screen(&window);
         let _ = window.show();
         let _ = window.set_always_on_top(true);
