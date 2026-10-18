@@ -1149,6 +1149,7 @@ impl SystemAudio {
         use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+            .ok()
             .map_err(|error| format!("System audio capture could not start: {error}"))?;
         match unsafe { Self::open_initialized() } {
             Ok(audio) => Ok(audio),
@@ -1424,6 +1425,7 @@ impl WindowsWriter {
         let fps = fps.max(1);
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED)
+                .ok()
                 .map_err(|error| format!("The video encoder could not start: {error}"))?;
             if let Err(error) = MFStartup(0x0002_0070, 0) {
                 CoUninitialize();

@@ -1363,7 +1363,7 @@ fn start_replay_audio(
     command.arg(monitor);
     command.args(["-ac", "2", "-ar", "48000", "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"]);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let child = command.spawn().map_err(|error| format!("Could not start system-audio capture: {error}"))?;
+    let mut child = command.spawn().map_err(|error| format!("Could not start system-audio capture: {error}"))?;
     let Some(stdout) = child.stdout.take() else {
         kill_now(child);
         return Err("ffmpeg did not open a system-audio stream.".to_string());
