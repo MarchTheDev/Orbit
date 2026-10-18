@@ -560,8 +560,17 @@ export interface Settings {
      * 5 to 300 seconds.
      */
     lengths?: number[];
-    /** Where the overlay boxes were dragged, and which ones stay up. */
-    layout?: Partial<Record<OverlayBoxId, { x: number; y: number; pinned?: boolean }>>;
+    /** Where the overlay boxes were dragged, how big they were made, and which ones stay up. */
+    layout?: Partial<Record<OverlayBoxId, { x: number; y: number; w?: number; h?: number; pinned?: boolean }>>;
+    /**
+     * Which default arrangement is saved. Missing means the older positions,
+     * which are placed again once so the new arrangement shows up.
+     */
+    layoutRevision?: number;
+    /** A small note when a screenshot, recording, or replay is saved. On unless turned off. */
+    captureToast?: boolean;
+    /** A short note from the top when the overlay opens. On unless turned off. */
+    readyNotice?: boolean;
     /** Boxes the player turned off. Missing means every box is shown. */
     hidden?: OverlayBoxId[];
     /** Empty means the built-in recorder. A path is only a fallback, and it is not shown in Settings. */

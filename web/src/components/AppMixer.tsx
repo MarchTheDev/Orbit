@@ -27,7 +27,7 @@ function matchGame(apps: AppAudio[], game: string): AppAudio | undefined {
  * The overlay shows the game, the speakers, and one other source.
  * More opens the rest. Settings shows the whole list.
  */
-export function AppMixer({ pad = false, game = '', compact = false }: { pad?: boolean; game?: string; compact?: boolean }) {
+export function AppMixer({ pad = false, game = '', compact = false, onMore }: { pad?: boolean; game?: string; compact?: boolean; onMore?: () => void }) {
   const [apps, setApps] = useState<AppAudio[]>([]);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<Record<string, Pending>>({});
@@ -172,7 +172,10 @@ export function AppMixer({ pad = false, game = '', compact = false }: { pad?: bo
         <button
           type="button"
           data-overlay={pad ? '' : undefined}
-          onClick={() => setMore((open) => !open)}
+          onClick={() => {
+            setMore((open) => !open);
+            if (!more) onMore?.();
+          }}
           className="w-full rounded-xl border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
         >
           {more ? 'Less' : `More · ${arranged.rest.length}`}

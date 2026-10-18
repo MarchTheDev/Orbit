@@ -44,6 +44,13 @@ const fn blank() -> MachineStats {
 static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None });
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Drop the sampler. Closing the overlay should not keep a desktop duplication open.
+pub fn release() {
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.asked = None;
+    }
+}
+
 pub fn sample() -> MachineStats {
     // A bad counter or a lost desktop frame must come back as missing numbers.
     // Unwinding out of this command is what used to take the whole app down
@@ -106,7 +113,7 @@ fn ensure_running() {
                     frames = watch_frames();
                 }
             }
-            std::thread::sleep(Duration::from_millis(1000));
+            std::thread::sleep(Duration::from_millis(200));
         }
     });
 }
@@ -231,8 +238,9 @@ fn com_ready() -> bool {
 fn windows_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
     let _ = com_ready();
     let total = vram_total();
-    let (gpu, used) = pdh_gpu();
-    let vram = if total > 0 && used > 0 {
+    let (gpu, used_reading) = pdh_gpu();
+    let used = used_reading.unwrap_or(0);
+    let vram = if total > 0 && used_reading.is_some() {
         Some(((used.saturating_mul(100)) / total).min(100) as u8)
     } else {
         None
@@ -261,7 +269,7 @@ fn vram_total() -> u64 {
 }
 
 #[cfg(windows)]
-fn pdh_gpu() -> (Option<u8>, u64) {
+fn pdh_gpu() -> (Option<u8>, Option<u64>) {
     use std::sync::Mutex as GpuMutex;
     use windows::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
@@ -271,8 +279,10 @@ fn pdh_gpu() -> (Option<u8>, u64) {
     struct Query {
         query: PDH_HQUERY,
         util: PDH_HCOUNTER,
+        util_3d: PDH_HCOUNTER,
         used: PDH_HCOUNTER,
         util_ok: bool,
+        util_3d_ok: bool,
         used_ok: bool,
     }
     unsafe impl Send for Query {}
@@ -284,32 +294,41 @@ fn pdh_gpu() -> (Option<u8>, u64) {
             let mut query = PDH_HQUERY(std::ptr::null_mut());
             // `None` is `Option<&PCWSTR>`, which is what this `Param` accepts.
             if PdhOpenQueryW(None::<&PCWSTR>, 0, &mut query) != 0 {
-                return (None, 0);
+                return (None, None);
             }
             let mut util = PDH_HCOUNTER(std::ptr::null_mut());
+            let mut util_3d = PDH_HCOUNTER(std::ptr::null_mut());
             let mut used = PDH_HCOUNTER(std::ptr::null_mut());
-            let util_path = wide_path("\\GPU Engine(*)\\Utilization Percentage");
+            let path_3d = wide_path("\\GPU Engine(*engtype_3D)\\Utilization Percentage");
+            let path_any = wide_path("\\GPU Engine(*)\\Utilization Percentage");
             let used_path = wide_path("\\GPU Adapter Memory(*)\\Dedicated Usage");
-            let util_ok = PdhAddEnglishCounterW(query, PCWSTR(util_path.as_ptr()), 0, &mut util) == 0;
+            let util_3d_ok = PdhAddEnglishCounterW(query, PCWSTR(path_3d.as_ptr()), 0, &mut util_3d) == 0;
+            let util_ok = PdhAddEnglishCounterW(query, PCWSTR(path_any.as_ptr()), 0, &mut util) == 0;
             let used_ok = PdhAddEnglishCounterW(query, PCWSTR(used_path.as_ptr()), 0, &mut used) == 0;
-            if !util_ok && !used_ok {
+            if !util_ok && !util_3d_ok && !used_ok {
                 let _ = PdhCloseQuery(query);
-                return (None, 0);
+                return (None, None);
             }
             let _ = PdhCollectQueryData(query);
-            *guard = Some(Query { query, util, used, util_ok, used_ok });
+            *guard = Some(Query { query, util, util_3d, used, util_ok, util_3d_ok, used_ok });
         }
     }
-    let Some(query) = guard.as_ref() else { return (None, 0) };
+    let Some(query) = guard.as_ref() else { return (None, None) };
     unsafe {
         if PdhCollectQueryData(query.query) != 0 {
-            return (None, 0);
+            return (None, None);
         }
         // A counter that failed to open is a null handle. Asking PDH to format
         // it is not a missing number, it is an access violation.
-        let gpu = if query.util_ok { counter_max(query.util, PDH_FMT_DOUBLE, true) } else { None };
+        let gpu_3d = if query.util_3d_ok { counter_max(query.util_3d, PDH_FMT_DOUBLE, true) } else { None };
+        let gpu_any = if query.util_ok { counter_max(query.util, PDH_FMT_DOUBLE, true) } else { None };
+        let gpu = match (gpu_3d, gpu_any) {
+            (Some(value), _) if value > 0.0 => Some(value),
+            (_, Some(value)) => Some(value),
+            (value, _) => value,
+        };
         let used = if query.used_ok { counter_max(query.used, PDH_FMT_LARGE, false) } else { None };
-        (gpu.map(|value| value.round().clamp(0.0, 100.0) as u8), used.unwrap_or(0.0) as u64)
+        (gpu.map(|value| value.round().clamp(0.0, 100.0) as u8), used.map(|value| value.max(0.0) as u64))
     }
 }
 
@@ -338,7 +357,9 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
     let mut best = None::<f64>;
     let mut best_3d = None::<f64>;
     for item in buffer.iter().take((count as usize).min(buffer.len())) {
-        if item.FmtValue.CStatus != 0 {
+        // 0 is a settled reading. 1 is the first reading after the counter
+        // opened, which is still a number. Anything else is not usable.
+        if item.FmtValue.CStatus > 1 {
             continue;
         }
         let value: f64 = unsafe {
@@ -361,7 +382,9 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
             }
         }
     }
-    if percent { best_3d } else { best }
+    // A 3D engine is the game. If the name cannot be read, the busiest
+    // engine is still a real reading, and a blank GPU line is not.
+    if percent { best_3d.or(best) } else { best }
 }
 
 #[cfg(windows)]
@@ -384,6 +407,9 @@ fn wide_text(value: windows::core::PWSTR) -> String {
 struct FrameWatch {
     #[cfg(windows)]
     inner: Option<WindowsFrames>,
+    /// Each mark is the frames seen since the previous mark.
+    #[cfg(windows)]
+    marks: Vec<(Instant, u32)>,
     #[cfg(not(windows))]
     _private: (),
 }
@@ -400,7 +426,7 @@ struct WindowsFrames {
 fn watch_frames() -> Option<FrameWatch> {
     #[cfg(windows)]
     {
-        return Some(FrameWatch { inner: WindowsFrames::open() });
+        return Some(FrameWatch { inner: WindowsFrames::open(), marks: Vec::new() });
     }
     #[cfg(not(windows))]
     {
@@ -423,10 +449,28 @@ impl FrameWatch {
                     // one first, while the old frame was still acquired.
                     self.inner = None;
                     self.inner = WindowsFrames::open();
+                    self.marks.clear();
                     None
                 }
-                FramePull::Waiting => None,
-                FramePull::Count(count) => Some(count),
+                FramePull::Waiting => {
+                    self.marks.clear();
+                    self.marks.push((Instant::now(), 0));
+                    None
+                }
+                FramePull::Count(count) => {
+                    let now = Instant::now();
+                    if self.marks.is_empty() {
+                        self.marks.push((now, 0));
+                    }
+                    self.marks.push((now, count));
+                    let cutoff = now.checked_sub(Duration::from_secs(1)).unwrap_or(now);
+                    while self.marks.len() > 2 && self.marks.get(1).is_some_and(|(at, _)| *at < cutoff) {
+                        self.marks.remove(0);
+                    }
+                    let start = self.marks.first().map(|(at, _)| *at).unwrap_or(now);
+                    let frames = self.marks.iter().skip(1).fold(0u32, |sum, (_, seen)| sum.saturating_add(*seen));
+                    frames_per_second(frames, now.saturating_duration_since(start).as_secs_f64())
+                }
             }
         }
         #[cfg(not(windows))]
@@ -497,7 +541,7 @@ impl WindowsFrames {
         use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO};
         let mut frames = 0u32;
         let mut saw = false;
-        for index in 0..8 {
+        for index in 0..32 {
             let mut info: DXGI_OUTDUPL_FRAME_INFO = unsafe { std::mem::zeroed() };
             let mut resource = None;
             let info_ptr: *mut DXGI_OUTDUPL_FRAME_INFO = &mut info;
@@ -508,8 +552,11 @@ impl WindowsFrames {
             match unsafe { self.duplication.AcquireNextFrame(timeout, info_ptr, resource_ptr) } {
                 Ok(()) => {
                     self.held = true;
-                    saw = true;
-                    frames = frames.saturating_add(info.AccumulatedFrames.max(1));
+                    let added = info.AccumulatedFrames;
+                    if added > 0 {
+                        saw = true;
+                        frames = frames.saturating_add(added);
+                    }
                     drop(resource);
                     if unsafe { self.duplication.ReleaseFrame() }.is_err() {
                         return FramePull::Dead;
@@ -635,12 +682,26 @@ fn sysfs_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
 /// down makes that claim bigger than the allocation, and PDH then writes past
 /// it. That is a process crash, not a missing number. A huge request is
 /// refused rather than allocated.
+/// Frames seen over the real gap, not the count itself.
+///
+/// The sampler does not wake on an exact second. Reporting the raw count made
+/// a 60fps video read 61 or 62 whenever the gap was a little over a second.
+fn frames_per_second(frames: u32, seconds: f64) -> Option<u32> {
+    if !seconds.is_finite() || seconds < 0.45 {
+        return None;
+    }
+    Some((frames as f64 / seconds).round().clamp(0.0, 1000.0) as u32)
+}
+
 fn counter_buffer_items(bytes: u32, stride: usize) -> Option<usize> {
     if bytes == 0 || stride == 0 {
         return None;
     }
     let items = (bytes as usize).div_ceil(stride);
-    if items == 0 || items > 256 {
+    // A busy PC has one GPU-engine row per process per engine. Capping that at
+    // a couple of hundred dropped the whole reading, so the GPU line stayed
+    // blank. A few thousand rows is still a small buffer.
+    if items == 0 || items > 4096 {
         return None;
     }
     Some(items)
@@ -648,7 +709,7 @@ fn counter_buffer_items(bytes: u32, stride: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::counter_buffer_items;
+    use super::{counter_buffer_items, frames_per_second};
 
     #[test]
     fn a_counter_buffer_is_never_smaller_than_pdh_asked_for() {
@@ -669,7 +730,11 @@ mod tests {
         assert_eq!(counter_buffer_items(0, 24), None);
         assert_eq!(counter_buffer_items(24, 0), None);
         assert_eq!(counter_buffer_items(u32::MAX, 24), None);
-        assert_eq!(counter_buffer_items(256 * 24, 24), Some(256));
-        assert_eq!(counter_buffer_items(256 * 24 + 1, 24), None);
+        assert_eq!(counter_buffer_items(4096 * 24, 24), Some(4096));
+        assert_eq!(counter_buffer_items(4096 * 24 + 1, 24), None);
+        assert_eq!(frames_per_second(62, 1.03), Some(60));
+        assert_eq!(frames_per_second(60, 1.0), Some(60));
+        assert_eq!(frames_per_second(30, 0.5), Some(60));
+        assert_eq!(frames_per_second(15, 0.25), None);
     }
 }

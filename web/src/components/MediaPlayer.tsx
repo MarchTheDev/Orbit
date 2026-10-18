@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { fileSrc } from '../services/desktop';
 import { audioSet, audioSetNamed, mediaControl, mediaNow, type NowPlaying } from '../services/native';
 
@@ -74,21 +74,21 @@ export function MediaPlayer({ pad = false }: { pad?: boolean }) {
     });
   };
 
-  const setVolume = (volume: number) => {
+  const applyAudio = (volume: number, muted: boolean) => {
     if (!current) return;
     const next = Math.min(100, Math.max(0, Math.round(volume)));
     const id = current.id;
-    setItems((list) => list.map((item) => (item.id === id ? { ...item, volume: next } : item)));
+    setItems((list) => list.map((item) => (item.id === id ? { ...item, volume: next, muted } : item)));
     const apply = current.volumeId
-      ? audioSet(current.volumeId, next, current.muted)
-      : audioSetNamed(current.app || current.title, next, current.muted);
-    if (current.volumeId) pending.current = { id: current.volumeId, volume: next, muted: current.muted };
-    else pendingNamed.current = { name: current.app || current.title, volume: next, muted: current.muted };
+      ? audioSet(current.volumeId, next, muted)
+      : audioSetNamed(current.app || current.title, next, muted);
+    if (current.volumeId) pending.current = { id: current.volumeId, volume: next, muted };
+    else pendingNamed.current = { name: current.app || current.title, volume: next, muted };
     void apply.catch((reason) => {
       setError(reason instanceof Error ? reason.message : String(reason));
     }).finally(() => {
-      if (pending.current?.volume === next) pending.current = null;
-      if (pendingNamed.current?.volume === next) pendingNamed.current = null;
+      if (pending.current?.volume === next && pending.current?.muted === muted) pending.current = null;
+      if (pendingNamed.current?.volume === next && pendingNamed.current?.muted === muted) pendingNamed.current = null;
     });
   };
 
@@ -143,17 +143,41 @@ export function MediaPlayer({ pad = false }: { pad?: boolean }) {
           </div>
         </div>
       </div>
-      <input
-        tabIndex={-1}
-        type="range"
-        min={0}
-        max={100}
-        value={current.volume}
-        aria-label={`${current.app || current.title || 'App'} volume`}
-        onChange={(event) => setVolume(Number(event.target.value))}
-        className="w-full accent-white"
-      />
-      {error && <p className="text-[11px] text-white/50">{error}</p>}
+      <div className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
+        <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-white/60">
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <Volume2 className="size-3.5 shrink-0" />
+            <span className="truncate">Volume{current.app ? ` · ${current.app}` : ''}</span>
+          </span>
+          <span className="tabular-nums">{current.muted ? 'Muted' : current.volume}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-overlay={pad ? '' : undefined}
+            aria-label={current.muted ? 'Unmute' : 'Mute'}
+            onClick={() => applyAudio(current.volume, !current.muted)}
+            className="grid size-7 shrink-0 place-items-center rounded-full border border-white/20 text-white/80 hover:border-white/50"
+          >
+            {current.muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+          </button>
+          <input
+            tabIndex={-1}
+            type="range"
+            min={0}
+            max={100}
+            value={current.muted ? 0 : current.volume}
+            aria-label={`${current.app || current.title || 'App'} volume`}
+            onChange={(event) => applyAudio(Number(event.target.value), false)}
+            className="orbit-range w-full"
+          />
+        </div>
+      </div>
+      {error && (
+        <p className="text-[11px] text-white/50">
+          {error.includes('not playing sound') ? 'That app is not in the mixer yet.' : error}
+        </p>
+      )}
     </div>
   );
 }

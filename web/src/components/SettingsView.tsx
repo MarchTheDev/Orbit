@@ -313,7 +313,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Replay lengths', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 90 120 seconds custom clip lengths' },
   { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
   { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter chime sound picture saved volume' },
-  { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes' },
+  { label: 'Capture notes', section: 'orbit-overlay', keywords: 'overlay toast screenshot recording replay saved notification' },
+  { label: 'Overlay open note', section: 'orbit-overlay', keywords: 'overlay working popup banner open note' },
+  { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes resize' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -362,6 +364,7 @@ function OverlaySettings({
   const setOverlay = (patch: Partial<NonNullable<Settings['overlay']>>) => {
     setSettings({
       overlay: {
+        ...overlay,
         enabled,
         replay,
         seconds,
@@ -371,7 +374,6 @@ function OverlaySettings({
         shutter: shutterOn,
         shutterVolume,
         ffmpeg: overlay?.ffmpeg ?? '',
-        layout: overlay?.layout,
         hidden: overlay?.hidden ?? [],
         ...patch,
       },
@@ -510,7 +512,7 @@ function OverlaySettings({
         checked={shutterOn}
         onChange={(on) => setOverlay({ shutter: on })}
         label="Play a sound when a picture is saved"
-        hint="A short chime, the same kind of tone as the library. Recordings stay quiet."
+        hint="A short, light chime. Recordings stay quiet."
       />
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-3">
@@ -537,6 +539,18 @@ function OverlaySettings({
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
+      <Checkbox
+        checked={overlay?.captureToast !== false}
+        onChange={(on) => setOverlay({ captureToast: on })}
+        label="Show a note when a capture is saved"
+        hint="A small note for a screenshot, a recording, or a replay."
+      />
+      <Checkbox
+        checked={overlay?.readyNotice !== false}
+        onChange={(on) => setOverlay({ readyNotice: on })}
+        label="Show that the overlay is working"
+        hint="A short note from the top when the overlay opens. It goes away on its own."
+      />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Overlay boxes</p>
         <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>

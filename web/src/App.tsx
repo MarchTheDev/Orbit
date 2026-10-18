@@ -646,7 +646,12 @@ export default function App() {
 
   const pinsShown = useRef(false);
   useEffect(() => {
-    if (!booted || !isNative() || !settings || pinsShown.current) return;
+    if (!booted || !isNative() || !settings) return;
+    if (settings.overlay?.enabled === false) {
+      pinsShown.current = false;
+      return;
+    }
+    if (pinsShown.current) return;
     pinsShown.current = true;
     const layout = settings.overlay?.layout;
     if (layout && Object.values(layout).some((box) => box?.pinned)) void overlayShowPins();

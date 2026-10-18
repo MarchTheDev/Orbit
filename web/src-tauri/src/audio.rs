@@ -16,6 +16,17 @@ pub struct AppAudio {
     pub muted: bool,
     /// The output itself, rather than one program. It is listed first. */
     pub device: bool,
+    /// The program file, so a browser video can find its mixer row when the
+    /// session is named after the page instead of the browser.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exe: String,
+    /// A session that is actually playing, not a silent helper process.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub live: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn list() -> Result<Vec<AppAudio>, String> {
@@ -80,21 +91,90 @@ pub fn use_device(id: &str, kind: &str) -> Result<(), String> {
 
 /// Set the volume of the app whose name matches, so the player does not have to open the mixer.
 pub fn set_named(name: &str, volume: u8, muted: bool) -> Result<(), String> {
-    let needle = fold(name);
-    if needle.len() < 3 {
-        return Err("That app is not playing sound.".to_string());
-    }
-    let hit = list()?.into_iter().find(|app| {
-        if app.device {
-            return false;
-        }
-        let item = fold(&app.name);
-        item.len() >= 3 && (item.contains(&needle) || needle.contains(&item))
-    });
-    let Some(hit) = hit else {
+    let apps = list()?;
+    let Some(hit) = volume_hit(name, "", &apps) else {
         return Err("That app is not playing sound.".to_string());
     };
     set(&hit.id, volume, muted)
+}
+
+/// The mixer row for a song or a browser video.
+///
+/// A YouTube tab is often listed under the page title, while the media controls
+/// say Chrome. The program file is what joins those two. A live session wins
+/// over a silent helper that happens to share the name.
+pub(crate) fn volume_hit<'a>(app: &str, title: &str, apps: &'a [AppAudio]) -> Option<&'a AppAudio> {
+    let title_fold = fold(title);
+    let mut best: Option<(i32, &AppAudio)> = None;
+    for item in apps {
+        if item.device {
+            continue;
+        }
+        let mut score = 0;
+        let name = fold(&item.name);
+        if title_fold.len() >= 6 && name.len() >= 6 && (name.contains(&title_fold) || title_fold.contains(&name)) {
+            score += 4;
+        }
+        if names_match(app, item) {
+            score += 2;
+        }
+        if score == 0 && (fold(app) == "playing" || fold(app).is_empty()) && is_browser(item) {
+            if name.contains("youtube") || title_fold.contains("youtube") {
+                score += 3;
+            } else if item.live {
+                score += 2;
+            }
+        }
+        if item.live {
+            score += 1;
+        }
+        if score > 1 && best.as_ref().map(|(current, _)| score > *current).unwrap_or(true) {
+            best = Some((score, item));
+        }
+    }
+    best.map(|(_, item)| item)
+}
+
+fn names_match(needle: &str, app: &AppAudio) -> bool {
+    let needle = fold(needle);
+    if needle.len() < 3 {
+        return false;
+    }
+    let name = fold(&app.name);
+    let exe = fold(&app.exe);
+    let named = name.len() >= 3 && (name.contains(&needle) || needle.contains(&name));
+    let filed = exe.len() >= 3 && (exe.contains(&needle) || needle.contains(&exe));
+    named || filed || browser_file(&needle).iter().any(|alias| exe.contains(alias) || name.contains(alias))
+}
+
+fn browser_file(folded: &str) -> &'static [&'static str] {
+    if folded.contains("chrome") || folded.contains("chromium") {
+        return &["chrome"];
+    }
+    if folded.contains("edge") {
+        return &["msedge", "edge"];
+    }
+    if folded.contains("firefox") {
+        return &["firefox"];
+    }
+    if folded.contains("brave") {
+        return &["brave"];
+    }
+    if folded.contains("opera") {
+        return &["opera"];
+    }
+    if folded.contains("vivaldi") {
+        return &["vivaldi"];
+    }
+    &[]
+}
+
+fn is_browser(app: &AppAudio) -> bool {
+    let exe = fold(&app.exe);
+    let name = fold(&app.name);
+    ["chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "edge"]
+        .iter()
+        .any(|item| exe.contains(item) || name.contains(item))
 }
 
 fn fold(value: &str) -> String {
@@ -155,6 +235,8 @@ pub(crate) fn parse_pactl(text: &str) -> Vec<AppAudio> {
             volume,
             muted,
             device: false,
+            exe: std::path::Path::new(&binary).file_stem().map(|stem| stem.to_string_lossy().to_string()).unwrap_or(binary),
+            live: true,
         });
     }
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -279,6 +361,8 @@ fn pactl_device() -> Option<AppAudio> {
             .map(|item| String::from_utf8_lossy(&item.stdout).to_lowercase().contains("yes"))
             .unwrap_or(false),
         device: true,
+        exe: String::new(),
+        live: false,
     })
 }
 
@@ -311,6 +395,8 @@ fn wpctl_list() -> Result<Vec<AppAudio>, String> {
             volume: level,
             muted,
             device: false,
+            exe: String::new(),
+            live: true,
         });
     }
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -393,7 +479,7 @@ unsafe fn windows_list_inner() -> Result<Vec<AppAudio>, String> {
     use std::collections::BTreeMap;
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
-        eConsole, eRender, AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionManager2,
+        eConsole, eRender, AudioSessionStateActive, AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionManager2,
         ISimpleAudioVolume, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
@@ -414,6 +500,8 @@ unsafe fn windows_list_inner() -> Result<Vec<AppAudio>, String> {
             volume: percent(volume),
             muted,
             device: true,
+            exe: String::new(),
+            live: false,
         });
     }
     let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).map_err(com_err)?;
@@ -437,16 +525,26 @@ unsafe fn windows_list_inner() -> Result<Vec<AppAudio>, String> {
         let volume = volume_ctl.GetMasterVolume().unwrap_or(1.0);
         let muted = volume_ctl.GetMute().map(|value| value.as_bool()).unwrap_or(false);
         let display = control2.GetDisplayName().map(pwstr).unwrap_or_default();
-        let name = pretty_name(&display, &process_name(pid));
+        let process = process_name(pid);
+        let name = pretty_name(&display, &process);
+        let exe = std::path::Path::new(&process)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let live = control2.GetState().ok() == Some(AudioSessionStateActive);
         grouped
             .entry(pid)
             .and_modify(|current| {
+                current.live = current.live || live;
                 if !muted {
                     current.muted = false;
                     current.volume = current.volume.max(percent(volume));
                 }
                 if current.name.starts_with("App ") && !name.starts_with("App ") {
                     current.name = name.clone();
+                }
+                if current.exe.is_empty() && !exe.is_empty() {
+                    current.exe = exe.clone();
                 }
             })
             .or_insert(AppAudio {
@@ -455,6 +553,8 @@ unsafe fn windows_list_inner() -> Result<Vec<AppAudio>, String> {
                 volume: percent(volume),
                 muted,
                 device: false,
+                exe,
+                live,
             });
     }
     let mut rest: Vec<AppAudio> = grouped.into_values().collect();
@@ -838,6 +938,35 @@ struct IUnknownVtbl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_youtube_tab_matches_the_browser_that_is_playing_it() {
+        let apps = vec![
+            AppAudio {
+                id: "win:9".to_string(),
+                name: "Chrome".to_string(),
+                volume: 100,
+                muted: false,
+                device: false,
+                exe: "chrome".to_string(),
+                live: false,
+            },
+            AppAudio {
+                id: "win:4".to_string(),
+                name: "Never Gonna Give You Up - YouTube".to_string(),
+                volume: 35,
+                muted: false,
+                device: false,
+                exe: "chrome".to_string(),
+                live: true,
+            },
+        ];
+        let hit = volume_hit("Chrome", "Never Gonna Give You Up", &apps).expect("browser");
+        assert_eq!(hit.id, "win:4");
+        assert_eq!(hit.volume, 35);
+        assert!(volume_hit("Playing", "Never Gonna Give You Up - YouTube", &apps).is_some());
+        assert!(volume_hit("Speakers", "", &apps).is_none());
+    }
 
     #[test]
     fn pactl_blocks_become_one_row_per_app() {

@@ -36,8 +36,19 @@ import { AppMixer } from './AppMixer';
 import { MediaPlayer } from './MediaPlayer';
 
 type BoxId = OverlayBoxId;
-type Place = { x: number; y: number; pinned?: boolean };
+type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
 const PAGE_SIZE = 4;
+const LAYOUT_REVISION = 2;
+const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
+  fps: { w: 176, h: 112, minW: 120, minH: 88 },
+  clock: { w: 176, h: 112, minW: 120, minH: 88 },
+  audio: { w: 300, h: 300, minW: 220, minH: 160 },
+  performance: { w: 240, h: 196, minW: 200, minH: 140 },
+  gallery: { w: 320, h: 360, minW: 240, minH: 180 },
+  player: { w: 320, h: 268, minW: 240, minH: 180 },
+  notes: { w: 300, h: 210, minW: 220, minH: 140 },
+  capture: { w: 560, h: 220, minW: 320, minH: 160 },
+};
 
 function stamp(): string {
   const now = new Date();
@@ -77,22 +88,58 @@ function mixId(node: Element | null): string | null {
 }
 
 function defaults(width: number, height: number): Record<BoxId, Place> {
-  return {
-    fps: { x: 24, y: 24 },
-    performance: { x: 24, y: 132 },
-    clock: { x: Math.max(24, width - 220), y: Math.max(24, height - 120) },
-    notes: { x: 24, y: Math.max(24, height - 280) },
-    audio: { x: 24, y: 280 },
-    player: { x: Math.min(width - 344, 360), y: 24 },
-    gallery: { x: Math.max(24, width - 344), y: 24 },
-    capture: { x: Math.max(24, (width - 640) / 2), y: Math.max(24, height - 220) },
+  const edge = 24;
+  const gap = 16;
+  const fps = { x: edge, y: edge, w: BOX.fps.w, h: BOX.fps.h };
+  const clock = { x: edge + BOX.fps.w + gap, y: edge, w: BOX.clock.w, h: BOX.clock.h };
+  const performance = {
+    x: edge,
+    y: Math.max(edge, height - BOX.performance.h - edge),
+    w: BOX.performance.w,
+    h: BOX.performance.h,
   };
+  const audioHeight = BOX.audio.h;
+  const audioTop = fps.y + BOX.fps.h + gap;
+  const audioRoom = performance.y - gap - audioTop;
+  const audio = {
+    x: edge,
+    y: audioRoom >= audioHeight ? audioTop + Math.round((audioRoom - audioHeight) / 2) : audioTop,
+    w: BOX.audio.w,
+    h: audioHeight,
+  };
+  const gallery = {
+    x: Math.max(edge, width - BOX.gallery.w - edge),
+    y: edge,
+    w: BOX.gallery.w,
+    h: BOX.gallery.h,
+  };
+  const player = {
+    x: Math.max(edge, width - BOX.player.w - edge),
+    y: Math.max(edge, Math.round((height - BOX.player.h) / 2)),
+    w: BOX.player.w,
+    h: BOX.player.h,
+  };
+  const notes = {
+    x: player.x,
+    y: Math.min(height - BOX.notes.h - edge, player.y + BOX.player.h + gap),
+    w: BOX.notes.w,
+    h: BOX.notes.h,
+  };
+  const capture = {
+    x: Math.max(edge, Math.round((width - BOX.capture.w) / 2)),
+    y: Math.max(edge, height - BOX.capture.h - edge),
+    w: BOX.capture.w,
+    h: BOX.capture.h,
+  };
+  return { fps, clock, audio, performance, gallery, player, notes, capture };
 }
 
 function placeOf(layout: NonNullable<Settings['overlay']>['layout'], id: BoxId, fallback: Place): Place {
   const saved = layout?.[id];
   if (!saved || !Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return fallback;
-  return { x: saved.x, y: saved.y, pinned: !!saved.pinned };
+  const w = Number.isFinite(saved.w) ? Math.max(BOX[id].minW, saved.w as number) : fallback.w;
+  const h = Number.isFinite(saved.h) ? Math.max(BOX[id].minH, saved.h as number) : fallback.h;
+  return { x: saved.x, y: saved.y, w, h, pinned: !!saved.pinned };
 }
 
 function anyPinned(places: Record<BoxId, Place>, hidden: BoxId[]): boolean {
@@ -145,7 +192,12 @@ export function OverlayView() {
   const [draft, setDraft] = useState('');
   const [noteError, setNoteError] = useState('');
   const [clock, setClock] = useState(() => new Date());
+  const [toast, setToast] = useState('');
+  const [hello, setHello] = useState(false);
   const settingsRef = useRef<Settings | null>(null);
+  const toastTimer = useRef(0);
+  const helloTimer = useRef(0);
+  const greeted = useRef(0);
   const placesRef = useRef(places);
   const hiddenRef = useRef(hidden);
   const gameKey = useRef('');
@@ -168,9 +220,26 @@ export function OverlayView() {
 
   const rememberLayout = async (next: Record<BoxId, Place>) => {
     setPlaces(next);
-    patchOverlay({ layout: next });
+    patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
     await overlayPins(anyPinned(next, hiddenRef.current));
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
+  };
+
+  const flash = (text: string) => {
+    if (settingsRef.current?.overlay?.captureToast === false) return;
+    setToast(text);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2200);
+  };
+
+  const greet = () => {
+    if (settingsRef.current?.overlay?.readyNotice === false) return;
+    const now = Date.now();
+    if (now - greeted.current < 1500) return;
+    greeted.current = now;
+    setHello(true);
+    window.clearTimeout(helloTimer.current);
+    helloTimer.current = window.setTimeout(() => setHello(false), 2600);
   };
 
   useEffect(() => {
@@ -183,22 +252,23 @@ export function OverlayView() {
       settingsRef.current = settings;
       const base = size();
       const layout = settings.overlay?.layout;
-      const savedFps = placeOf(layout, 'fps', base.fps);
-      const fps = layout?.fps
-        ? savedFps
-        : (layout?.audio && Math.abs(layout.audio.x - savedFps.x) < 48 && Math.abs(layout.audio.y - savedFps.y) < 48)
-          ? { ...savedFps, y: savedFps.y + 108 }
-          : savedFps;
-      const next = {
-        fps,
-        performance: placeOf(layout, 'performance', base.performance),
-        clock: placeOf(layout, 'clock', base.clock),
-        notes: placeOf(layout, 'notes', base.notes),
-        audio: placeOf(layout, 'audio', base.audio),
-        player: placeOf(layout, 'player', base.player),
-        gallery: placeOf(layout, 'gallery', base.gallery),
-        capture: placeOf(layout, 'capture', base.capture),
-      };
+      const revision = settings.overlay?.layoutRevision ?? 0;
+      const next = revision >= LAYOUT_REVISION
+        ? {
+            fps: placeOf(layout, 'fps', base.fps),
+            performance: placeOf(layout, 'performance', base.performance),
+            clock: placeOf(layout, 'clock', base.clock),
+            notes: placeOf(layout, 'notes', base.notes),
+            audio: placeOf(layout, 'audio', base.audio),
+            player: placeOf(layout, 'player', base.player),
+            gallery: placeOf(layout, 'gallery', base.gallery),
+            capture: placeOf(layout, 'capture', base.capture),
+          }
+        : (Object.fromEntries((Object.keys(base) as BoxId[]).map((id) => [id, { ...base[id], pinned: !!layout?.[id]?.pinned }])) as Record<BoxId, Place>);
+      if (revision < LAYOUT_REVISION) {
+        settingsRef.current = { ...settings, overlay: { ...settings.overlay, layout: next, layoutRevision: LAYOUT_REVISION } };
+        patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
+      }
       const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
       setPlaces(next);
       setHidden(hiddenBoxes);
@@ -208,6 +278,7 @@ export function OverlayView() {
       setAwake(mode.open || mode.resting);
       void overlayPins(anyPinned(next, hiddenBoxes));
       setReady(true);
+      if (mode.open && !mode.resting) greet();
     }).catch(() => setReady(true));
     refresh();
     const onKey = (event: KeyboardEvent) => {
@@ -244,7 +315,8 @@ export function OverlayView() {
         hiddenRef.current = hiddenBoxes;
         setShutterOn(settings.overlay?.shutter !== false);
         setShutterVolume(settings.overlay?.shutterVolume ?? 40);
-      }).catch(() => undefined);
+        greet();
+      }).catch(() => greet());
       window.setTimeout(() => {
         const next = document.querySelector('[data-overlay-section="capture"] button[data-overlay]:not([disabled])');
         if (next instanceof HTMLElement) next.focus();
@@ -326,7 +398,7 @@ export function OverlayView() {
     };
   }, [ready, resting, places]);
 
-  const run = async (work: () => Promise<void>, shot = false) => {
+  const run = async (work: () => Promise<void>, shot = false, done = '') => {
     if (busy) return;
     setBusy(true);
     setFailed(false);
@@ -339,6 +411,7 @@ export function OverlayView() {
         const volume = fresh?.overlay?.shutterVolume ?? shutterVolume;
         if (on) playShutter(volume);
       }
+      if (done) flash(done);
       refresh();
     } catch (error) {
       setFailed(true);
@@ -396,6 +469,35 @@ export function OverlayView() {
     window.addEventListener('pointerup', up);
   };
 
+  const resize = (id: BoxId, event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFront(id);
+    const origin = places[id];
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startW = origin.w ?? BOX[id].w;
+    const startH = origin.h ?? BOX[id].h;
+    const moveTo = (ev: PointerEvent) => {
+      const min = BOX[id];
+      const w = Math.round(Math.min(window.innerWidth - 16, Math.max(min.minW, startW + ev.clientX - startX)));
+      const h = Math.round(Math.min(window.innerHeight - 16, Math.max(min.minH, startH + ev.clientY - startY)));
+      setPlaces((current) => {
+        const next = { ...current, [id]: { ...current[id], w, h } };
+        placesRef.current = next;
+        return next;
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', moveTo);
+      window.removeEventListener('pointerup', up);
+      void rememberLayout(placesRef.current);
+    };
+    window.addEventListener('pointermove', moveTo);
+    window.addEventListener('pointerup', up);
+  };
+
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
@@ -424,7 +526,7 @@ export function OverlayView() {
     if (!wantStats) return;
     const pull = () => void machineStats().then(setStats).catch(() => undefined);
     pull();
-    const timer = window.setInterval(pull, 1000);
+    const timer = window.setInterval(pull, 200);
     return () => window.clearInterval(timer);
   }, [wantStats]);
 
@@ -473,6 +575,11 @@ export function OverlayView() {
   return (
     <div className="relative h-full text-white">
       {!resting && <div className="absolute inset-0 bg-black/45" onClick={() => void overlayHide()} />}
+      {toast && (
+        <div className="orbit-toast pointer-events-none absolute bottom-8 left-1/2 z-50 whitespace-nowrap rounded-full border border-white/15 bg-[#141416]/95 px-4 py-2 text-xs text-white shadow-2xl backdrop-blur-md">
+          {toast}
+        </div>
+      )}
       {visible('audio') && (
         <Box
           id="audio"
@@ -480,15 +587,16 @@ export function OverlayView() {
           place={places.audio}
           front={front === 'audio'}
           onDrag={drag}
+          onResize={resize}
           onPin={pin}
           section="audio"
         >
           <p className="mb-2 text-[11px] leading-relaxed text-white/45">The game, the speakers, then one other. More opens the rest. Left and right change a volume by 1.</p>
-          <AppMixer pad game={status?.game ?? ''} compact />
+          <AppMixer pad game={status?.game ?? ''} compact onMore={() => setFront('audio')} />
         </Box>
       )}
       {visible('player') && (
-        <Box id="player" title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onPin={pin} section="player">
+        <Box id="player" title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onResize={resize} onPin={pin} section="player">
           <MediaPlayer pad />
         </Box>
       )}
@@ -499,6 +607,7 @@ export function OverlayView() {
           place={places.gallery}
           front={front === 'gallery'}
           onDrag={drag}
+          onResize={resize}
           onPin={pin}
           section="gallery"
           extra={!resting && (
@@ -593,9 +702,9 @@ export function OverlayView() {
           place={places.capture}
           front={front === 'capture'}
           onDrag={drag}
+          onResize={resize}
           onPin={pin}
           section="capture"
-          wide
           extra={!resting && (
             <button
               type="button"
@@ -610,18 +719,18 @@ export function OverlayView() {
         >
           <p className="mb-3 text-center text-[11px] tabular-nums text-white/45">{quality} · {fps} fps</p>
           <div className="flex items-start justify-center gap-6 sm:gap-10">
-            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(async () => { await overlayShot(stamp()); }, true); }}>
+            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(async () => { await overlayShot(stamp()); }, true, 'Screenshot saved'); }}>
               <Camera className="size-7" />
             </CaptureButton>
             <CaptureButton
               label={status?.recording ? 'Stop' : 'Record'}
               hot={!!status?.recording}
               disabled={busy}
-              onClick={() => void run(async () => { await overlayRecord(stamp()); })}
+              onClick={() => void run(async () => { await overlayRecord(stamp()); }, false, status?.recording ? 'Recording saved' : 'Recording started')}
             >
               {status?.recording ? <Square className="size-6 fill-white" /> : <Circle className="size-6 fill-white" />}
             </CaptureButton>
-            <CaptureButton label="Last" disabled={busy} onClick={() => void run(async () => { await overlayReplay(seconds, stamp()); })}>
+            <CaptureButton label="Last" disabled={busy} onClick={() => void run(async () => { await overlayReplay(seconds, stamp()); }, false, 'Replay saved')}>
               <span className="text-2xl font-semibold tabular-nums leading-none">{seconds}</span>
             </CaptureButton>
           </div>
@@ -646,12 +755,12 @@ export function OverlayView() {
         </Box>
       )}
       {visible('fps') && (
-        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onPin={pin} section="fps" size="slim">
+        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
           <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
         </Box>
       )}
       {visible('performance') && (
-        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onPin={pin} section="performance" size="meter">
+        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onResize={resize} onPin={pin} section="performance">
           <Meter label="GPU" value={stats?.gpu} />
           <Meter label="CPU" value={stats?.cpu} />
           <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
@@ -659,12 +768,12 @@ export function OverlayView() {
         </Box>
       )}
       {visible('clock') && (
-        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onPin={pin} section="clock" size="slim">
-          <p className="text-center text-2xl font-medium tabular-nums">{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onResize={resize} onPin={pin} section="clock">
+          <p className="truncate text-center text-4xl font-semibold tabular-nums leading-none">{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </Box>
       )}
       {visible('notes') && (
-        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onPin={pin} section="notes">
+        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onResize={resize} onPin={pin} section="notes">
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -684,20 +793,25 @@ export function OverlayView() {
           {noteError && <p className="mt-1 text-[11px] text-red-200">{noteError}</p>}
         </Box>
       )}
+      {hello && (
+        <div className="orbit-hello pointer-events-none absolute left-1/2 top-3 z-50 whitespace-nowrap rounded-full border border-white/15 bg-[#141416]/95 px-4 py-1.5 text-xs text-white/90 shadow-2xl backdrop-blur-md">
+          Orbit overlay is working
+        </div>
+      )}
       {!resting && (
-        <div className="pointer-events-auto absolute left-1/2 top-4 z-40 -translate-x-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-12 z-40 -translate-x-1/2">
           <button
             type="button"
             data-overlay
             aria-expanded={boxesOpen}
             onClick={() => setBoxesOpen((open) => !open)}
-            className="flex items-center gap-1.5 rounded-full border border-white/15 bg-[#141416]/92 px-3 py-1.5 text-[11px] text-white/80 backdrop-blur-md"
+            className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/15 bg-[#141416]/92 px-3 py-1.5 text-[11px] text-white/80 backdrop-blur-md"
           >
             <Settings2 className="size-3.5" />
             Boxes
           </button>
           {boxesOpen && (
-            <div className="mt-2 w-56 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
+            <div className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="flex flex-wrap gap-1.5">
                 {OVERLAY_BOXES.map((box) => {
                   const shown = !hidden.includes(box.id);
@@ -740,10 +854,9 @@ function Box({
   place,
   front,
   onDrag,
+  onResize,
   onPin,
   section,
-  wide = false,
-  size = 'normal',
   extra,
   children,
 }: {
@@ -752,10 +865,9 @@ function Box({
   place: Place;
   front: boolean;
   onDrag: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
+  onResize: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
   onPin: (id: BoxId) => void;
   section: string;
-  wide?: boolean;
-  size?: 'normal' | 'slim' | 'meter';
   extra?: ReactNode;
   children: ReactNode;
 }) {
@@ -763,11 +875,8 @@ function Box({
     <aside
       data-overlay-section={section}
       data-pin={place.pinned ? '1' : '0'}
-      className={cn(
-        'pointer-events-auto absolute flex max-h-[calc(100%-3rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
-        wide ? 'w-[min(40rem,calc(100%-3rem))]' : size === 'slim' ? 'w-36' : size === 'meter' ? 'w-56' : 'w-80',
-      )}
-      style={{ left: place.x, top: place.y, zIndex: front ? 30 : 20 }}
+      className="pointer-events-auto absolute flex max-h-[calc(100%-3rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md"
+      style={{ left: place.x, top: place.y, width: place.w ?? BOX[id].w, height: place.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
         className="flex cursor-grab items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"
@@ -792,6 +901,14 @@ function Box({
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-2">{children}</div>
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        title="Resize"
+        aria-label={`Resize ${title}`}
+        onPointerDown={(event) => onResize(id, event)}
+        className="absolute bottom-1.5 right-1.5 size-3.5 cursor-nwse-resize rounded-sm border-b-2 border-r-2 border-white/40 hover:border-white"
+      />
     </aside>
   );
 }
@@ -805,7 +922,7 @@ function Meter({ label, value, detail = '' }: { label: string; value: number | n
         <span className="tabular-nums text-white">{shown}</span>
       </div>
       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-white/80" style={{ width: `${Math.min(100, value ?? 0)}%` }} />
+        <div className="h-full rounded-full bg-white/80 transition-[width] duration-300 ease-out" style={{ width: `${Math.min(100, value ?? 0)}%` }} />
       </div>
       {detail && <p className="mt-0.5 text-[10px] tabular-nums text-white/40">{detail}</p>}
     </div>

@@ -25,7 +25,7 @@ pub fn now() -> Vec<NowPlaying> {
     let mut items = platform_now();
     let apps = crate::audio::list().unwrap_or_default();
     for item in &mut items {
-        let (id, volume, muted) = match_volume(&item.app, &apps);
+        let (id, volume, muted) = match_volume(&item.app, &item.title, &apps);
         item.volume_id = id;
         item.volume = volume;
         item.muted = muted;
@@ -65,21 +65,10 @@ pub(crate) fn pretty_source(raw: &str) -> String {
     if name.is_empty() { "Playing".to_string() } else { name.to_string() }
 }
 
-pub(crate) fn match_volume(app: &str, apps: &[crate::audio::AppAudio]) -> (String, u8, bool) {
-    let needle = app.trim().to_ascii_lowercase();
-    if needle.is_empty() || needle == "playing" {
-        return (String::new(), 100, false);
-    }
-    for item in apps {
-        if item.device {
-            continue;
-        }
-        let name = item.name.to_ascii_lowercase();
-        if name.contains(&needle) || needle.contains(&name) {
-            return (item.id.clone(), item.volume, item.muted);
-        }
-    }
-    (String::new(), 100, false)
+pub(crate) fn match_volume(app: &str, title: &str, apps: &[crate::audio::AppAudio]) -> (String, u8, bool) {
+    crate::audio::volume_hit(app, title, apps)
+        .map(|item| (item.id.clone(), item.volume, item.muted))
+        .unwrap_or((String::new(), 100, false))
 }
 
 pub(crate) fn parse_playerctl(text: &str) -> Vec<NowPlaying> {

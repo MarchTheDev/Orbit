@@ -1,11 +1,11 @@
 /**
  * A short chime for a saved picture.
  *
- * It uses the same warm sine tones as the library chord, not a camera click.
- * Recordings stay quiet. The volume is 0 to 100.
+ * It sits a couple of octaves above the library chord, so it is light rather
+ * than a low bell. Recordings stay quiet. The volume is 0 to 100.
  */
 
-const ROOT = 130.8128;
+const ROOT = 523.2511;
 
 function frequency(semitones: number): number {
   return ROOT * Math.pow(2, semitones / 12);
@@ -53,9 +53,9 @@ export function playShutter(volume = 40) {
     return tone;
   };
 
-  // C3, a fifth above it, and a quiet high note that falls back into the chord.
-  voice(0, 0.42, 0.04, 0.62);
-  voice(7, 0.26, 0.06, 0.9);
-  voice(24, 0.1, 0.02, 0.48, 19);
+  // A short major chord an octave higher than a low C, with a quiet note that lifts.
+  voice(0, 0.34, 0.012, 0.28);
+  voice(4, 0.2, 0.02, 0.34);
+  voice(12, 0.1, 0.01, 0.22, 7);
   void ctx.resume();
 }

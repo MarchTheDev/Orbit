@@ -224,7 +224,9 @@ pub fn configure(
     }
     if hide {
         if let Some(app) = app {
-            hide_window(app);
+            // Hiding leaves the second web view running. Turning the overlay
+            // off has to close that window, or its processes stay behind.
+            close_panel(app);
         }
     }
 }
@@ -295,6 +297,8 @@ pub fn close_panel(app: &AppHandle) {
     RESTING.store(false, Ordering::SeqCst);
     HAS_PINS.store(false, Ordering::SeqCst);
     capture::set_paused(false);
+    crate::stats::release();
+    tell(app, "overlay-visible", "false");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
         if window.destroy().is_err() {
@@ -666,14 +670,9 @@ fn hide_window(app: &AppHandle) {
         rest_window(app);
         return;
     }
-    RESTING.store(false, Ordering::SeqCst);
-    IGNORE.store(false, Ordering::SeqCst);
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.set_ignore_cursor_events(false);
-        let _ = window.set_focusable(true);
-        let _ = window.hide();
-    }
-    mark_hidden(app);
+    // A hidden panel is still a web view. Closing it drops those processes
+    // until the overlay is opened again. A pinned box has to stay.
+    close_panel(app);
 }
 
 fn rest_window(app: &AppHandle) {
@@ -1469,7 +1468,7 @@ pub fn set_hits(boxes: Vec<HitBox>) {
 
 /// A pinned box should already be on screen when Orbit opens, without Alt+X.
 pub fn show_pins(app: &AppHandle) {
-    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) || !lock().enabled {
         return;
     }
     HAS_PINS.store(true, Ordering::SeqCst);
