@@ -275,21 +275,29 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
     if status != 0 {
         return None;
     }
-    let mut best = None;
-    let mut best_3d = None;
+    let mut best = None::<f64>;
+    let mut best_3d = None::<f64>;
     for item in buffer.iter().take(count as usize) {
         if item.FmtValue.CStatus != 0 {
             continue;
         }
-        let value = if percent { item.FmtValue.Anonymous.doubleValue } else { item.FmtValue.Anonymous.largeValue as f64 };
+        let value: f64 = unsafe {
+            if percent {
+                item.FmtValue.Anonymous.doubleValue
+            } else {
+                item.FmtValue.Anonymous.largeValue as f64
+            }
+        };
         if !value.is_finite() || value < 0.0 {
             continue;
         }
-        best = Some(best.unwrap_or(0.0).max(value));
+        let previous = best.unwrap_or(0.0f64);
+        best = Some(if value > previous { value } else { previous });
         if percent {
             let name = wide_text(windows::core::PWSTR(item.szName.0));
             if name.contains("engtype_3D") {
-                best_3d = Some(best_3d.unwrap_or(0.0).max(value));
+                let previous = best_3d.unwrap_or(0.0f64);
+                best_3d = Some(if value > previous { value } else { previous });
             }
         }
     }
@@ -412,7 +420,7 @@ impl WindowsFrames {
         let mut frames = 0u32;
         let mut saw = false;
         for _ in 0..8 {
-            let mut info: DXGI_OUTDUPL_FRAME_INFO = std::mem::zeroed();
+            let mut info: DXGI_OUTDUPL_FRAME_INFO = unsafe { std::mem::zeroed() };
             let mut resource = None;
             let info_ptr: *mut DXGI_OUTDUPL_FRAME_INFO = &mut info;
             let resource_ptr: *mut Option<windows::Win32::Graphics::Dxgi::IDXGIResource> = &mut resource;

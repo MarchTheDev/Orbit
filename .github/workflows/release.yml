@@ -133,12 +133,11 @@ jobs:
           $code = $LASTEXITCODE
           if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
           if ($code -ne 0) {
-            $hits = @(Select-String -Path $log -Pattern 'error(\[E\d+])?:|-->')
-            if ($hits.Count -eq 0) {
-              $hits = @(Get-Content $log -Tail 40 | ForEach-Object { [pscustomobject]@{ Line = $_ } })
-            }
+            $plain = Get-Content -LiteralPath $log | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' }
+            $hits = @($plain | Where-Object { $_ -match 'error(\[E\d+\])?:' -or $_ -match '-->' })
+            if ($hits.Count -eq 0) { $hits = @($plain | Select-Object -Last 40) }
             $hits | Select-Object -Last 40 | ForEach-Object {
-              $msg = ([string]$_.Line) -replace "[\r\n]", " " -replace "%", " "
+              $msg = ([string]$_) -replace "[\r\n]", " " -replace "%", " "
               if ($msg.Length -gt 450) { $msg = $msg.Substring(0, 450) }
               if ($msg.Trim().Length -gt 0) { Write-Host "::error::$msg" }
             }
