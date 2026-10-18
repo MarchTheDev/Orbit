@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Volume2, VolumeX } from 'lucide-react';
 import { audioApps, audioDevices, audioSet, audioUseDevice, type AppAudio, type AudioDevice } from '../services/native';
+import { cn } from '../utils/cn';
 
 type Pending = { volume: number; muted: boolean };
 
@@ -24,10 +25,9 @@ function matchGame(apps: AppAudio[], game: string): AppAudio | undefined {
 }
 
 /**
- * The overlay shows the game, the speakers, and one other source.
- * More opens the rest. Settings shows the whole list.
+ * The overlay keeps the game and speakers in view. More opens the other sources.
  */
-export function AppMixer({ pad = false, game = '', compact = false, onMore }: { pad?: boolean; game?: string; compact?: boolean; onMore?: () => void }) {
+export function AppMixer({ pad = false, game = '', compact = false, onMore }: { pad?: boolean; game?: string; compact?: boolean; onMore?: (open: boolean) => void }) {
   const [apps, setApps] = useState<AppAudio[]>([]);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<Record<string, Pending>>({});
@@ -95,7 +95,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
     if (gameApp) top.push(gameApp);
     if (speakers) top.push(speakers);
     for (const app of others) {
-      if (top.length >= 3) break;
+      if (top.length >= 2) break;
       if (top.some((item) => item.id === app.id)) continue;
       top.push(app);
     }
@@ -104,43 +104,50 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
   }, [apps, compact, game]);
   const shown = !compact ? apps : more ? [...arranged.top, ...arranged.rest] : arranged.top;
 
+  useEffect(() => {
+    if (more && arranged.rest.length === 0) {
+      setMore(false);
+      onMore?.(false);
+    }
+  }, [arranged.rest.length, more, onMore]);
+
   if (error && apps.length === 0) {
     return <p className="text-xs leading-relaxed text-muted">{error}</p>;
   }
 
   return (
-    <div className="space-y-2">
-      <DevicePick pad={pad} />
+    <div className={compact ? 'space-y-1' : 'space-y-2'}>
+      <DevicePick pad={pad} compact={compact} />
       {apps.length === 0 && <p className="text-xs text-muted">No apps are playing sound.</p>}
       {arranged.missing && (
-        <p className="rounded-xl border border-line bg-panel2 px-3 py-2 text-sm">
+        <p className={cn('rounded-xl border border-line bg-panel2', compact ? 'px-2 py-1 text-[10px] leading-tight text-muted' : 'px-3 py-2 text-sm')}>
           {game}
           <span className="text-muted"> · not playing sound</span>
         </p>
       )}
       {shown.map((app) => (
-        <div key={app.id} className="rounded-xl border border-line bg-panel2 px-3 py-2">
+        <div key={app.id} className={cn('rounded-xl border border-line bg-panel2', compact ? 'px-2 py-1.5' : 'px-3 py-2')}>
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-sm">{app.name}</span>
+            <span className={cn('min-w-0 truncate', compact ? 'text-xs' : 'text-sm')}>{app.name}</span>
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={app.muted ? `Unmute ${app.name}` : `Mute ${app.name}`}
               onClick={() => setVolume(app.id, app.volume, !app.muted)}
-              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
+              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
             >
               {app.muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
             </button>
           </div>
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className={cn('flex items-center', compact ? 'mt-1 gap-1.5' : 'mt-1.5 gap-2')}>
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Quieter ${app.name}`}
               onClick={() => nudge(app.id, -1)}
-              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
+              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
             >
               <Minus className="size-3.5" />
             </button>
@@ -154,14 +161,14 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
               onChange={(event) => setVolume(app.id, Number(event.target.value), app.muted)}
               className="min-w-0 flex-1 accent-[var(--c-accent)]"
             />
-            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted">{app.volume}</span>
+            <span className={cn('shrink-0 text-right tabular-nums text-muted', compact ? 'w-7 text-[10px]' : 'w-8 text-[11px]')}>{app.volume}</span>
             <button
               type="button"
               data-overlay={pad ? '' : undefined}
               data-mix={app.id}
               aria-label={`Louder ${app.name}`}
               onClick={() => nudge(app.id, 1)}
-              className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg"
+              className={cn('grid shrink-0 place-items-center rounded-lg border border-line text-muted hover:border-accent hover:text-fg', compact ? 'size-6' : 'size-7')}
             >
               <Plus className="size-3.5" />
             </button>
@@ -173,10 +180,11 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
           type="button"
           data-overlay={pad ? '' : undefined}
           onClick={() => {
-            setMore((open) => !open);
-            if (!more) onMore?.();
+            const open = !more;
+            setMore(open);
+            onMore?.(open);
           }}
-          className="w-full rounded-xl border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+          className={cn('w-full rounded-xl border border-line text-muted hover:border-accent hover:text-fg', compact ? 'px-3 py-1 text-[11px]' : 'px-3 py-1.5 text-xs')}
         >
           {more ? 'Less' : `More · ${arranged.rest.length}`}
         </button>
@@ -186,7 +194,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
   );
 }
 
-function DevicePick({ pad }: { pad: boolean }) {
+function DevicePick({ pad, compact }: { pad: boolean; compact: boolean }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [error, setError] = useState('');
 
@@ -218,10 +226,10 @@ function DevicePick({ pad }: { pad: boolean }) {
   if (outputs.length === 0 && inputs.length === 0 && !error) return null;
 
   return (
-    <div className="space-y-2">
-      <DeviceSelect label="Output" devices={outputs} pad={pad} onChoose={(id) => choose('output', id)} />
-      <DeviceSelect label="Microphone" devices={inputs} pad={pad} onChoose={(id) => choose('input', id)} />
-      {error && <p className="text-[11px] text-muted">{error}</p>}
+    <div className={compact ? 'grid grid-cols-2 gap-2' : 'space-y-2'}>
+      <DeviceSelect label="Output" devices={outputs} pad={pad} compact={compact} onChoose={(id) => choose('output', id)} />
+      <DeviceSelect label="Microphone" devices={inputs} pad={pad} compact={compact} onChoose={(id) => choose('input', id)} />
+      {error && <p className={cn('text-[11px] text-muted', compact && 'col-span-2')}>{error}</p>}
     </div>
   );
 }
@@ -230,24 +238,26 @@ function DeviceSelect({
   label,
   devices,
   pad,
+  compact,
   onChoose,
 }: {
   label: string;
   devices: AudioDevice[];
   pad: boolean;
+  compact: boolean;
   onChoose: (id: string) => void;
 }) {
   if (devices.length === 0) return null;
   const current = devices.find((item) => item.current)?.id ?? devices[0].id;
   return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] text-muted">{label}</span>
+    <label className="block min-w-0">
+      <span className={cn('mb-0.5 block text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>{label}</span>
       <select
         value={current}
         aria-label={label}
         data-overlay={pad ? '' : undefined}
         onChange={(event) => onChoose(event.target.value)}
-        className="w-full rounded-xl border border-line bg-panel2 px-2 py-1.5 text-xs text-fg"
+        className={cn('w-full rounded-xl border border-line bg-panel2 text-fg', compact ? 'px-1.5 py-1 text-[10px]' : 'px-2 py-1.5 text-xs')}
       >
         {devices.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>

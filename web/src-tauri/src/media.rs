@@ -42,6 +42,9 @@ pub(crate) fn pretty_source(raw: &str) -> String {
     if raw.is_empty() {
         return "Playing".to_string();
     }
+    if raw.len() >= 12 && raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return "Playing".to_string();
+    }
     let lower = raw.to_ascii_lowercase();
     if lower.contains("chrome") {
         return "Chrome".to_string();
@@ -493,6 +496,7 @@ mod tests {
     fn a_browser_name_is_short_enough_to_match_the_mixer() {
         assert_eq!(pretty_source("Google.Chrome_8wekyb3d8bbwe!App"), "Chrome");
         assert_eq!(pretty_source("MSEdge"), "Edge");
+        assert_eq!(pretty_source("308046B0AF4A39CB"), "Playing");
         assert_eq!(pretty_source(""), "Playing");
     }
 

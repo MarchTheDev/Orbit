@@ -551,7 +551,7 @@ export interface Settings {
     quality?: '720p' | '1080p' | '1440p' | '4k' | 'lighter' | 'normal' | 'sharper';
     /** 30 or 60. Missing means 30. */
     fps?: number;
-    /** A short chime when a picture is saved. On unless turned off. */
+    /** A soft chime when a picture is saved. On unless turned off. */
     shutter?: boolean;
     /** 0 to 100. Missing means a quiet 40. */
     shutterVolume?: number;
@@ -569,11 +569,15 @@ export interface Settings {
     layoutRevision?: number;
     /** A small note when a screenshot, recording, or replay is saved. On unless turned off. */
     captureToast?: boolean;
-    /** A short note from the top when the overlay opens. On unless turned off. */
+    /** A note in Orbit when a game starts, not when the overlay opens. On unless turned off. */
     readyNotice?: boolean;
     /** Boxes the player turned off. Missing means every box is shown. */
     hidden?: OverlayBoxId[];
-    /** Empty means the built-in recorder. A path is only a fallback, and it is not shown in Settings. */
+    /** Optional folders for each capture type. Empty means its folder in Orbit's data directory. */
+    screenshotDirectory?: string;
+    recordingDirectory?: string;
+    replayDirectory?: string;
+    /** Empty means the built-in recorder. A path is only a fallback. */
     ffmpeg?: string;
   };
   /**

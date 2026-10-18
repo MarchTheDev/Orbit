@@ -687,16 +687,6 @@ input[type='number']::-webkit-outer-spin-button {
   cursor: not-allowed;
 }
 
-@keyframes orbit-hello {
-  0% { opacity: 0; transform: translate3d(-50%, -140%, 0); }
-  16% { opacity: 1; transform: translate3d(-50%, 0, 0); }
-  74% { opacity: 1; transform: translate3d(-50%, 0, 0); }
-  100% { opacity: 0; transform: translate3d(-50%, -40%, 0); }
-}
-.orbit-hello {
-  left: 50%;
-  animation: orbit-hello 2.6s cubic-bezier(.2, .8, .2, 1) both;
-}
 @keyframes orbit-toast {
   0% { opacity: 0; transform: translate3d(-50%, 8px, 0); }
   12% { opacity: 1; transform: translate3d(-50%, 0, 0); }
@@ -705,5 +695,5 @@ input[type='number']::-webkit-outer-spin-button {
 }
 .orbit-toast {
   left: 50%;
-  animation: orbit-toast 2.2s ease both;
+  animation: orbit-toast 4.2s cubic-bezier(.2, .8, .2, 1) both;
 }

@@ -966,6 +966,7 @@ mod tests {
         assert_eq!(hit.id, "win:4");
         assert_eq!(hit.volume, 35);
         assert!(volume_hit("Playing", "Never Gonna Give You Up - YouTube", &apps).is_some());
+        assert_eq!(volume_hit("Playing", "A browser song", &apps).map(|app| app.id.as_str()), Some("win:4"));
         assert!(volume_hit("Speakers", "", &apps).is_none());
     }
 

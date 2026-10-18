@@ -665,6 +665,9 @@ fn overlay_configure(
     quality: Option<String>,
     fps: Option<u32>,
     ffmpeg: String,
+    screenshot_directory: String,
+    recording_directory: String,
+    replay_directory: String,
 ) {
     overlay::configure(
         Some(&app),
@@ -675,6 +678,9 @@ fn overlay_configure(
         quality.as_deref().unwrap_or("1080p"),
         fps.unwrap_or(30),
         &ffmpeg,
+        &screenshot_directory,
+        &recording_directory,
+        &replay_directory,
     );
 }
 
@@ -736,8 +742,8 @@ fn audio_set_named(name: String, volume: u8, muted: bool) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn machine_stats() -> stats::MachineStats {
-    stats::sample()
+fn machine_stats(want_fps: bool) -> stats::MachineStats {
+    stats::sample(want_fps)
 }
 
 /// Add the overlay's notes under the journal notes for the game that is running.
@@ -819,6 +825,11 @@ fn overlay_open_kind(kind: String) -> Result<String, String> {
 #[tauri::command]
 fn overlay_open(path: String) -> Result<(), String> {
     overlay::open_item(&path)
+}
+
+#[tauri::command]
+fn overlay_delete(path: String) -> Result<(), String> {
+    overlay::delete_item(&path)
 }
 
 #[tauri::command]
@@ -2481,6 +2492,7 @@ pub fn run() {
             overlay_folder,
             overlay_open_kind,
             overlay_open,
+            overlay_delete,
             overlay_gallery,
         ])
         .build(tauri::generate_context!())

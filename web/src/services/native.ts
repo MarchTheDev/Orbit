@@ -1242,6 +1242,9 @@ export function overlayConfigure(options: {
   quality?: string;
   fps?: number;
   ffmpeg: string;
+  screenshotDirectory: string;
+  recordingDirectory: string;
+  replayDirectory: string;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
 }
@@ -1336,8 +1339,8 @@ export interface MachineStats {
   fps: number | null;
 }
 
-export function machineStats(): Promise<MachineStats> {
-  return call('machine_stats', {}, () => ({
+export function machineStats(wantFps: boolean): Promise<MachineStats> {
+  return call('machine_stats', { wantFps }, () => ({
     cpu: null,
     ram: null,
     ramUsed: 0,
@@ -1421,6 +1424,12 @@ export function overlayGallery(): Promise<GalleryItem[]> {
 export function overlayOpen(path: string): Promise<void> {
   return call('overlay_open', { path }, async () => {
     throw new Error('Opening a capture needs the desktop app.');
+  });
+}
+
+export function overlayDelete(path: string): Promise<void> {
+  return call('overlay_delete', { path }, async () => {
+    throw new Error('Deleting a capture needs the desktop app.');
   });
 }
 

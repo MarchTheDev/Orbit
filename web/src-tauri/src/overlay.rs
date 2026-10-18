@@ -44,7 +44,12 @@ struct Live {
     quality: String,
     fps: u32,
     ffmpeg: String,
+    /// Orbit's data directory; kept separate so replay cleanup never touches a custom capture folder.
     root: PathBuf,
+    /// Per-kind output folders; default to the matching subfolders of `root`.
+    screenshot_root: PathBuf,
+    recording_root: PathBuf,
+    replay_root: PathBuf,
     game: String,
     playing: bool,
     recording: Option<Child>,
@@ -83,6 +88,9 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     fps: 30,
     ffmpeg: String::new(),
     root: PathBuf::new(),
+    screenshot_root: PathBuf::new(),
+    recording_root: PathBuf::new(),
+    replay_root: PathBuf::new(),
     game: String::new(),
     playing: false,
     recording: None,
@@ -169,7 +177,10 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg);
+    let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
+    let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
+    let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
 }
 
 pub fn configure(
@@ -181,6 +192,9 @@ pub fn configure(
     quality: &str,
     fps: u32,
     ffmpeg: &str,
+    screenshot_directory: &str,
+    recording_directory: &str,
+    replay_directory: &str,
 ) {
     let seconds = clamp_seconds(seconds);
     let lengths = lengths.map(|items| {
@@ -197,8 +211,15 @@ pub fn configure(
             None => live.lengths.clone(),
         };
         let keep = keep_seconds(&lengths, seconds);
+        let screenshot_root = configured_capture_dir(&live.root, screenshot_directory, "screenshots");
+        let recording_root = configured_capture_dir(&live.root, recording_directory, "recordings");
+        let replay_root = configured_capture_dir(&live.root, replay_directory, "replays");
+        let capture_changed = live.screenshot_root != screenshot_root || live.recording_root != recording_root || live.replay_root != replay_root;
+        live.screenshot_root = screenshot_root;
+        live.recording_root = recording_root;
+        live.replay_root = replay_root;
         let must_restart = live.keep != keep || live.quality != quality || live.fps != fps || live.replay != replay || live.enabled != enabled;
-        let changed = must_restart || live.seconds != seconds || live.lengths != lengths || live.ffmpeg != ffmpeg;
+        let changed = must_restart || live.seconds != seconds || live.lengths != lengths || live.ffmpeg != ffmpeg || capture_changed;
         let hide = live.enabled && !enabled;
         live.enabled = enabled;
         live.replay = replay;
@@ -311,7 +332,16 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Ok(dir) = app.path().app_data_dir() {
         capture::sweep_replay_files(&dir);
         let mut live = lock();
-        live.root = dir;
+        live.root = dir.clone();
+        if live.screenshot_root.as_os_str().is_empty() {
+            live.screenshot_root = dir.join("screenshots");
+        }
+        if live.recording_root.as_os_str().is_empty() {
+            live.recording_root = dir.join("recordings");
+        }
+        if live.replay_root.as_os_str().is_empty() {
+            live.replay_root = dir.join("replays");
+        }
     }
     // The panel is built on the first Alt+X, not during startup. A second
     // webview here would compete with the boot animation.
@@ -352,7 +382,11 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
 
 pub fn status() -> OverlayStatus {
     let live = lock();
-    let folder = kind_dir_from(&live.root, "recordings");
+    let folder = if live.recording_root.as_os_str().is_empty() {
+        kind_dir_from(&live.root, "recordings")
+    } else {
+        live.recording_root.clone()
+    };
     OverlayStatus {
         enabled: live.enabled,
         recording: live.recording.is_some() || live.native_recording.is_some(),
@@ -398,15 +432,32 @@ pub fn open_item(path: &str) -> Result<(), String> {
     launch_path(&path)
 }
 
+pub fn delete_item(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !allowed_capture(&path) {
+        return Err("That file is not one of Orbit's captures.".to_string());
+    }
+    if !path.is_file() {
+        return Err("That file is not there any more.".to_string());
+    }
+    fs::remove_file(&path).map_err(|error| format!("Could not delete that capture: {error}"))
+}
+
 pub fn gallery() -> Vec<GalleryItem> {
-    let root = lock().root.clone();
-    if root.as_os_str().is_empty() {
+    let (screenshots, recordings, replays) = {
+        let live = lock();
+        let screenshots = if live.screenshot_root.as_os_str().is_empty() { live.root.join("screenshots") } else { live.screenshot_root.clone() };
+        let recordings = if live.recording_root.as_os_str().is_empty() { live.root.join("recordings") } else { live.recording_root.clone() };
+        let replays = if live.replay_root.as_os_str().is_empty() { live.root.join("replays") } else { live.replay_root.clone() };
+        (screenshots, recordings, replays)
+    };
+    if screenshots.as_os_str().is_empty() && recordings.as_os_str().is_empty() && replays.as_os_str().is_empty() {
         return Vec::new();
     }
     let mut found = Vec::new();
-    collect_kind(&root.join("screenshots"), "screenshot", &mut found);
-    collect_kind(&root.join("recordings"), "recording", &mut found);
-    collect_kind(&root.join("replays"), "replay", &mut found);
+    collect_kind(&screenshots, "screenshot", &mut found);
+    collect_kind(&recordings, "recording", &mut found);
+    collect_kind(&replays, "replay", &mut found);
     found.sort_by(|left, right| right.0.cmp(&left.0));
     found.into_iter().take(36).map(|(_, item)| item).collect()
 }
@@ -421,8 +472,8 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // Windows leaves the panel out of the capture, so it can stay up. Other
-    // desktops still step aside for the one picture, then come back.
+    // Windows capture tools can include the open panel. Other desktops still
+    // step aside for the one in-app picture, then come back.
     #[cfg(not(windows))]
     let was_open = is_open();
     #[cfg(not(windows))]
@@ -473,7 +524,8 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
                 live.recording_name.clone()
             }
         };
-        let message = format!("Saved the recording as {name}.");
+        let copied = if path.as_os_str().is_empty() { String::new() } else { clipboard_note(&path) };
+        let message = format!("Saved the recording as {name}.{copied}");
         remember(&Ok(message.clone()));
         return Ok(message);
     }
@@ -597,7 +649,6 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .content_protected(true)
         .visible(false)
         .focused(false)
         .center()
@@ -611,7 +662,6 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
-    exclude_from_capture(&window);
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
@@ -631,7 +681,6 @@ fn show_window(app: &AppHandle) {
     RESTING.store(false, Ordering::SeqCst);
     IGNORE.store(false, Ordering::SeqCst);
     capture::set_paused(false);
-    exclude_from_capture(&window);
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_focusable(true);
     cover_screen(&window);
@@ -680,7 +729,6 @@ fn rest_window(app: &AppHandle) {
     RESTING.store(true, Ordering::SeqCst);
     capture::set_paused(false);
     if let Some(window) = ensure_window(app) {
-        exclude_from_capture(&window);
         cover_screen(&window);
         let _ = window.show();
         let _ = window.set_always_on_top(true);
@@ -712,21 +760,21 @@ fn take_shot(stamp: &str) -> Result<String, String> {
     if capture::available() {
         let path = clip_path(&dir, &lock().game, stamp, "jpg");
         if capture::save_picture(&path, current_spec()).is_ok() {
-            return Ok(saved_name("Saved the picture as", &path));
+            return saved_picture(&path);
         }
     }
     let path = clip_path(&dir, &lock().game, stamp, "png");
     #[cfg(windows)]
     if powershell_shot(&path).is_ok() {
-        return Ok(saved_name("Saved the picture as", &path));
+        return saved_picture(&path);
     }
     #[cfg(target_os = "linux")]
     if linux_shot(&path).is_ok() {
-        return Ok(saved_name("Saved the picture as", &path));
+        return saved_picture(&path);
     }
     if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
         if ffmpeg_shot(&ffmpeg, &path).is_ok() {
-            return Ok(saved_name("Saved the picture as", &path));
+            return saved_picture(&path);
         }
     }
     Err("Orbit could not take a picture of the screen.".to_string())
@@ -968,10 +1016,11 @@ fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "the clip".to_string());
     let covered = kept.frames.len() as u32 / kept.fps.max(1);
+    let copied = clipboard_note(&path);
     if covered + 1 < seconds {
-        return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."));
+        return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}.{copied}"));
     }
-    Ok(format!("Saved the last {seconds} seconds as {name}."))
+    Ok(format!("Saved the last {seconds} seconds as {name}.{copied}"))
 }
 
 fn encode_kept(path: &Path, kept: &capture::Kept) -> Result<(), String> {
@@ -1186,12 +1235,12 @@ pub(crate) fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn data_root() -> Result<PathBuf, String> {
-    let root = lock().root.clone();
-    if root.as_os_str().is_empty() {
-        return Err("Orbit is still starting.".to_string());
+fn configured_capture_dir(root: &Path, selected: &str, kind: &str) -> PathBuf {
+    if selected.trim().is_empty() {
+        if root.as_os_str().is_empty() { PathBuf::new() } else { root.join(kind) }
+    } else {
+        PathBuf::from(selected.trim())
     }
-    Ok(root)
 }
 
 fn kind_name(kind: &str) -> &'static str {
@@ -1203,7 +1252,20 @@ fn kind_name(kind: &str) -> &'static str {
 }
 
 fn kind_dir(kind: &str) -> Result<PathBuf, String> {
-    Ok(kind_dir_from(&data_root()?, kind_name(kind)))
+    let name = kind_name(kind);
+    let live = lock();
+    let selected = match name {
+        "screenshots" => &live.screenshot_root,
+        "replays" => &live.replay_root,
+        _ => &live.recording_root,
+    };
+    if !selected.as_os_str().is_empty() {
+        return Ok(selected.clone());
+    }
+    if live.root.as_os_str().is_empty() {
+        return Err("Orbit is still starting.".to_string());
+    }
+    Ok(live.root.join(name))
 }
 
 fn kind_dir_from(root: &Path, kind: &str) -> PathBuf {
@@ -1263,9 +1325,9 @@ fn collect_kind(dir: &Path, kind: &str, found: &mut Vec<(SystemTime, GalleryItem
 
 fn allowed_capture(path: &Path) -> bool {
     let Ok(path) = path.canonicalize() else { return false };
-    let Ok(root) = data_root() else { return false };
-    for folder in ["screenshots", "recordings", "replays"] {
-        let Ok(base) = root.join(folder).canonicalize() else { continue };
+    for kind in ["screenshots", "recordings", "replays"] {
+        let Ok(base) = kind_dir(kind) else { continue };
+        let Ok(base) = base.canonicalize() else { continue };
         if path.starts_with(&base) {
             return true;
         }
@@ -1283,6 +1345,248 @@ fn saved_name(prefix: &str, path: &Path) -> String {
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "the picture".to_string());
     format!("{prefix} {name}.")
+}
+
+fn saved_picture(path: &Path) -> Result<String, String> {
+    Ok(format!("{}{}", saved_name("Saved the picture as", path), clipboard_note(path)))
+}
+
+fn clipboard_note(path: &Path) -> String {
+    match copy_capture_to_clipboard(path) {
+        Ok(()) => " Copied to clipboard.".to_string(),
+        Err(error) => format!(" Clipboard copy failed: {error}"),
+    }
+}
+
+/// Copy the saved media as a file, so Paste works in Explorer/Finder and in apps
+/// that accept file attachments. On Windows, screenshots also get a native image
+/// format for apps that expect pixels rather than a file.
+#[cfg(windows)]
+fn screenshot_dib(path: &Path) -> Option<Vec<u8>> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "jpg" && extension != "jpeg" {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let (width, height, bgra) = capture::decode_jpeg(&bytes).ok()?;
+    dib_24bit(width, height, &bgra)
+}
+
+#[cfg(windows)]
+fn dib_24bit(width: u32, height: u32, bgra: &[u8]) -> Option<Vec<u8>> {
+    let width_usize = usize::try_from(width).ok()?;
+    let height_usize = usize::try_from(height).ok()?;
+    if width_usize == 0 || height_usize == 0 || width_usize > i32::MAX as usize || height_usize > i32::MAX as usize {
+        return None;
+    }
+    let pixels = width_usize.checked_mul(height_usize)?;
+    if bgra.len() != pixels.checked_mul(4)? {
+        return None;
+    }
+    let row_bytes = width_usize.checked_mul(3)?;
+    let stride = row_bytes.checked_add(3)? & !3;
+    let image_bytes = stride.checked_mul(height_usize)?;
+    let image_size = u32::try_from(image_bytes).ok()?;
+    let mut dib = Vec::with_capacity(40usize.checked_add(image_bytes)?);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+    dib.extend_from_slice(&image_size.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    for row in (0..height_usize).rev() {
+        let begin = row * width_usize * 4;
+        for pixel in bgra[begin..begin + width_usize * 4].chunks_exact(4) {
+            dib.extend_from_slice(&[pixel[0], pixel[1], pixel[2]]);
+        }
+        let padding = stride - row_bytes;
+        let end = dib.len().checked_add(padding)?;
+        dib.resize(end, 0);
+    }
+    Some(dib)
+}
+
+#[cfg(windows)]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn OpenClipboard(owner: *mut c_void) -> i32;
+        fn EmptyClipboard() -> i32;
+        fn SetClipboardData(format: u32, data: *mut c_void) -> *mut c_void;
+        fn CloseClipboard() -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalAlloc(flags: u32, bytes: usize) -> *mut c_void;
+        fn GlobalLock(memory: *mut c_void) -> *mut c_void;
+        fn GlobalUnlock(memory: *mut c_void) -> i32;
+        fn GlobalFree(memory: *mut c_void) -> *mut c_void;
+    }
+
+    let allocate = |bytes: &[u8]| -> Result<*mut c_void, String> {
+        let memory = unsafe { GlobalAlloc(0x0002 | 0x0040, bytes.len()) }; // GMEM_MOVEABLE | GMEM_ZEROINIT
+        if memory.is_null() {
+            return Err("Windows could not allocate clipboard memory.".to_string());
+        }
+        let data = unsafe { GlobalLock(memory) };
+        if data.is_null() {
+            unsafe { GlobalFree(memory); }
+            return Err("Windows could not lock clipboard memory.".to_string());
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast::<u8>(), bytes.len());
+            GlobalUnlock(memory);
+        }
+        Ok(memory)
+    };
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.extend([0, 0]);
+    let header_size = 20u32; // DROPFILES: DWORD, POINT, BOOL, BOOL.
+    let mut file_data = Vec::with_capacity(header_size as usize + wide.len() * 2);
+    file_data.extend_from_slice(&header_size.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&1i32.to_le_bytes());
+    for unit in wide {
+        file_data.extend_from_slice(&unit.to_le_bytes());
+    }
+    let file_memory = allocate(&file_data)?;
+    let image_memory = screenshot_dib(path).and_then(|dib| allocate(&dib).ok()).unwrap_or(std::ptr::null_mut());
+    if unsafe { OpenClipboard(std::ptr::null_mut()) } == 0 {
+        unsafe {
+            GlobalFree(file_memory);
+            if !image_memory.is_null() {
+                GlobalFree(image_memory);
+            }
+        }
+        return Err("Windows clipboard is busy.".to_string());
+    }
+    let emptied = unsafe { EmptyClipboard() } != 0;
+    let file_stored = emptied && !unsafe { SetClipboardData(15, file_memory) }.is_null(); // CF_HDROP
+    let image_stored = emptied && !image_memory.is_null() && !unsafe { SetClipboardData(8, image_memory) }.is_null(); // CF_DIB
+    unsafe { CloseClipboard(); }
+    if !file_stored {
+        unsafe {
+            GlobalFree(file_memory);
+        }
+    }
+    if !image_memory.is_null() && !image_stored {
+        unsafe {
+            GlobalFree(image_memory);
+        }
+    }
+    if file_stored || image_stored {
+        Ok(())
+    } else {
+        Err("Windows could not copy the file to the clipboard.".to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    let image_type = match extension.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        _ => None,
+    };
+    if let Some(image_type) = image_type {
+        if let Ok(image) = fs::read(path) {
+            let mut last = String::new();
+            let wayland_args = ["--type", image_type];
+            let x11_args = ["-selection", "clipboard", "-t", image_type, "-i"];
+            for (program, args) in [("wl-copy", &wayland_args[..]), ("xclip", &x11_args[..])] {
+                match send_clipboard(program, args, &image) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => last = error,
+                }
+            }
+            if !last.is_empty() {
+                log::debug!("could not copy screenshot pixels, trying the file instead: {last}");
+            }
+        }
+    }
+    let uri = file_uri(path)?;
+    let files = format!("copy\n{uri}\n");
+    let uri_list = format!("{uri}\r\n");
+    let mut last = String::new();
+    for (program, args, data) in [
+        ("wl-copy", & ["--type", "x-special/gnome-copied-files"][..], files.as_bytes()),
+        ("xclip", & ["-selection", "clipboard", "-t", "x-special/gnome-copied-files", "-i"][..], files.as_bytes()),
+        ("wl-copy", & ["--type", "text/uri-list"][..], uri_list.as_bytes()),
+        ("xclip", & ["-selection", "clipboard", "-t", "text/uri-list", "-i"][..], uri_list.as_bytes()),
+    ] {
+        match send_clipboard(program, args, data) {
+            Ok(()) => return Ok(()),
+            Err(error) => last = error,
+        }
+    }
+    Err(if last.is_empty() { "No desktop clipboard helper was found.".to_string() } else { last })
+}
+
+#[cfg(target_os = "macos")]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    let escaped = path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!("set the clipboard to (POSIX file \"{escaped}\" as alias)");
+    let output = process::command("osascript").arg("-e").arg(script).output();
+    if let Ok(output) = output {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
+    let uri = file_uri(path)?;
+    send_clipboard("pbcopy", &[], uri.as_bytes())
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn copy_capture_to_clipboard(_path: &Path) -> Result<(), String> {
+    Err("File clipboard support is not available on this system.".to_string())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn send_clipboard(program: &str, args: &[&str], data: &[u8]) -> Result<(), String> {
+    let mut child = process::command(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start {program}: {error}"))?;
+    let mut input = child.stdin.take().ok_or_else(|| format!("Could not write to {program}."))?;
+    input.write_all(data).map_err(|error| format!("Could not write to the clipboard: {error}"))?;
+    drop(input);
+    let output = child.wait_with_output().map_err(|error| format!("Could not finish {program}: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if error.is_empty() { format!("{program} could not copy the file.") } else { error })
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn file_uri(path: &Path) -> Result<String, String> {
+    let path = path.canonicalize().map_err(|error| format!("Could not locate the saved file: {error}"))?;
+    let raw = path.to_string_lossy();
+    let mut uri = String::from("file://");
+    for byte in raw.as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-._~".contains(byte) {
+            uri.push(*byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Ok(uri)
 }
 
 fn launch_path(path: &Path) -> Result<(), String> {
@@ -1475,19 +1779,6 @@ pub fn show_pins(app: &AppHandle) {
     rest_window(app);
 }
 
-fn exclude_from_capture(window: &tauri::WebviewWindow) {
-    #[cfg(windows)]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
-
-        let Ok(hwnd) = window.hwnd() else { return };
-        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = window;
-    }
-}
 
 fn sync_click_through(app: &AppHandle) {
     if !RESTING.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {

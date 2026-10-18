@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { Camera, Circle, FolderOpen, Image, Pin, Settings2, Square, X } from 'lucide-react';
+import { Camera, CheckCircle2, Circle, ExternalLink, FolderOpen, Image, Pin, Settings2, Square, Trash2, X } from 'lucide-react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { applyFont, applyTheme } from '../data/themes';
 import { loadSettings } from '../services/storage';
@@ -10,6 +10,7 @@ import {
   overlayConfigure,
   overlayFps,
   overlayGallery,
+  overlayDelete,
   overlayHide,
   overlayHits,
   overlayLengths,
@@ -23,6 +24,7 @@ import {
   overlayShot,
   overlayStatus,
   overlayOpenSettings,
+  revealInExplorer,
   appendPlaythroughNotes,
   machineStats,
   clampOverlaySeconds,
@@ -32,13 +34,16 @@ import {
 } from '../services/native';
 import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
 import { cn } from '../utils/cn';
+import { ContextMenu, type MenuItem } from './ui/ContextMenu';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { AppMixer } from './AppMixer';
 import { MediaPlayer } from './MediaPlayer';
 
 type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
+type GalleryMenuState = { x: number; y: number; item: GalleryItem };
 const PAGE_SIZE = 4;
-const LAYOUT_REVISION = 2;
+const LAYOUT_REVISION = 3;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
   fps: { w: 176, h: 112, minW: 120, minH: 88 },
   clock: { w: 176, h: 112, minW: 120, minH: 88 },
@@ -91,21 +96,18 @@ function defaults(width: number, height: number): Record<BoxId, Place> {
   const edge = 24;
   const gap = 16;
   const fps = { x: edge, y: edge, w: BOX.fps.w, h: BOX.fps.h };
-  const clock = { x: edge + BOX.fps.w + gap, y: edge, w: BOX.clock.w, h: BOX.clock.h };
-  const performance = {
-    x: edge,
-    y: Math.max(edge, height - BOX.performance.h - edge),
-    w: BOX.performance.w,
-    h: BOX.performance.h,
-  };
-  const audioHeight = BOX.audio.h;
-  const audioTop = fps.y + BOX.fps.h + gap;
-  const audioRoom = performance.y - gap - audioTop;
+  const clock = { x: edge, y: fps.y + BOX.fps.h + gap, w: BOX.clock.w, h: BOX.clock.h };
   const audio = {
     x: edge,
-    y: audioRoom >= audioHeight ? audioTop + Math.round((audioRoom - audioHeight) / 2) : audioTop,
+    y: clock.y + BOX.clock.h + gap,
     w: BOX.audio.w,
-    h: audioHeight,
+    h: BOX.audio.h,
+  };
+  const performance = {
+    x: edge + BOX.audio.w + gap,
+    y: edge,
+    w: BOX.performance.w,
+    h: BOX.performance.h,
   };
   const gallery = {
     x: Math.max(edge, width - BOX.gallery.w - edge),
@@ -115,13 +117,13 @@ function defaults(width: number, height: number): Record<BoxId, Place> {
   };
   const player = {
     x: Math.max(edge, width - BOX.player.w - edge),
-    y: Math.max(edge, Math.round((height - BOX.player.h) / 2)),
+    y: Math.max(edge, Math.min(height - BOX.player.h - edge, gallery.y + BOX.gallery.h + gap)),
     w: BOX.player.w,
     h: BOX.player.h,
   };
   const notes = {
-    x: player.x,
-    y: Math.min(height - BOX.notes.h - edge, player.y + BOX.player.h + gap),
+    x: performance.x,
+    y: performance.y + BOX.performance.h + gap,
     w: BOX.notes.w,
     h: BOX.notes.h,
   };
@@ -192,12 +194,13 @@ export function OverlayView() {
   const [draft, setDraft] = useState('');
   const [noteError, setNoteError] = useState('');
   const [clock, setClock] = useState(() => new Date());
-  const [toast, setToast] = useState('');
-  const [hello, setHello] = useState(false);
+  const [toast, setToast] = useState<{ title: string; detail: string } | null>(null);
+  const [audioMore, setAudioMore] = useState(false);
+  const [galleryMenu, setGalleryMenu] = useState<GalleryMenuState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
+  const [galleryError, setGalleryError] = useState('');
   const settingsRef = useRef<Settings | null>(null);
   const toastTimer = useRef(0);
-  const helloTimer = useRef(0);
-  const greeted = useRef(0);
   const placesRef = useRef(places);
   const hiddenRef = useRef(hidden);
   const gameKey = useRef('');
@@ -225,21 +228,11 @@ export function OverlayView() {
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
   };
 
-  const flash = (text: string) => {
+  const flash = (title: string, detail: string) => {
     if (settingsRef.current?.overlay?.captureToast === false) return;
-    setToast(text);
+    setToast({ title, detail });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 2200);
-  };
-
-  const greet = () => {
-    if (settingsRef.current?.overlay?.readyNotice === false) return;
-    const now = Date.now();
-    if (now - greeted.current < 1500) return;
-    greeted.current = now;
-    setHello(true);
-    window.clearTimeout(helloTimer.current);
-    helloTimer.current = window.setTimeout(() => setHello(false), 2600);
+    toastTimer.current = window.setTimeout(() => setToast(null), 4200);
   };
 
   useEffect(() => {
@@ -264,7 +257,18 @@ export function OverlayView() {
             gallery: placeOf(layout, 'gallery', base.gallery),
             capture: placeOf(layout, 'capture', base.capture),
           }
-        : (Object.fromEntries((Object.keys(base) as BoxId[]).map((id) => [id, { ...base[id], pinned: !!layout?.[id]?.pinned }])) as Record<BoxId, Place>);
+        : revision === 2
+          ? {
+              fps: placeOf(layout, 'fps', base.fps),
+              performance: placeOf(layout, 'performance', base.performance),
+              clock: { ...base.clock, pinned: !!layout?.clock?.pinned },
+              notes: placeOf(layout, 'notes', base.notes),
+              audio: placeOf(layout, 'audio', base.audio),
+              player: placeOf(layout, 'player', base.player),
+              gallery: placeOf(layout, 'gallery', base.gallery),
+              capture: placeOf(layout, 'capture', base.capture),
+            }
+          : (Object.fromEntries((Object.keys(base) as BoxId[]).map((id) => [id, { ...base[id], pinned: !!layout?.[id]?.pinned }])) as Record<BoxId, Place>);
       if (revision < LAYOUT_REVISION) {
         settingsRef.current = { ...settings, overlay: { ...settings.overlay, layout: next, layoutRevision: LAYOUT_REVISION } };
         patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
@@ -278,7 +282,6 @@ export function OverlayView() {
       setAwake(mode.open || mode.resting);
       void overlayPins(anyPinned(next, hiddenBoxes));
       setReady(true);
-      if (mode.open && !mode.resting) greet();
     }).catch(() => setReady(true));
     refresh();
     const onKey = (event: KeyboardEvent) => {
@@ -315,8 +318,7 @@ export function OverlayView() {
         hiddenRef.current = hiddenBoxes;
         setShutterOn(settings.overlay?.shutter !== false);
         setShutterVolume(settings.overlay?.shutterVolume ?? 40);
-        greet();
-      }).catch(() => greet());
+      }).catch(() => undefined);
       window.setTimeout(() => {
         const next = document.querySelector('[data-overlay-section="capture"] button[data-overlay]:not([disabled])');
         if (next instanceof HTMLElement) next.focus();
@@ -375,6 +377,7 @@ export function OverlayView() {
       stopRest();
       stopHidden();
       stopPad();
+      window.clearTimeout(toastTimer.current);
     };
   }, []);
 
@@ -398,20 +401,27 @@ export function OverlayView() {
     };
   }, [ready, resting, places]);
 
-  const run = async (work: () => Promise<void>, shot = false, done = '') => {
+  const run = async (work: () => Promise<unknown>, shot = false, done = '') => {
     if (busy) return;
     setBusy(true);
     setFailed(false);
     setNote('');
     try {
-      await work();
+      const result = await work();
       if (shot) {
         const fresh = await loadSettings().catch(() => settingsRef.current);
         const on = fresh ? fresh.overlay?.shutter !== false : shutterOn;
         const volume = fresh?.overlay?.shutterVolume ?? shutterVolume;
         if (on) playShutter(volume);
       }
-      if (done) flash(done);
+      if (done) {
+        const saved = /saved/i.test(done);
+        const copyFailed = typeof result === 'string' && result.toLowerCase().includes('clipboard copy failed');
+        const detail = saved
+          ? copyFailed ? 'Saved to Gallery · clipboard copy was not available' : 'Saved to Gallery · copied to clipboard'
+          : 'Your recording is underway';
+        flash(done, detail);
+      }
       refresh();
     } catch (error) {
       setFailed(true);
@@ -432,6 +442,9 @@ export function OverlayView() {
       quality: overlayQuality(overlay?.quality),
       fps: overlayFps(overlay?.fps),
       ffmpeg: overlay?.ffmpeg ?? '',
+      screenshotDirectory: overlay?.screenshotDirectory ?? '',
+      recordingDirectory: overlay?.recordingDirectory ?? '',
+      replayDirectory: overlay?.replayDirectory ?? '',
     });
     setStatus((current) => (current ? { ...current, seconds } : current));
   };
@@ -498,6 +511,13 @@ export function OverlayView() {
     window.addEventListener('pointerup', up);
   };
 
+  const resetSize = (id: BoxId) => {
+    const current = placesRef.current;
+    const next = { ...current, [id]: { ...current[id], w: BOX[id].w, h: BOX[id].h } };
+    placesRef.current = next;
+    void rememberLayout(next);
+  };
+
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
@@ -518,17 +538,16 @@ export function OverlayView() {
     setNoteError('');
   }, [status]);
 
-  const wantStats = awake && (
-    (!hidden.includes('fps') && (!resting || places.fps.pinned))
-    || (!hidden.includes('performance') && (!resting || places.performance.pinned))
-  );
+  const wantFps = awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
+  const wantPerformance = awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
+  const wantStats = wantFps || wantPerformance;
   useEffect(() => {
     if (!wantStats) return;
-    const pull = () => void machineStats().then(setStats).catch(() => undefined);
+    const pull = () => void machineStats(wantFps).then(setStats).catch(() => undefined);
     pull();
-    const timer = window.setInterval(pull, 200);
+    const timer = window.setInterval(pull, 1000);
     return () => window.clearInterval(timer);
-  }, [wantStats]);
+  }, [wantStats, wantFps]);
 
   useEffect(() => {
     const count = items.filter((item) => item.kind === tab).length;
@@ -576,27 +595,35 @@ export function OverlayView() {
     <div className="relative h-full text-white">
       {!resting && <div className="absolute inset-0 bg-black/45" onClick={() => void overlayHide()} />}
       {toast && (
-        <div className="orbit-toast pointer-events-none absolute bottom-8 left-1/2 z-50 whitespace-nowrap rounded-full border border-white/15 bg-[#141416]/95 px-4 py-2 text-xs text-white shadow-2xl backdrop-blur-md">
-          {toast}
+        <div role="status" aria-live="polite" className="orbit-toast pointer-events-none absolute bottom-8 left-1/2 z-50 flex max-w-[calc(100%-2rem)] min-w-[16rem] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-200/35 bg-gradient-to-br from-[#14221a]/98 via-[#111615]/98 to-[#111318]/98 px-4 py-3 text-white shadow-[0_18px_60px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-xl">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-emerald-200/25 bg-emerald-300/10 text-emerald-100">
+            <CheckCircle2 className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold">{toast.title}</span>
+            <span className="mt-0.5 block truncate text-[11px] text-white/60">{toast.detail}</span>
+          </span>
         </div>
       )}
       {visible('audio') && (
         <Box
           id="audio"
           title="Audio"
+          scroll={audioMore}
           place={places.audio}
           front={front === 'audio'}
           onDrag={drag}
           onResize={resize}
+          onResetSize={resetSize}
           onPin={pin}
           section="audio"
         >
-          <p className="mb-2 text-[11px] leading-relaxed text-white/45">The game, the speakers, then one other. More opens the rest. Left and right change a volume by 1.</p>
-          <AppMixer pad game={status?.game ?? ''} compact onMore={() => setFront('audio')} />
+          <p className="mb-1 text-[10px] leading-tight text-white/45">More opens the other apps · ± changes volume.</p>
+          <AppMixer pad game={status?.game ?? ''} compact onMore={(open) => { setAudioMore(open); setFront('audio'); }} />
         </Box>
       )}
       {visible('player') && (
-        <Box id="player" title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onResize={resize} onPin={pin} section="player">
+        <Box id="player" title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onResize={resize} onResetSize={resetSize} onPin={pin} section="player">
           <MediaPlayer pad />
         </Box>
       )}
@@ -608,6 +635,7 @@ export function OverlayView() {
           front={front === 'gallery'}
           onDrag={drag}
           onResize={resize}
+          onResetSize={resetSize}
           onPin={pin}
           section="gallery"
           extra={!resting && (
@@ -651,6 +679,12 @@ export function OverlayView() {
                 key={item.path}
                 type="button"
                 data-overlay
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setGalleryMenu({ x: event.clientX, y: event.clientY, item });
+                  setFront('gallery');
+                }}
                 onClick={() => void run(async () => { await overlayOpen(item.path); })}
                 className="overflow-hidden rounded-2xl bg-black/30 text-left hover:bg-white/10"
               >
@@ -682,6 +716,7 @@ export function OverlayView() {
               </button>
             </div>
           )}
+          {galleryError && <p role="alert" className="mt-2 text-[11px] text-red-200">{galleryError}</p>}
           <button
             type="button"
             data-overlay
@@ -703,6 +738,7 @@ export function OverlayView() {
           front={front === 'capture'}
           onDrag={drag}
           onResize={resize}
+          onResetSize={resetSize}
           onPin={pin}
           section="capture"
           extra={!resting && (
@@ -717,24 +753,24 @@ export function OverlayView() {
             </button>
           )}
         >
-          <p className="mb-3 text-center text-[11px] tabular-nums text-white/45">{quality} · {fps} fps</p>
+          <p className="mb-2 text-center text-[11px] tabular-nums text-white/45">{quality} · {fps} fps</p>
           <div className="flex items-start justify-center gap-6 sm:gap-10">
-            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(async () => { await overlayShot(stamp()); }, true, 'Screenshot saved'); }}>
+            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(() => overlayShot(stamp()), true, 'Screenshot saved'); }}>
               <Camera className="size-7" />
             </CaptureButton>
             <CaptureButton
               label={status?.recording ? 'Stop' : 'Record'}
               hot={!!status?.recording}
               disabled={busy}
-              onClick={() => void run(async () => { await overlayRecord(stamp()); }, false, status?.recording ? 'Recording saved' : 'Recording started')}
+              onClick={() => void run(() => overlayRecord(stamp()), false, status?.recording ? 'Recording saved' : 'Recording started')}
             >
               {status?.recording ? <Square className="size-6 fill-white" /> : <Circle className="size-6 fill-white" />}
             </CaptureButton>
-            <CaptureButton label="Last" disabled={busy} onClick={() => void run(async () => { await overlayReplay(seconds, stamp()); }, false, 'Replay saved')}>
+            <CaptureButton label="Last" disabled={busy} onClick={() => void run(() => overlayReplay(seconds, stamp()), false, 'Replay saved')}>
               <span className="text-2xl font-semibold tabular-nums leading-none">{seconds}</span>
             </CaptureButton>
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             {lengths.map((length) => (
               <button
                 key={length}
@@ -755,12 +791,12 @@ export function OverlayView() {
         </Box>
       )}
       {visible('fps') && (
-        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
+        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onResetSize={resetSize} onPin={pin} section="fps">
           <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
         </Box>
       )}
       {visible('performance') && (
-        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onResize={resize} onPin={pin} section="performance">
+        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onResize={resize} onResetSize={resetSize} onPin={pin} section="performance">
           <Meter label="GPU" value={stats?.gpu} />
           <Meter label="CPU" value={stats?.cpu} />
           <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
@@ -768,16 +804,16 @@ export function OverlayView() {
         </Box>
       )}
       {visible('clock') && (
-        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onResize={resize} onPin={pin} section="clock">
+        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onResize={resize} onResetSize={resetSize} onPin={pin} section="clock">
           <p className="truncate text-center text-4xl font-semibold tabular-nums leading-none">{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </Box>
       )}
       {visible('notes') && (
-        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onResize={resize} onPin={pin} section="notes">
+        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onResize={resize} onResetSize={resetSize} onPin={pin} section="notes">
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            rows={5}
+            rows={4}
             placeholder={status?.playing ? 'These go away when the game closes.' : 'Start the game to keep a note.'}
             className="w-full resize-none rounded-2xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/35"
           />
@@ -793,13 +829,8 @@ export function OverlayView() {
           {noteError && <p className="mt-1 text-[11px] text-red-200">{noteError}</p>}
         </Box>
       )}
-      {hello && (
-        <div className="orbit-hello pointer-events-none absolute left-1/2 top-3 z-50 whitespace-nowrap rounded-full border border-white/15 bg-[#141416]/95 px-4 py-1.5 text-xs text-white/90 shadow-2xl backdrop-blur-md">
-          Orbit overlay is working
-        </div>
-      )}
       {!resting && (
-        <div className="pointer-events-none absolute left-1/2 top-12 z-40 -translate-x-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2">
           <button
             type="button"
             data-overlay
@@ -844,6 +875,32 @@ export function OverlayView() {
           )}
         </div>
       )}
+      {galleryMenu && (
+        <ContextMenu
+          x={galleryMenu.x}
+          y={galleryMenu.y}
+          onClose={() => setGalleryMenu(null)}
+          items={[
+            { label: 'Open', icon: ExternalLink, onSelect: () => void overlayOpen(galleryMenu.item.path).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) },
+            { label: 'Open path', icon: FolderOpen, onSelect: () => void revealInExplorer(galleryMenu.item.path).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error))) },
+            { kind: 'sep' },
+            { label: 'Delete…', icon: Trash2, danger: true, onSelect: () => setDeleteTarget(galleryMenu.item) },
+          ] as MenuItem[]}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this capture?"
+          description={`Delete “${deleteTarget.name}” from Orbit's Gallery? This cannot be undone.`}
+          confirmLabel="Delete capture"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            void overlayDelete(target.path).then(() => { setGalleryError(''); refresh(); }).catch((error) => setGalleryError(error instanceof Error ? error.message : String(error)));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -855,9 +912,11 @@ function Box({
   front,
   onDrag,
   onResize,
+  onResetSize,
   onPin,
   section,
   extra,
+  scroll = false,
   children,
 }: {
   id: BoxId;
@@ -866,16 +925,18 @@ function Box({
   front: boolean;
   onDrag: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
   onResize: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
+  onResetSize: (id: BoxId) => void;
   onPin: (id: BoxId) => void;
   section: string;
   extra?: ReactNode;
+  scroll?: boolean;
   children: ReactNode;
 }) {
   return (
     <aside
       data-overlay-section={section}
       data-pin={place.pinned ? '1' : '0'}
-      className="pointer-events-auto absolute flex max-h-[calc(100%-3rem)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md"
+      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md"
       style={{ left: place.x, top: place.y, width: place.w ?? BOX[id].w, height: place.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
@@ -900,13 +961,14 @@ function Box({
           </button>
         </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-2">{children}</div>
+      <div className={cn('min-h-0 flex-1 px-4 pb-4 pt-2', scroll ? 'overflow-y-auto' : 'overflow-hidden')}>{children}</div>
       <div
         role="separator"
         aria-orientation="horizontal"
-        title="Resize"
-        aria-label={`Resize ${title}`}
+        title="Resize · double-click to restore default size"
+        aria-label={`Resize ${title}; double-click to restore its default size`}
         onPointerDown={(event) => onResize(id, event)}
+        onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); onResetSize(id); }}
         className="absolute bottom-1.5 right-1.5 size-3.5 cursor-nwse-resize rounded-sm border-b-2 border-r-2 border-white/40 hover:border-white"
       />
     </aside>
@@ -916,15 +978,15 @@ function Box({
 function Meter({ label, value, detail = '' }: { label: string; value: number | null | undefined; detail?: string }) {
   const shown = value == null ? '—' : `${value}%`;
   return (
-    <div className="mb-2">
-      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+    <div className="mb-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-[10px] leading-tight">
         <span className="text-white/50">{label}</span>
         <span className="tabular-nums text-white">{shown}</span>
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+      <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-white/10">
         <div className="h-full rounded-full bg-white/80 transition-[width] duration-300 ease-out" style={{ width: `${Math.min(100, value ?? 0)}%` }} />
       </div>
-      {detail && <p className="mt-0.5 text-[10px] tabular-nums text-white/40">{detail}</p>}
+      {detail && <p className="mt-0.5 text-[9px] leading-tight tabular-nums text-white/40">{detail}</p>}
     </div>
   );
 }

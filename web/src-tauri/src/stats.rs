@@ -25,6 +25,7 @@ pub struct MachineStats {
 struct Cache {
     stats: MachineStats,
     asked: Option<Instant>,
+    fps_asked: bool,
 }
 
 const fn blank() -> MachineStats {
@@ -41,34 +42,46 @@ const fn blank() -> MachineStats {
     }
 }
 
-static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None });
+static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None, fps_asked: false });
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Drop the sampler. Closing the overlay should not keep a desktop duplication open.
 pub fn release() {
     if let Ok(mut cache) = CACHE.lock() {
         cache.asked = None;
+        cache.fps_asked = false;
     }
 }
 
-pub fn sample() -> MachineStats {
+pub fn sample(want_fps: bool) -> MachineStats {
     // A bad counter or a lost desktop frame must come back as missing numbers.
     // Unwinding out of this command is what used to take the whole app down
     // the moment the overlay asked for them.
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(sample_asked)).unwrap_or_else(|_| blank())
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sample_asked(want_fps))).unwrap_or_else(|_| blank())
 }
 
-fn sample_asked() -> MachineStats {
-    {
+fn sample_asked(want_fps: bool) -> MachineStats {
+    let first = {
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.asked = Some(Instant::now());
-        // A first look should not wait for the thread to start.
+        cache.fps_asked = want_fps;
+        cache.stats.ram.is_none()
+    };
+    // Do slow OS counters without holding the cache lock. The first request is
+    // still answered immediately instead of waiting for the sampler thread.
+    if first {
+        let next = read_now();
+        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.stats.ram.is_none() {
-            cache.stats = read_now();
+            cache.stats = next;
         }
     }
     ensure_running();
-    CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).stats.clone()
+    let mut stats = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).stats.clone();
+    if !want_fps {
+        stats.fps = None;
+    }
+    stats
 }
 
 fn ensure_running() {
@@ -84,22 +97,64 @@ fn ensure_running() {
             // faults inside dxgi.dll instead of returning an error.
             let _ = com_ready();
         }
-        let mut frames = watch_frames();
+        let mut frames = None;
+        let mut resources = {
+            let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.stats.ram.is_some().then(|| cache.stats.clone())
+        };
+        let mut last_resource_sample = Instant::now();
         loop {
-            let idle = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4));
+            let (idle, want_fps) = {
+                let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                (cache.asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4)), cache.fps_asked)
+            };
             if idle {
+                // Dispose the frame duplication on its owning thread before a
+                // fast reopen can start another worker.
+                frames = None;
                 RUNNING.store(false, Ordering::SeqCst);
+                // A request can arrive between the idle check and clearing the
+                // running flag. Re-check after clearing it so that a fast reopen
+                // does not leave the cache asleep until the next UI poll.
+                let active = CACHE
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .asked
+                    .is_some_and(|asked| asked.elapsed() <= Duration::from_secs(4));
+                if active {
+                    ensure_running();
+                }
                 break;
             }
+            if want_fps {
+                if frames.is_none() {
+                    frames = watch_frames();
+                }
+            } else {
+                // Releasing the duplication matters: a performance-only box
+                // does not need a live desktop frame stream.
+                frames = None;
+            }
+            let now = Instant::now();
+            let refresh_resources = resources.is_none() || now.saturating_duration_since(last_resource_sample) >= Duration::from_secs(1);
             let pulled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut next = read_now();
-                next.fps = frames.as_mut().and_then(|watch| watch.take());
+                let mut next = if refresh_resources {
+                    let sample = read_now();
+                    resources = Some(sample.clone());
+                    last_resource_sample = now;
+                    sample
+                } else {
+                    resources.clone().unwrap_or_else(blank)
+                };
+                // Frame presentation still gets checked frequently, while the
+                // heavier CPU/GPU/VRAM counters track Task Manager's one-second cadence.
+                next.fps = if want_fps { frames.as_mut().and_then(|watch| watch.take()) } else { None };
                 next
             }));
             match pulled {
                 Ok(mut next) => {
                     if let Ok(mut cache) = CACHE.lock() {
-                        if next.fps.is_none() {
+                        if want_fps && next.fps.is_none() {
                             next.fps = cache.stats.fps;
                         }
                         cache.stats = next;
@@ -111,6 +166,7 @@ fn ensure_running() {
                     // the output while the old frame was still acquired.
                     frames = None;
                     frames = watch_frames();
+                    resources = None;
                 }
             }
             std::thread::sleep(Duration::from_millis(200));

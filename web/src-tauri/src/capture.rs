@@ -892,7 +892,7 @@ fn pack(high: u32, low: u32) -> u64 {
     ((high as u64) << 32) | low as u64
 }
 
-fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
     let pixels = decoder.decode().map_err(|error| format!("A frame could not be read: {error}"))?;
     let info = decoder.info().ok_or_else(|| "A frame could not be read.".to_string())?;
