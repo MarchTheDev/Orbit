@@ -218,7 +218,7 @@ fn pdh_gpu() -> (Option<u8>, u64) {
     use windows::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
     };
-    use windows::core::{w, PCWSTR};
+    use windows::core::PCWSTR;
 
     struct Query {
         query: PDH_HQUERY,
@@ -232,13 +232,16 @@ fn pdh_gpu() -> (Option<u8>, u64) {
     if guard.is_none() {
         unsafe {
             let mut query = PDH_HQUERY(std::ptr::null_mut());
-            if PdhOpenQueryW(PCWSTR(std::ptr::null()), 0, &mut query) != 0 {
+            // `None` is `Option<&PCWSTR>`, which is what this `Param` accepts.
+            if PdhOpenQueryW(None::<&PCWSTR>, 0, &mut query) != 0 {
                 return (None, 0);
             }
             let mut util = PDH_HCOUNTER(std::ptr::null_mut());
             let mut used = PDH_HCOUNTER(std::ptr::null_mut());
-            let util_ok = PdhAddEnglishCounterW(query, w!("\\GPU Engine(*)\\Utilization Percentage"), 0, &mut util) == 0;
-            let used_ok = PdhAddEnglishCounterW(query, w!("\\GPU Adapter Memory(*)\\Dedicated Usage"), 0, &mut used) == 0;
+            let util_path = wide_path("\\GPU Engine(*)\\Utilization Percentage");
+            let used_path = wide_path("\\GPU Adapter Memory(*)\\Dedicated Usage");
+            let util_ok = PdhAddEnglishCounterW(query, PCWSTR(util_path.as_ptr()), 0, &mut util) == 0;
+            let used_ok = PdhAddEnglishCounterW(query, PCWSTR(used_path.as_ptr()), 0, &mut used) == 0;
             if !util_ok && !used_ok {
                 return (None, 0);
             }
@@ -262,7 +265,7 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
     use windows::Win32::System::Performance::{PdhGetFormattedCounterArrayW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_MORE_DATA};
     let mut size = 0u32;
     let mut count = 0u32;
-    let first = PdhGetFormattedCounterArrayW(counter, format, &mut size, &mut count, None);
+    let first = PdhGetFormattedCounterArrayW(counter, format, &mut size, &mut count, None::<*mut PDH_FMT_COUNTERVALUE_ITEM_W>);
     if first != PDH_MORE_DATA && first != 0 {
         return None;
     }
@@ -291,6 +294,11 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
         }
     }
     if percent { best_3d } else { best }
+}
+
+#[cfg(windows)]
+fn wide_path(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg(windows)]
@@ -364,8 +372,10 @@ enum FramePull {
 impl WindowsFrames {
     fn open() -> Option<Self> {
         use windows::Win32::Foundation::HMODULE;
-        use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0};
-        use windows::Win32::Graphics::Direct3D11::{D3D11CreateDevice, ID3D11Device, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION};
+        use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0};
+        use windows::Win32::Graphics::Direct3D11::{
+            D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+        };
         use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput1};
         use windows::core::Interface;
 
@@ -377,16 +387,17 @@ impl WindowsFrames {
             let output1: IDXGIOutput1 = output.cast().ok()?;
             let mut device = None::<ID3D11Device>;
             let device_slot: *mut Option<ID3D11Device> = &mut device;
+            let levels = [D3D_FEATURE_LEVEL_11_0];
             D3D11CreateDevice(
                 &base,
                 D3D_DRIVER_TYPE_UNKNOWN,
-                HMODULE(std::ptr::null_mut()),
+                HMODULE(std::ptr::null_mut::<core::ffi::c_void>()),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                Some(&[D3D_FEATURE_LEVEL_11_0]),
+                Some(&levels),
                 D3D11_SDK_VERSION,
                 Some(device_slot),
-                None,
-                None,
+                None::<*mut D3D_FEATURE_LEVEL>,
+                None::<*mut Option<ID3D11DeviceContext>>,
             )
             .ok()?;
             let device = device?;

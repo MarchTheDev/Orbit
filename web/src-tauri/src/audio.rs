@@ -64,6 +64,7 @@ pub fn use_device(id: &str, kind: &str) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
+        let _ = kind;
         return unsafe { windows_use_device(id) };
     }
     #[cfg(target_os = "linux")]
@@ -827,6 +828,7 @@ unsafe fn windows_use_device(id: &str) -> Result<(), String> {
 
 #[cfg(windows)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct IUnknownVtbl {
     query: unsafe extern "system" fn(*mut core::ffi::c_void, *const windows::core::GUID, *mut *mut core::ffi::c_void) -> windows::core::HRESULT,
     add_ref: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32,

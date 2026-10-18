@@ -126,7 +126,24 @@ jobs:
       # that is the standalone exe.
       - name: Build
         working-directory: web
-        run: npx tauri build --bundles nsis,msi
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "orbit-windows-build.log"
+          cmd /c "npx tauri build --bundles nsis,msi > `"$log`" 2>&1"
+          $code = $LASTEXITCODE
+          if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+          if ($code -ne 0) {
+            $hits = @(Select-String -Path $log -Pattern 'error(\[E\d+])?:|-->')
+            if ($hits.Count -eq 0) {
+              $hits = @(Get-Content $log -Tail 40 | ForEach-Object { [pscustomobject]@{ Line = $_ } })
+            }
+            $hits | Select-Object -Last 40 | ForEach-Object {
+              $msg = ([string]$_.Line) -replace "[\r\n]", " " -replace "%", " "
+              if ($msg.Length -gt 450) { $msg = $msg.Substring(0, 450) }
+              if ($msg.Trim().Length -gt 0) { Write-Host "::error::$msg" }
+            }
+            exit $code
+          }
 
       - name: Collect the installers
         shell: pwsh
