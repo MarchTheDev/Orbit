@@ -223,11 +223,12 @@ pub(crate) fn parse_pactl(text: &str) -> Vec<AppAudio> {
                 binary = value;
             }
         }
+        let exe = std::path::Path::new(&binary)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| binary.clone());
         if name.is_empty() {
-            name = binary;
-        }
-        if name.is_empty() {
-            name = format!("App {id}");
+            name = if binary.is_empty() { format!("App {id}") } else { binary };
         }
         apps.push(AppAudio {
             id,
@@ -235,10 +236,7 @@ pub(crate) fn parse_pactl(text: &str) -> Vec<AppAudio> {
             volume,
             muted,
             device: false,
-            exe: std::path::Path::new(&binary)
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_else(|| binary.clone()),
+            exe,
             live: true,
         });
     }
