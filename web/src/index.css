@@ -714,10 +714,6 @@ input[type='number']::-webkit-outer-spin-button {
   --toast-accent: var(--c-accent2);
   --toast-secondary: var(--c-accent);
 }
-.orbit-toast-edge {
-  background: linear-gradient(180deg, var(--toast-accent), var(--toast-secondary));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--toast-accent) 58%, transparent);
-}
 .orbit-toast-icon {
   color: color-mix(in srgb, var(--toast-accent) 74%, white);
   border-color: color-mix(in srgb, var(--toast-accent) 34%, var(--c-border));

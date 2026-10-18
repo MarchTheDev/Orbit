@@ -56,6 +56,12 @@ struct Live {
     playing: bool,
     recording: Option<Child>,
     buffer: Option<Child>,
+    #[cfg(target_os = "linux")]
+    audio_buffer: Option<Child>,
+    #[cfg(target_os = "linux")]
+    audio_stop: Option<Arc<AtomicBool>>,
+    #[cfg(target_os = "linux")]
+    audio_thread: Option<thread::JoinHandle<()>>,
     native_recording: Option<capture::Hold>,
     native_buffer: Option<capture::Hold>,
     replay_frames: Option<capture::Buffer>,
@@ -98,6 +104,12 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     playing: false,
     recording: None,
     buffer: None,
+    #[cfg(target_os = "linux")]
+    audio_buffer: None,
+    #[cfg(target_os = "linux")]
+    audio_stop: None,
+    #[cfg(target_os = "linux")]
+    audio_thread: None,
     native_recording: None,
     native_buffer: None,
     replay_frames: None,
@@ -351,23 +363,45 @@ pub fn game_stopped() {
 
 pub fn shutdown() {
     STOP.store(true, Ordering::SeqCst);
-    let recording = {
+    let (recording, audio) = {
         let mut live = lock();
-        let recording = live.recording.take();
-        let buffer = live.buffer.take();
-        let native_recording = live.native_recording.take();
-        let native_buffer = live.native_buffer.take();
+        let recording = (
+            live.recording.take(),
+            live.buffer.take(),
+            live.native_recording.take(),
+            live.native_buffer.take(),
+        );
         if let Some(stop) = live.pipe_stop.take() {
             stop.store(true, Ordering::SeqCst);
         }
+        #[cfg(target_os = "linux")]
+        let audio = {
+            if let Some(stop) = live.audio_stop.take() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            (live.audio_buffer.take(), live.audio_thread.take())
+        };
+        #[cfg(not(target_os = "linux"))]
+        let audio = ();
         live.replay_frames = None;
-        (recording, buffer, native_recording, native_buffer)
+        (recording, audio)
     };
+    #[cfg(not(target_os = "linux"))]
+    let _ = audio;
     if let Some(child) = recording.0 {
         kill_now(child);
     }
     if let Some(child) = recording.1 {
         kill_now(child);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(child) = audio.0 {
+            kill_now(child);
+        }
+        if let Some(reader) = audio.1 {
+            let _ = reader.join();
+        }
     }
     if let Some(hold) = recording.2 {
         let _ = capture::finish(hold);
@@ -565,8 +599,8 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // Windows capture tools can include the open panel. Other desktops still
-    // step aside for the one in-app picture, then come back.
+    // Windows marks the panel as excluded from display capture. Other desktops
+    // still step aside for the one in-app picture, then come back.
     #[cfg(not(windows))]
     let was_open = is_open();
     #[cfg(not(windows))]
@@ -742,6 +776,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        .content_protected(true)
         .visible(false)
         .focused(false)
         .center()
@@ -755,6 +790,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
+    exclude_from_capture(&window);
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
@@ -769,11 +805,12 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 fn show_window(app: &AppHandle) {
     let Some(window) = ensure_window(app) else { return };
-    // The panel is left out of the capture, so the grab keeps running. Pausing
-    // it used to repeat one frame for as long as the panel stayed open.
+    // Windows excludes the panel from capture, so the grab can keep running.
+    // Pausing it would repeat one frame for as long as the panel stayed open.
     RESTING.store(false, Ordering::SeqCst);
     IGNORE.store(false, Ordering::SeqCst);
     capture::set_paused(false);
+    exclude_from_capture(&window);
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_focusable(true);
     cover_screen(&window);
@@ -799,6 +836,20 @@ fn cover_screen(window: &tauri::WebviewWindow) {
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
 
+fn exclude_from_capture(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+
+        let Ok(hwnd) = window.hwnd() else { return };
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+    }
+}
+
 /// Hide even a pinned panel, for the one moment a picture is taken.
 #[cfg(not(windows))]
 fn conceal(app: &AppHandle) {
@@ -822,6 +873,7 @@ fn rest_window(app: &AppHandle) {
     RESTING.store(true, Ordering::SeqCst);
     capture::set_paused(false);
     if let Some(window) = ensure_window(app) {
+        exclude_from_capture(&window);
         cover_screen(&window);
         let _ = window.show();
         let _ = window.set_always_on_top(true);
@@ -926,6 +978,26 @@ fn linux_shot(path: &Path) -> Result<(), String> {
     Err("no screenshot tool".to_string())
 }
 
+#[cfg(target_os = "linux")]
+fn system_audio_monitor() -> Option<String> {
+    let direct = process::command("pactl").args(["get-default-sink"]).output().ok();
+    let sink = direct
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let output = process::command("pactl").arg("info").output().ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .find_map(|line| line.strip_prefix("Default Sink:").map(str::trim).map(str::to_string))
+                .filter(|value| !value.is_empty())
+        })?;
+    Some(format!("{sink}.monitor"))
+}
+
 fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
     let mut command = process::command(ffmpeg);
     command.arg("-y");
@@ -977,14 +1049,24 @@ fn spawn_native_recording(stamp: &str) -> Result<(), String> {
 }
 
 fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    return Err("Orbit could not start its built-in audio recorder, and the ffmpeg fallback cannot preserve system audio.".to_string());
+
     let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
     let dir = game_dir("recordings")?;
     let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(lock().fps)))?;
+    #[cfg(target_os = "linux")]
+    {
+        let source = system_audio_monitor().ok_or_else(|| {
+            "Orbit could not find the system-audio monitor. A PulseAudio-compatible output is required for audio capture.".to_string()
+        })?;
+        command.args(["-thread_queue_size", "512", "-f", "pulse", "-i"]).arg(source);
+        command.args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k"]);
+    }
     let quality = lock().quality.clone();
-    command.arg("-an");
     push_encode(&mut command, &quality);
     command.args(["-movflags", "+frag_keyframe+empty_moov+default_base_moof"]);
     command.arg(&path);
@@ -1020,6 +1102,9 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
     if capture::available() {
         match start_native_buffer() {
             Ok(()) => return Ok(()),
+            #[cfg(windows)]
+            Err(error) => return Err(error),
+            #[cfg(not(windows))]
             Err(error) => {
                 if find_ffmpeg(&lock().ffmpeg).is_none() {
                     return Err(error);
@@ -1033,14 +1118,41 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
 }
 
 fn start_native_buffer() -> Result<(), String> {
+    lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
     let hold = capture::start_buffer(keep, current_spec())?;
-    lock().native_buffer = Some(hold);
+    #[cfg(target_os = "linux")]
+    let audio = {
+        let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) else {
+            let _ = capture::finish(hold);
+            return Err("System audio replay needs ffmpeg with PulseAudio input support.".to_string());
+        };
+        let Some(buffer) = hold.buffer() else {
+            let _ = capture::finish(hold);
+            return Err("The replay buffer could not be opened.".to_string());
+        };
+        match start_replay_audio(&ffmpeg, buffer) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                let _ = capture::finish(hold);
+                return Err(error);
+            }
+        }
+    };
+    let mut live = lock();
+    live.native_buffer = Some(hold);
+    #[cfg(target_os = "linux")]
+    if let Some((child, stop, thread)) = audio {
+        live.audio_buffer = Some(child);
+        live.audio_stop = Some(stop);
+        live.audio_thread = Some(thread);
+    }
     Ok(())
 }
 
 /// ffmpeg's pictures stay in memory. Nothing is written until the player saves.
 fn start_pipe_buffer() -> Result<(), String> {
+    lock().note.clear();
     let ffmpeg = match find_ffmpeg(&lock().ffmpeg) {
         Some(path) => path,
         None => return Ok(()),
@@ -1051,10 +1163,16 @@ fn start_pipe_buffer() -> Result<(), String> {
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(fps)))?;
+    // This worker pipes JPEG frames only; system audio is captured into the same
+    // in-memory replay ring by the companion PCM worker below.
     command.arg("-an");
-    if let Some(scale) = quality_scale(&lock().quality) {
-        command.args(["-vf", scale]);
-    }
+    let scale = quality_scale(&lock().quality).unwrap_or("");
+    let filter = if scale.is_empty() {
+        format!("fps={}", quality_fps(fps))
+    } else {
+        format!("fps={},{}", quality_fps(fps), scale)
+    };
+    command.args(["-vf", &filter]);
     command.args(["-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = command.spawn().map_err(|error| error.to_string())?;
@@ -1065,19 +1183,51 @@ fn start_pipe_buffer() -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
     let shared = buffer.clone();
-    thread::Builder::new()
+    let _reader = match thread::Builder::new()
         .name("orbit-replay".to_string())
         .spawn(move || read_jpeg_pipe(stdout, shared, flag))
-        .map_err(|error| error.to_string())?;
+    {
+        Ok(reader) => reader,
+        Err(error) => {
+            kill_now(child);
+            return Err(format!("Could not start the picture buffer: {error}"));
+        }
+    };
+    #[cfg(target_os = "linux")]
+    let audio = match start_replay_audio(&ffmpeg, buffer.clone()) {
+        Ok(audio) => audio,
+        Err(error) => {
+            kill_now(child);
+            return Err(error);
+        }
+    };
     let mut live = lock();
     live.buffer = Some(child);
     live.pipe_stop = Some(stop);
     live.replay_frames = Some(buffer);
+    #[cfg(target_os = "linux")]
+    {
+        live.audio_buffer = Some(audio.0);
+        live.audio_stop = Some(audio.1);
+        live.audio_thread = Some(audio.2);
+    }
     Ok(())
 }
 
 fn stop_buffer() {
     let _held = gate();
+    #[cfg(target_os = "linux")]
+    if let Some(stop) = lock().audio_stop.take() {
+        stop.store(true, Ordering::SeqCst);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(child) = lock().audio_buffer.take() {
+        stop_child(child);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(reader) = lock().audio_thread.take() {
+        let _ = reader.join();
+    }
     if let Some(stop) = lock().pipe_stop.take() {
         stop.store(true, Ordering::SeqCst);
     }
@@ -1135,29 +1285,49 @@ fn encode_kept(path: &Path, kept: &capture::Kept) -> Result<(), String> {
 }
 
 fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result<(), String> {
+    if !kept.has_audio() {
+        return Err("No system audio was captured, so Orbit did not save a silent replay.".to_string());
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let audio_path = path.with_extension("orbit-audio.wav");
+    if let Err(error) = capture::write_audio_wav(&audio_path, kept) {
+        let _ = fs::remove_file(&audio_path);
+        return Err(error);
     }
     let rate = kept.fps.max(1).to_string();
     let mut command = process::command(ffmpeg);
     command.args(["-y", "-f", "image2pipe", "-framerate"]);
     command.arg(&rate);
+    command.args(["-i", "pipe:0", "-i"]).arg(&audio_path);
     command.args([
-        "-i",
-        "pipe:0",
-        "-an",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
         "-vf",
         "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v",
         "libx264",
         "-pix_fmt",
         "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
         "-movflags",
         "+faststart",
     ]);
     command.arg(path);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
-    let mut child = command.spawn().map_err(|error| format!("Could not start ffmpeg: {error}"))?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_file(&audio_path);
+            return Err(format!("Could not start ffmpeg: {error}"));
+        }
+    };
     let write_result = child.stdin.as_mut().ok_or_else(|| "ffmpeg did not accept the pictures.".to_string()).and_then(|stdin| {
         for frame in &kept.frames {
             stdin.write_all(frame).map_err(|error| error.to_string())?;
@@ -1168,13 +1338,80 @@ fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result
     let status = child.wait().map_err(|error| error.to_string());
     if let Err(error) = write_result {
         let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&audio_path);
         return Err(error);
     }
-    if status.map(|item| item.success()).unwrap_or(false) && !missing_video(path) {
+    let succeeded = status.map(|item| item.success()).unwrap_or(false) && !missing_video(path);
+    let _ = fs::remove_file(&audio_path);
+    if succeeded {
         return Ok(());
     }
     let _ = fs::remove_file(path);
     Err("The video file was empty.".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn start_replay_audio(
+    ffmpeg: &Path,
+    buffer: capture::Buffer,
+) -> Result<(Child, Arc<AtomicBool>, thread::JoinHandle<()>), String> {
+    let monitor = system_audio_monitor().ok_or_else(|| {
+        "Orbit could not find the system-audio monitor. A PulseAudio-compatible output is required for replay audio.".to_string()
+    })?;
+    let mut command = process::command(ffmpeg);
+    command.args(["-hide_banner", "-loglevel", "error", "-thread_queue_size", "512", "-f", "pulse", "-i"]);
+    command.arg(monitor);
+    command.args(["-ac", "2", "-ar", "48000", "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"]);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let child = command.spawn().map_err(|error| format!("Could not start system-audio capture: {error}"))?;
+    let Some(stdout) = child.stdout.take() else {
+        kill_now(child);
+        return Err("ffmpeg did not open a system-audio stream.".to_string());
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let reader = match thread::Builder::new()
+        .name("orbit-audio-replay".to_string())
+        .spawn(move || read_audio_pipe(stdout, buffer, flag))
+    {
+        Ok(reader) => reader,
+        Err(error) => {
+            kill_now(child);
+            return Err(format!("Could not start the audio buffer: {error}"));
+        }
+    };
+    Ok((child, stop, reader))
+}
+
+#[cfg(target_os = "linux")]
+fn read_audio_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<AtomicBool>) {
+    let mut pending = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    let mut captured_frames = 0usize;
+    loop {
+        let read = match stdout.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(_) => break,
+        };
+        pending.extend_from_slice(&chunk[..read]);
+        let aligned = pending.len() / 4 * 4;
+        if aligned > 0 {
+            let pcm: Vec<u8> = pending.drain(..aligned).collect();
+            captured_frames = captured_frames.saturating_add(aligned / 4);
+            buffer.push_audio_pcm(pcm);
+        }
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+    if !stop.load(Ordering::SeqCst) {
+        lock().note = if captured_frames == 0 {
+            "The system-audio stream ended before Orbit captured any audio.".to_string()
+        } else {
+            "The system-audio stream stopped unexpectedly; saved replays may be shorter.".to_string()
+        };
+    }
 }
 
 fn read_jpeg_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<AtomicBool>) {

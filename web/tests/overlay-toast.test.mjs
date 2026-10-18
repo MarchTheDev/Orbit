@@ -26,6 +26,7 @@ check(
   !/translate3d\(\s*-50%/.test(toastCss) && !/\.orbit-toast\s*\{[^}]*left:\s*50%/s.test(toastCss),
 );
 check('the toast styling uses Orbit theme accents', css.includes('.orbit-toast-card') && css.includes('--toast-accent: var(--c-accent)'));
+check('the toast no longer draws the glowing left rail', !overlay.includes('orbit-toast-edge') && !css.includes('.orbit-toast-edge'));
 check(
   'screenshot, recording, replay, and game-ready states have distinct labels',
   ['ORBIT · SCREENSHOT', 'ORBIT · RECORDING', 'ORBIT · REPLAY', 'ORBIT · READY'].every((label) => overlay.includes(label)),

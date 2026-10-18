@@ -670,7 +670,6 @@ export function OverlayView() {
             aria-live="polite"
             className={cn('orbit-toast orbit-toast-card relative flex w-full max-w-[26rem] items-center gap-3.5 overflow-hidden rounded-[1.25rem] border px-4 py-3.5 text-white shadow-2xl backdrop-blur-2xl', `orbit-toast-card--${toast.kind}`)}
           >
-            <span className="orbit-toast-edge absolute inset-y-3 left-0 z-10 w-[2px]" aria-hidden="true" />
             <span className="orbit-toast-orbit pointer-events-none absolute -right-5 -top-8 z-0 size-24 rounded-full border" aria-hidden="true" />
             <span className="orbit-toast-icon relative z-10 grid size-11 shrink-0 place-items-center rounded-2xl border">
               <ToastIcon className="size-[19px]" aria-hidden="true" />

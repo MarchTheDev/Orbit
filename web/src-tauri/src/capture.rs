@@ -6,15 +6,21 @@
 
 use std::collections::VecDeque;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-/// Enough for a long custom replay without letting one game fill the RAM.
-const MAX_RING_BYTES: usize = 768 * 1024 * 1024;
+/// Cap the rolling replay data and share compressed frames with snapshots so
+/// saving a replay does not immediately clone the ring's video payloads.
+const MAX_RING_BYTES: usize = 96 * 1024 * 1024;
+// Keep uncompressed loopback PCM from crowding out most of the video ring.
+const MAX_AUDIO_RING_BYTES: usize = 16 * 1024 * 1024;
+const AUDIO_SAMPLE_RATE: u32 = 48_000;
+const AUDIO_CHANNELS: usize = 2;
+const AUDIO_BYTES_PER_FRAME: usize = AUDIO_CHANNELS * 2;
 
 static PAUSED: AtomicBool = AtomicBool::new(false);
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
@@ -39,7 +45,23 @@ struct Ring {
     fps: u32,
     max_frames: usize,
     bytes: usize,
-    frames: VecDeque<Vec<u8>>,
+    frames: VecDeque<Arc<[u8]>>,
+    audio: VecDeque<AudioChunk>,
+    audio_bytes: usize,
+    audio_frames: usize,
+}
+
+struct AudioChunk {
+    bytes: Arc<[u8]>,
+    first_frame: usize,
+    frames: usize,
+}
+
+#[derive(Clone)]
+struct AudioSlice {
+    bytes: Arc<[u8]>,
+    first_frame: usize,
+    frames: usize,
 }
 
 /// The last few seconds, kept in memory. Cloning shares the same frames.
@@ -60,11 +82,15 @@ impl Buffer {
                 max_frames: seconds.saturating_mul(fps as usize).max(fps as usize),
                 bytes: 0,
                 frames: VecDeque::new(),
+                audio: VecDeque::new(),
+                audio_bytes: 0,
+                audio_frames: 0,
             })),
         }
     }
 
-    pub fn push_jpeg(&self, jpeg: Vec<u8>, width: u32, height: u32) {
+    pub fn push_jpeg(&self, jpeg: impl Into<Arc<[u8]>>, width: u32, height: u32) {
+        let jpeg = jpeg.into();
         if jpeg.len() < 4 || width < 2 || height < 2 {
             return;
         }
@@ -78,10 +104,26 @@ impl Buffer {
         }
         ring.bytes = ring.bytes.saturating_add(jpeg.len());
         ring.frames.push_back(jpeg);
-        while ring.frames.len() > ring.max_frames || ring.bytes > MAX_RING_BYTES {
-            let Some(old) = ring.frames.pop_front() else { break };
-            ring.bytes = ring.bytes.saturating_sub(old.len());
+        trim_video(&mut ring);
+    }
+
+    /// Add interleaved 48 kHz stereo signed-16 PCM to the rolling replay.
+    pub fn push_audio_pcm(&self, bytes: Vec<u8>) {
+        let usable = bytes.len() / AUDIO_BYTES_PER_FRAME * AUDIO_BYTES_PER_FRAME;
+        if usable == 0 {
+            return;
         }
+        let bytes: Arc<[u8]> = if usable == bytes.len() {
+            bytes.into()
+        } else {
+            bytes[..usable].into()
+        };
+        let frames = usable / AUDIO_BYTES_PER_FRAME;
+        let mut ring = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        ring.audio_bytes = ring.audio_bytes.saturating_add(usable);
+        ring.audio_frames = ring.audio_frames.saturating_add(frames);
+        ring.audio.push_back(AudioChunk { bytes, first_frame: 0, frames });
+        trim_audio(&mut ring);
     }
 
     pub fn snapshot(&self, seconds: u32) -> Result<Kept, String> {
@@ -95,21 +137,83 @@ impl Buffer {
         }
         let fps = ring.fps.max(1);
         let keep = (seconds.max(1) as usize).saturating_mul(fps as usize).max(1);
+        let audio_video_frames = ring.audio_frames.saturating_mul(fps as usize) / AUDIO_SAMPLE_RATE as usize;
+        let keep = if ring.audio_frames > 0 { keep.min(audio_video_frames.max(1)) } else { keep };
         let start = ring.frames.len().saturating_sub(keep);
+        let frames: Vec<_> = ring.frames.iter().skip(start).cloned().collect();
+        let audio_wanted = frames.len().saturating_mul(AUDIO_SAMPLE_RATE as usize) / fps as usize;
+        let mut audio_left = audio_wanted.min(ring.audio_frames);
+        let mut audio = Vec::new();
+        for chunk in ring.audio.iter().rev() {
+            if audio_left == 0 {
+                break;
+            }
+            let take = audio_left.min(chunk.frames);
+            audio.push(AudioSlice {
+                bytes: Arc::clone(&chunk.bytes),
+                first_frame: chunk.first_frame + chunk.frames - take,
+                frames: take,
+            });
+            audio_left -= take;
+        }
+        audio.reverse();
         Ok(Kept {
             width: ring.width,
             height: ring.height,
             fps,
-            frames: ring.frames.iter().skip(start).cloned().collect(),
+            frames,
+            audio_frames: audio_wanted.min(ring.audio_frames) - audio_left,
+            audio,
         })
     }
+}
+
+fn trim_video(ring: &mut Ring) {
+    while ring.frames.len() > ring.max_frames || ring.bytes.saturating_add(ring.audio_bytes) > MAX_RING_BYTES {
+        let Some(old) = ring.frames.pop_front() else { break };
+        ring.bytes = ring.bytes.saturating_sub(old.len());
+    }
+}
+
+fn trim_audio(ring: &mut Ring) {
+    let audio_limit = ring.max_frames.saturating_mul(AUDIO_SAMPLE_RATE as usize) / ring.fps.max(1) as usize;
+    loop {
+        let combined_excess = ring.bytes.saturating_add(ring.audio_bytes).saturating_sub(MAX_RING_BYTES);
+        let audio_excess = ring.audio_bytes.saturating_sub(MAX_AUDIO_RING_BYTES);
+        let duration_excess = ring.audio_frames.saturating_sub(audio_limit);
+        let remove_frames = (combined_excess.saturating_add(AUDIO_BYTES_PER_FRAME - 1) / AUDIO_BYTES_PER_FRAME)
+            .max(audio_excess.saturating_add(AUDIO_BYTES_PER_FRAME - 1) / AUDIO_BYTES_PER_FRAME)
+            .max(duration_excess);
+        if remove_frames == 0 {
+            break;
+        }
+        let Some(front) = ring.audio.front_mut() else { break };
+        let remove = remove_frames.min(front.frames);
+        front.first_frame += remove;
+        front.frames -= remove;
+        ring.audio_frames = ring.audio_frames.saturating_sub(remove);
+        let removed_bytes = remove.saturating_mul(AUDIO_BYTES_PER_FRAME);
+        ring.audio_bytes = ring.audio_bytes.saturating_sub(removed_bytes);
+        if front.frames == 0 {
+            ring.audio.pop_front();
+        }
+    }
+    trim_video(ring);
 }
 
 pub struct Kept {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    pub frames: Vec<Vec<u8>>,
+    pub frames: Vec<Arc<[u8]>>,
+    audio_frames: usize,
+    audio: Vec<AudioSlice>,
+}
+
+impl Kept {
+    pub fn has_audio(&self) -> bool {
+        self.audio_frames > 0
+    }
 }
 
 pub struct Hold {
@@ -124,6 +228,10 @@ impl Hold {
             .as_ref()
             .ok_or_else(|| "Nothing has been kept yet. The replay starts when a game is playing.".to_string())?
             .snapshot(seconds)
+    }
+
+    pub fn buffer(&self) -> Option<Buffer> {
+        self.buffer.clone()
     }
 }
 
@@ -234,6 +342,9 @@ pub fn write_mp4(path: &Path, kept: &Kept) -> Result<(), String> {
     if kept.frames.is_empty() || kept.width < 2 || kept.height < 2 {
         return Err("The clip was empty.".to_string());
     }
+    if !kept.has_audio() {
+        return Err("No system audio was captured, so Orbit did not save a silent replay.".to_string());
+    }
     #[cfg(windows)]
     {
         return write_mp4_windows(path, kept);
@@ -243,6 +354,41 @@ pub fn write_mp4(path: &Path, kept: &Kept) -> Result<(), String> {
         let _ = path;
         Err("This desktop saves the video with ffmpeg.".to_string())
     }
+}
+
+/// Write the buffered PCM as a temporary WAV input for ffmpeg-based encoders.
+pub fn write_audio_wav(path: &Path, kept: &Kept) -> Result<(), String> {
+    if !kept.has_audio() {
+        return Err("No system audio was captured.".to_string());
+    }
+    let data_bytes = kept.audio_frames.checked_mul(AUDIO_BYTES_PER_FRAME)
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| "The audio clip was too large to save.".to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
+    file.write_all(b"RIFF").map_err(|error| error.to_string())?;
+    file.write_all(&(36u32.saturating_add(data_bytes)).to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(b"WAVEfmt ").map_err(|error| error.to_string())?;
+    file.write_all(&16u32.to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&1u16.to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&(AUDIO_CHANNELS as u16).to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&AUDIO_SAMPLE_RATE.to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&(AUDIO_SAMPLE_RATE * AUDIO_BYTES_PER_FRAME as u32).to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&(AUDIO_BYTES_PER_FRAME as u16).to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&16u16.to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(b"data").map_err(|error| error.to_string())?;
+    file.write_all(&data_bytes.to_le_bytes()).map_err(|error| error.to_string())?;
+    for slice in &kept.audio {
+        let start = slice.first_frame.saturating_mul(AUDIO_BYTES_PER_FRAME);
+        let end = start.saturating_add(slice.frames.saturating_mul(AUDIO_BYTES_PER_FRAME));
+        let Some(bytes) = slice.bytes.get(start..end) else {
+            return Err("The buffered audio was incomplete.".to_string());
+        };
+        file.write_all(bytes).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Remove the old per-second replay pieces. They are not videos.
@@ -283,44 +429,145 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
             return Err(error);
         }
     };
-    signal_ready(&ready, "");
+    #[cfg(windows)]
+    let recording_epoch = Instant::now();
     let mut written = 0u32;
     if writer.push_bgra(&first.bytes).is_ok() {
         written += 1;
     }
+    #[cfg(windows)]
+    let mut audio = match SystemAudio::open() {
+        Ok(audio) => audio,
+        Err(error) => {
+            let _ = writer.finish();
+            let _ = fs::remove_file(&out);
+            signal_ready(&ready, &error);
+            return Err(error);
+        }
+    };
+    #[cfg(windows)]
+    let audio_offset = recording_epoch.elapsed();
+    #[cfg(windows)]
+    writer.set_audio_offset(audio_offset);
+    #[cfg(windows)]
+    let audio_offset_ticks = (audio_offset.as_nanos() / 100).min(i64::MAX as u128) as i64;
+    signal_ready(&ready, "");
+    #[cfg(windows)]
+    let mut audio_active = true;
+    #[cfg(windows)]
+    let mut audio_write_failed = false;
+    #[cfg(windows)]
+    let mut audio_written = 0usize;
+    #[cfg(windows)]
+    let mut pending_audio = VecDeque::new();
     let mut last = first.bytes;
-    let interval = Duration::from_millis(1000 / spec.fps.max(1) as u64);
+    let interval = frame_interval(spec.fps);
+    #[cfg(windows)]
+    let video_duration_ticks = 10_000_000i64 / spec.fps.max(1) as i64;
+    #[cfg(windows)]
+    let mut next_frame = recording_epoch + interval;
+    #[cfg(not(windows))]
+    let mut next_frame = Instant::now() + interval;
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        let began = Instant::now();
-        if PAUSED.load(Ordering::SeqCst) {
-            if writer.push_bgra(&last).is_ok() {
-                written += 1;
+        #[cfg(windows)]
+        if audio_active {
+            if let Err(error) = audio.drain(|pcm, frames| {
+                pending_audio.push_back((pcm, frames));
+                Ok(())
+            }) {
+                set_error(&error);
+                audio_active = false;
             }
-        } else {
-            match grab(spec) {
-                Ok(frame) => {
-                    if size != Some((frame.width, frame.height)) {
-                        set_error("The picture size changed, so this frame was skipped.");
-                    } else if let Err(error) = writer.push_bgra(&frame.bytes) {
-                        set_error(&error);
-                    } else {
-                        last = frame.bytes;
-                        written += 1;
+        }
+        let captured = if PAUSED.load(Ordering::SeqCst) { None } else { Some(grab(spec)) };
+        #[cfg(windows)]
+        if audio_active {
+            if let Err(error) = audio.drain(|pcm, frames| {
+                pending_audio.push_back((pcm, frames));
+                Ok(())
+            }) {
+                set_error(&error);
+                audio_active = false;
+            }
+        }
+        let now = Instant::now();
+
+        // The capture call can take longer than a frame interval, especially at
+        // 4K. Fill every elapsed presentation slot with the previous picture so
+        // the encoded duration follows real time instead of playing too fast.
+        while next_frame <= now && !stop.load(Ordering::SeqCst) {
+            #[cfg(windows)]
+            if !audio_write_failed {
+                let next_video_ticks = written as i64 * video_duration_ticks;
+                if let Err(error) = flush_audio_samples(
+                    &mut writer,
+                    &mut pending_audio,
+                    &mut audio_written,
+                    audio_offset_ticks,
+                    next_video_ticks,
+                ) {
+                    set_error(&error);
+                    audio_active = false;
+                    audio_write_failed = true;
+                }
+            }
+            match writer.push_bgra(&last) {
+                Ok(()) => written += 1,
+                Err(error) => set_error(&error),
+            }
+            next_frame += interval;
+        }
+
+        if let Some(result) = captured {
+            match result {
+                Ok(frame) if size == Some((frame.width, frame.height)) => {
+                    last = frame.bytes;
+                    #[cfg(windows)]
+                    if audio_active {
                         set_error("");
                     }
+                    #[cfg(not(windows))]
+                    set_error("");
                 }
+                Ok(_) => set_error("The picture size changed, so this frame was skipped."),
                 Err(error) => set_error(&error),
             }
         }
-        let spent = began.elapsed();
-        if spent < interval {
-            sleep_until(&stop, interval - spent);
+        sleep_until(&stop, next_frame);
+    }
+    #[cfg(windows)]
+    if audio_active {
+        if let Err(error) = audio.drain(|pcm, frames| {
+            pending_audio.push_back((pcm, frames));
+            Ok(())
+        }) {
+            set_error(&error);
         }
     }
+    #[cfg(windows)]
+    if !audio_write_failed {
+        let video_end_ticks = written as i64 * video_duration_ticks;
+        if let Err(error) = flush_audio_samples(
+            &mut writer,
+            &mut pending_audio,
+            &mut audio_written,
+            audio_offset_ticks,
+            video_end_ticks,
+        ) {
+            set_error(&error);
+        }
+    }
+    #[cfg(windows)]
+    pending_audio.clear();
     let finished = writer.finish();
+    #[cfg(windows)]
+    if audio_written == 0 {
+        let _ = fs::remove_file(&out);
+        return Err("No system audio samples were captured, so Orbit did not keep a silent recording.".to_string());
+    }
     if written == 0 || missing_video(&out) {
         let _ = fs::remove_file(&out);
         return Err(if last_error().is_empty() {
@@ -332,45 +579,126 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
     finished
 }
 
+#[cfg(windows)]
+fn flush_audio_samples(
+    writer: &mut Writer,
+    pending: &mut VecDeque<(Vec<u8>, usize)>,
+    audio_written: &mut usize,
+    audio_offset_ticks: i64,
+    video_end_ticks: i64,
+) -> Result<(), String> {
+    while !pending.is_empty() {
+        let audio_time = audio_offset_ticks.saturating_add(
+            (*audio_written as i64).saturating_mul(10_000_000) / AUDIO_SAMPLE_RATE as i64,
+        );
+        if audio_time >= video_end_ticks {
+            break;
+        }
+        let (pcm, frames) = pending.pop_front().expect("the queue is not empty");
+        writer.push_audio(&pcm, frames)?;
+        *audio_written = (*audio_written).saturating_add(frames);
+    }
+    Ok(())
+}
+
 fn run_buffer(buffer: Buffer, spec: Spec, stop: Arc<AtomicBool>) -> Result<(), String> {
-    let interval = Duration::from_millis(1000 / spec.fps.max(1) as u64);
+    #[cfg(windows)]
+    let mut audio = match SystemAudio::open() {
+        Ok(audio) => audio,
+        Err(error) => {
+            set_error(&error);
+            return Err(error);
+        }
+    };
+    #[cfg(windows)]
+    let mut audio_active = true;
+    let interval = frame_interval(spec.fps);
     let mut size = None;
-    let mut last: Option<(Vec<u8>, u32, u32)> = None;
+    let mut last: Option<(Arc<[u8]>, u32, u32)> = None;
+    let mut next_frame = Instant::now();
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        let began = Instant::now();
-        if PAUSED.load(Ordering::SeqCst) {
-            if let Some((jpeg, width, height)) = last.clone() {
-                buffer.push_jpeg(jpeg, width, height);
+        #[cfg(windows)]
+        if audio_active {
+            if let Err(error) = audio.drain(|pcm, _frames| {
+                buffer.push_audio_pcm(pcm);
+                Ok(())
+            }) {
+                set_error(&error);
+                audio_active = false;
             }
-        } else {
-            match grab_jpeg(spec, &mut size) {
+        }
+        let captured = if PAUSED.load(Ordering::SeqCst) { None } else { Some(grab_jpeg(spec, &mut size)) };
+        #[cfg(windows)]
+        if audio_active {
+            if let Err(error) = audio.drain(|pcm, _frames| {
+                buffer.push_audio_pcm(pcm);
+                Ok(())
+            }) {
+                set_error(&error);
+                audio_active = false;
+            }
+        }
+        let now = Instant::now();
+
+        if let Some((jpeg, width, height)) = last.as_ref() {
+            while next_frame <= now && !stop.load(Ordering::SeqCst) {
+                buffer.push_jpeg(Arc::clone(jpeg), *width, *height);
+                next_frame += interval;
+            }
+        }
+
+        if let Some(result) = captured {
+            match result {
                 Ok(jpeg) => {
                     let (width, height) = size.unwrap_or((0, 0));
-                    last = Some((jpeg.clone(), width, height));
-                    buffer.push_jpeg(jpeg, width, height);
+                    let jpeg: Arc<[u8]> = jpeg.into();
+                    if last.is_none() {
+                        buffer.push_jpeg(Arc::clone(&jpeg), width, height);
+                        next_frame = now + interval;
+                    }
+                    last = Some((jpeg, width, height));
+                    #[cfg(windows)]
+                    if audio_active {
+                        set_error("");
+                    }
+                    #[cfg(not(windows))]
                     set_error("");
                 }
                 Err(error) => set_error(&error),
             }
         }
-        let spent = began.elapsed();
-        if spent < interval {
-            sleep_until(&stop, interval - spent);
+        if last.is_none() && next_frame <= now {
+            // Don't spin if capture fails or the overlay is visible before the
+            // first frame arrives.
+            next_frame = now + interval;
+        }
+        sleep_until(&stop, next_frame);
+    }
+    #[cfg(windows)]
+    if audio_active {
+        if let Err(error) = audio.drain(|pcm, _frames| {
+            buffer.push_audio_pcm(pcm);
+            Ok(())
+        }) {
+            set_error(&error);
         }
     }
     Ok(())
 }
 
-fn sleep_until(stop: &AtomicBool, duration: Duration) {
-    let end = Instant::now() + duration;
-    while Instant::now() < end {
+fn frame_interval(fps: u32) -> Duration {
+    Duration::from_nanos(1_000_000_000 / fps.max(1) as u64)
+}
+
+fn sleep_until(stop: &AtomicBool, deadline: Instant) {
+    while Instant::now() < deadline {
         if stop.load(Ordering::SeqCst) {
             return;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -550,8 +878,10 @@ fn grab_screen(spec: Spec) -> Result<Frame, String> {
         return Err("The screen is too wide to copy without ffmpeg.".to_string());
     }
     let rows = (max_bytes / row_bytes).clamp(1, height as usize) as u16;
-    let mut raw = vec![0u8; width as usize * height as usize * 4];
+    let (out_w, out_h) = fit(width as u32, height as u32, spec.max_width, spec.max_height);
+    let mut bytes = vec![0u8; out_w as usize * out_h as usize * 4];
     let mut y = 0u16;
+    let mut dst_y = 0u32;
     while y < height {
         let tile = rows.min(height - y);
         let reply = get_image(&conn, ImageFormat::Z_PIXMAP, screen.root, 0, y as i16, width, tile, u32::MAX)
@@ -562,16 +892,30 @@ fn grab_screen(spec: Spec) -> Result<Frame, String> {
         if reply.data.len() < expect {
             return Err("This desktop returned a picture Orbit could not read. ffmpeg can still be used as a fallback.".to_string());
         }
-        let start = y as usize * width as usize * 4;
-        raw[start..start + expect].copy_from_slice(&reply.data[..expect]);
+        let tile_end = y + tile;
+        while dst_y < out_h {
+            let src_y = (dst_y as u64 * height as u64 / out_h as u64) as usize;
+            if src_y >= tile_end as usize {
+                break;
+            }
+            if src_y < y as usize {
+                return Err("This desktop returned picture rows out of order.".to_string());
+            }
+            let src_row = (src_y - y as usize) * row_bytes;
+            let dst_row = dst_y as usize * out_w as usize * 4;
+            for dst_x in 0..out_w {
+                let src_x = (dst_x as u64 * width as u64 / out_w as u64) as usize;
+                let source = src_row + src_x * 4;
+                let target = dst_row + dst_x as usize * 4;
+                bytes[target..target + 4].copy_from_slice(&reply.data[source..source + 4]);
+            }
+            dst_y += 1;
+        }
         y += tile;
     }
-    let (out_w, out_h) = fit(width as u32, height as u32, spec.max_width, spec.max_height);
-    let bytes = if out_w == width as u32 && out_h == height as u32 {
-        raw
-    } else {
-        scale_bgra(&raw, width as u32, height as u32, out_w, out_h)
-    };
+    if dst_y != out_h {
+        return Err("The picture could not be scaled to Orbit's capture size.".to_string());
+    }
     Ok(Frame { width: out_w, height: out_h, bytes })
 }
 
@@ -681,6 +1025,20 @@ impl Writer {
         }
     }
 
+    #[cfg(windows)]
+    fn push_audio(&mut self, pcm: &[u8], frames: usize) -> Result<(), String> {
+        match self {
+            Writer::Windows(writer) => writer.push_audio(pcm, frames),
+        }
+    }
+
+    #[cfg(windows)]
+    fn set_audio_offset(&mut self, offset: Duration) {
+        match self {
+            Writer::Windows(writer) => writer.set_audio_offset(offset),
+        }
+    }
+
     fn finish(self) -> Result<(), String> {
         match self {
             #[cfg(windows)]
@@ -693,29 +1051,68 @@ impl Writer {
 
 #[cfg(windows)]
 fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
+    if !kept.has_audio() {
+        return Err("No system audio was captured, so Orbit did not save a silent replay.".to_string());
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let mut writer = WindowsWriter::open(path, kept.width, kept.height, kept.fps.max(1))?;
     let mut written = 0u32;
-    for jpeg in &kept.frames {
-        let (width, height, bgra) = match decode_jpeg(jpeg) {
-            Ok(frame) => frame,
-            Err(error) => {
+    let mut video_index = 0usize;
+    let mut audio_index = 0usize;
+    let mut audio_sample_index = 0usize;
+    let fps = kept.fps.max(1) as u128;
+    while video_index < kept.frames.len() || audio_index < kept.audio.len() {
+        let video_time = if video_index < kept.frames.len() {
+            video_index as u128 * 10_000_000 / fps
+        } else {
+            u128::MAX
+        };
+        let audio_time = if audio_index < kept.audio.len() {
+            audio_sample_index as u128 * 10_000_000 / AUDIO_SAMPLE_RATE as u128
+        } else {
+            u128::MAX
+        };
+        if video_time <= audio_time {
+            let jpeg = &kept.frames[video_index];
+            let (width, height, bgra) = match decode_jpeg(jpeg) {
+                Ok(frame) => frame,
+                Err(error) => {
+                    writer.abandon();
+                    let _ = fs::remove_file(path);
+                    return Err(error);
+                }
+            };
+            if width != kept.width || height != kept.height || bgra.len() < kept.width as usize * kept.height as usize * 4 {
+                writer.abandon();
+                let _ = fs::remove_file(path);
+                return Err("A replay frame was the wrong size.".to_string());
+            }
+            if let Err(error) = writer.push_bgra(&bgra) {
                 writer.abandon();
                 let _ = fs::remove_file(path);
                 return Err(error);
             }
-        };
-        if width != kept.width || height != kept.height || bgra.len() < kept.width as usize * kept.height as usize * 4 {
-            continue;
+            written += 1;
+            video_index += 1;
+        } else {
+            let slice = &kept.audio[audio_index];
+            let start = slice.first_frame.saturating_mul(AUDIO_BYTES_PER_FRAME);
+            let end = start.saturating_add(slice.frames.saturating_mul(AUDIO_BYTES_PER_FRAME));
+            let Some(pcm) = slice.bytes.get(start..end) else {
+                writer.abandon();
+                let _ = fs::remove_file(path);
+                return Err("The buffered audio was incomplete.".to_string());
+            };
+            if let Err(error) = writer.push_audio(pcm, slice.frames) {
+                writer.abandon();
+                let _ = fs::remove_file(path);
+                return Err(error);
+            }
+            audio_sample_index += slice.frames;
+            audio_index += 1;
         }
-        if let Err(error) = writer.push_bgra(&bgra) {
-            writer.abandon();
-            let _ = fs::remove_file(path);
-            return Err(error);
-        }
-        written += 1;
     }
     if written == 0 {
         writer.abandon();
@@ -734,14 +1131,275 @@ fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+struct SystemAudio {
+    client: windows::Win32::Media::Audio::IAudioClient,
+    capture: windows::Win32::Media::Audio::IAudioCaptureClient,
+    sample_rate: u32,
+    channels: usize,
+    bits: u16,
+    block_align: usize,
+    is_float: bool,
+    phase: f64,
+    previous: Option<[f32; 2]>,
+}
+
+#[cfg(windows)]
+impl SystemAudio {
+    fn open() -> Result<Self, String> {
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+            .map_err(|error| format!("System audio capture could not start: {error}"))?;
+        match unsafe { Self::open_initialized() } {
+            Ok(audio) => Ok(audio),
+            Err(error) => {
+                unsafe { CoUninitialize() };
+                Err(error)
+            }
+        }
+    }
+
+    unsafe fn open_initialized() -> Result<Self, String> {
+        use windows::Win32::Media::Audio::{
+            eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
+            AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
+        };
+        use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
+
+        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+            .map_err(audio_error)?;
+        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).map_err(audio_error)?;
+        let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(audio_error)?;
+        let format_ptr = client.GetMixFormat().map_err(audio_error)?;
+        if format_ptr.is_null() {
+            return Err("The system audio format could not be read.".to_string());
+        }
+        let parsed = (|| {
+            let format = unsafe { std::ptr::read_unaligned(format_ptr) };
+            let extensible = format.wFormatTag == 0xFFFE && format.cbSize >= 22;
+            let subtype = if extensible {
+                let offset = std::mem::size_of::<windows::Win32::Media::Audio::WAVEFORMATEX>() + 6;
+                let subtype_ptr = unsafe { (format_ptr as *const u8).add(offset) as *const windows::core::GUID };
+                Some(unsafe { std::ptr::read_unaligned(subtype_ptr) })
+            } else {
+                None
+            };
+            let is_float = format.wFormatTag == 3 || subtype.map(|guid| audio_subtype(guid, 3)).unwrap_or(false);
+            let is_pcm = format.wFormatTag == 1 || subtype.map(|guid| audio_subtype(guid, 1)).unwrap_or(false);
+            let channels = format.nChannels as usize;
+            let bits = format.wBitsPerSample;
+            let block_align = format.nBlockAlign as usize;
+            let sample_rate = format.nSamplesPerSec;
+            let bytes_per_sample = (bits as usize + 7) / 8;
+            if (!is_float && !is_pcm)
+                || (is_float && bits != 32)
+                || !matches!(bits, 8 | 16 | 24 | 32)
+                || sample_rate == 0
+                || channels == 0
+                || block_align < channels.saturating_mul(bytes_per_sample)
+            {
+                return Err("The system audio format is not supported by Orbit.".to_string());
+            }
+            Ok((sample_rate, channels, bits, block_align, is_float))
+        })();
+        let (sample_rate, channels, bits, block_align, is_float) = match parsed {
+            Ok(format) => format,
+            Err(error) => {
+                CoTaskMemFree(Some(format_ptr as *const _));
+                return Err(error);
+            }
+        };
+        let initialized = client.Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            AUDCLNT_STREAMFLAGS_LOOPBACK,
+            10_000_000,
+            0,
+            format_ptr,
+            None,
+        );
+        CoTaskMemFree(Some(format_ptr as *const _));
+        initialized.map_err(audio_error)?;
+        let capture: IAudioCaptureClient = client.GetService().map_err(audio_error)?;
+        client.Start().map_err(audio_error)?;
+        Ok(Self {
+            client,
+            capture,
+            sample_rate,
+            channels,
+            bits,
+            block_align,
+            is_float,
+            phase: 0.0,
+            previous: None,
+        })
+    }
+
+    fn drain(&mut self, mut emit: impl FnMut(Vec<u8>, usize) -> Result<(), String>) -> Result<(), String> {
+        loop {
+            let frames = unsafe { self.capture.GetNextPacketSize() }.map_err(audio_error)?;
+            if frames == 0 {
+                break;
+            }
+            let mut data = std::ptr::null_mut();
+            let mut available = 0u32;
+            let mut flags = 0u32;
+            unsafe {
+                self.capture
+                    .GetBuffer(&mut data, &mut available, &mut flags, None, None)
+                    .map_err(audio_error)?;
+            }
+            let pcm = if available == 0 {
+                Vec::new()
+            } else if flags & 0x2 != 0 || data.is_null() {
+                self.convert_packet(None, available as usize)
+            } else {
+                let len = (available as usize).saturating_mul(self.block_align);
+                let source = unsafe { std::slice::from_raw_parts(data, len) };
+                self.convert_packet(Some(source), available as usize)
+            };
+            let no_data = available == 0;
+            let released = unsafe { self.capture.ReleaseBuffer(available) }.map_err(audio_error);
+            released?;
+            if no_data {
+                break;
+            }
+            if !pcm.is_empty() {
+                let output_frames = pcm.len() / AUDIO_BYTES_PER_FRAME;
+                emit(pcm, output_frames)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn convert_packet(&mut self, source: Option<&[u8]>, frames: usize) -> Vec<u8> {
+        if frames == 0 {
+            return Vec::new();
+        }
+        let bytes_per_sample = (self.bits as usize + 7) / 8;
+        let mut current = Vec::with_capacity(frames);
+        for frame in 0..frames {
+            let sample = if let Some(source) = source {
+                let read = |channel| self.read_channel(source, frame, channel, bytes_per_sample);
+                let mut left = read(0);
+                let mut right = if self.channels > 1 { read(1) } else { left };
+                if self.channels > 2 {
+                    let center = read(2) * 0.5;
+                    left += center;
+                    right += center;
+                }
+                if self.channels > 3 {
+                    let lfe = read(3) * 0.2;
+                    left += lfe;
+                    right += lfe;
+                }
+                if self.channels > 4 {
+                    left += read(4) * 0.5;
+                }
+                if self.channels > 5 {
+                    right += read(5) * 0.5;
+                }
+                if self.channels > 6 {
+                    left += read(6) * 0.5;
+                }
+                if self.channels > 7 {
+                    right += read(7) * 0.5;
+                }
+                [left.clamp(-1.0, 1.0), right.clamp(-1.0, 1.0)]
+            } else {
+                [0.0, 0.0]
+            };
+            current.push(sample);
+        }
+        let Some(last) = current.last().copied() else { return Vec::new() };
+        let previous = self.previous.unwrap_or(current[0]);
+        let step = self.sample_rate as f64 / AUDIO_SAMPLE_RATE as f64;
+        let mut position = self.phase;
+        let mut pcm = Vec::with_capacity(((frames as f64 / step).ceil() as usize + 1) * AUDIO_BYTES_PER_FRAME);
+        while position <= (frames - 1) as f64 {
+            let floor = position.floor();
+            let low_index = floor as isize;
+            let fraction = (position - floor) as f32;
+            let low = if low_index < 0 { previous } else { current[low_index as usize] };
+            let high_index = low_index + 1;
+            let high = if high_index < 0 {
+                previous
+            } else if high_index as usize >= frames {
+                last
+            } else {
+                current[high_index as usize]
+            };
+            for channel in 0..AUDIO_CHANNELS {
+                let value = low[channel] + (high[channel] - low[channel]) * fraction;
+                let sample = (value.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+                pcm.extend_from_slice(&sample.to_le_bytes());
+            }
+            position += step;
+        }
+        self.phase = position - frames as f64;
+        self.previous = Some(last);
+        pcm
+    }
+
+    fn read_channel(&self, source: &[u8], frame: usize, channel: usize, bytes_per_sample: usize) -> f32 {
+        let offset = frame
+            .saturating_mul(self.block_align)
+            .saturating_add(channel.saturating_mul(bytes_per_sample));
+        let Some(sample) = source.get(offset..offset.saturating_add(bytes_per_sample)) else { return 0.0 };
+        if self.is_float {
+            let value = f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
+            return if value.is_finite() { value.clamp(-1.0, 1.0) } else { 0.0 };
+        }
+        match self.bits {
+            8 => (sample[0] as f32 - 128.0) / 128.0,
+            16 => i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32_768.0,
+            24 => {
+                let packed = (sample[0] as i32) | ((sample[1] as i32) << 8) | ((sample[2] as i32) << 16);
+                ((packed << 8) >> 8) as f32 / 8_388_608.0
+            }
+            32 => i32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]) as f32 / 2_147_483_648.0,
+            _ => 0.0,
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SystemAudio {
+    fn drop(&mut self) {
+        use windows::Win32::System::Com::CoUninitialize;
+
+        unsafe {
+            let _ = self.client.Stop();
+            CoUninitialize();
+        }
+    }
+}
+
+#[cfg(windows)]
+fn audio_subtype(guid: windows::core::GUID, subtype: u32) -> bool {
+    guid.data1 == subtype
+        && guid.data2 == 0
+        && guid.data3 == 0x0010
+        && guid.data4 == [0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]
+}
+
+#[cfg(windows)]
+fn audio_error(error: windows::core::Error) -> String {
+    format!("System audio could not be captured: {error}")
+}
+
+#[cfg(windows)]
 struct WindowsWriter {
     writer: windows::Win32::Media::MediaFoundation::IMFSinkWriter,
     stream: u32,
+    audio_stream: u32,
     width: u32,
     height: u32,
     fps: u32,
     index: u64,
+    audio_index: u64,
+    audio_offset: i64,
     open: bool,
+    com_initialized: bool,
 }
 
 #[cfg(windows)]
@@ -752,18 +1410,25 @@ impl WindowsWriter {
         use windows::core::PCWSTR;
         use windows::Win32::Media::MediaFoundation::{
             MFCreateMediaType, MFCreateSinkWriterFromURL, MFStartup, IMFAttributes, IMFByteStream,
-            MFVideoFormat_H264, MFVideoFormat_RGB32, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES,
-            MF_MT_SAMPLE_SIZE,
+            MFAudioFormat_AAC, MFAudioFormat_PCM, MFMediaType_Audio, MFVideoFormat_H264, MFVideoFormat_RGB32,
+            MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
+            MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
+            MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES,
+            MF_MT_MAJOR_TYPE, MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE,
         };
-        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
         if width < 2 || height < 2 || width % 2 == 1 || height % 2 == 1 {
             return Err("The picture size could not be used.".to_string());
         }
         let fps = fps.max(1);
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            MFStartup(0x0002_0070, 0).map_err(|error| format!("The video encoder could not start: {error}"))?;
+            CoInitializeEx(None, COINIT_MULTITHREADED)
+                .map_err(|error| format!("The video encoder could not start: {error}"))?;
+            if let Err(error) = MFStartup(0x0002_0070, 0) {
+                CoUninitialize();
+                return Err(format!("The video encoder could not start: {error}"));
+            }
         }
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         // `Param` is implemented for `Option<&T>`, not `Option<T>`.
@@ -773,7 +1438,7 @@ impl WindowsWriter {
         .map_err(mf_fail)?;
         let bitrate = ((width as u64).saturating_mul(height as u64).saturating_mul(fps as u64) / 8)
             .clamp(1_500_000, 20_000_000) as u32;
-        let stream = unsafe {
+        let (stream, audio_stream) = unsafe {
             let out_type = MFCreateMediaType().map_err(mf_fail)?;
             set_video(&out_type, &MFVideoFormat_H264, width, height, fps)?;
             out_type.SetUINT32(&MF_MT_AVG_BITRATE, bitrate).map_err(mf_fail)?;
@@ -788,10 +1453,47 @@ impl WindowsWriter {
                 .SetUINT32(&MF_MT_SAMPLE_SIZE, width.saturating_mul(height).saturating_mul(4))
                 .map_err(mf_fail)?;
             writer.SetInputMediaType(stream, &in_type, None::<&IMFAttributes>).map_err(mf_fail)?;
+
+            let audio_out = MFCreateMediaType().map_err(mf_fail)?;
+            audio_out.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(mf_fail)?;
+            audio_out.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, AUDIO_CHANNELS as u32).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, AUDIO_SAMPLE_RATE).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16_000).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 1).map_err(mf_fail)?;
+            audio_out.SetUINT32(&MF_MT_AVG_BITRATE, 128_000).map_err(mf_fail)?;
+            let audio_stream = writer.AddStream(&audio_out).map_err(mf_fail)?;
+            let audio_in = MFCreateMediaType().map_err(mf_fail)?;
+            audio_in.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(mf_fail)?;
+            audio_in.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).map_err(mf_fail)?;
+            audio_in.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, AUDIO_CHANNELS as u32).map_err(mf_fail)?;
+            audio_in.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, AUDIO_SAMPLE_RATE).map_err(mf_fail)?;
+            audio_in.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16).map_err(mf_fail)?;
+            audio_in.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, AUDIO_BYTES_PER_FRAME as u32).map_err(mf_fail)?;
+            audio_in
+                .SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AUDIO_SAMPLE_RATE * AUDIO_BYTES_PER_FRAME as u32)
+                .map_err(mf_fail)?;
+            audio_in.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1).map_err(mf_fail)?;
+            writer
+                .SetInputMediaType(audio_stream, &audio_in, None::<&IMFAttributes>)
+                .map_err(mf_fail)?;
             writer.BeginWriting().map_err(mf_fail)?;
-            stream
+            (stream, audio_stream)
         };
-        Ok(Self { writer, stream, width, height, fps, index: 0, open: true })
+        Ok(Self {
+            writer,
+            stream,
+            audio_stream,
+            width,
+            height,
+            fps,
+            index: 0,
+            audio_index: 0,
+            audio_offset: 0,
+            open: true,
+            com_initialized: true,
+        })
     }
 
     fn push_bgra(&mut self, bgra: &[u8]) -> Result<(), String> {
@@ -824,8 +1526,48 @@ impl WindowsWriter {
         Ok(())
     }
 
+    fn set_audio_offset(&mut self, offset: Duration) {
+        self.audio_offset = (offset.as_nanos() / 100).min(i64::MAX as u128) as i64;
+    }
+
+    fn push_audio(&mut self, pcm: &[u8], frames: usize) -> Result<(), String> {
+        use windows::Win32::Media::MediaFoundation::{MFCreateMemoryBuffer, MFCreateSample};
+
+        let expected = frames.saturating_mul(AUDIO_BYTES_PER_FRAME);
+        if frames == 0 {
+            return Ok(());
+        }
+        if pcm.len() < expected {
+            return Err("An audio packet was incomplete.".to_string());
+        }
+        unsafe {
+            let buffer = MFCreateMemoryBuffer(expected as u32).map_err(|error| error.to_string())?;
+            let mut ptr = std::ptr::null_mut();
+            buffer.Lock(&mut ptr, None, None).map_err(|error| error.to_string())?;
+            if ptr.is_null() {
+                let _ = buffer.Unlock();
+                return Err("An audio packet could not be copied.".to_string());
+            }
+            std::ptr::copy_nonoverlapping(pcm.as_ptr(), ptr, expected);
+            buffer.Unlock().map_err(|error| error.to_string())?;
+            buffer.SetCurrentLength(expected as u32).map_err(|error| error.to_string())?;
+            let sample = MFCreateSample().map_err(|error| error.to_string())?;
+            sample.AddBuffer(&buffer).map_err(|error| error.to_string())?;
+            let scale = 10_000_000i64;
+            let rate = AUDIO_SAMPLE_RATE as i64;
+            let when = self.audio_offset.saturating_add((self.audio_index as i64).saturating_mul(scale) / rate);
+            let duration = (frames as i64).saturating_mul(scale) / rate;
+            sample.SetSampleTime(when).map_err(|error| error.to_string())?;
+            sample.SetSampleDuration(duration.max(1)).map_err(|error| error.to_string())?;
+            self.writer.WriteSample(self.audio_stream, &sample).map_err(|error| error.to_string())?;
+        }
+        self.audio_index = self.audio_index.saturating_add(frames as u64);
+        Ok(())
+    }
+
     fn finish(mut self) -> Result<(), String> {
         use windows::Win32::Media::MediaFoundation::MFShutdown;
+        use windows::Win32::System::Com::CoUninitialize;
 
         if !self.open {
             return Ok(());
@@ -834,12 +1576,17 @@ impl WindowsWriter {
         let result = unsafe { self.writer.Finalize() }.map_err(|error| format!("The video could not be finished: {error}"));
         unsafe {
             let _ = MFShutdown();
+            if self.com_initialized {
+                CoUninitialize();
+                self.com_initialized = false;
+            }
         }
         result
     }
 
     fn abandon(&mut self) {
         use windows::Win32::Media::MediaFoundation::MFShutdown;
+        use windows::Win32::System::Com::CoUninitialize;
 
         if !self.open {
             return;
@@ -848,6 +1595,10 @@ impl WindowsWriter {
         unsafe {
             let _ = self.writer.Finalize();
             let _ = MFShutdown();
+            if self.com_initialized {
+                CoUninitialize();
+                self.com_initialized = false;
+            }
         }
     }
 }
@@ -880,9 +1631,11 @@ fn set_video(
 #[cfg(windows)]
 fn mf_fail(error: windows::core::Error) -> String {
     use windows::Win32::Media::MediaFoundation::MFShutdown;
+    use windows::Win32::System::Com::CoUninitialize;
 
     unsafe {
         let _ = MFShutdown();
+        CoUninitialize();
     }
     format!("The video file could not be opened: {error}")
 }
@@ -996,6 +1749,23 @@ mod tests {
     }
 
     #[test]
+    fn replay_snapshots_keep_audio_for_the_video_window() {
+        let buffer = Buffer::new(2, Duration::from_secs(2));
+        let jpeg = sample_jpeg();
+        for _ in 0..4 {
+            buffer.push_jpeg(jpeg.clone(), 16, 16);
+        }
+        let second = vec![0u8; AUDIO_SAMPLE_RATE as usize * AUDIO_BYTES_PER_FRAME];
+        buffer.push_audio_pcm(second.clone());
+        buffer.push_audio_pcm(second);
+
+        let kept = buffer.snapshot(1).unwrap();
+        assert_eq!(kept.frames.len(), 2);
+        assert_eq!(kept.audio_frames, AUDIO_SAMPLE_RATE as usize);
+        assert!(kept.has_audio());
+    }
+
+    #[test]
     fn a_frame_round_trips_and_reports_its_size() {
         let jpeg = sample_jpeg();
         assert_eq!(jpeg_size(&jpeg), Some((16, 16)));
@@ -1007,7 +1777,14 @@ mod tests {
 
     #[test]
     fn an_empty_clip_is_not_written() {
-        let kept = Kept { width: 16, height: 16, fps: 30, frames: Vec::new() };
+        let kept = Kept {
+            width: 16,
+            height: 16,
+            fps: 30,
+            frames: Vec::new(),
+            audio_frames: 0,
+            audio: Vec::new(),
+        };
         assert!(write_mp4(Path::new("unused.mp4"), &kept).is_err());
     }
 }

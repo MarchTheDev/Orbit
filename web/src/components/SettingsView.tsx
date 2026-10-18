@@ -415,7 +415,7 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="This keeps the replay in memory while a game runs. Turn it off for the lightest resource use; nothing is written until you save a clip."
+        hint="The rolling replay's video and audio together are capped at 96 MiB of memory. At 4K or for long clips, less than the selected duration may be available. Turn it off for the lightest resource use; nothing is written until you save a clip."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay lengths</p>
@@ -1152,7 +1152,7 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Game sound is not recorded yet."
+        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
       >
         <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>
