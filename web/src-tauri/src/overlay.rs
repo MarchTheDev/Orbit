@@ -9,7 +9,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +33,7 @@ static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
+static READY_NOTICE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
@@ -44,11 +45,23 @@ struct Live {
     quality: String,
     fps: u32,
     ffmpeg: String,
+    /// Orbit's data directory; kept separate so replay cleanup never touches a custom capture folder.
     root: PathBuf,
+    /// Per-kind output folders; default to the matching subfolders of `root`.
+    screenshot_root: PathBuf,
+    recording_root: PathBuf,
+    replay_root: PathBuf,
     game: String,
+    ready_notice: Option<String>,
     playing: bool,
     recording: Option<Child>,
     buffer: Option<Child>,
+    #[cfg(target_os = "linux")]
+    audio_buffer: Option<Child>,
+    #[cfg(target_os = "linux")]
+    audio_stop: Option<Arc<AtomicBool>>,
+    #[cfg(target_os = "linux")]
+    audio_thread: Option<thread::JoinHandle<()>>,
     native_recording: Option<capture::Hold>,
     native_buffer: Option<capture::Hold>,
     replay_frames: Option<capture::Buffer>,
@@ -83,10 +96,20 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     fps: 30,
     ffmpeg: String::new(),
     root: PathBuf::new(),
+    screenshot_root: PathBuf::new(),
+    recording_root: PathBuf::new(),
+    replay_root: PathBuf::new(),
     game: String::new(),
+    ready_notice: None,
     playing: false,
     recording: None,
     buffer: None,
+    #[cfg(target_os = "linux")]
+    audio_buffer: None,
+    #[cfg(target_os = "linux")]
+    audio_stop: None,
+    #[cfg(target_os = "linux")]
+    audio_thread: None,
     native_recording: None,
     native_buffer: None,
     replay_frames: None,
@@ -121,6 +144,7 @@ pub struct OverlayStatus {
     pub game: String,
     pub folder: String,
     pub note: String,
+    pub ready_notice: Option<String>,
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Live> {
@@ -169,7 +193,10 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg);
+    let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
+    let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
+    let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
 }
 
 pub fn configure(
@@ -181,6 +208,9 @@ pub fn configure(
     quality: &str,
     fps: u32,
     ffmpeg: &str,
+    screenshot_directory: &str,
+    recording_directory: &str,
+    replay_directory: &str,
 ) {
     let seconds = clamp_seconds(seconds);
     let lengths = lengths.map(|items| {
@@ -197,8 +227,15 @@ pub fn configure(
             None => live.lengths.clone(),
         };
         let keep = keep_seconds(&lengths, seconds);
+        let screenshot_root = configured_capture_dir(&live.root, screenshot_directory, "screenshots");
+        let recording_root = configured_capture_dir(&live.root, recording_directory, "recordings");
+        let replay_root = configured_capture_dir(&live.root, replay_directory, "replays");
+        let capture_changed = live.screenshot_root != screenshot_root || live.recording_root != recording_root || live.replay_root != replay_root;
+        live.screenshot_root = screenshot_root;
+        live.recording_root = recording_root;
+        live.replay_root = replay_root;
         let must_restart = live.keep != keep || live.quality != quality || live.fps != fps || live.replay != replay || live.enabled != enabled;
-        let changed = must_restart || live.seconds != seconds || live.lengths != lengths || live.ffmpeg != ffmpeg;
+        let changed = must_restart || live.seconds != seconds || live.lengths != lengths || live.ffmpeg != ffmpeg || capture_changed;
         let hide = live.enabled && !enabled;
         live.enabled = enabled;
         live.replay = replay;
@@ -254,6 +291,68 @@ pub fn game_started(title: &str) {
     }
 }
 
+/// Show a short, click-through overlay notice after Orbit successfully starts a game.
+/// The main window may already be minimized or hidden by the launch policy.
+pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
+    let title = safe_name(title);
+    {
+        let mut live = lock();
+        if !live.enabled {
+            return Ok(());
+        }
+        live.ready_notice = Some(title.clone());
+    }
+
+    let Some(window) = ensure_window(app) else {
+        lock().ready_notice = None;
+        return Err("The overlay window could not be created.".to_string());
+    };
+    if OPEN.load(Ordering::SeqCst) {
+        // The full overlay is already visible; its regular status refresh will
+        // pick up the notice without disturbing the player's current layout.
+        return Ok(());
+    }
+    if window.is_visible().unwrap_or(false) && HAS_PINS.load(Ordering::SeqCst) {
+        // Keep pinned widgets exactly as they are; the notice can appear above them.
+        return Ok(());
+    }
+
+    RESTING.store(true, Ordering::SeqCst);
+    IGNORE.store(true, Ordering::SeqCst);
+    capture::set_paused(false);
+    cover_screen(&window);
+    let _ = window.set_focusable(false);
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_always_on_top(true);
+    if let Err(error) = window.show() {
+        lock().ready_notice = None;
+        return Err(format!("The overlay window could not be shown: {error}"));
+    }
+
+    let generation = READY_NOTICE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-ready-notice".to_string())
+        .spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            let panel = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if READY_NOTICE_GENERATION.load(Ordering::SeqCst) != generation
+                    || OPEN.load(Ordering::SeqCst)
+                {
+                    return;
+                }
+                lock().ready_notice = None;
+                if HAS_PINS.load(Ordering::SeqCst) {
+                    rest_window(&panel);
+                } else {
+                    close_panel(&panel);
+                }
+            });
+        });
+    Ok(())
+}
+
 pub fn game_stopped() {
     {
         let mut live = lock();
@@ -264,23 +363,45 @@ pub fn game_stopped() {
 
 pub fn shutdown() {
     STOP.store(true, Ordering::SeqCst);
-    let recording = {
+    let (recording, audio) = {
         let mut live = lock();
-        let recording = live.recording.take();
-        let buffer = live.buffer.take();
-        let native_recording = live.native_recording.take();
-        let native_buffer = live.native_buffer.take();
+        let recording = (
+            live.recording.take(),
+            live.buffer.take(),
+            live.native_recording.take(),
+            live.native_buffer.take(),
+        );
         if let Some(stop) = live.pipe_stop.take() {
             stop.store(true, Ordering::SeqCst);
         }
+        #[cfg(target_os = "linux")]
+        let audio = {
+            if let Some(stop) = live.audio_stop.take() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            (live.audio_buffer.take(), live.audio_thread.take())
+        };
+        #[cfg(not(target_os = "linux"))]
+        let audio = ();
         live.replay_frames = None;
-        (recording, buffer, native_recording, native_buffer)
+        (recording, audio)
     };
+    #[cfg(not(target_os = "linux"))]
+    let _ = audio;
     if let Some(child) = recording.0 {
         kill_now(child);
     }
     if let Some(child) = recording.1 {
         kill_now(child);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(child) = audio.0 {
+            kill_now(child);
+        }
+        if let Some(reader) = audio.1 {
+            let _ = reader.join();
+        }
     }
     if let Some(hold) = recording.2 {
         let _ = capture::finish(hold);
@@ -295,6 +416,7 @@ pub fn shutdown() {
 pub fn close_panel(app: &AppHandle) {
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
+    lock().ready_notice = None;
     HAS_PINS.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     crate::stats::release();
@@ -311,7 +433,16 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Ok(dir) = app.path().app_data_dir() {
         capture::sweep_replay_files(&dir);
         let mut live = lock();
-        live.root = dir;
+        live.root = dir.clone();
+        if live.screenshot_root.as_os_str().is_empty() {
+            live.screenshot_root = dir.join("screenshots");
+        }
+        if live.recording_root.as_os_str().is_empty() {
+            live.recording_root = dir.join("recordings");
+        }
+        if live.replay_root.as_os_str().is_empty() {
+            live.replay_root = dir.join("replays");
+        }
     }
     // The panel is built on the first Alt+X, not during startup. A second
     // webview here would compete with the boot animation.
@@ -351,8 +482,13 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
 }
 
 pub fn status() -> OverlayStatus {
-    let live = lock();
-    let folder = kind_dir_from(&live.root, "recordings");
+    let mut live = lock();
+    let folder = if live.recording_root.as_os_str().is_empty() {
+        kind_dir_from(&live.root, "recordings")
+    } else {
+        live.recording_root.clone()
+    };
+    let ready_notice = live.ready_notice.take();
     OverlayStatus {
         enabled: live.enabled,
         recording: live.recording.is_some() || live.native_recording.is_some(),
@@ -369,6 +505,7 @@ pub fn status() -> OverlayStatus {
             let capture_error = capture::last_error();
             if !capture_error.is_empty() { capture_error } else { live.note.clone() }
         },
+        ready_notice,
     }
 }
 
@@ -398,15 +535,56 @@ pub fn open_item(path: &str) -> Result<(), String> {
     launch_path(&path)
 }
 
+pub fn delete_item(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !allowed_capture(&path) {
+        return Err("That file is not one of Orbit's captures.".to_string());
+    }
+    if !path.is_file() {
+        return Err("That file is not there any more.".to_string());
+    }
+    fs::remove_file(&path).map_err(|error| format!("Could not delete that capture: {error}"))
+}
+
+pub fn copy_item(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !allowed_capture(&path) {
+        return Err("That file is not one of Orbit's captures.".to_string());
+    }
+    if !path.is_file() {
+        return Err("That capture is not there any more.".to_string());
+    }
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!(extension.as_str(), "jpg" | "jpeg" | "png") {
+        return Err("Only screenshots can be copied as images.".to_string());
+    }
+    #[cfg(windows)]
+    {
+        if extension == "png" {
+            return copy_png_image_with_powershell(&path);
+        }
+        if screenshot_dib(&path).is_none() {
+            return Err("Orbit could not read that screenshot as an image.".to_string());
+        }
+    }
+    copy_capture_to_clipboard(&path)
+}
+
 pub fn gallery() -> Vec<GalleryItem> {
-    let root = lock().root.clone();
-    if root.as_os_str().is_empty() {
+    let (screenshots, recordings, replays) = {
+        let live = lock();
+        let screenshots = if live.screenshot_root.as_os_str().is_empty() { live.root.join("screenshots") } else { live.screenshot_root.clone() };
+        let recordings = if live.recording_root.as_os_str().is_empty() { live.root.join("recordings") } else { live.recording_root.clone() };
+        let replays = if live.replay_root.as_os_str().is_empty() { live.root.join("replays") } else { live.replay_root.clone() };
+        (screenshots, recordings, replays)
+    };
+    if screenshots.as_os_str().is_empty() && recordings.as_os_str().is_empty() && replays.as_os_str().is_empty() {
         return Vec::new();
     }
     let mut found = Vec::new();
-    collect_kind(&root.join("screenshots"), "screenshot", &mut found);
-    collect_kind(&root.join("recordings"), "recording", &mut found);
-    collect_kind(&root.join("replays"), "replay", &mut found);
+    collect_kind(&screenshots, "screenshot", &mut found);
+    collect_kind(&recordings, "recording", &mut found);
+    collect_kind(&replays, "replay", &mut found);
     found.sort_by(|left, right| right.0.cmp(&left.0));
     found.into_iter().take(36).map(|(_, item)| item).collect()
 }
@@ -421,8 +599,8 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // Windows leaves the panel out of the capture, so it can stay up. Other
-    // desktops still step aside for the one picture, then come back.
+    // Windows marks the panel as excluded from display capture. Other desktops
+    // still step aside for the one in-app picture, then come back.
     #[cfg(not(windows))]
     let was_open = is_open();
     #[cfg(not(windows))]
@@ -473,7 +651,8 @@ pub fn record(app: &AppHandle, stamp: &str) -> Result<String, String> {
                 live.recording_name.clone()
             }
         };
-        let message = format!("Saved the recording as {name}.");
+        let copied = if path.as_os_str().is_empty() { String::new() } else { clipboard_note(&path) };
+        let message = format!("Saved the recording as {name}.{copied}");
         remember(&Ok(message.clone()));
         return Ok(message);
     }
@@ -626,8 +805,8 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 fn show_window(app: &AppHandle) {
     let Some(window) = ensure_window(app) else { return };
-    // The panel is left out of the capture, so the grab keeps running. Pausing
-    // it used to repeat one frame for as long as the panel stayed open.
+    // Windows excludes the panel from capture, so the grab can keep running.
+    // Pausing it would repeat one frame for as long as the panel stayed open.
     RESTING.store(false, Ordering::SeqCst);
     IGNORE.store(false, Ordering::SeqCst);
     capture::set_paused(false);
@@ -655,6 +834,20 @@ fn cover_screen(window: &tauri::WebviewWindow) {
     let size = monitor.size();
     let _ = window.set_position(tauri::PhysicalPosition::new(pos.x, pos.y));
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
+}
+
+fn exclude_from_capture(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+
+        let Ok(hwnd) = window.hwnd() else { return };
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+    }
 }
 
 /// Hide even a pinned panel, for the one moment a picture is taken.
@@ -710,23 +903,23 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = game_dir("screenshots")?;
     if capture::available() {
-        let path = clip_path(&dir, &lock().game, stamp, "jpg");
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
         if capture::save_picture(&path, current_spec()).is_ok() {
-            return Ok(saved_name("Saved the picture as", &path));
+            return saved_picture(&path);
         }
     }
-    let path = clip_path(&dir, &lock().game, stamp, "png");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
     #[cfg(windows)]
     if powershell_shot(&path).is_ok() {
-        return Ok(saved_name("Saved the picture as", &path));
+        return saved_picture(&path);
     }
     #[cfg(target_os = "linux")]
     if linux_shot(&path).is_ok() {
-        return Ok(saved_name("Saved the picture as", &path));
+        return saved_picture(&path);
     }
     if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
         if ffmpeg_shot(&ffmpeg, &path).is_ok() {
-            return Ok(saved_name("Saved the picture as", &path));
+            return saved_picture(&path);
         }
     }
     Err("Orbit could not take a picture of the screen.".to_string())
@@ -785,6 +978,26 @@ fn linux_shot(path: &Path) -> Result<(), String> {
     Err("no screenshot tool".to_string())
 }
 
+#[cfg(target_os = "linux")]
+fn system_audio_monitor() -> Option<String> {
+    let direct = process::command("pactl").args(["get-default-sink"]).output().ok();
+    let sink = direct
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let output = process::command("pactl").arg("info").output().ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .find_map(|line| line.strip_prefix("Default Sink:").map(str::trim).map(str::to_string))
+                .filter(|value| !value.is_empty())
+        })?;
+    Some(format!("{sink}.monitor"))
+}
+
 fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
     let mut command = process::command(ffmpeg);
     command.arg("-y");
@@ -821,7 +1034,7 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
 
 fn spawn_native_recording(stamp: &str) -> Result<(), String> {
     let dir = game_dir("recordings")?;
-    let path = clip_path(&dir, &lock().game, stamp, "mp4");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let spec = current_spec();
     let hold = capture::start_recording(path.clone(), spec)?;
     let name = path
@@ -836,14 +1049,24 @@ fn spawn_native_recording(stamp: &str) -> Result<(), String> {
 }
 
 fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    return Err("Orbit could not start its built-in audio recorder, and the ffmpeg fallback cannot preserve system audio.".to_string());
+
     let ffmpeg = find_ffmpeg(&lock().ffmpeg).ok_or_else(ffmpeg_missing)?;
     let dir = game_dir("recordings")?;
-    let path = clip_path(&dir, &lock().game, stamp, "mp4");
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(lock().fps)))?;
+    #[cfg(target_os = "linux")]
+    {
+        let source = system_audio_monitor().ok_or_else(|| {
+            "Orbit could not find the system-audio monitor. A PulseAudio-compatible output is required for audio capture.".to_string()
+        })?;
+        command.args(["-thread_queue_size", "512", "-f", "pulse", "-i"]).arg(source);
+        command.args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k"]);
+    }
     let quality = lock().quality.clone();
-    command.arg("-an");
     push_encode(&mut command, &quality);
     command.args(["-movflags", "+frag_keyframe+empty_moov+default_base_moof"]);
     command.arg(&path);
@@ -879,6 +1102,9 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
     if capture::available() {
         match start_native_buffer() {
             Ok(()) => return Ok(()),
+            #[cfg(windows)]
+            Err(error) => return Err(error),
+            #[cfg(not(windows))]
             Err(error) => {
                 if find_ffmpeg(&lock().ffmpeg).is_none() {
                     return Err(error);
@@ -892,14 +1118,41 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
 }
 
 fn start_native_buffer() -> Result<(), String> {
+    lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
     let hold = capture::start_buffer(keep, current_spec())?;
-    lock().native_buffer = Some(hold);
+    #[cfg(target_os = "linux")]
+    let audio = {
+        let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) else {
+            let _ = capture::finish(hold);
+            return Err("System audio replay needs ffmpeg with PulseAudio input support.".to_string());
+        };
+        let Some(buffer) = hold.buffer() else {
+            let _ = capture::finish(hold);
+            return Err("The replay buffer could not be opened.".to_string());
+        };
+        match start_replay_audio(&ffmpeg, buffer) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                let _ = capture::finish(hold);
+                return Err(error);
+            }
+        }
+    };
+    let mut live = lock();
+    live.native_buffer = Some(hold);
+    #[cfg(target_os = "linux")]
+    if let Some((child, stop, thread)) = audio {
+        live.audio_buffer = Some(child);
+        live.audio_stop = Some(stop);
+        live.audio_thread = Some(thread);
+    }
     Ok(())
 }
 
 /// ffmpeg's pictures stay in memory. Nothing is written until the player saves.
 fn start_pipe_buffer() -> Result<(), String> {
+    lock().note.clear();
     let ffmpeg = match find_ffmpeg(&lock().ffmpeg) {
         Some(path) => path,
         None => return Ok(()),
@@ -910,10 +1163,16 @@ fn start_pipe_buffer() -> Result<(), String> {
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(fps)))?;
+    // This worker pipes JPEG frames only; system audio is captured into the same
+    // in-memory replay ring by the companion PCM worker below.
     command.arg("-an");
-    if let Some(scale) = quality_scale(&lock().quality) {
-        command.args(["-vf", scale]);
-    }
+    let scale = quality_scale(&lock().quality).unwrap_or("");
+    let filter = if scale.is_empty() {
+        format!("fps={}", quality_fps(fps))
+    } else {
+        format!("fps={},{}", quality_fps(fps), scale)
+    };
+    command.args(["-vf", &filter]);
     command.args(["-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = command.spawn().map_err(|error| error.to_string())?;
@@ -924,19 +1183,51 @@ fn start_pipe_buffer() -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
     let shared = buffer.clone();
-    thread::Builder::new()
+    let _reader = match thread::Builder::new()
         .name("orbit-replay".to_string())
         .spawn(move || read_jpeg_pipe(stdout, shared, flag))
-        .map_err(|error| error.to_string())?;
+    {
+        Ok(reader) => reader,
+        Err(error) => {
+            kill_now(child);
+            return Err(format!("Could not start the picture buffer: {error}"));
+        }
+    };
+    #[cfg(target_os = "linux")]
+    let audio = match start_replay_audio(&ffmpeg, buffer.clone()) {
+        Ok(audio) => audio,
+        Err(error) => {
+            kill_now(child);
+            return Err(error);
+        }
+    };
     let mut live = lock();
     live.buffer = Some(child);
     live.pipe_stop = Some(stop);
     live.replay_frames = Some(buffer);
+    #[cfg(target_os = "linux")]
+    {
+        live.audio_buffer = Some(audio.0);
+        live.audio_stop = Some(audio.1);
+        live.audio_thread = Some(audio.2);
+    }
     Ok(())
 }
 
 fn stop_buffer() {
     let _held = gate();
+    #[cfg(target_os = "linux")]
+    if let Some(stop) = lock().audio_stop.take() {
+        stop.store(true, Ordering::SeqCst);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(child) = lock().audio_buffer.take() {
+        stop_child(child);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(reader) = lock().audio_thread.take() {
+        let _ = reader.join();
+    }
     if let Some(stop) = lock().pipe_stop.take() {
         stop.store(true, Ordering::SeqCst);
     }
@@ -961,17 +1252,18 @@ fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
         }
     }?;
     let dir = game_dir("replays")?;
-    let path = clip_path(&dir, &format!("{} last {seconds}s", lock().game), stamp, "mp4");
+    let path = clip_path(&dir, &format!("{} last {seconds}s", capture_name_for_dir(&dir)), stamp, "mp4");
     encode_kept(&path, &kept)?;
     let name = path
         .file_name()
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "the clip".to_string());
     let covered = kept.frames.len() as u32 / kept.fps.max(1);
+    let copied = clipboard_note(&path);
     if covered + 1 < seconds {
-        return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}."));
+        return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}.{copied}"));
     }
-    Ok(format!("Saved the last {seconds} seconds as {name}."))
+    Ok(format!("Saved the last {seconds} seconds as {name}.{copied}"))
 }
 
 fn encode_kept(path: &Path, kept: &capture::Kept) -> Result<(), String> {
@@ -993,29 +1285,49 @@ fn encode_kept(path: &Path, kept: &capture::Kept) -> Result<(), String> {
 }
 
 fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result<(), String> {
+    if !kept.has_audio() {
+        return Err("No system audio was captured, so Orbit did not save a silent replay.".to_string());
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let audio_path = path.with_extension("orbit-audio.wav");
+    if let Err(error) = capture::write_audio_wav(&audio_path, kept) {
+        let _ = fs::remove_file(&audio_path);
+        return Err(error);
     }
     let rate = kept.fps.max(1).to_string();
     let mut command = process::command(ffmpeg);
     command.args(["-y", "-f", "image2pipe", "-framerate"]);
     command.arg(&rate);
+    command.args(["-i", "pipe:0", "-i"]).arg(&audio_path);
     command.args([
-        "-i",
-        "pipe:0",
-        "-an",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
         "-vf",
         "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v",
         "libx264",
         "-pix_fmt",
         "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
         "-movflags",
         "+faststart",
     ]);
     command.arg(path);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
-    let mut child = command.spawn().map_err(|error| format!("Could not start ffmpeg: {error}"))?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_file(&audio_path);
+            return Err(format!("Could not start ffmpeg: {error}"));
+        }
+    };
     let write_result = child.stdin.as_mut().ok_or_else(|| "ffmpeg did not accept the pictures.".to_string()).and_then(|stdin| {
         for frame in &kept.frames {
             stdin.write_all(frame).map_err(|error| error.to_string())?;
@@ -1026,13 +1338,80 @@ fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result
     let status = child.wait().map_err(|error| error.to_string());
     if let Err(error) = write_result {
         let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&audio_path);
         return Err(error);
     }
-    if status.map(|item| item.success()).unwrap_or(false) && !missing_video(path) {
+    let succeeded = status.map(|item| item.success()).unwrap_or(false) && !missing_video(path);
+    let _ = fs::remove_file(&audio_path);
+    if succeeded {
         return Ok(());
     }
     let _ = fs::remove_file(path);
     Err("The video file was empty.".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn start_replay_audio(
+    ffmpeg: &Path,
+    buffer: capture::Buffer,
+) -> Result<(Child, Arc<AtomicBool>, thread::JoinHandle<()>), String> {
+    let monitor = system_audio_monitor().ok_or_else(|| {
+        "Orbit could not find the system-audio monitor. A PulseAudio-compatible output is required for replay audio.".to_string()
+    })?;
+    let mut command = process::command(ffmpeg);
+    command.args(["-hide_banner", "-loglevel", "error", "-thread_queue_size", "512", "-f", "pulse", "-i"]);
+    command.arg(monitor);
+    command.args(["-ac", "2", "-ar", "48000", "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"]);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = command.spawn().map_err(|error| format!("Could not start system-audio capture: {error}"))?;
+    let Some(stdout) = child.stdout.take() else {
+        kill_now(child);
+        return Err("ffmpeg did not open a system-audio stream.".to_string());
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let reader = match thread::Builder::new()
+        .name("orbit-audio-replay".to_string())
+        .spawn(move || read_audio_pipe(stdout, buffer, flag))
+    {
+        Ok(reader) => reader,
+        Err(error) => {
+            kill_now(child);
+            return Err(format!("Could not start the audio buffer: {error}"));
+        }
+    };
+    Ok((child, stop, reader))
+}
+
+#[cfg(target_os = "linux")]
+fn read_audio_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<AtomicBool>) {
+    let mut pending = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    let mut captured_frames = 0usize;
+    loop {
+        let read = match stdout.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(_) => break,
+        };
+        pending.extend_from_slice(&chunk[..read]);
+        let aligned = pending.len() / 4 * 4;
+        if aligned > 0 {
+            let pcm: Vec<u8> = pending.drain(..aligned).collect();
+            captured_frames = captured_frames.saturating_add(aligned / 4);
+            buffer.push_audio_pcm(pcm);
+        }
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+    if !stop.load(Ordering::SeqCst) {
+        lock().note = if captured_frames == 0 {
+            "The system-audio stream ended before Orbit captured any audio.".to_string()
+        } else {
+            "The system-audio stream stopped unexpectedly; saved replays may be shorter.".to_string()
+        };
+    }
 }
 
 fn read_jpeg_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<AtomicBool>) {
@@ -1186,12 +1565,12 @@ pub(crate) fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn data_root() -> Result<PathBuf, String> {
-    let root = lock().root.clone();
-    if root.as_os_str().is_empty() {
-        return Err("Orbit is still starting.".to_string());
+fn configured_capture_dir(root: &Path, selected: &str, kind: &str) -> PathBuf {
+    if selected.trim().is_empty() {
+        if root.as_os_str().is_empty() { PathBuf::new() } else { root.join(kind) }
+    } else {
+        PathBuf::from(selected.trim())
     }
-    Ok(root)
 }
 
 fn kind_name(kind: &str) -> &'static str {
@@ -1203,23 +1582,45 @@ fn kind_name(kind: &str) -> &'static str {
 }
 
 fn kind_dir(kind: &str) -> Result<PathBuf, String> {
-    Ok(kind_dir_from(&data_root()?, kind_name(kind)))
+    let name = kind_name(kind);
+    let live = lock();
+    let selected = match name {
+        "screenshots" => &live.screenshot_root,
+        "replays" => &live.replay_root,
+        _ => &live.recording_root,
+    };
+    if !selected.as_os_str().is_empty() {
+        return Ok(selected.clone());
+    }
+    if live.root.as_os_str().is_empty() {
+        return Err("Orbit is still starting.".to_string());
+    }
+    Ok(live.root.join(name))
 }
 
 fn kind_dir_from(root: &Path, kind: &str) -> PathBuf {
     root.join(kind_name(kind))
 }
 
+fn capture_label(game: &str, playing: bool) -> String {
+    if playing && !game.trim().is_empty() {
+        game.to_string()
+    } else {
+        "Desktop".to_string()
+    }
+}
+
+fn capture_name() -> String {
+    let live = lock();
+    capture_label(&live.game, live.playing)
+}
+
+fn capture_name_for_dir(dir: &Path) -> String {
+    dir.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(capture_name)
+}
+
 fn game_dir(kind: &str) -> Result<PathBuf, String> {
-    let game = {
-        let name = lock().game.clone();
-        if name.trim().is_empty() {
-            "Desktop".to_string()
-        } else {
-            name
-        }
-    };
-    let dir = kind_dir(kind)?.join(safe_name(&game));
+    let dir = kind_dir(kind)?.join(safe_name(&capture_name()));
     fs::create_dir_all(&dir).map_err(|error| format!("Could not create the folder: {error}"))?;
     Ok(dir)
 }
@@ -1263,9 +1664,9 @@ fn collect_kind(dir: &Path, kind: &str, found: &mut Vec<(SystemTime, GalleryItem
 
 fn allowed_capture(path: &Path) -> bool {
     let Ok(path) = path.canonicalize() else { return false };
-    let Ok(root) = data_root() else { return false };
-    for folder in ["screenshots", "recordings", "replays"] {
-        let Ok(base) = root.join(folder).canonicalize() else { continue };
+    for kind in ["screenshots", "recordings", "replays"] {
+        let Ok(base) = kind_dir(kind) else { continue };
+        let Ok(base) = base.canonicalize() else { continue };
         if path.starts_with(&base) {
             return true;
         }
@@ -1283,6 +1684,280 @@ fn saved_name(prefix: &str, path: &Path) -> String {
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "the picture".to_string());
     format!("{prefix} {name}.")
+}
+
+fn saved_picture(path: &Path) -> Result<String, String> {
+    Ok(format!("{}{}", saved_name("Saved the picture as", path), clipboard_note(path)))
+}
+
+fn clipboard_note(path: &Path) -> String {
+    match copy_capture_to_clipboard(path) {
+        Ok(()) => " Copied to clipboard.".to_string(),
+        Err(error) => format!(" Clipboard copy failed: {error}"),
+    }
+}
+
+/// Copy the saved media as a file, so Paste works in Explorer/Finder and in apps
+/// that accept file attachments. On Windows, screenshots also get a native image
+/// format for apps that expect pixels rather than a file.
+#[cfg(windows)]
+fn screenshot_dib(path: &Path) -> Option<Vec<u8>> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "jpg" && extension != "jpeg" {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let (width, height, bgra) = capture::decode_jpeg(&bytes).ok()?;
+    dib_24bit(width, height, &bgra)
+}
+
+#[cfg(windows)]
+fn dib_24bit(width: u32, height: u32, bgra: &[u8]) -> Option<Vec<u8>> {
+    let width_usize = usize::try_from(width).ok()?;
+    let height_usize = usize::try_from(height).ok()?;
+    if width_usize == 0 || height_usize == 0 || width_usize > i32::MAX as usize || height_usize > i32::MAX as usize {
+        return None;
+    }
+    let pixels = width_usize.checked_mul(height_usize)?;
+    if bgra.len() != pixels.checked_mul(4)? {
+        return None;
+    }
+    let row_bytes = width_usize.checked_mul(3)?;
+    let stride = row_bytes.checked_add(3)? & !3;
+    let image_bytes = stride.checked_mul(height_usize)?;
+    let image_size = u32::try_from(image_bytes).ok()?;
+    let mut dib = Vec::with_capacity(40usize.checked_add(image_bytes)?);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+    dib.extend_from_slice(&image_size.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    for row in (0..height_usize).rev() {
+        let begin = row * width_usize * 4;
+        for pixel in bgra[begin..begin + width_usize * 4].chunks_exact(4) {
+            dib.extend_from_slice(&[pixel[0], pixel[1], pixel[2]]);
+        }
+        let padding = stride - row_bytes;
+        let end = dib.len().checked_add(padding)?;
+        dib.resize(end, 0);
+    }
+    Some(dib)
+}
+
+#[cfg(windows)]
+fn copy_png_image_with_powershell(path: &Path) -> Result<(), String> {
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "Add-Type -AssemblyName System.Drawing; Add-Type -AssemblyName System.Windows.Forms; $image = [System.Drawing.Image]::FromFile('{escaped}'); try {{ [System.Windows.Forms.Clipboard]::SetImage($image) }} finally {{ $image.Dispose() }}"
+    );
+    let output = process::command("powershell")
+        .args(["-NoProfile", "-STA", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|error| format!("Could not start PowerShell to copy the image: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() { "PowerShell could not copy the image.".to_string() } else { detail })
+    }
+}
+
+#[cfg(windows)]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn OpenClipboard(owner: *mut c_void) -> i32;
+        fn EmptyClipboard() -> i32;
+        fn SetClipboardData(format: u32, data: *mut c_void) -> *mut c_void;
+        fn CloseClipboard() -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalAlloc(flags: u32, bytes: usize) -> *mut c_void;
+        fn GlobalLock(memory: *mut c_void) -> *mut c_void;
+        fn GlobalUnlock(memory: *mut c_void) -> i32;
+        fn GlobalFree(memory: *mut c_void) -> *mut c_void;
+    }
+
+    let allocate = |bytes: &[u8]| -> Result<*mut c_void, String> {
+        let memory = unsafe { GlobalAlloc(0x0002 | 0x0040, bytes.len()) }; // GMEM_MOVEABLE | GMEM_ZEROINIT
+        if memory.is_null() {
+            return Err("Windows could not allocate clipboard memory.".to_string());
+        }
+        let data = unsafe { GlobalLock(memory) };
+        if data.is_null() {
+            unsafe { GlobalFree(memory); }
+            return Err("Windows could not lock clipboard memory.".to_string());
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast::<u8>(), bytes.len());
+            GlobalUnlock(memory);
+        }
+        Ok(memory)
+    };
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.extend([0, 0]);
+    let header_size = 20u32; // DROPFILES: DWORD, POINT, BOOL, BOOL.
+    let mut file_data = Vec::with_capacity(header_size as usize + wide.len() * 2);
+    file_data.extend_from_slice(&header_size.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&0i32.to_le_bytes());
+    file_data.extend_from_slice(&1i32.to_le_bytes());
+    for unit in wide {
+        file_data.extend_from_slice(&unit.to_le_bytes());
+    }
+    let file_memory = allocate(&file_data)?;
+    let image_dib = screenshot_dib(path);
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    if image_dib.is_none() && extension == "png" && copy_png_image_with_powershell(path).is_ok() {
+        unsafe { GlobalFree(file_memory); }
+        return Ok(());
+    }
+    let image_memory = image_dib.and_then(|dib| allocate(&dib).ok()).unwrap_or(std::ptr::null_mut());
+    if unsafe { OpenClipboard(std::ptr::null_mut()) } == 0 {
+        unsafe {
+            GlobalFree(file_memory);
+            if !image_memory.is_null() {
+                GlobalFree(image_memory);
+            }
+        }
+        return Err("Windows clipboard is busy.".to_string());
+    }
+    let emptied = unsafe { EmptyClipboard() } != 0;
+    let file_stored = emptied && !unsafe { SetClipboardData(15, file_memory) }.is_null(); // CF_HDROP
+    let image_stored = emptied && !image_memory.is_null() && !unsafe { SetClipboardData(8, image_memory) }.is_null(); // CF_DIB
+    unsafe { CloseClipboard(); }
+    if !file_stored {
+        unsafe {
+            GlobalFree(file_memory);
+        }
+    }
+    if !image_memory.is_null() && !image_stored {
+        unsafe {
+            GlobalFree(image_memory);
+        }
+    }
+    if file_stored || image_stored {
+        Ok(())
+    } else {
+        Err("Windows could not copy the file to the clipboard.".to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    let extension = path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
+    let image_type = match extension.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        _ => None,
+    };
+    if let Some(image_type) = image_type {
+        if let Ok(image) = fs::read(path) {
+            let mut last = String::new();
+            let wayland_args = ["--type", image_type];
+            let x11_args = ["-selection", "clipboard", "-t", image_type, "-i"];
+            for (program, args) in [("wl-copy", &wayland_args[..]), ("xclip", &x11_args[..])] {
+                match send_clipboard(program, args, &image) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => last = error,
+                }
+            }
+            if !last.is_empty() {
+                log::debug!("could not copy screenshot pixels, trying the file instead: {last}");
+            }
+        }
+    }
+    let uri = file_uri(path)?;
+    let files = format!("copy\n{uri}\n");
+    let uri_list = format!("{uri}\r\n");
+    let mut last = String::new();
+    for (program, args, data) in [
+        ("wl-copy", & ["--type", "x-special/gnome-copied-files"][..], files.as_bytes()),
+        ("xclip", & ["-selection", "clipboard", "-t", "x-special/gnome-copied-files", "-i"][..], files.as_bytes()),
+        ("wl-copy", & ["--type", "text/uri-list"][..], uri_list.as_bytes()),
+        ("xclip", & ["-selection", "clipboard", "-t", "text/uri-list", "-i"][..], uri_list.as_bytes()),
+    ] {
+        match send_clipboard(program, args, data) {
+            Ok(()) => return Ok(()),
+            Err(error) => last = error,
+        }
+    }
+    Err(if last.is_empty() { "No desktop clipboard helper was found.".to_string() } else { last })
+}
+
+#[cfg(target_os = "macos")]
+fn copy_capture_to_clipboard(path: &Path) -> Result<(), String> {
+    let escaped = path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let image_class = match path.extension().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => Some("PNGf"),
+        "jpg" | "jpeg" => Some("JPEG"),
+        _ => None,
+    };
+    if let Some(class) = image_class {
+        let script = format!("set the clipboard to (read (POSIX file \"{escaped}\") as «class {class}»)");
+        if process::command("osascript").arg("-e").arg(script).output().is_ok_and(|output| output.status.success()) {
+            return Ok(());
+        }
+    }
+    let script = format!("set the clipboard to (POSIX file \"{escaped}\" as alias)");
+    if process::command("osascript").arg("-e").arg(script).output().is_ok_and(|output| output.status.success()) {
+        return Ok(());
+    }
+    let uri = file_uri(path)?;
+    send_clipboard("pbcopy", &[], uri.as_bytes())
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn copy_capture_to_clipboard(_path: &Path) -> Result<(), String> {
+    Err("File clipboard support is not available on this system.".to_string())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn send_clipboard(program: &str, args: &[&str], data: &[u8]) -> Result<(), String> {
+    let mut child = process::command(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start {program}: {error}"))?;
+    let mut input = child.stdin.take().ok_or_else(|| format!("Could not write to {program}."))?;
+    input.write_all(data).map_err(|error| format!("Could not write to the clipboard: {error}"))?;
+    drop(input);
+    let output = child.wait_with_output().map_err(|error| format!("Could not finish {program}: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if error.is_empty() { format!("{program} could not copy the file.") } else { error })
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn file_uri(path: &Path) -> Result<String, String> {
+    let path = path.canonicalize().map_err(|error| format!("Could not locate the saved file: {error}"))?;
+    let raw = path.to_string_lossy();
+    let mut uri = String::from("file://");
+    for byte in raw.as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-._~".contains(byte) {
+            uri.push(*byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Ok(uri)
 }
 
 fn launch_path(path: &Path) -> Result<(), String> {
@@ -1475,19 +2150,6 @@ pub fn show_pins(app: &AppHandle) {
     rest_window(app);
 }
 
-fn exclude_from_capture(window: &tauri::WebviewWindow) {
-    #[cfg(windows)]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
-
-        let Ok(hwnd) = window.hwnd() else { return };
-        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = window;
-    }
-}
 
 fn sync_click_through(app: &AppHandle) {
     if !RESTING.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
@@ -1618,6 +2280,13 @@ fn read_xinput(slot: &mut u32) -> Option<(Vec<bool>, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_desktop_capture_does_not_reuse_the_last_game_title() {
+        assert_eq!(capture_label("Previously Opened", false), "Desktop");
+        assert_eq!(capture_label("", true), "Desktop");
+        assert_eq!(capture_label("Currently Playing", true), "Currently Playing");
+    }
 
     #[test]
     fn a_name_cannot_leave_the_clips_folder() {

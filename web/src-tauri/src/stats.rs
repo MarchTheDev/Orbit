@@ -25,6 +25,7 @@ pub struct MachineStats {
 struct Cache {
     stats: MachineStats,
     asked: Option<Instant>,
+    fps_asked: bool,
 }
 
 const fn blank() -> MachineStats {
@@ -41,34 +42,46 @@ const fn blank() -> MachineStats {
     }
 }
 
-static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None });
+static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None, fps_asked: false });
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Drop the sampler. Closing the overlay should not keep a desktop duplication open.
 pub fn release() {
     if let Ok(mut cache) = CACHE.lock() {
         cache.asked = None;
+        cache.fps_asked = false;
     }
 }
 
-pub fn sample() -> MachineStats {
+pub fn sample(want_fps: bool) -> MachineStats {
     // A bad counter or a lost desktop frame must come back as missing numbers.
     // Unwinding out of this command is what used to take the whole app down
     // the moment the overlay asked for them.
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(sample_asked)).unwrap_or_else(|_| blank())
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sample_asked(want_fps))).unwrap_or_else(|_| blank())
 }
 
-fn sample_asked() -> MachineStats {
-    {
+fn sample_asked(want_fps: bool) -> MachineStats {
+    let first = {
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.asked = Some(Instant::now());
-        // A first look should not wait for the thread to start.
+        cache.fps_asked = want_fps;
+        cache.stats.ram.is_none()
+    };
+    // Do slow OS counters without holding the cache lock. The first request is
+    // still answered immediately instead of waiting for the sampler thread.
+    if first {
+        let next = read_now();
+        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.stats.ram.is_none() {
-            cache.stats = read_now();
+            cache.stats = next;
         }
     }
     ensure_running();
-    CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).stats.clone()
+    let mut stats = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).stats.clone();
+    if !want_fps {
+        stats.fps = None;
+    }
+    stats
 }
 
 fn ensure_running() {
@@ -84,22 +97,64 @@ fn ensure_running() {
             // faults inside dxgi.dll instead of returning an error.
             let _ = com_ready();
         }
-        let mut frames = watch_frames();
+        let mut frames = None;
+        let mut resources = {
+            let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.stats.ram.is_some().then(|| cache.stats.clone())
+        };
+        let mut last_resource_sample = Instant::now();
         loop {
-            let idle = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4));
+            let (idle, want_fps) = {
+                let cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                (cache.asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4)), cache.fps_asked)
+            };
             if idle {
+                // Dispose the frame duplication on its owning thread before a
+                // fast reopen can start another worker.
+                frames = None;
                 RUNNING.store(false, Ordering::SeqCst);
+                // A request can arrive between the idle check and clearing the
+                // running flag. Re-check after clearing it so that a fast reopen
+                // does not leave the cache asleep until the next UI poll.
+                let active = CACHE
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .asked
+                    .is_some_and(|asked| asked.elapsed() <= Duration::from_secs(4));
+                if active {
+                    ensure_running();
+                }
                 break;
             }
+            if want_fps {
+                if frames.is_none() {
+                    frames = watch_frames();
+                }
+            } else {
+                // Releasing the duplication matters: a performance-only box
+                // does not need a live desktop frame stream.
+                frames = None;
+            }
+            let now = Instant::now();
+            let refresh_resources = resources.is_none() || now.saturating_duration_since(last_resource_sample) >= Duration::from_secs(1);
             let pulled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut next = read_now();
-                next.fps = frames.as_mut().and_then(|watch| watch.take());
+                let mut next = if refresh_resources {
+                    let sample = read_now();
+                    resources = Some(sample.clone());
+                    last_resource_sample = now;
+                    sample
+                } else {
+                    resources.clone().unwrap_or_else(blank)
+                };
+                // Frame presentation still gets checked frequently, while the
+                // heavier CPU/GPU/VRAM counters track Task Manager's one-second cadence.
+                next.fps = if want_fps { frames.as_mut().and_then(|watch| watch.take()) } else { None };
                 next
             }));
             match pulled {
                 Ok(mut next) => {
                     if let Ok(mut cache) = CACHE.lock() {
-                        if next.fps.is_none() {
+                        if want_fps && next.fps.is_none() {
                             next.fps = cache.stats.fps;
                         }
                         cache.stats = next;
@@ -111,6 +166,7 @@ fn ensure_running() {
                     // the output while the old frame was still acquired.
                     frames = None;
                     frames = watch_frames();
+                    resources = None;
                 }
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -237,9 +293,11 @@ fn com_ready() -> bool {
 #[cfg(windows)]
 fn windows_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
     let _ = com_ready();
-    let total = vram_total();
-    let (gpu, used_reading) = pdh_gpu();
-    let used = used_reading.unwrap_or(0);
+    let adapter = primary_vram_adapter();
+    let total = adapter.map(|(_, _, total)| total).unwrap_or(0);
+    let luid = adapter.map(|(low, high, _)| (low, high));
+    let (gpu, used_reading) = pdh_gpu(luid);
+    let used = used_reading.unwrap_or(0).min(total);
     let vram = if total > 0 && used_reading.is_some() {
         Some(((used.saturating_mul(100)) / total).min(100) as u8)
     } else {
@@ -249,15 +307,18 @@ fn windows_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
 }
 
 #[cfg(windows)]
-fn vram_total() -> u64 {
+fn primary_vram_adapter() -> Option<(u32, i32, u64)> {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
     unsafe {
-        let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else { return 0 };
-        let mut best = 0u64;
+        let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else { return None };
+        let mut best = None::<(u32, i32, u64)>;
         let mut index = 0u32;
         while let Ok(adapter) = factory.EnumAdapters1(index) {
             if let Ok(desc) = adapter.GetDesc1() {
-                best = best.max(desc.DedicatedVideoMemory as u64);
+                let total = desc.DedicatedVideoMemory as u64;
+                if total > best.map(|(_, _, memory)| memory).unwrap_or(0) {
+                    best = Some((desc.AdapterLuid.LowPart, desc.AdapterLuid.HighPart, total));
+                }
             }
             index += 1;
             if index > 8 {
@@ -269,7 +330,7 @@ fn vram_total() -> u64 {
 }
 
 #[cfg(windows)]
-fn pdh_gpu() -> (Option<u8>, Option<u64>) {
+fn pdh_gpu(adapter: Option<(u32, i32)>) -> (Option<u8>, Option<u64>) {
     use std::sync::Mutex as GpuMutex;
     use windows::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
@@ -318,22 +379,24 @@ fn pdh_gpu() -> (Option<u8>, Option<u64>) {
         if PdhCollectQueryData(query.query) != 0 {
             return (None, None);
         }
-        // A counter that failed to open is a null handle. Asking PDH to format
-        // it is not a missing number, it is an access violation.
-        let gpu_3d = if query.util_3d_ok { counter_max(query.util_3d, PDH_FMT_DOUBLE, true) } else { None };
-        let gpu_any = if query.util_ok { counter_max(query.util, PDH_FMT_DOUBLE, true) } else { None };
-        let gpu = match (gpu_3d, gpu_any) {
-            (Some(value), _) if value > 0.0 => Some(value),
-            (_, Some(value)) => Some(value),
-            (value, _) => value,
-        };
-        let used = if query.used_ok { counter_max(query.used, PDH_FMT_LARGE, false) } else { None };
+        // Restrict the readings to the adapter with the largest dedicated
+        // memory, which is normally the active discrete GPU. Task Manager's
+        // GPU percentage is the busiest engine, while its dedicated-memory
+        // reading is the sum of all processes on that adapter.
+        let gpu_3d = if query.util_3d_ok { counter_max(query.util_3d, PDH_FMT_DOUBLE, true, adapter) } else { None };
+        let gpu_any = if query.util_ok { counter_max(query.util, PDH_FMT_DOUBLE, true, adapter) } else { None };
+        let gpu = gpu_any.or(gpu_3d);
+        let used = if query.used_ok { counter_sum(query.used, PDH_FMT_LARGE, false, adapter) } else { None };
         (gpu.map(|value| value.round().clamp(0.0, 100.0) as u8), used.map(|value| value.max(0.0) as u64))
     }
 }
 
 #[cfg(windows)]
-unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER, format: windows::Win32::System::Performance::PDH_FMT, percent: bool) -> Option<f64> {
+unsafe fn counter_rows(
+    counter: windows::Win32::System::Performance::PDH_HCOUNTER,
+    format: windows::Win32::System::Performance::PDH_FMT,
+    percent: bool,
+) -> Option<Vec<(String, f64)>> {
     use windows::Win32::System::Performance::{PdhGetFormattedCounterArrayW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_MORE_DATA};
     if counter.0.is_null() {
         return None;
@@ -347,15 +410,14 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
     let stride = std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>();
     // `size` is bytes. Dividing it and then telling PDH the old byte count
     // writes past the allocation whenever the count does not divide evenly.
-    let Some(items) = counter_buffer_items(size, stride) else { return None };
+    let items = counter_buffer_items(size, stride)?;
     let mut buffer = vec![std::mem::zeroed::<PDH_FMT_COUNTERVALUE_ITEM_W>(); items];
     let mut bytes = (items * stride) as u32;
     let status = PdhGetFormattedCounterArrayW(counter, format, &mut bytes, &mut count, Some(buffer.as_mut_ptr()));
     if status != 0 {
         return None;
     }
-    let mut best = None::<f64>;
-    let mut best_3d = None::<f64>;
+    let mut rows = Vec::new();
     for item in buffer.iter().take((count as usize).min(buffer.len())) {
         // 0 is a settled reading. 1 is the first reading after the counter
         // opened, which is still a number. Anything else is not usable.
@@ -372,19 +434,69 @@ unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER
         if !value.is_finite() || value < 0.0 {
             continue;
         }
-        let previous = best.unwrap_or(0.0f64);
-        best = Some(if value > previous { value } else { previous });
-        if percent {
-            let name = wide_text(windows::core::PWSTR(item.szName.0));
-            if name.contains("engtype_3D") {
-                let previous = best_3d.unwrap_or(0.0f64);
-                best_3d = Some(if value > previous { value } else { previous });
-            }
+        rows.push((wide_text(windows::core::PWSTR(item.szName.0)), value));
+    }
+    Some(rows)
+}
+
+#[cfg(windows)]
+unsafe fn counter_max(
+    counter: windows::Win32::System::Performance::PDH_HCOUNTER,
+    format: windows::Win32::System::Performance::PDH_FMT,
+    percent: bool,
+    adapter: Option<(u32, i32)>,
+) -> Option<f64> {
+    let rows = counter_rows(counter, format, percent)?;
+    let selected = adapter.map(|(low, high)| {
+        rows.iter().filter(|(name, _)| instance_matches_adapter(name, low, high)).cloned().collect::<Vec<_>>()
+    }).unwrap_or_default();
+    let rows = if selected.is_empty() { rows } else { selected };
+    if percent {
+        gpu_engine_max(&rows).or_else(|| rows.iter().map(|(_, value)| *value).reduce(f64::max))
+    } else {
+        rows.iter().map(|(_, value)| *value).reduce(f64::max)
+    }
+}
+
+#[cfg(windows)]
+unsafe fn counter_sum(
+    counter: windows::Win32::System::Performance::PDH_HCOUNTER,
+    format: windows::Win32::System::Performance::PDH_FMT,
+    percent: bool,
+    adapter: Option<(u32, i32)>,
+) -> Option<f64> {
+    let rows = counter_rows(counter, format, percent)?;
+    let selected = adapter.map(|(low, high)| {
+        rows.iter().filter(|(name, _)| instance_matches_adapter(name, low, high)).map(|(_, value)| *value).collect::<Vec<_>>()
+    }).unwrap_or_default();
+    if !selected.is_empty() {
+        Some(selected.into_iter().sum())
+    } else {
+        rows.iter().map(|(_, value)| *value).reduce(|total, value| total + value)
+    }
+}
+
+fn gpu_engine_max(rows: &[(String, f64)]) -> Option<f64> {
+    let mut engines = std::collections::HashMap::<String, f64>::new();
+    for (name, value) in rows {
+        if let Some(key) = name.to_ascii_lowercase().find("luid_").map(|index| name[index..].to_ascii_lowercase()) {
+            *engines.entry(key).or_default() += *value;
         }
     }
-    // A 3D engine is the game. If the name cannot be read, the busiest
-    // engine is still a real reading, and a blank GPU line is not.
-    if percent { best_3d.or(best) } else { best }
+    engines.values().copied().reduce(f64::max)
+}
+
+fn instance_matches_adapter(name: &str, low: u32, high: i32) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    let parts = lowered.split('_').collect::<Vec<_>>();
+    let high = high as u32;
+    parts.windows(3).any(|parts| {
+        if parts[0] != "luid" {
+            return false;
+        }
+        let parse = |value: &str| u32::from_str_radix(value.strip_prefix("0x").unwrap_or(value), 16).ok();
+        matches!((parse(&parts[1]), parse(&parts[2])), (Some(first), Some(second)) if (first == high && second == low) || (first == low && second == high))
+    })
 }
 
 #[cfg(windows)]
@@ -709,7 +821,7 @@ fn counter_buffer_items(bytes: u32, stride: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{counter_buffer_items, frames_per_second};
+    use super::{counter_buffer_items, frames_per_second, gpu_engine_max, instance_matches_adapter};
 
     #[test]
     fn a_counter_buffer_is_never_smaller_than_pdh_asked_for() {
@@ -718,6 +830,23 @@ mod tests {
         let items = counter_buffer_items(bytes, stride).expect("fits");
         assert!(items * stride >= bytes as usize);
         assert_eq!(items, 5);
+    }
+
+    #[test]
+    fn gpu_utilization_sums_processes_per_engine_before_selecting_the_busiest() {
+        let rows = vec![
+            ("pid_1_luid_0x00000000_0x00001234_phys_0_eng_0_engtype_3D".to_string(), 35.0),
+            ("pid_2_luid_0x00000000_0x00001234_phys_0_eng_0_engtype_3D".to_string(), 30.0),
+            ("pid_1_luid_0x00000000_0x00001234_phys_0_eng_1_engtype_3D".to_string(), 70.0),
+        ];
+        assert_eq!(gpu_engine_max(&rows), Some(70.0));
+    }
+
+    #[test]
+    fn gpu_counters_match_the_selected_adapter_luid_in_either_order() {
+        assert!(instance_matches_adapter("pid_44_luid_0x00000000_0x00001234_phys_0_eng_1_engtype_3D", 0x1234, 0));
+        assert!(instance_matches_adapter("pid_44_luid_0x00001234_0x00000000_phys_0_eng_1_engtype_3D", 0x1234, 0));
+        assert!(!instance_matches_adapter("pid_44_luid_0x00000000_0x00005678_phys_0_eng_1_engtype_3D", 0x1234, 0));
     }
 
     #[test]

@@ -665,6 +665,9 @@ fn overlay_configure(
     quality: Option<String>,
     fps: Option<u32>,
     ffmpeg: String,
+    screenshot_directory: String,
+    recording_directory: String,
+    replay_directory: String,
 ) {
     overlay::configure(
         Some(&app),
@@ -675,6 +678,9 @@ fn overlay_configure(
         quality.as_deref().unwrap_or("1080p"),
         fps.unwrap_or(30),
         &ffmpeg,
+        &screenshot_directory,
+        &recording_directory,
+        &replay_directory,
     );
 }
 
@@ -736,8 +742,8 @@ fn audio_set_named(name: String, volume: u8, muted: bool) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn machine_stats() -> stats::MachineStats {
-    stats::sample()
+fn machine_stats(want_fps: bool) -> stats::MachineStats {
+    stats::sample(want_fps)
 }
 
 /// Add the overlay's notes under the journal notes for the game that is running.
@@ -773,6 +779,27 @@ fn overlay_open_settings(app: tauri::AppHandle) {
 #[tauri::command]
 fn overlay_playing(title: String) {
     overlay::game_started(&title);
+}
+
+#[tauri::command]
+async fn overlay_ready_notice(app: tauri::AppHandle, title: String) -> Result<(), String> {
+    // The launch path calls this immediately after the game starts. Do not build
+    // or show a WebView from the synchronous invoke handler: queue the native
+    // window work onto Tauri's main thread and wait off-thread for its result.
+    tauri::async_runtime::spawn_blocking(move || {
+        let (notice_tx, notice_rx) = std::sync::mpsc::channel();
+        let notice_app = app.clone();
+        app.run_on_main_thread(move || {
+            let _ = notice_tx.send(overlay::ready_notice(&notice_app, &title));
+        })
+        .map_err(|error| error.to_string())?;
+
+        notice_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|error| format!("The game-start notice could not be displayed: {error}"))?
+    })
+    .await
+    .map_err(|error| format!("The game-start notice task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -819,6 +846,16 @@ fn overlay_open_kind(kind: String) -> Result<String, String> {
 #[tauri::command]
 fn overlay_open(path: String) -> Result<(), String> {
     overlay::open_item(&path)
+}
+
+#[tauri::command]
+fn overlay_delete(path: String) -> Result<(), String> {
+    overlay::delete_item(&path)
+}
+
+#[tauri::command]
+fn overlay_copy(path: String) -> Result<(), String> {
+    overlay::copy_item(&path)
 }
 
 #[tauri::command]
@@ -2473,6 +2510,7 @@ pub fn run() {
             append_playthrough_notes,
             overlay_open_settings,
             overlay_playing,
+            overlay_ready_notice,
             overlay_status,
             overlay_shot,
             overlay_record,
@@ -2481,6 +2519,8 @@ pub fn run() {
             overlay_folder,
             overlay_open_kind,
             overlay_open,
+            overlay_delete,
+            overlay_copy,
             overlay_gallery,
         ])
         .build(tauri::generate_context!())

@@ -15,6 +15,7 @@ import { build } from 'esbuild';
 const dir = path.join('.test-build');
 mkdirSync(dir, { recursive: true });
 const checks = [
+  'tests/shutter.test.mjs',
   'tests/appearance.test.mjs',
   'tests/favorite-star.test.mjs',
   'tests/settings.test.mjs',
@@ -40,6 +41,9 @@ const checks = [
   'tests/launcher-path.test.mjs',
   'tests/idle-animations.test.mjs',
   'tests/tab-order.test.mjs',
+  'tests/overlay-toast.test.mjs',
+  'tests/capture-pipeline.test.mjs',
+  'tests/capture-feedback.test.mjs',
   'tests/reorder.test.mjs',
   'tests/pad-nav.test.mjs',
 ];

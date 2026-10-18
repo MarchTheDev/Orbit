@@ -1,4 +1,4 @@
-import { directionsHeld, heldDirection, journalMove, padDistance, padEdges, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
+import { directionsHeld, heldDirection, journalMove, mayHandleGamepadInput, padDistance, padEdges, padEdgesWhenOwned, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
 
 let failures = 0;
 const check = (name, pass) => {
@@ -48,5 +48,15 @@ check('another direction still counts while up is only the opening hold', heldDi
 const cleared = releaseRest(rest, directionsHeld({ buttons: Array(16).fill(false), axes: [0, 0, 0, 0] }));
 check('letting the stick go clears the hold', !cleared.up);
 check('a later push up still counts', heldDirection({ buttons: Array(16).fill(false), axes: [0, -0.8, 0, 0] }, cleared) === 'up');
+
+console.log('the library only acts on a controller while its window owns focus');
+const startButtons = Array(16).fill(false);
+startButtons[9] = true;
+const startPress = { buttons: startButtons, axes: [0, 0, 0, 0] };
+check('Start still maps to Play in the focused library', padEdgesWhenOwned(mayHandleGamepadInput(false, true, true), null, startPress).includes('play'));
+check('Start is ignored while the library is unfocused', padEdgesWhenOwned(mayHandleGamepadInput(false, true, false), null, startPress).length === 0);
+check('Start is ignored while the library is hidden', padEdgesWhenOwned(mayHandleGamepadInput(false, false, true), null, startPress).length === 0);
+check('the main window leaves input to the overlay when it is open', padEdgesWhenOwned(mayHandleGamepadInput(true, true, true), null, startPress).length === 0);
+check('a held Start button does not become a new press on refocus', padEdgesWhenOwned(mayHandleGamepadInput(false, true, true), startPress, startPress).length === 0);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

@@ -16,6 +16,8 @@ export interface ToastAction {
 
 export interface ToastMessage {
   text: string;
+  /** An optional second line that explains what the notice is for. */
+  detail?: string;
   tone?: ToastTone;
   /**
    * Buttons, for a toast that is asking something rather than telling. Choosing

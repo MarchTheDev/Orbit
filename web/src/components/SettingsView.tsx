@@ -52,7 +52,6 @@ import {
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { playShutter } from '../services/shutter';
 import { CopySettings } from './CopySettings';
-import { AppMixer } from './AppMixer';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
@@ -312,9 +311,10 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Overlay', section: 'orbit-overlay', keywords: 'overlay alt x start select screenshot recording replay hotkey' },
   { label: 'Replay lengths', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 90 120 seconds custom clip lengths' },
   { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
-  { label: 'Screenshot sound', section: 'orbit-overlay', keywords: 'overlay shutter chime sound picture saved volume' },
+  { label: 'Capture chime', section: 'orbit-overlay', keywords: 'overlay shutter recording replay screenshot chime sound saved volume' },
   { label: 'Capture notes', section: 'orbit-overlay', keywords: 'overlay toast screenshot recording replay saved notification' },
-  { label: 'Overlay open note', section: 'orbit-overlay', keywords: 'overlay working popup banner open note' },
+  { label: 'Game start note', section: 'orbit-overlay', keywords: 'overlay working popup banner start game notice' },
+  { label: 'Capture folder', section: 'orbit-overlay', keywords: 'overlay screenshots recordings replays save location path directory folder' },
   { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes resize' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
@@ -332,7 +332,6 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
-  { label: 'Audio', section: 'orbit-sound', keywords: 'mixer volume audio apps speakers mute quieter louder' },
   { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
@@ -390,15 +389,19 @@ function OverlaySettings({
     setOverlay({ lengths: [...extras, next].sort((a, b) => a - b), seconds: next });
   };
 
-  const sep = where?.includes('\\') ? '\\' : '/';
-  const captureRoot = where ? where.replace(/[\\/]+$/, '') : '';
-  const captureFolders = captureRoot
-    ? [
-        { kind: 'screenshots', label: 'Screenshots', path: `${captureRoot}${sep}screenshots` },
-        { kind: 'recordings', label: 'Recordings', path: `${captureRoot}${sep}recordings` },
-        { kind: 'replays', label: 'Replays', path: `${captureRoot}${sep}replays` },
-      ]
-    : [];
+  const sep = where.includes('\\') ? '\\' : '/';
+  const trimmedRoot = where.replace(/[\\/]+$/, '');
+  const captureRoot = trimmedRoot || (where.startsWith('/') ? '/' : '');
+  const capturePath = (name: string) =>
+    captureRoot ? `${captureRoot}${captureRoot.endsWith(sep) ? '' : sep}${name}` : '';
+  const captureFolders = ([
+    { kind: 'screenshots', label: 'Screenshots', setting: 'screenshotDirectory' },
+    { kind: 'recordings', label: 'Recordings', setting: 'recordingDirectory' },
+    { kind: 'replays', label: 'Replays', setting: 'replayDirectory' },
+  ] as const).map((folder) => {
+    const custom = overlay?.[folder.setting]?.trim() ?? '';
+    return { ...folder, custom, path: custom || capturePath(folder.kind) };
+  });
 
   return (
     <>
@@ -412,7 +415,7 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="This stays in memory while the game is running, so it does not fill the disk. The overlay buttons choose how much of it to save. Nothing is written until you save it."
+        hint="The rolling replay's video and audio together are capped at 96 MiB of memory. At 4K or for long clips, less than the selected duration may be available. Turn it off for the lightest resource use; nothing is written until you save a clip."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay lengths</p>
@@ -505,18 +508,18 @@ function OverlaySettings({
           ))}
         </div>
         <p className="text-xs leading-relaxed text-muted">
-          Orbit records up to this size. A smaller screen is not stretched to 4K. 4K and 60 use more of the PC. A recording that has already started keeps the size it began with.
+          Orbit records up to this size. A smaller screen is not stretched to 4K. 720p at 30 fps uses the least power; 4K and 60 use more. Performance readings refresh once a second, and the FPS sampler stops when its box is hidden.
         </p>
       </div>
       <Checkbox
         checked={shutterOn}
         onChange={(on) => setOverlay({ shutter: on })}
-        label="Play a sound when a picture is saved"
-        hint="A short, light chime. Recordings stay quiet."
+        label="Play a sound when a capture is saved"
+        hint="A short, light chime after a screenshot, recording, or replay is saved."
       />
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium" htmlFor="shutter-volume">Screenshot sound</label>
+          <label className="text-sm font-medium" htmlFor="shutter-volume">Capture chime</label>
           <button
             type="button"
             disabled={!shutterOn}
@@ -533,7 +536,7 @@ function OverlaySettings({
           max={100}
           disabled={!shutterOn}
           value={shutterVolume}
-          aria-label="Screenshot sound volume"
+          aria-label="Capture chime volume"
           onChange={(event) => setOverlay({ shutterVolume: Number(event.target.value) })}
           className="w-full max-w-xs accent-[var(--c-accent)] disabled:opacity-40"
         />
@@ -549,8 +552,12 @@ function OverlaySettings({
         checked={overlay?.readyNotice !== false}
         onChange={(on) => setOverlay({ readyNotice: on })}
         label="Show that the overlay is working"
-        hint="A short note from the top when the overlay opens. It goes away on its own."
+        hint="A small note in Orbit's main window when you start a game. It does not appear when you open the overlay."
       />
+      <div className="rounded-2xl border border-line bg-panel2/30 p-3">
+        <p className="text-sm font-medium">Capture folders</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">Choose a separate location for screenshots, recordings, and replays. Each one gets a subfolder for the game.</p>
+      </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Overlay boxes</p>
         <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>
@@ -580,18 +587,40 @@ function OverlaySettings({
         </div>
       </div>
       {captureFolders.map((folder) => (
-        <div key={folder.kind} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+        <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
           <span className="min-w-0">
             <span className="block text-xs text-fg">{folder.label}</span>
-            <span className="block break-all font-mono text-[11px] text-muted">{folder.path}</span>
+            <span className="block break-all font-mono text-[11px] text-muted">{folder.path || 'Choose a folder to set this location'}</span>
           </span>
-          <button
-            type="button"
-            onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
-            className={btnBrowse}
-          >
-            Open
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {isNative() && (
+              <button
+                type="button"
+                onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
+                className={btnBrowse}
+              >
+                <FolderOpen className="mr-1.5 inline size-3.5" />
+                Choose folder…
+              </button>
+            )}
+            {folder.custom && (
+              <button
+                type="button"
+                onClick={() => setOverlay({ [folder.setting]: undefined } as Partial<NonNullable<Settings['overlay']>>)}
+                className={btnBrowse}
+              >
+                Use default folder
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={!folder.path}
+              onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
+              className={btnBrowse}
+            >
+              Open
+            </button>
+          </div>
         </div>
       ))}
       {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
@@ -1123,7 +1152,7 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Game sound is not recorded yet."
+        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
       >
         <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>
@@ -1355,11 +1384,6 @@ export function SettingsView({
             hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
           />
         </Group>
-        <SubHead>Audio</SubHead>
-        <p className="text-xs leading-relaxed text-muted">
-          The speakers, then each program that is playing sound. The same list as the volume mixer. The overlay shows three of these, and More for the rest.
-        </p>
-        <AppMixer />
       </Section>
 
       <Section

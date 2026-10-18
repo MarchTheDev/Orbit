@@ -24,10 +24,9 @@ function matchGame(apps: AppAudio[], game: string): AppAudio | undefined {
 }
 
 /**
- * The overlay shows the game, the speakers, and one other source.
- * More opens the rest. Settings shows the whole list.
+ * The overlay keeps the game and speakers in view. More opens the other sources.
  */
-export function AppMixer({ pad = false, game = '', compact = false, onMore }: { pad?: boolean; game?: string; compact?: boolean; onMore?: () => void }) {
+export function AppMixer({ pad = false, game = '', compact = false, onMore }: { pad?: boolean; game?: string; compact?: boolean; onMore?: (open: boolean) => void }) {
   const [apps, setApps] = useState<AppAudio[]>([]);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<Record<string, Pending>>({});
@@ -87,7 +86,7 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
 
   const [more, setMore] = useState(false);
   const arranged = useMemo(() => {
-    if (!compact) return { top: apps, rest: [] as AppAudio[], missing: false };
+    if (!compact) return { top: apps, rest: [] as AppAudio[] };
     const speakers = apps.find((app) => app.device);
     const others = apps.filter((app) => !app.device);
     const gameApp = matchGame(others, game);
@@ -100,9 +99,16 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
       top.push(app);
     }
     const ids = new Set(top.map((app) => app.id));
-    return { top, rest: apps.filter((app) => !ids.has(app.id)), missing: Boolean(game.trim()) && !gameApp };
+    return { top, rest: apps.filter((app) => !ids.has(app.id)) };
   }, [apps, compact, game]);
   const shown = !compact ? apps : more ? [...arranged.top, ...arranged.rest] : arranged.top;
+
+  useEffect(() => {
+    if (more && arranged.rest.length === 0) {
+      setMore(false);
+      onMore?.(false);
+    }
+  }, [arranged.rest.length, more, onMore]);
 
   if (error && apps.length === 0) {
     return <p className="text-xs leading-relaxed text-muted">{error}</p>;
@@ -112,12 +118,6 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
     <div className="space-y-2">
       <DevicePick pad={pad} />
       {apps.length === 0 && <p className="text-xs text-muted">No apps are playing sound.</p>}
-      {arranged.missing && (
-        <p className="rounded-xl border border-line bg-panel2 px-3 py-2 text-sm">
-          {game}
-          <span className="text-muted"> · not playing sound</span>
-        </p>
-      )}
       {shown.map((app) => (
         <div key={app.id} className="rounded-xl border border-line bg-panel2 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
@@ -173,8 +173,9 @@ export function AppMixer({ pad = false, game = '', compact = false, onMore }: { 
           type="button"
           data-overlay={pad ? '' : undefined}
           onClick={() => {
-            setMore((open) => !open);
-            if (!more) onMore?.();
+            const open = !more;
+            setMore(open);
+            onMore?.(open);
           }}
           className="w-full rounded-xl border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
         >
@@ -240,7 +241,7 @@ function DeviceSelect({
   if (devices.length === 0) return null;
   const current = devices.find((item) => item.current)?.id ?? devices[0].id;
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="mb-1 block text-[11px] text-muted">{label}</span>
       <select
         value={current}

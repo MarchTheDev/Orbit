@@ -20,7 +20,9 @@ import { cn } from '../../utils/cn';
  * That guess is right most of the time and wrong often enough to matter, so a
  * game can carry its own answer: `meta.coverFit` pins the picture to `cover`
  * (fill the frame, crop what does not fit) or `contain` (fit it whole), chosen
- * on the Edit tab next to the artwork it applies to.
+ * on the Edit tab next to the artwork it applies to. Images use native lazy
+ * loading so long libraries do not fetch and decode every poster just because
+ * every tile is in the grid.
  */
 export function Cover({
   game,
@@ -125,6 +127,7 @@ function Artwork({
           src={src}
           alt=""
           aria-hidden
+          loading="lazy"
           decoding="async"
           className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-xl"
         />
@@ -132,6 +135,7 @@ function Artwork({
       <img
         src={src}
         alt={alt}
+        loading="lazy"
         onLoad={(e) => {
           const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
           // Filling a tall frame with a picture that is barely taller than it is

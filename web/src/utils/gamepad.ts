@@ -25,6 +25,20 @@ export type PadAction =
 const DEAD = 0.45;
 
 /**
+ * The main library shares a controller with whatever game is in front. It may
+ * only act on input while its own visible window has focus; the overlay has a
+ * separate native input path and is handled independently.
+ */
+export function mayHandleGamepadInput(overlayOpen: boolean, visible: boolean, focused: boolean): boolean {
+  return !overlayOpen && visible && focused;
+}
+
+/** Do not turn a button held in the background into a fresh action on refocus. */
+export function padEdgesWhenOwned(ownsWindow: boolean, previous: PadSnapshot | null, next: PadSnapshot): PadAction[] {
+  return ownsWindow ? padEdges(previous, next) : [];
+}
+
+/**
  * The edge of a press: a button that was up and is now down, or a stick that
  * has just crossed the dead zone. Holding a direction repeats elsewhere, so
  * this function itself fires once per press.

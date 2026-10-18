@@ -4,8 +4,8 @@ import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
 
-// Sessions sits right after the library, because that is the tab anyone reaches
-// for next. The theme button is gone: themes live in Settings.
+// Sessions follows the library, with Journal before Backlog in the default
+// order. The theme button is gone: themes live in Settings.
 //
 // The order can be rearranged in Settings, so this list is the default and the
 // place every tab is defined; `orderedTabs` turns it into whatever order the
@@ -15,8 +15,8 @@ export type Tab = { id: Page; label: string; Icon: typeof Library };
 export const TABS: Tab[] = [
   { id: 'library', label: 'Library', Icon: Library },
   { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
-  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'logs', label: 'Journal', Icon: ScrollText },
+  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'saves', label: 'Saves', Icon: Save },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
@@ -29,12 +29,17 @@ export const TABS: Tab[] = [
  * than dropping it, and an id that no longer exists is ignored, so a stale
  * setting can never hide a page.
  */
-const PREVIOUS_DEFAULT: Page[] = ['library', 'sessions', 'backlog', 'logs', 'storage', 'saves'];
+const PREVIOUS_DEFAULTS: Page[][] = [
+  // The original default had Backlog before Journal and Storage before Saves.
+  ['library', 'sessions', 'backlog', 'logs', 'storage', 'saves'],
+  // Saves was moved ahead of Storage before the Journal/Backlog change.
+  ['library', 'sessions', 'backlog', 'logs', 'saves', 'storage'],
+];
 
 export function orderedTabs(order: Page[] | undefined): Tab[] {
-  // A saved copy of the old default still has Storage before Saves. That was
-  // the list, not a choice the player made, so it follows the new order.
-  if (!order || order.length === 0 || order.join() === PREVIOUS_DEFAULT.join()) return TABS;
+  // A saved copy of either previous default is still the default list, not a
+  // player choice, so migrate it to the current Journal-before-Backlog order.
+  if (!order || order.length === 0 || PREVIOUS_DEFAULTS.some((previous) => order.join() === previous.join())) return TABS;
   const known = new Map(TABS.map((t) => [t.id, t]));
   const seen = new Set<Page>();
   const out: Tab[] = [];

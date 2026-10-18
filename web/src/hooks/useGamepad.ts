@@ -1,5 +1,18 @@
 import { useEffect } from 'react';
-import { directionsHeld, heldDirection, journalMove, padDistance, padEdges, releaseRest, withoutRest, type HeldDirs, type JournalZone, type PadBox, type PadSnapshot } from '../utils/gamepad';
+import {
+  directionsHeld,
+  heldDirection,
+  journalMove,
+  mayHandleGamepadInput,
+  padDistance,
+  padEdgesWhenOwned,
+  releaseRest,
+  withoutRest,
+  type HeldDirs,
+  type JournalZone,
+  type PadBox,
+  type PadSnapshot,
+} from '../utils/gamepad';
 
 interface NativePad {
   connected: boolean;
@@ -256,6 +269,10 @@ export function useGamepad() {
     const pump = (time: number) => {
       if (!scrolling) return;
       frame = window.requestAnimationFrame(pump);
+      if (!ownsPad()) {
+        lastScroll = 0;
+        return;
+      }
       if (!latest) return;
       const dt = lastScroll ? Math.min(0.05, (time - lastScroll) / 1000) : 0.016;
       lastScroll = time;
@@ -274,12 +291,32 @@ export function useGamepad() {
       lastScroll = 0;
     };
     const linux = /linux|x11/i.test(navigator.userAgent);
+    const ownsPad = () => mayHandleGamepadInput(
+      overlayOpen,
+      document.visibilityState === 'visible',
+      document.hasFocus(),
+    );
+    let padOwnedLast = ownsPad();
+    const webPadSnapshot = (): PadSnapshot | null => {
+      const pads = navigator.getGamepads?.() ?? [];
+      const pad = Array.from(pads).find((item) => item && item.connected) ?? null;
+      return pad ? snapshot(pad) : null;
+    };
+    const resetUnowned = (now: PadSnapshot | null) => {
+      // Keep a quiet baseline while a game or another window owns the pad.
+      // That way a held Start button cannot become a new Play press on refocus.
+      latest = now;
+      previous = now;
+      heldFor = 0;
+      restReady = now !== null;
+      restHold = now ? directionsHeld(now) : { up: false, down: false, left: false, right: false };
+    };
 
     const apply = (now: PadSnapshot) => {
-      // The overlay owns the pad while it is open, and Start+Select is its
-      // shortcut, not Play. Neither should move the library.
-      if (overlayOpen || (now.buttons[8] === true && now.buttons[9] === true)) {
-        previous = now;
+      // The overlay has its own input path. Start+Select is its shortcut, not
+      // Play. The main window also stays silent unless it is visible and focused.
+      if (!ownsPad() || (now.buttons[8] === true && now.buttons[9] === true)) {
+        resetUnowned(now);
         return;
       }
       const heldNow = directionsHeld(now);
@@ -288,7 +325,7 @@ export function useGamepad() {
       // back to the top. It starts counting only after it has been let go.
       restHold = restReady ? releaseRest(restHold, heldNow) : heldNow;
       restReady = true;
-      const edges = withoutRest(padEdges(previous, now), restHold);
+      const edges = withoutRest(padEdgesWhenOwned(ownsPad(), previous, now), restHold);
       previous = now;
       if (edges.length === 0) return;
       document.documentElement.classList.add('orbit-pad');
@@ -301,7 +338,20 @@ export function useGamepad() {
       if (current instanceof HTMLElement && current !== document.body) markPadFocus(current);
     };
     const tick = () => {
-      if (overlayOpen) return;
+      if (!ownsPad()) {
+        padOwnedLast = false;
+        // Do not poll the browser's Gamepad API while a game owns the window.
+        // Its current reading is sampled once on refocus, as a quiet baseline.
+        const current = nativeOn && native ? native : linux ? null : previous;
+        resetUnowned(current);
+        return;
+      }
+      if (!padOwnedLast) {
+        padOwnedLast = true;
+        const current = nativeOn && native ? native : linux ? null : webPadSnapshot();
+        resetUnowned(current);
+        return;
+      }
       if (nativeOn && native) {
         latest = native;
         const held = heldDirection(native, restHold);
@@ -336,6 +386,7 @@ export function useGamepad() {
     };
     const start = () => {
       if (timer) return;
+      padOwnedLast = ownsPad();
       // A device that only looks connected must not paint the ring. The ring
       // is added when a press actually moves focus.
       startScroll();

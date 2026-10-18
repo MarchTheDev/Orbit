@@ -41,6 +41,7 @@ import {
   overlayConfigure,
   overlayFps,
   overlayPlaying,
+  overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
 } from './services/native';
@@ -312,7 +313,7 @@ export default function App() {
     // asking something, so it waits for the answer.
     if (!message.actions?.length && !message.sticky) {
       // A short note should not sit as long as a long one.
-      const stay = Math.min(6000, Math.max(2200, 1600 + message.text.length * 24));
+      const stay = Math.min(7000, Math.max(2600, 1800 + (message.text.length + (message.detail?.length ?? 0)) * 24));
       setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), stay);
     }
   }, []);
@@ -641,6 +642,9 @@ export default function App() {
       quality: overlayQuality(overlay?.quality),
       fps: overlayFps(overlay?.fps),
       ffmpeg: overlay?.ffmpeg ?? '',
+      screenshotDirectory: overlay?.screenshotDirectory ?? '',
+      recordingDirectory: overlay?.recordingDirectory ?? '',
+      replayDirectory: overlay?.replayDirectory ?? '',
     });
   }, [settings]);
 
@@ -950,6 +954,15 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
+    const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
+    if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
+      const fallbackNotice = () => announce({
+        text: 'Orbit Overlay is working',
+        detail: 'Ready for captures. Press Alt+X to open it.',
+      });
+      if (isNative()) void overlayReadyNotice(g.title).catch(fallbackNotice);
+      else fallbackNotice();
+    }
     updateGame(g.id, {
       lastPlayed: new Date().toISOString(),
       status: g.status === 'backlog' ? 'playing' : g.status,
@@ -1335,19 +1348,20 @@ export default function App() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex w-fit max-w-full items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-xl ${
+            className={`pointer-events-auto flex w-fit max-w-full items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-2xl backdrop-blur-xl ${
               t.tone === 'error'
-                ? 'border-rose-400/40 bg-rose-500/15 text-rose-100'
-                : 'border-line bg-panel/95 text-fg'
+                ? 'border-rose-300/35 bg-gradient-to-br from-rose-950/95 to-panel/95 text-rose-100 ring-1 ring-rose-300/10'
+                : 'border-emerald-300/25 bg-gradient-to-br from-panel/98 to-emerald-950/35 text-fg ring-1 ring-white/5'
             }`}
           >
             {t.tone === 'error' ? (
-              <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <CircleAlert className="mt-0.5 size-5 shrink-0 text-rose-300" />
             ) : (
-              <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-400" />
+              <CircleCheck className="mt-0.5 size-5 shrink-0 text-emerald-300" />
             )}
             <div className="min-w-0 flex-1">
-              <span className="break-words">{t.text}</span>
+              <span className="block break-words font-semibold">{t.text}</span>
+              {t.detail && <span className="mt-0.5 block text-xs leading-relaxed text-muted">{t.detail}</span>}
               {t.actions?.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {t.actions.map((action) => (

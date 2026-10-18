@@ -29,6 +29,33 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+#[cfg(windows)]
+struct ComApartment {
+    initialized: bool,
+}
+
+#[cfg(windows)]
+impl ComApartment {
+    fn enter() -> Self {
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+
+        // Audio rows and devices are polled repeatedly while the overlay is
+        // open. Every successful COM initialization must be balanced, even
+        // when an early return exits one of the enumerators.
+        let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+        Self { initialized }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        }
+    }
+}
+
 pub fn list() -> Result<Vec<AppAudio>, String> {
     #[cfg(windows)]
     {
@@ -483,10 +510,10 @@ unsafe fn windows_list_inner() -> Result<Vec<AppAudio>, String> {
         eConsole, eRender, AudioSessionStateActive, AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionManager2,
         ISimpleAudioVolume, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
-    use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::CLSCTX_ALL;
     use windows::core::Interface;
 
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let _com = ComApartment::enter();
     let enumerator: IMMDeviceEnumerator =
         windows::Win32::System::Com::CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(com_err)?;
@@ -571,10 +598,10 @@ unsafe fn windows_set_inner(id: &str, volume: u8, muted: bool) -> Result<(), Str
         eConsole, eRender, IAudioSessionControl2, IAudioSessionManager2, ISimpleAudioVolume,
         IMMDeviceEnumerator, MMDeviceEnumerator,
     };
-    use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::CLSCTX_ALL;
     use windows::core::Interface;
 
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let _com = ComApartment::enter();
     let enumerator: IMMDeviceEnumerator =
         windows::Win32::System::Com::CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(com_err)?;
@@ -824,9 +851,9 @@ unsafe fn windows_devices() -> Result<Vec<AudioDevice>, String> {
     use windows::Win32::Media::Audio::{
         eCapture, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
-    use windows::Win32::System::Com::{CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::CLSCTX_ALL;
 
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let _com = ComApartment::enter();
     let enumerator: IMMDeviceEnumerator =
         windows::Win32::System::Com::CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(com_err)?;
     let mut devices = Vec::new();
@@ -894,10 +921,10 @@ unsafe fn friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> Opt
 
 #[cfg(windows)]
 unsafe fn windows_use_device(id: &str) -> Result<(), String> {
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
     use windows::core::{Interface, IUnknown, PCWSTR, GUID, HRESULT};
 
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let _com = ComApartment::enter();
     let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
     let name = PCWSTR(wide.as_ptr());
     let client = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
@@ -966,6 +993,7 @@ mod tests {
         assert_eq!(hit.id, "win:4");
         assert_eq!(hit.volume, 35);
         assert!(volume_hit("Playing", "Never Gonna Give You Up - YouTube", &apps).is_some());
+        assert_eq!(volume_hit("Playing", "A browser song", &apps).map(|app| app.id.as_str()), Some("win:4"));
         assert!(volume_hit("Speakers", "", &apps).is_none());
     }
 
