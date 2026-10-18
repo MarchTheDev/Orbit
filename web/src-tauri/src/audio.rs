@@ -883,8 +883,9 @@ Settings
 
     #[test]
     fn pactl_names_the_speakers_and_skips_monitors() {
-        let text = "Sink #1\n\tName: alsa_output.speakers\n\tDescription: Speakers\nSource #2\n\tName: alsa_input.mic\n\tDescription: USB mic\nSource #3\n\tName: alsa_output.speakers.monitor\n\tDescription: Monitor\n";
-        assert_eq!(parse_pactl_blocks(text, "Sink #"), vec![("alsa_output.speakers".to_string(), "Speakers".to_string())]);
-        assert_eq!(parse_pactl_blocks(text, "Source #"), vec![("alsa_input.mic".to_string(), "USB mic".to_string())]);
+        let sinks = "Sink #1\n\tName: alsa_output.speakers\n\tDescription: Speakers\n";
+        let sources = "Source #2\n\tName: alsa_input.mic\n\tDescription: USB mic\nSource #3\n\tName: alsa_output.speakers.monitor\n\tDescription: Monitor\n";
+        assert_eq!(parse_pactl_blocks(sinks, "Sink #"), vec![("alsa_output.speakers".to_string(), "Speakers".to_string())]);
+        assert_eq!(parse_pactl_blocks(sources, "Source #"), vec![("alsa_input.mic".to_string(), "USB mic".to_string())]);
     }
 }
