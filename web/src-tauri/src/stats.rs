@@ -27,8 +27,8 @@ struct Cache {
     asked: Option<Instant>,
 }
 
-static CACHE: Mutex<Cache> = Mutex::new(Cache {
-    stats: MachineStats {
+const fn blank() -> MachineStats {
+    MachineStats {
         cpu: None,
         ram: None,
         ram_used: 0,
@@ -38,12 +38,20 @@ static CACHE: Mutex<Cache> = Mutex::new(Cache {
         vram_used: 0,
         vram_total: 0,
         fps: None,
-    },
-    asked: None,
-});
+    }
+}
+
+static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None });
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn sample() -> MachineStats {
+    // A bad counter or a lost desktop frame must come back as missing numbers.
+    // Unwinding out of this command is what used to take the whole app down
+    // the moment the overlay asked for them.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(sample_asked)).unwrap_or_else(|_| blank())
+}
+
+fn sample_asked() -> MachineStats {
     {
         let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.asked = Some(Instant::now());
@@ -62,6 +70,13 @@ fn ensure_running() {
         return;
     }
     std::thread::spawn(|| {
+        #[cfg(windows)]
+        {
+            // This thread is the only one that may touch the duplication.
+            // DXGI is a COM object, and calling it here before COM is ready
+            // faults inside dxgi.dll instead of returning an error.
+            let _ = com_ready();
+        }
         let mut frames = watch_frames();
         loop {
             let idle = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).asked.is_none_or(|asked| asked.elapsed() > Duration::from_secs(4));
@@ -69,13 +84,27 @@ fn ensure_running() {
                 RUNNING.store(false, Ordering::SeqCst);
                 break;
             }
-            let mut next = read_now();
-            next.fps = frames.as_mut().and_then(|watch| watch.take());
-            if let Ok(mut cache) = CACHE.lock() {
-                if next.fps.is_none() {
-                    next.fps = cache.stats.fps;
+            let pulled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut next = read_now();
+                next.fps = frames.as_mut().and_then(|watch| watch.take());
+                next
+            }));
+            match pulled {
+                Ok(mut next) => {
+                    if let Ok(mut cache) = CACHE.lock() {
+                        if next.fps.is_none() {
+                            next.fps = cache.stats.fps;
+                        }
+                        cache.stats = next;
+                    }
                 }
-                cache.stats = next;
+                Err(_) => {
+                    // Drop the watch on this thread so a held frame is released
+                    // before another one is opened. Opening first would duplicate
+                    // the output while the old frame was still acquired.
+                    frames = None;
+                    frames = watch_frames();
+                }
             }
             std::thread::sleep(Duration::from_millis(1000));
         }
@@ -181,7 +210,26 @@ fn cpu_from_times(idle: u64, kernel: u64, user: u64) -> Option<u8> {
 }
 
 #[cfg(windows)]
+fn com_ready() -> bool {
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+    thread_local! {
+        static READY: std::cell::Cell<Option<bool>> = std::cell::Cell::new(None);
+    }
+    READY.with(|slot| {
+        if let Some(ready) = slot.get() {
+            return ready;
+        }
+        // S_OK and S_FALSE both mean this thread can use COM. A changed
+        // apartment does not, and a DXGI call after that is skipped.
+        let ready = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+        slot.set(Some(ready));
+        ready
+    })
+}
+
+#[cfg(windows)]
 fn windows_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
+    let _ = com_ready();
     let total = vram_total();
     let (gpu, used) = pdh_gpu();
     let vram = if total > 0 && used > 0 {
@@ -216,7 +264,7 @@ fn vram_total() -> u64 {
 fn pdh_gpu() -> (Option<u8>, u64) {
     use std::sync::Mutex as GpuMutex;
     use windows::Win32::System::Performance::{
-        PdhAddEnglishCounterW, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
     };
     use windows::core::PCWSTR;
 
@@ -224,6 +272,8 @@ fn pdh_gpu() -> (Option<u8>, u64) {
         query: PDH_HQUERY,
         util: PDH_HCOUNTER,
         used: PDH_HCOUNTER,
+        util_ok: bool,
+        used_ok: bool,
     }
     unsafe impl Send for Query {}
     static QUERY: GpuMutex<Option<Query>> = GpuMutex::new(None);
@@ -243,10 +293,11 @@ fn pdh_gpu() -> (Option<u8>, u64) {
             let util_ok = PdhAddEnglishCounterW(query, PCWSTR(util_path.as_ptr()), 0, &mut util) == 0;
             let used_ok = PdhAddEnglishCounterW(query, PCWSTR(used_path.as_ptr()), 0, &mut used) == 0;
             if !util_ok && !used_ok {
+                let _ = PdhCloseQuery(query);
                 return (None, 0);
             }
             let _ = PdhCollectQueryData(query);
-            *guard = Some(Query { query, util, used });
+            *guard = Some(Query { query, util, used, util_ok, used_ok });
         }
     }
     let Some(query) = guard.as_ref() else { return (None, 0) };
@@ -254,8 +305,10 @@ fn pdh_gpu() -> (Option<u8>, u64) {
         if PdhCollectQueryData(query.query) != 0 {
             return (None, 0);
         }
-        let gpu = counter_max(query.util, PDH_FMT_DOUBLE, true);
-        let used = counter_max(query.used, PDH_FMT_LARGE, false);
+        // A counter that failed to open is a null handle. Asking PDH to format
+        // it is not a missing number, it is an access violation.
+        let gpu = if query.util_ok { counter_max(query.util, PDH_FMT_DOUBLE, true) } else { None };
+        let used = if query.used_ok { counter_max(query.used, PDH_FMT_LARGE, false) } else { None };
         (gpu.map(|value| value.round().clamp(0.0, 100.0) as u8), used.unwrap_or(0.0) as u64)
     }
 }
@@ -263,21 +316,28 @@ fn pdh_gpu() -> (Option<u8>, u64) {
 #[cfg(windows)]
 unsafe fn counter_max(counter: windows::Win32::System::Performance::PDH_HCOUNTER, format: windows::Win32::System::Performance::PDH_FMT, percent: bool) -> Option<f64> {
     use windows::Win32::System::Performance::{PdhGetFormattedCounterArrayW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_MORE_DATA};
+    if counter.0.is_null() {
+        return None;
+    }
     let mut size = 0u32;
     let mut count = 0u32;
     let first = PdhGetFormattedCounterArrayW(counter, format, &mut size, &mut count, None::<*mut PDH_FMT_COUNTERVALUE_ITEM_W>);
     if first != PDH_MORE_DATA && first != 0 {
         return None;
     }
-    let items = (size as usize / std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>()).max(1);
+    let stride = std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+    // `size` is bytes. Dividing it and then telling PDH the old byte count
+    // writes past the allocation whenever the count does not divide evenly.
+    let Some(items) = counter_buffer_items(size, stride) else { return None };
     let mut buffer = vec![std::mem::zeroed::<PDH_FMT_COUNTERVALUE_ITEM_W>(); items];
-    let status = PdhGetFormattedCounterArrayW(counter, format, &mut size, &mut count, Some(buffer.as_mut_ptr()));
+    let mut bytes = (items * stride) as u32;
+    let status = PdhGetFormattedCounterArrayW(counter, format, &mut bytes, &mut count, Some(buffer.as_mut_ptr()));
     if status != 0 {
         return None;
     }
     let mut best = None::<f64>;
     let mut best_3d = None::<f64>;
-    for item in buffer.iter().take(count as usize) {
+    for item in buffer.iter().take((count as usize).min(buffer.len())) {
         if item.FmtValue.CStatus != 0 {
             continue;
         }
@@ -332,6 +392,9 @@ struct FrameWatch {
 struct WindowsFrames {
     duplication: windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication,
     primed: bool,
+    /// A frame is still acquired. Dropping the duplication in that state hangs
+    /// or kills the process, so Drop releases it first.
+    held: bool,
 }
 
 fn watch_frames() -> Option<FrameWatch> {
@@ -355,6 +418,10 @@ impl FrameWatch {
             let watch = self.inner.as_mut()?;
             match watch.drain() {
                 FramePull::Dead => {
+                    // Release any held frame before opening another duplication.
+                    // The right-hand side of an assignment would open the new
+                    // one first, while the old frame was still acquired.
+                    self.inner = None;
                     self.inner = WindowsFrames::open();
                     None
                 }
@@ -387,6 +454,9 @@ impl WindowsFrames {
         use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput1};
         use windows::core::Interface;
 
+        if !com_ready() {
+            return None;
+        }
         unsafe {
             let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
             let adapter = factory.EnumAdapters1(0).ok()?;
@@ -411,27 +481,40 @@ impl WindowsFrames {
             let device = device?;
             let unknown: windows::core::IUnknown = device.cast().ok()?;
             let duplication = output1.DuplicateOutput(&unknown).ok()?;
-            Some(Self { duplication, primed: false })
+            Some(Self { duplication, primed: false, held: false })
         }
+    }
+
+    fn release_held(&mut self) {
+        if !self.held {
+            return;
+        }
+        let _ = unsafe { self.duplication.ReleaseFrame() };
+        self.held = false;
     }
 
     fn drain(&mut self) -> FramePull {
         use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO};
         let mut frames = 0u32;
         let mut saw = false;
-        for _ in 0..8 {
+        for index in 0..8 {
             let mut info: DXGI_OUTDUPL_FRAME_INFO = unsafe { std::mem::zeroed() };
             let mut resource = None;
             let info_ptr: *mut DXGI_OUTDUPL_FRAME_INFO = &mut info;
             let resource_ptr: *mut Option<windows::Win32::Graphics::Dxgi::IDXGIResource> = &mut resource;
-            match unsafe { self.duplication.AcquireNextFrame(0, info_ptr, resource_ptr) } {
+            // A zero wait is what some drivers fault on. The first wait is one
+            // frame; the rest only drain what is already queued.
+            let timeout = if index == 0 { 16 } else { 1 };
+            match unsafe { self.duplication.AcquireNextFrame(timeout, info_ptr, resource_ptr) } {
                 Ok(()) => {
+                    self.held = true;
                     saw = true;
                     frames = frames.saturating_add(info.AccumulatedFrames.max(1));
                     drop(resource);
                     if unsafe { self.duplication.ReleaseFrame() }.is_err() {
                         return FramePull::Dead;
                     }
+                    self.held = false;
                 }
                 Err(error) if error.code() == DXGI_ERROR_WAIT_TIMEOUT => break,
                 Err(_) => return FramePull::Dead,
@@ -442,6 +525,13 @@ impl WindowsFrames {
             return FramePull::Waiting;
         }
         FramePull::Count(if saw { frames } else { 0 })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsFrames {
+    fn drop(&mut self) {
+        self.release_held();
     }
 }
 
@@ -537,4 +627,49 @@ fn sysfs_gpu() -> (Option<u8>, Option<u8>, u64, u64) {
         .unwrap_or(0);
     let vram = if total > 0 { Some(((used.saturating_mul(100)) / total).min(100) as u8) } else { None };
     (gpu, vram, used, total)
+}
+
+/// How many formatted counter rows fit in the byte count PDH asked for.
+///
+/// The second call is told the buffer size in bytes. Rounding the row count
+/// down makes that claim bigger than the allocation, and PDH then writes past
+/// it. That is a process crash, not a missing number. A huge request is
+/// refused rather than allocated.
+fn counter_buffer_items(bytes: u32, stride: usize) -> Option<usize> {
+    if bytes == 0 || stride == 0 {
+        return None;
+    }
+    let items = (bytes as usize).div_ceil(stride);
+    if items == 0 || items > 256 {
+        return None;
+    }
+    Some(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::counter_buffer_items;
+
+    #[test]
+    fn a_counter_buffer_is_never_smaller_than_pdh_asked_for() {
+        let stride = 24;
+        let bytes = 100;
+        let items = counter_buffer_items(bytes, stride).expect("fits");
+        assert!(items * stride >= bytes as usize);
+        assert_eq!(items, 5);
+    }
+
+    #[test]
+    fn an_exact_counter_list_keeps_every_row() {
+        assert_eq!(counter_buffer_items(32 * 3, 32), Some(3));
+    }
+
+    #[test]
+    fn a_huge_or_empty_counter_list_is_skipped() {
+        assert_eq!(counter_buffer_items(0, 24), None);
+        assert_eq!(counter_buffer_items(24, 0), None);
+        assert_eq!(counter_buffer_items(u32::MAX, 24), None);
+        assert_eq!(counter_buffer_items(256 * 24, 24), Some(256));
+        assert_eq!(counter_buffer_items(256 * 24 + 1, 24), None);
+    }
 }
