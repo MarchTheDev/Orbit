@@ -235,7 +235,10 @@ pub(crate) fn parse_pactl(text: &str) -> Vec<AppAudio> {
             volume,
             muted,
             device: false,
-            exe: std::path::Path::new(&binary).file_stem().map(|stem| stem.to_string_lossy().to_string()).unwrap_or(binary),
+            exe: std::path::Path::new(&binary)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_else(|| binary.clone()),
             live: true,
         });
     }
