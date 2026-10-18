@@ -23,6 +23,13 @@ const AUDIO_CHANNELS: usize = 2;
 const AUDIO_BYTES_PER_FRAME: usize = AUDIO_CHANNELS * 2;
 #[cfg(windows)]
 const MAX_PENDING_AUDIO_BYTES: usize = 16 * 1024 * 1024;
+#[cfg(any(windows, test))]
+const MAX_PENDING_VIDEO_SAMPLES: u64 = 2;
+
+#[cfg(any(windows, test))]
+fn pending_video_samples(received: u64, processed: u64) -> u64 {
+    received.saturating_sub(processed)
+}
 
 static PAUSED: AtomicBool = AtomicBool::new(false);
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
@@ -434,9 +441,13 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
     #[cfg(windows)]
     let recording_epoch = Instant::now();
     let mut written = 0u32;
-    if writer.push_bgra(&first.bytes).is_ok() {
-        written += 1;
+    match writer.push_bgra(&first.bytes) {
+        Ok(true) => written += 1,
+        Ok(false) => {}
+        Err(error) => set_error(&error),
     }
+    #[cfg(windows)]
+    let mut timeline_frames = 1u64;
     #[cfg(windows)]
     let mut audio = match SystemAudio::open() {
         Ok(audio) => audio,
@@ -507,12 +518,15 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
         let now = Instant::now();
 
         // The capture call can take longer than a frame interval, especially at
-        // 4K. Fill every elapsed presentation slot with the previous picture so
-        // the encoded duration follows real time instead of playing too fast.
+        // 4K. Fill elapsed slots with the previous picture so playback follows
+        // real time; if the encoder queue is full, drop a frame but keep its
+        // presentation slot so audio and duration stay synchronized.
         while next_frame <= now && !stop.load(Ordering::SeqCst) {
             #[cfg(windows)]
             if !audio_write_failed {
-                let next_video_ticks = written as i64 * video_duration_ticks;
+                let next_video_ticks = timeline_frames
+                    .saturating_mul(video_duration_ticks as u64)
+                    .min(i64::MAX as u64) as i64;
                 if let Err(error) = flush_audio_samples(
                     &mut writer,
                     &mut pending_audio,
@@ -528,8 +542,13 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
                 }
             }
             match writer.push_bgra(&last) {
-                Ok(()) => written += 1,
+                Ok(true) => written += 1,
+                Ok(false) => {}
                 Err(error) => set_error(&error),
+            }
+            #[cfg(windows)]
+            {
+                timeline_frames = timeline_frames.saturating_add(1);
             }
             next_frame += interval;
         }
@@ -569,7 +588,9 @@ fn run_recording(out: PathBuf, spec: Spec, stop: Arc<AtomicBool>, ready: Arc<Mut
     }
     #[cfg(windows)]
     if !audio_write_failed {
-        let video_end_ticks = written as i64 * video_duration_ticks;
+        let video_end_ticks = timeline_frames
+            .saturating_mul(video_duration_ticks as u64)
+            .min(i64::MAX as u64) as i64;
         if let Err(error) = flush_audio_samples(
             &mut writer,
             &mut pending_audio,
@@ -1071,11 +1092,17 @@ enum Writer {
 }
 
 impl Writer {
-    fn push_bgra(&mut self, bgra: &[u8]) -> Result<(), String> {
+    /// Return `false` when the encoder is already holding two video samples.
+    /// Advance the output timeline without adding another full-size sample.
+    fn push_bgra(&mut self, bgra: &[u8]) -> Result<bool, String> {
         #[cfg(windows)]
         {
             match self {
-                Writer::Windows(writer) => writer.push_bgra(bgra),
+                Writer::Windows(writer) if writer.video_queue_full() => {
+                    writer.skip_video_frame();
+                    Ok(false)
+                }
+                Writer::Windows(writer) => writer.push_bgra(bgra).map(|()| true),
             }
         }
         #[cfg(not(windows))]
@@ -1604,6 +1631,22 @@ impl WindowsWriter {
         })
     }
 
+    fn video_queue_full(&self) -> bool {
+        use windows::Win32::Media::MediaFoundation::MF_SINK_WRITER_STATISTICS;
+
+        let Some(writer) = self.writer.as_ref() else { return false };
+        let mut stats = MF_SINK_WRITER_STATISTICS::default();
+        stats.cb = std::mem::size_of::<MF_SINK_WRITER_STATISTICS>() as u32;
+        if unsafe { writer.GetStatistics(self.stream, &mut stats) }.is_err() {
+            return false;
+        }
+        pending_video_samples(stats.qwNumSamplesReceived, stats.qwNumSamplesProcessed) >= MAX_PENDING_VIDEO_SAMPLES
+    }
+
+    fn skip_video_frame(&mut self) {
+        self.index = self.index.saturating_add(1);
+    }
+
     fn push_bgra(&mut self, bgra: &[u8]) -> Result<(), String> {
         use windows::Win32::Media::MediaFoundation::{MFCreateMemoryBuffer, MFCreateSample};
 
@@ -1840,6 +1883,13 @@ mod tests {
         assert!(error.contains("recording was not saved"));
         assert_eq!(pending.len(), 1);
         assert_eq!(bytes, 4);
+    }
+
+    #[test]
+    fn pending_video_samples_saturate_when_the_encoder_has_caught_up() {
+        assert_eq!(pending_video_samples(8, 6), 2);
+        assert_eq!(pending_video_samples(4, 7), 0);
+        assert_eq!(MAX_PENDING_VIDEO_SAMPLES, 2);
     }
 
     #[test]

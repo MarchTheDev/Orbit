@@ -45,6 +45,7 @@ check('queued Windows recording audio has a hard memory cap and failed audio dis
 const writerRelease = windowsWriter.indexOf('drop(self.writer.take())');
 const runtimeRelease = windowsWriter.indexOf('drop(self.runtime.take())');
 check('the Windows sink writer is released before Media Foundation and COM shut down', writerRelease >= 0 && runtimeRelease > writerRelease && capture.includes('struct MfRuntime'));
+check('Windows recording bounds pending video samples and advances the real-time timeline when dropping frames', capture.includes('MAX_PENDING_VIDEO_SAMPLES: u64 = 2') && capture.includes('GetStatistics(self.stream, &mut stats)') && capture.includes('writer.skip_video_frame()') && capture.includes('timeline_frames = timeline_frames.saturating_add(1)'));
 const captureClientRelease = systemAudioDrop.indexOf('drop(self.capture.take())');
 const audioClientRelease = systemAudioDrop.indexOf('drop(self.client.take())');
 const audioComShutdown = systemAudioDrop.indexOf('CoUninitialize();');
