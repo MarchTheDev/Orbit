@@ -114,11 +114,26 @@ check('Linux audio capture workers are stopped and joined during app shutdown', 
 check(
   'a capture that outlives the panel still reports itself',
   /pub fn announce_capture/.test(overlay) &&
+    // A panel on screen (open or resting) has its own toast; a closed one
+    // gets the card.
     overlay.includes('if panel_visible(app)') &&
     overlay.includes('Card::error("Capture failed"') &&
-    /overlay::announce_capture\(&app, "screenshot", &outcome\)/.test(lib) &&
-    /overlay::announce_capture\(&app, "recording", &outcome\)/.test(lib) &&
-    /overlay::announce_capture\(&app, "replay", &outcome\)/.test(lib),
+    // Announced from inside the blocking task, so closing the panel - and
+    // dropping the command's future - cannot swallow it.
+    /spawn_blocking\(move \|\| \{[\s\S]*?overlay::announce_capture\(&worker, "screenshot", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "recording", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "replay", &outcome\)/.test(lib),
+);
+check(
+  'a capture announced with no panel on screen brings its own chime',
+  overlay.includes('play_chime(volume)') &&
+    overlay.includes('play_chime(volume)') &&
+    overlay.includes('fn chime_wav(') &&
+    overlay.includes('PlaySoundW(') &&
+    // The same three notes as the web chime, and the same setting.
+    overlay.includes('const ROOT: f32 = 293.66') &&
+    overlay.includes('live.shutter') &&
+    overlay.includes('live.shutter_volume'),
 );
 check(
   'the game-start card is a themed Orbit card with the mark, not a plain rectangle',

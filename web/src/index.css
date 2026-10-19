@@ -226,11 +226,24 @@ html.orbit-pad .orbit-detail .orbit-pad-focus {
 }
 /* The controller picks a box before it steps inside one. The ring goes round
    the whole card, not round the first button in it, so the choice being made is
-   the box itself. */
+   the box itself. It sits on the card's own border: a ring floating a few
+   pixels away read as a second box around the first. */
 html.orbit-pad .orbit-box-focus {
   outline: 2px solid var(--c-accent);
-  outline-offset: 4px;
+  outline-offset: 0;
   border-radius: 1.5rem;
+}
+/* The capture buttons are a circle with its name under it. The ring goes round
+   the circle that gets pressed, not round the circle and the word: the three
+   icons are the row the player is choosing from. */
+html.orbit-pad [data-pad-icon].orbit-pad-focus {
+  border-radius: 0;
+  box-shadow: none;
+}
+html.orbit-pad [data-pad-icon].orbit-pad-focus [data-pad-ring] {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 999px;
 }
 
 html.orbit-pad .orbit-pad-focus {

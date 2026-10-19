@@ -103,29 +103,34 @@ mod win {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-        GetSystemMetrics, PeekMessageW, PostQuitMessage, RegisterClassW, SetWindowDisplayAffinity,
-        ShowWindow, TranslateMessage, MSG, PM_REMOVE, SM_CXSCREEN, SW_SHOWNOACTIVATE, WM_DESTROY,
-        WM_ERASEBKGND, WM_PAINT, WM_QUIT, WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+        GetSystemMetrics, PeekMessageW, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes,
+        SetWindowDisplayAffinity, SetWindowPos, ShowWindow, TranslateMessage, LWA_ALPHA, MSG,
+        PM_REMOVE, SM_CXSCREEN, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        WM_DESTROY, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WDA_EXCLUDEFROMCAPTURE, WNDCLASSW,
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+        WS_POPUP,
     };
 
     use super::{Card, Palette};
 
-    /// The Orbit mark, as 128 by 128 anti-aliased coverage. The picture is
+    /// The Orbit mark, as 256 by 256 anti-aliased coverage. The picture is
     /// white; recolouring it here is what lets the card follow the theme.
     /// It is the same drawing as `src/assets/orbit-mark.svg`, rendered once:
-    /// rasterise that file at 128 by 128 on a transparent background and keep
-    /// the alpha channel only. Change one, change the other.
+    /// rasterise that file at 512 by 512 on a transparent background, crop to
+    /// the drawing's own bounds, keep the alpha channel only and sample it down
+    /// to 256. Crop first, because the SVG's box has a ring of empty space
+    /// around the mark and at card size every pixel of that space is a pixel
+    /// the mark does not get. Change one, change the other.
     const MARK: &[u8] = include_bytes!("orbit-mark-mask.bin");
-    const MARK_SIZE: usize = 128;
+    const MARK_SIZE: usize = 256;
 
     // Sizes at 96 DPI. Everything is multiplied by the display scale.
     const WIDTH: f32 = 392.0;
     const HEIGHT: f32 = 88.0;
     const RADIUS: f32 = 18.0;
-    const CHIP: f32 = 44.0;
-    const CHIP_RADIUS: f32 = 14.0;
-    const MARK_DRAW: f32 = 26.0;
+    const CHIP: f32 = 46.0;
+    const CHIP_RADIUS: f32 = 15.0;
+    const MARK_DRAW: f32 = 32.0;
     const MARGIN_TOP: f32 = 48.0;
     const MARGIN: f32 = 18.0;
     const LIFETIME: Duration = Duration::from_millis(4200);
@@ -221,13 +226,17 @@ mod win {
 
             let screen = GetSystemMetrics(SM_CXSCREEN);
             let stack = slot.as_ref().map_or(0, |held| held.0 as i32) * (height + scaled(8.0, scale));
+            let left = (screen - width) / 2;
+            let top = margin + stack;
+            // Ten pixels lower than it will sit, so it can rise into place.
+            let rise = scaled(10.0, scale);
             let window = CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                 w!("OrbitNotice"),
                 w!("Orbit"),
                 WS_POPUP,
-                (screen - width) / 2,
-                margin + stack,
+                left,
+                top - rise,
                 width,
                 height,
                 None,
@@ -244,6 +253,9 @@ mod win {
             // A confirmation card has no business appearing inside a recording.
             let _ = SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE);
 
+            // A layered window is the only way to fade a GDI card: the paint
+            // stays as it is and Windows blends the whole window.
+            let _ = SetLayeredWindowAttributes(window, COLORREF(0), 0, LWA_ALPHA);
             let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
 
             let lifetime = CARD.with(|slot| {
@@ -252,8 +264,12 @@ mod win {
 
             // A plain message pump with a deadline. There is no timer to cancel
             // and nothing to tear down if the window is closed early.
+            const ENTER: f32 = 0.16;
+            const LEAVE: f32 = 0.22;
             let mut message = MSG::default();
-            let deadline = Instant::now() + lifetime;
+            let opened = Instant::now();
+            let deadline = opened + lifetime;
+            let mut alpha = 0u8;
             'pump: loop {
                 while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
                     if message.message == WM_QUIT {
@@ -262,10 +278,24 @@ mod win {
                     let _ = TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
-                if Instant::now() >= deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now()).as_secs_f32();
+                // Rise and fade in quickly, fade out at the end. The exit is
+                // what makes a card that is replaced feel replaced rather than
+                // redrawn in place.
+                let entering = (opened.elapsed().as_secs_f32() / ENTER).min(1.0);
+                let leaving = (remaining / LEAVE).min(1.0);
+                let eased = 1.0 - (1.0 - entering).powi(3);
+                let next = (eased.min(leaving) * 255.0).round() as u8;
+                if next != alpha {
+                    alpha = next;
+                    let _ = SetLayeredWindowAttributes(window, COLORREF(0), alpha, LWA_ALPHA);
+                }
+                let offset = ((1.0 - eased) * rise as f32).round() as i32;
+                let _ = SetWindowPos(window, None, left, top - offset, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                if remaining <= 0.0 {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(24));
+                std::thread::sleep(Duration::from_millis(16));
             }
             let _ = DestroyWindow(window);
         }
@@ -357,7 +387,13 @@ mod win {
                         count += 1;
                     }
                 }
-                let alpha = if count == 0 { 0 } else { sum / count };
+                let mut alpha = if count == 0 { 0 } else { sum / count };
+                if size <= 48 {
+                    // At card size one orbit line is thinner than a pixel, and
+                    // area sampling alone leaves it half transparent. Lift the
+                    // coverage a little so the mark still reads as the mark.
+                    alpha = (255.0 * (alpha as f32 / 255.0).powf(0.85)).round() as u32;
+                }
                 let out = ((dy * size + dx) * 4) as usize;
                 pixels[out] = ((blue * alpha) / 255) as u8;
                 pixels[out + 1] = ((green * alpha) / 255) as u8;
@@ -387,13 +423,17 @@ mod win {
         let Palette { panel, text, muted, accent } = card.palette;
         // A failure is a rose accent, whatever the theme's own accent is.
         let accent = if card.error { 0xfb_71_85 } else { accent };
-        let edge = mix(panel, text, 0.10);
+        // A one pixel accent rim, then a hairline of light, then the panel.
+        // The rim is what ties the card to the theme's own colour.
+        let edge = mix(panel, accent, 0.26);
+        let liner = mix(panel, text, 0.07);
         let chip = mix(panel, accent, 0.14);
         let chip_edge = mix(panel, accent, 0.30);
 
         // The ring of the rounded rectangle, then the panel just inside it.
         round_fill(dc, 0, 0, width, height, radius, edge);
-        round_fill(dc, 1, 1, width - 1, height - 1, radius - 1, panel);
+        round_fill(dc, 1, 1, width - 1, height - 1, radius - 1, liner);
+        round_fill(dc, 2, 2, width - 2, height - 2, radius - 2, panel);
 
         let margin = scaled(MARGIN, scale);
         let chip_size = scaled(CHIP, scale);

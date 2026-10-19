@@ -74,8 +74,24 @@ check(
 
 console.log('the controller picks a box before it reaches into one');
 check(
-  'a box gets a ring of its own, drawn outside the card',
-  overlay.includes('orbit-box-focus') && /html\.orbit-pad \.orbit-box-focus\s*\{[^}]*outline: 2px solid var\(--c-accent\)/s.test(css),
+  'a box gets a ring of its own, sitting on the card border',
+  overlay.includes('orbit-box-focus') &&
+    /html\.orbit-pad \.orbit-box-focus\s*\{[^}]*outline: 2px solid var\(--c-accent\)[^}]*outline-offset: 0/s.test(css),
+);
+check(
+  'the ring round a capture button is round the icon, not the label',
+  /html\.orbit-pad \[data-pad-icon\]\.orbit-pad-focus\s*\{[^}]*box-shadow: none/s.test(css) &&
+    /\[data-pad-icon\]\.orbit-pad-focus \[data-pad-ring\]\s*\{[^}]*outline: 2px solid var\(--c-accent\)/s.test(css) &&
+    /data-overlay\s*\n\s*data-pad-icon/s.test(overlay) &&
+    /data-pad-ring/s.test(overlay),
+);
+check(
+  'the card rises and fades instead of appearing in one frame',
+  notice.includes('WS_EX_LAYERED') &&
+    notice.includes('SetLayeredWindowAttributes') &&
+    notice.includes('SetWindowPos') &&
+    notice.includes('let entering = (opened.elapsed().as_secs_f32() / ENTER)') &&
+    notice.includes('let leaving = (remaining / LEAVE)'),
 );
 check(
   'the ring starts on a box, and A steps inside it',
@@ -84,8 +100,10 @@ check(
     /const enterBox = \(id: PadTarget\) => \{[\s\S]*?setPad\(\{ level: 'inside', id \}\)/.test(overlay),
 );
 check(
-  'B backs out of a box before it closes the overlay',
-  /action === 'back'[\s\S]*?focus\?\.level === 'inside'[\s\S]*?leaveBox\(focus\.id\)/.test(overlay),
+  'B backs out of a box, then moves the ring to the next one',
+  /action === 'back'[\s\S]*?focus\?\.level === 'inside'[\s\S]*?leaveBox\(focus\.id\)/.test(overlay) &&
+    /const nextBox = \(from: PadTarget \| null\): PadTarget => \{/.test(overlay) &&
+    overlay.includes("setPad({ level: 'box', id: nextBox(focus.id) })"),
 );
 check(
   'directions pick the nearest control or box instead of walking a list',
@@ -109,6 +127,13 @@ check(
 check(
   'the game-start card carries the Orbit mark, not an empty square',
   notice.includes('orbit-mark-mask.bin') && notice.includes('draw_mark(') && notice.includes('CHIP'),
+);
+check(
+  'the card draws the mark large enough to read, from a cropped high-resolution mask',
+  notice.includes('const MARK_SIZE: usize = 256;') &&
+    notice.includes('const MARK_DRAW: f32 = 32.0;') &&
+    notice.includes('const CHIP: f32 = 46.0;') &&
+    notice.includes('powf(0.85)'),
 );
 check(
   'the card takes the colours of the player theme',

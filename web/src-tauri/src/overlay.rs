@@ -71,6 +71,10 @@ struct Live {
     note: String,
     /// The colours of the player's theme, for the native card.
     palette: Palette,
+    /// The chime, for a capture that finishes after the panel is gone. The
+    /// panel plays its own copy of this from the web view.
+    shutter: bool,
+    shutter_volume: u8,
 }
 
 struct Watch {
@@ -137,6 +141,8 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     recording_path: PathBuf::new(),
     note: String::new(),
     palette: Palette::NEBULA,
+    shutter: true,
+    shutter_volume: 40,
 });
 static GATE: Mutex<()> = Mutex::new(());
 static PAD: Mutex<Watch> = Mutex::new(Watch {
@@ -214,6 +220,8 @@ fn parse_colour(value: &str) -> Option<u32> {
 /// it, so the card does: a save that was started before the overlay closed is
 /// exactly the one the player is waiting to hear about.
 pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>) {
+    // A panel on screen - open, or resting against a pin - has its own toast
+    // and its own chime. Only a capture that outlives it needs the card.
     if panel_visible(app) {
         return;
     }
@@ -231,7 +239,112 @@ pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, Str
         }
         Err(text) => Card::error("Capture failed", text, palette),
     };
+    // The web view that would have played the chime is gone with the panel, so
+    // the card brings its own.
+    let (on, volume) = {
+        let live = lock();
+        (live.shutter, live.shutter_volume)
+    };
+    if on {
+        play_chime(volume);
+    }
     crate::notice::show(card);
+}
+
+/// The panel's three-note chime, for the one case the panel cannot play it:
+/// a capture that finishes after its window is gone.
+///
+/// The notes are the same D-major arpeggio `src/services/shutter.ts` makes,
+/// rendered here to a small in-memory WAV so `PlaySound` can play it without a
+/// second web view. The image has to outlive the call because playback is
+/// asynchronous, so it is kept in a static that is replaced only when the
+/// volume changes.
+#[cfg(windows)]
+fn play_chime(volume: u8) {
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+
+    static SOUND: Mutex<Option<(u8, &'static [u8])>> = Mutex::new(None);
+    if volume == 0 {
+        return;
+    }
+    let mut sound = SOUND.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if sound.as_ref().map(|(level, _)| *level) != Some(volume) {
+        let bytes: &'static [u8] = Box::leak(chime_wav(volume).into_boxed_slice());
+        *sound = Some((volume, bytes));
+    }
+    let Some((_, bytes)) = sound.as_ref() else { return };
+    if bytes.len() < 44 {
+        return;
+    }
+    unsafe {
+        let _ = PlaySoundW(
+            PCWSTR(bytes.as_ptr() as *const u16),
+            None,
+            SND_ASYNC | SND_MEMORY | SND_NODEFAULT,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn play_chime(_volume: u8) {}
+
+/// A 16 bit mono WAV of the three notes, at the same level the panel uses.
+#[cfg(windows)]
+fn chime_wav(volume: u8) -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    const SECONDS: f32 = 0.95;
+    const ATTACK: f32 = 0.035;
+    const RELEASE: f32 = 0.58;
+    const ROOT: f32 = 293.66;
+    // D4, F#4 and A4, each with its own peak and its own delay: the soft,
+    // unhurried D-major arpeggio the shutter makes.
+    const NOTES: [(f32, f32, f32); 3] = [(0.0, 0.13, 0.0), (4.0, 0.10, 0.11), (7.0, 0.075, 0.22)];
+
+    let level = (volume.min(100) as f32 / 100.0) * 0.09;
+    let count = (RATE as f32 * SECONDS) as usize;
+    let mut samples = Vec::with_capacity(count);
+    for index in 0..count {
+        let time = index as f32 / RATE as f32;
+        let mut sample = 0.0f32;
+        for (semitones, peak, delay) in NOTES {
+            let local = time - delay;
+            if local <= 0.0 || local >= RELEASE {
+                continue;
+            }
+            // A short bloom up to the peak, then a fade to a thousandth of it,
+            // both exponential, the way the WebAudio envelope is written.
+            let quietest = 0.0001f32;
+            let ratio = quietest / peak;
+            let envelope = if local < ATTACK {
+                ratio.powf(1.0 - local / ATTACK)
+            } else {
+                ratio.powf((local - ATTACK) / (RELEASE - ATTACK))
+            };
+            let frequency = ROOT * 2f32.powf(semitones / 12.0);
+            sample += peak * envelope * (std::f32::consts::TAU * frequency * time).sin();
+        }
+        samples.push((sample * level).clamp(-1.0, 1.0));
+    }
+
+    let data_len = (samples.len() * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&RATE.to_le_bytes());
+    wav.extend_from_slice(&(RATE * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        wav.extend_from_slice(&((sample * i16::MAX as f32) as i16).to_le_bytes());
+    }
+    wav
 }
 
 /// The same quiet second line the panel's own toast uses.
@@ -282,6 +395,17 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("ffmpeg"))
         .and_then(Value::as_str)
         .unwrap_or("");
+    let shutter = overlay.and_then(|item| item.get("shutter")).and_then(Value::as_bool).unwrap_or(true);
+    let shutter_volume = overlay
+        .and_then(|item| item.get("shutterVolume"))
+        .and_then(Value::as_u64)
+        .unwrap_or(40)
+        .min(100) as u8;
+    {
+        let mut live = lock();
+        live.shutter = shutter;
+        live.shutter_volume = shutter_volume;
+    }
     let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");

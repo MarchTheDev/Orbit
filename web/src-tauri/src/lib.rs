@@ -811,34 +811,44 @@ fn overlay_status() -> overlay::OverlayStatus {
 /// A capture outlives the panel that asked for it. The panel shows its own
 /// toast while it is on screen; when it has closed in the meantime, the answer
 /// is drawn by the native card instead, so a save never finishes in silence.
+// The announcement happens inside the blocking task, not after its `await`.
+// Closing the overlay destroys the web view that asked for the capture, which
+// drops the command's future: anything after the await would never run, and a
+// save started just before the panel closed would finish silently.
 #[tauri::command]
 async fn overlay_shot(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
     let worker = app.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::shot(&worker, &stamp))
-        .await
-        .map_err(|error| error.to_string())?;
-    overlay::announce_capture(&app, "screenshot", &outcome);
-    outcome
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcome = overlay::shot(&worker, &stamp);
+        overlay::announce_capture(&worker, "screenshot", &outcome);
+        outcome
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn overlay_record(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
     let worker = app.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::record(&worker, &stamp))
-        .await
-        .map_err(|error| error.to_string())?;
-    overlay::announce_capture(&app, "recording", &outcome);
-    outcome
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcome = overlay::record(&worker, &stamp);
+        overlay::announce_capture(&worker, "recording", &outcome);
+        outcome
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn overlay_replay(app: tauri::AppHandle, seconds: u32, stamp: String) -> Result<String, String> {
     let worker = app.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::save_replay(&worker, seconds, &stamp))
-        .await
-        .map_err(|error| error.to_string())?;
-    overlay::announce_capture(&app, "replay", &outcome);
-    outcome
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcome = overlay::save_replay(&worker, seconds, &stamp);
+        overlay::announce_capture(&worker, "replay", &outcome);
+        outcome
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// The colours of the player's theme, for the native card. Called by the main
