@@ -205,7 +205,7 @@ fn make_room<T: Record>(queue: &mut VecDeque<T>, capacity: u64, at: u64, len: u6
     let low = at - capacity;
     // The window ends before `at` because no record is larger than the file.
     let high = low.saturating_add(len);
-    let mut frames = 0;
+    let mut frames = 0usize;
     loop {
         let safe = queue.front().map(|front| front.at() >= high).unwrap_or(true);
         if safe {
