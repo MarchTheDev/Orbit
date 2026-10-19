@@ -26,6 +26,7 @@ mod launchers;
 mod linux_window;
 mod cloud;
 mod metadata;
+mod notice;
 mod process;
 mod saves;
 mod session;

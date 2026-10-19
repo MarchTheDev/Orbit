@@ -8,6 +8,7 @@ const capture = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'capture
 const audio = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'audio.rs'), 'utf8');
 const overlay = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
 const settings = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
+const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -23,6 +24,7 @@ const pipeBuffer = overlay.slice(overlay.indexOf('fn start_pipe_buffer'), overla
 const linuxGrabStart = capture.indexOf('#[cfg(target_os = "linux")]\nfn grab_screen');
 const linuxGrab = capture.slice(linuxGrabStart, capture.indexOf('pub fn fit', linuxGrabStart));
 const replayEncoder = overlay.slice(overlay.indexOf('fn ffmpeg_from_jpegs'), overlay.indexOf('fn read_jpeg_pipe'));
+const readyNotice = overlay.slice(overlay.indexOf('pub fn ready_notice'), overlay.indexOf('pub fn game_stopped'));
 const windowsWriterStart = capture.indexOf('impl WindowsWriter');
 const windowsWriterEnd = capture.indexOf('fn set_video(', windowsWriterStart);
 const windowsWriter = capture.slice(windowsWriterStart, windowsWriterEnd);
@@ -43,6 +45,8 @@ check('a replay save decodes every frame into one reused buffer', capture.includ
 check('Linux capture scales each tile into the output without a full-screen BGRA staging buffer', !linuxGrab.includes('let mut raw = vec!') && linuxGrab.includes('bytes.resize(') && linuxGrab.includes('for dst_x in 0..out_w'));
 check('recording and replay capture reuse their raw frame buffers', capture.includes('grab_with_buffer(spec, std::mem::take(&mut scratch))') && capture.includes('fn grab_jpeg(spec: Spec, size: &mut Option<(u32, u32)>, scratch: &mut Vec<u8>)') && capture.includes('pixels.resize('));
 check('replay snapshots keep only offsets, so a long clip costs no memory', capture.includes('struct FrameRef') && capture.includes('.skip(start).copied().collect()'));
+check('the game-start notice does not create a second web view', readyNotice.includes('crate::notice::show') && !readyNotice.includes('ensure_window') && !/window\.show\(\)/.test(readyNotice));
+check('the game-start notice is a native, click-through card', notice.includes('CreateWindowExW') && notice.includes('WS_EX_TRANSPARENT') && notice.includes('WS_EX_NOACTIVATE') && !notice.includes('WebviewWindow'));
 check('WASAPI loopback reads the default system output', capture.includes('AUDCLNT_STREAMFLAGS_LOOPBACK') && capture.includes('GetDefaultAudioEndpoint(eRender, eConsole)'));
 check('Windows MP4 output declares and writes an AAC audio stream', capture.includes('MFAudioFormat_AAC') && capture.includes('WriteSample(self.audio_stream, &sample)'));
 check('the built-in recording rejects a silent replay buffer', capture.includes('No system audio was captured, so Orbit did not save a silent replay.'));

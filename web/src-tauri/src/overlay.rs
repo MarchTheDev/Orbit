@@ -9,7 +9,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,7 +33,6 @@ static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
-static READY_NOTICE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
@@ -289,65 +288,31 @@ pub fn game_started(title: &str) {
     }
 }
 
-/// Show a short, click-through overlay notice after Orbit successfully starts a game.
-/// The main window may already be minimized or hidden by the launch policy.
+/// Show a short notice after Orbit successfully starts a game. The main window
+/// may already be minimized or hidden by the launch policy.
+///
+/// When the panel is on screen it picks the notice up from the next status
+/// refresh. Otherwise a native card is drawn instead: showing the overlay
+/// window for five seconds meant a second WebView2 instance, about 50 MB of
+/// processes, on every game start.
 pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
     let title = safe_name(title);
+    let panel = app
+        .get_webview_window(WINDOW)
+        .is_some_and(|window| window.is_visible().unwrap_or(false));
     {
         let mut live = lock();
         if !live.enabled {
             return Ok(());
         }
-        live.ready_notice = Some(title.clone());
+        if panel {
+            live.ready_notice = Some(title);
+            return Ok(());
+        }
+        // Nothing should keep a notice waiting for the next time the panel opens.
+        live.ready_notice = None;
     }
-
-    let Some(window) = ensure_window(app) else {
-        lock().ready_notice = None;
-        return Err("The overlay window could not be created.".to_string());
-    };
-    if OPEN.load(Ordering::SeqCst) {
-        // The full overlay is already visible; its regular status refresh will
-        // pick up the notice without disturbing the player's current layout.
-        return Ok(());
-    }
-    if window.is_visible().unwrap_or(false) && HAS_PINS.load(Ordering::SeqCst) {
-        // Keep pinned widgets exactly as they are; the notice can appear above them.
-        return Ok(());
-    }
-
-    RESTING.store(true, Ordering::SeqCst);
-    IGNORE.store(true, Ordering::SeqCst);
-    capture::set_paused(false);
-    cover_screen(&window);
-    let _ = window.set_focusable(false);
-    let _ = window.set_ignore_cursor_events(true);
-    let _ = window.set_always_on_top(true);
-    if let Err(error) = window.show() {
-        lock().ready_notice = None;
-        return Err(format!("The overlay window could not be shown: {error}"));
-    }
-
-    let generation = READY_NOTICE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    let app = app.clone();
-    let _ = thread::Builder::new()
-        .name("orbit-ready-notice".to_string())
-        .spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            let panel = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if READY_NOTICE_GENERATION.load(Ordering::SeqCst) != generation
-                    || OPEN.load(Ordering::SeqCst)
-                {
-                    return;
-                }
-                lock().ready_notice = None;
-                if HAS_PINS.load(Ordering::SeqCst) {
-                    rest_window(&panel);
-                } else {
-                    close_panel(&panel);
-                }
-            });
-        });
+    crate::notice::show(&title);
     Ok(())
 }
 
