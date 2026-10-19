@@ -148,7 +148,9 @@ check(
   'the card has no chip behind its icon either',
   !notice.includes('CHIP') &&
     notice.includes('const ICON_BOX: f32 = 24.0;') &&
-    /let text_left = box_left \+ box \+ GAP \* scale/.test(notice),
+    // `box` is a reserved word; the icon column is called a column.
+    /let text_left = column_left \+ column \+ GAP \* scale/.test(notice) &&
+    !/\blet box\b/.test(notice),
 );
 check(
   'the card takes the colours of the player theme',

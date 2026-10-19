@@ -705,17 +705,18 @@ mod win {
         // A tinted chip under a tinted glyph was two shapes saying one thing,
         // and at this size the chip won.
         let pad = PAD * scale;
-        let box = ICON_BOX * scale;
-        let box_left = pad;
-        let box_top = (h - box) / 2.0;
+        // `box` is a reserved word in Rust, and a column is what this is.
+        let column = ICON_BOX * scale;
+        let column_left = pad;
+        let column_top = (h - column) / 2.0;
         if card.icon == Icon::Mark {
             let mark = scaled(MARK_DRAW, scale);
-            draw_mark(g, box_left + (box - mark as f32) / 2.0, box_top + (box - mark as f32) / 2.0, mark, accent);
+            draw_mark(g, column_left + (column - mark as f32) / 2.0, column_top + (column - mark as f32) / 2.0, mark, accent);
         } else {
-            draw_icon(g, card.icon, box_left + box / 2.0, box_top + box / 2.0, ICON_DRAW * scale, accent);
+            draw_icon(g, card.icon, column_left + column / 2.0, column_top + column / 2.0, ICON_DRAW * scale, accent);
         }
 
-        let text_left = box_left + box + GAP * scale;
+        let text_left = column_left + column + GAP * scale;
         let text_width = (w - pad - text_left).max(1.0);
         let semibold = {
             let handle = family(w!("Segoe UI Semibold"));
