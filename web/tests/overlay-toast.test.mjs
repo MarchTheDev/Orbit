@@ -42,7 +42,15 @@ check(
 );
 check(
   'the capture note fades away after three and a half seconds',
-  /orbit-toast 3\.6s/.test(css) && /setToast\(null\), 3600\)/.test(overlay),
+  /orbit-toast 3\.6s/.test(css) && /const TOAST_MS = 3600/.test(overlay),
+);
+check(
+  'a failed capture stays long enough to read, even with confirmations off',
+  /const ERROR_TOAST_MS = 6500/.test(overlay) &&
+    /kind === 'error' \? ERROR_TOAST_MS : TOAST_MS/.test(overlay) &&
+    /animation-duration: 6\.5s/.test(css) &&
+    /kind !== 'error' && settingsRef\.current\?\.overlay\?\.captureToast === false/.test(overlay) &&
+    /flash\('Capture failed', message, 'error'\)/.test(overlay),
 );
 check(
   'the library note is the same flat card, not a gradient panel',

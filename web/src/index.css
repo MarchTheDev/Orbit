@@ -698,6 +698,10 @@ input[type='number']::-webkit-outer-spin-button {
 .orbit-toast {
   animation: orbit-toast 3.6s cubic-bezier(.2, .8, .2, 1) both;
 }
+/* A failure sits still for longer, so it shares the fade but not the timing. */
+.orbit-toast-card--error {
+  animation-duration: 6.5s;
+}
 .orbit-toast-card {
   --toast-accent: var(--c-accent);
   border-color: color-mix(in srgb, var(--c-text) 10%, var(--c-border));
@@ -708,6 +712,10 @@ input[type='number']::-webkit-outer-spin-button {
 .orbit-toast-card--recording,
 .orbit-toast-card--gallery {
   --toast-accent: var(--c-accent2);
+}
+.orbit-toast-card--error {
+  --toast-accent: #fb7185;
+  border-color: color-mix(in srgb, #fb7185 34%, var(--c-border));
 }
 .orbit-toast-icon {
   color: color-mix(in srgb, var(--toast-accent) 78%, white);

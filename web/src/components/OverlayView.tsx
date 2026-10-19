@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { Camera, Circle, Copy, ExternalLink, FolderOpen, Image, Pin, RotateCcw, Settings2, Sparkles, Square, Trash2, Video, X } from 'lucide-react';
+import { AlertCircle, Camera, Circle, Copy, ExternalLink, FolderOpen, Image, Pin, RotateCcw, Settings2, Sparkles, Square, Trash2, Video, X } from 'lucide-react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { applyFont, applyTheme } from '../data/themes';
 import { loadSettings } from '../services/storage';
@@ -43,7 +43,10 @@ import { MediaPlayer } from './MediaPlayer';
 type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
 type GalleryMenuState = { x: number; y: number; item: GalleryItem };
-type OverlayToastKind = 'screenshot' | 'recording' | 'replay' | 'gallery' | 'ready';
+type OverlayToastKind = 'screenshot' | 'recording' | 'replay' | 'gallery' | 'ready' | 'error';
+// A failure has to stay long enough to be read; a confirmation does not.
+const TOAST_MS = 3600;
+const ERROR_TOAST_MS = 6500;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
 const LAYOUT_REVISION = 4;
@@ -234,10 +237,12 @@ export function OverlayView() {
   };
 
   const flash = (title: string, detail: string, kind: OverlayToastKind = 'screenshot') => {
-    if (settingsRef.current?.overlay?.captureToast === false) return;
+    // A save the player only learns about from a passing note is bad enough;
+    // a failure must not be silenced by turning confirmations off.
+    if (kind !== 'error' && settingsRef.current?.overlay?.captureToast === false) return;
     setToast({ title, detail, kind });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 3600);
+    toastTimer.current = window.setTimeout(() => setToast(null), kind === 'error' ? ERROR_TOAST_MS : TOAST_MS);
   };
 
   useEffect(() => {
@@ -462,8 +467,12 @@ export function OverlayView() {
       }
       refresh();
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       setFailed(true);
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(message);
+      // The red line under the buttons stays, but the panel can be closed or
+      // dismissed before it is read, so the reason is shown on its own too.
+      flash('Capture failed', message, 'error');
     } finally {
       setBusy(false);
     }
@@ -649,6 +658,7 @@ export function OverlayView() {
     replay: RotateCcw,
     gallery: Copy,
     ready: Sparkles,
+    error: AlertCircle,
   })[toast.kind] : null;
 
   return (

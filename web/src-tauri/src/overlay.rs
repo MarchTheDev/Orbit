@@ -372,6 +372,9 @@ pub fn shutdown() {
     if let Some(hold) = recording.3 {
         let _ = capture::finish(hold);
     }
+    // A file still held by a save that is finishing right now cannot be
+    // removed yet; it is swept on the next start instead.
+    capture::clear_replay_files(&replay_workspace());
 }
 
 /// Hide and destroy the overlay window. Hiding is not enough: a hidden window
@@ -1198,6 +1201,10 @@ fn stop_buffer() {
         let _ = capture::finish(hold);
     }
     lock().replay_frames = None;
+    // The buffer removes its own files, but a file written by a process that
+    // died before it could clean up is still on disk. Nothing is playing now,
+    // so anything left in the folder is rubbish.
+    capture::clear_replay_files(&replay_workspace());
 }
 
 fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {

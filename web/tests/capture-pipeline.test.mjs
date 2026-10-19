@@ -40,6 +40,15 @@ check(
 );
 check('the replay buffer writes into a circular file and reads records back', capture.includes('struct Spool') && capture.includes('fn append(&self, bytes: &[u8])') && capture.includes('fn read(&self, at: u64, len: u32)'));
 check('a snapshot keeps its own files so encoding cannot read a reused record', capture.includes('fn renew(&mut self)') && /ring\.renew\(\)\?;/.test(capture));
+check(
+  'a wrapped replay file drops exactly the records the next write would land on',
+  capture.includes('fn make_room') &&
+    capture.includes('fn position(&self, len: u64) -> u64') &&
+    capture.includes('Self::place(written, self.capacity, len)') &&
+    capture.includes('video.position(len)') &&
+    capture.includes('sound.position(incoming)') &&
+    !capture.includes('ring.bytes.saturating_add(len) > VIDEO_SPOOL_BYTES'),
+);
 check('a replay save waits for the encoder queue instead of growing with the clip', capture.includes('fn wait_for_video_room') && /wait_for_video_room\(&writer\)/.test(capture));
 check('a replay save decodes every frame into one reused buffer', capture.includes('fn decode_jpeg_into(bytes: &[u8], out: &mut Vec<u8>)') && /decode_jpeg_into\(&jpeg, &mut bgra\)/.test(capture));
 check('Linux capture scales each tile into the output without a full-screen BGRA staging buffer', !linuxGrab.includes('let mut raw = vec!') && linuxGrab.includes('bytes.resize(') && linuxGrab.includes('for dst_x in 0..out_w'));

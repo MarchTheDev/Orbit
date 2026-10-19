@@ -60,8 +60,11 @@ struct Spool {
 
 struct SpoolState {
     file: Option<File>,
-    /// Where the next record starts. Records never straddle the end.
-    head: u64,
+    /// Bytes written since the file was made, padding included. The file
+    /// offset is `written % capacity`. Counting from the start of the file,
+    /// rather than keeping only an offset, is what lets the ring tell which
+    /// records a wrap is about to land on.
+    written: u64,
 }
 
 impl Spool {
@@ -78,30 +81,51 @@ impl Spool {
         Ok(Arc::new(Self {
             path,
             capacity: capacity.max(1),
-            state: Mutex::new(SpoolState { file: Some(file), head: 0 }),
+            state: Mutex::new(SpoolState { file: Some(file), written: 0 }),
         }))
     }
 
+    fn capacity(&self) -> u64 {
+        self.capacity
+    }
+
+    /// Where a record of `len` bytes would start. A record never crosses the
+    /// end of the file: one that will not fit in the tail starts on the next
+    /// lap, so every record reads back as one contiguous run.
+    fn position(&self, len: u64) -> u64 {
+        let written = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .written;
+        Self::place(written, self.capacity, len)
+    }
+
+    fn place(written: u64, capacity: u64, len: u64) -> u64 {
+        let offset = written % capacity;
+        if offset.saturating_add(len) > capacity {
+            written.saturating_add(capacity - offset)
+        } else {
+            written
+        }
+    }
+
     /// Write one record and report where it landed. The caller has already
-    /// dropped enough old records for it to fit without touching live data.
+    /// dropped the records this write would land on.
     fn append(&self, bytes: &[u8]) -> Result<(u64, u32), String> {
         let len = bytes.len() as u64;
         if len == 0 || len > self.capacity {
             return Err("A replay record was too large for the replay buffer.".to_string());
         }
         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        // The head is read and moved before the file is borrowed, because the
-        // handle and the position live in the same guarded record.
-        if state.head.saturating_add(len) > self.capacity {
-            state.head = 0;
-        }
-        let at = state.head;
+        let at = Self::place(state.written, self.capacity, len);
+        let offset = at % self.capacity;
         let Some(file) = state.file.as_mut() else {
             return Err("The replay buffer is no longer available.".to_string());
         };
-        file.seek(SeekFrom::Start(at)).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
         file.write_all(bytes).map_err(|error| error.to_string())?;
-        state.head = at.saturating_add(len);
+        state.written = at.saturating_add(len);
         Ok((at, len as u32))
     }
 
@@ -111,7 +135,7 @@ impl Spool {
         let Some(file) = state.file.as_mut() else {
             return Err("The replay buffer is no longer available.".to_string());
         };
-        file.seek(SeekFrom::Start(at)).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(at % self.capacity)).map_err(|error| error.to_string())?;
         file.read_exact(&mut bytes).map_err(|error| error.to_string())?;
         Ok(bytes)
     }
@@ -141,15 +165,65 @@ struct AudioRef {
     frames: usize,
 }
 
+/// What the ring has to know about a stored record to keep the file honest.
+trait Record {
+    fn at(&self) -> u64;
+    fn frames(&self) -> usize;
+}
+
+impl Record for FrameRef {
+    fn at(&self) -> u64 {
+        self.at
+    }
+    fn frames(&self) -> usize {
+        1
+    }
+}
+
+impl Record for AudioRef {
+    fn at(&self) -> u64 {
+        self.at
+    }
+    fn frames(&self) -> usize {
+        self.frames
+    }
+}
+
+/// Drop every record the next write would land on.
+///
+/// A circular file reuses the bytes one lap behind the write point. Checking
+/// only that the live records fit in the file is not enough: with records of
+/// different sizes the write head can land partway into an older record while
+/// the totals still fit, which silently corrupts the frames a saved clip is
+/// about to read. So the write position is compared with the records
+/// themselves.
+fn make_room<T: Record>(queue: &mut VecDeque<T>, capacity: u64, at: u64, len: u64) -> usize {
+    if at < capacity {
+        // Still on the first lap: the write lands in space nothing is using.
+        return 0;
+    }
+    let low = at - capacity;
+    // The window ends before `at` because no record is larger than the file.
+    let high = low.saturating_add(len);
+    let mut frames = 0;
+    loop {
+        let safe = queue.front().map(|front| front.at() >= high).unwrap_or(true);
+        if safe {
+            break;
+        }
+        let Some(old) = queue.pop_front() else { break };
+        frames = frames.saturating_add(old.frames());
+    }
+    frames
+}
+
 struct Ring {
     width: u32,
     height: u32,
     fps: u32,
     max_frames: usize,
-    bytes: u64,
     frames: VecDeque<FrameRef>,
     audio: VecDeque<AudioRef>,
-    audio_bytes: u64,
     audio_frames: usize,
     dir: PathBuf,
     video: Option<Arc<Spool>>,
@@ -173,21 +247,23 @@ fn new_spool(dir: &Path, kind: &str, capacity: u64) -> Result<Arc<Spool>, String
 
 impl Buffer {
     pub fn new(dir: &Path, fps: u32, keep: Duration) -> Result<Self, String> {
+        Self::with_files(dir, fps, keep, VIDEO_SPOOL_BYTES, AUDIO_SPOOL_BYTES)
+    }
+
+    fn with_files(dir: &Path, fps: u32, keep: Duration, video_bytes: u64, audio_bytes: u64) -> Result<Self, String> {
         let fps = fps.max(1);
         let seconds = keep.as_secs().max(1) as usize;
         let dir = dir.to_path_buf();
-        let video = new_spool(&dir, "video", VIDEO_SPOOL_BYTES)?;
-        let sound = Some(new_spool(&dir, "audio", AUDIO_SPOOL_BYTES)?);
+        let video = new_spool(&dir, "video", video_bytes)?;
+        let sound = Some(new_spool(&dir, "audio", audio_bytes)?);
         Ok(Self {
             inner: Arc::new(Mutex::new(Ring {
                 width: 0,
                 height: 0,
                 fps,
                 max_frames: seconds.saturating_mul(fps as usize).max(fps as usize),
-                bytes: 0,
                 frames: VecDeque::new(),
                 audio: VecDeque::new(),
-                audio_bytes: 0,
                 audio_frames: 0,
                 dir,
                 video: Some(video),
@@ -209,20 +285,22 @@ impl Buffer {
             return;
         }
         let len = jpeg.len() as u64;
-        if len > VIDEO_SPOOL_BYTES {
+        let Some(video) = ring.video.clone() else { return };
+        if len > video.capacity() {
             return;
         }
-        // Room is made before the write, never after it: a circular file that
-        // overwrites first would corrupt the frames it is about to drop.
-        while ring.frames.len() >= ring.max_frames || ring.bytes.saturating_add(len) > VIDEO_SPOOL_BYTES {
-            let Some(old) = ring.frames.pop_front() else { break };
-            ring.bytes = ring.bytes.saturating_sub(old.len as u64);
+        // Keep the requested length: the oldest frame goes once the window is
+        // full. Room is made before the write, never after it.
+        while ring.frames.len() >= ring.max_frames {
+            if ring.frames.pop_front().is_none() {
+                break;
+            }
         }
-        let Some(video) = ring.video.clone() else { return };
+        let at = video.position(len);
+        make_room(&mut ring.frames, video.capacity(), at, len);
         match video.append(jpeg) {
             Ok((at, len)) => {
                 ring.frames.push_back(FrameRef { at, len });
-                ring.bytes = ring.bytes.saturating_add(len as u64);
             }
             Err(error) => set_error(&error),
         }
@@ -241,7 +319,6 @@ impl Buffer {
         let Some(sound) = ring.sound.clone() else { return };
         match sound.append(bytes) {
             Ok((at, len)) => {
-                ring.audio_bytes = ring.audio_bytes.saturating_add(len as u64);
                 ring.audio_frames = ring.audio_frames.saturating_add(frames);
                 ring.audio.push_back(AudioRef { at, len, first_frame: 0, frames });
             }
@@ -310,9 +387,7 @@ impl Ring {
         let sound = new_spool(&self.dir, "audio", AUDIO_SPOOL_BYTES)?;
         self.video = Some(video);
         self.sound = Some(sound);
-        self.bytes = 0;
         self.frames.clear();
-        self.audio_bytes = 0;
         self.audio_frames = 0;
         self.audio.clear();
         Ok(())
@@ -321,31 +396,25 @@ impl Ring {
 
 fn trim_audio(ring: &mut Ring, incoming: u64) {
     let audio_limit = ring.max_frames.saturating_mul(AUDIO_SAMPLE_RATE as usize) / ring.fps.max(1) as usize;
-    loop {
-        // Room for the record that is about to arrive, so `append` never has to
-        // write over a chunk that is still part of the replay.
-        let over_bytes = ring.audio_bytes.saturating_add(incoming) > AUDIO_SPOOL_BYTES;
-        let over_time = ring.audio_frames > audio_limit;
-        if !over_bytes && !over_time {
+    // Keep the audio inside the same window as the pictures.
+    while ring.audio_frames > audio_limit {
+        let Some(front) = ring.audio.front_mut() else { break };
+        let remove = ring.audio_frames.saturating_sub(audio_limit).min(front.frames);
+        if remove == 0 {
             break;
         }
-        let remove_frames = if over_bytes {
-            let excess = ring.audio_bytes.saturating_add(incoming).saturating_sub(AUDIO_SPOOL_BYTES);
-            ((excess.saturating_add(AUDIO_BYTES_PER_FRAME as u64 - 1)) / AUDIO_BYTES_PER_FRAME as u64).max(1) as usize
-        } else {
-            ring.audio_frames.saturating_sub(audio_limit).max(1)
-        };
-        let Some(front) = ring.audio.front_mut() else { break };
-        let remove = remove_frames.min(front.frames);
         front.first_frame += remove;
         front.frames -= remove;
-        ring.audio_frames = ring.audio_frames.saturating_sub(remove);
-        let removed_bytes = remove.saturating_mul(AUDIO_BYTES_PER_FRAME) as u64;
-        ring.audio_bytes = ring.audio_bytes.saturating_sub(removed_bytes);
+        ring.audio_frames -= remove;
         if front.frames == 0 {
             ring.audio.pop_front();
         }
     }
+    // Then make sure the incoming record does not land on one still in use.
+    let Some(sound) = ring.sound.clone() else { return };
+    let at = sound.position(incoming);
+    let frames = make_room(&mut ring.audio, sound.capacity(), at, incoming);
+    ring.audio_frames = ring.audio_frames.saturating_sub(frames);
 }
 
 pub struct Kept {
@@ -576,6 +645,20 @@ pub fn write_audio_wav(path: &Path, kept: &Kept) -> Result<(), String> {
         file.write_all(&bytes).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Remove replay files nothing owns any more. A crash, a killed process, or a
+/// quit in the middle of a save can leave one behind, and a 256 MB file has no
+/// business outliving the session that wrote it.
+pub fn clear_replay_files(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|item| item.to_str()) == Some("spool") {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let _ = fs::remove_dir(dir);
 }
 
 /// Remove old per-second replay pieces from version 1.1, and a spool file that
@@ -2219,8 +2302,95 @@ mod tests {
         assert_eq!(spool.read(0, 20).unwrap(), vec![1u8; 20]);
         assert_eq!(spool.read(20, 20).unwrap(), vec![2u8; 20]);
         // A record that would cross the end starts again at the beginning.
-        assert_eq!(spool.append(&[3u8; 30]).unwrap(), (0, 30));
-        assert_eq!(spool.read(0, 30).unwrap(), vec![3u8; 30]);
+        assert_eq!(spool.append(&[3u8; 30]).unwrap(), (64, 30));
+        assert_eq!(spool.read(64, 30).unwrap(), vec![3u8; 30]);
+    }
+
+    /// Records of different sizes are what the replay really holds. Counting
+    /// only live bytes let the write head land inside a live record as soon as
+    /// the file wrapped, which is what made a saved replay fail to decode about
+    /// half a minute into a game.
+    #[test]
+    fn a_replay_that_fills_its_file_still_returns_whole_frames() {
+        let dir = test_dir("ring-wrap");
+        // Small files, so the wrap happens inside a short test. The code path
+        // is the same one the real 256 MB file uses.
+        let buffer = Buffer::with_files(&dir, 30, Duration::from_secs(20), 4096, 2048).unwrap();
+        let mut pushed = Vec::new();
+        for step in 0..300u32 {
+            let len = 13 + (step.wrapping_mul(29) % 71) as usize;
+            let tag = (step % 251) as u8;
+            buffer.push_jpeg(&vec![tag; len], 16, 16);
+            pushed.push(tag);
+        }
+        let kept = buffer.snapshot(20).unwrap();
+        assert!(kept.frame_count() > 4);
+        let first = pushed.len() - kept.frame_count();
+        for index in 0..kept.frame_count() {
+            let frame = kept.frame(index).unwrap();
+            assert!(
+                frame.iter().all(|byte| *byte == pushed[first + index]),
+                "frame {index} was overwritten by a later lap"
+            );
+        }
+    }
+
+    #[test]
+    fn a_replay_that_fills_its_audio_file_keeps_whole_chunks() {
+        let dir = test_dir("audio-wrap");
+        let buffer = Buffer::with_files(&dir, 30, Duration::from_secs(20), 4096, 1024).unwrap();
+        buffer.push_jpeg(&[9u8; 16], 16, 16);
+        let mut pushed = Vec::new();
+        for step in 0..80u32 {
+            let frames = 90 + (step % 40) as usize;
+            let tag = (step % 251) as u8;
+            buffer.push_audio_pcm(vec![tag; frames * AUDIO_BYTES_PER_FRAME]);
+            pushed.push(tag);
+        }
+        let kept = buffer.snapshot(1).unwrap();
+        assert!(kept.audio_chunk_count() > 1);
+        let first = pushed.len() - kept.audio_chunk_count();
+        for index in 0..kept.audio_chunk_count() {
+            let (pcm, frames) = kept.audio_chunk(index).unwrap();
+            assert_eq!(pcm.len(), frames * AUDIO_BYTES_PER_FRAME);
+            assert!(
+                pcm.iter().all(|byte| *byte == pushed[first + index]),
+                "audio chunk {index} was overwritten by a later lap"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wrapped_spool_never_writes_into_a_live_record() {
+        let dir = test_dir("wrap-live");
+        let capacity = 4096;
+        let spool = Spool::create(&dir, "wrap.spool", capacity).unwrap();
+        let mut records: VecDeque<FrameRef> = VecDeque::new();
+        let mut tags: VecDeque<u8> = VecDeque::new();
+        for step in 0..400u32 {
+            let len = 13 + (step.wrapping_mul(37) % 89) as usize;
+            let tag = (step % 251) as u8;
+            let bytes = vec![tag; len];
+            let at = spool.position(len as u64);
+            let dropped = make_room(&mut records, capacity, at, len as u64);
+            for _ in 0..dropped {
+                tags.pop_front();
+            }
+            let (at, len) = spool.append(&bytes).unwrap();
+            records.push_back(FrameRef { at, len });
+            tags.push_back(tag);
+            for (record, written) in records.iter().zip(tags.iter()) {
+                let read = spool.read(record.at, record.len).unwrap();
+                assert!(
+                    read.iter().all(|item| item == written),
+                    "step {step}: the record at {} no longer holds what was written",
+                    record.at
+                );
+            }
+            // Nothing older than one lap may stay in the index.
+            let oldest = spool.position(0).saturating_sub(capacity);
+            assert!(records.iter().all(|record| record.at > oldest));
+        }
     }
 
     #[test]
