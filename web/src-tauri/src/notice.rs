@@ -35,16 +35,16 @@ mod win {
     use windows::core::w;
     use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{
-        BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, GetClientRect,
-        SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_CHARSET, DT_END_ELLIPSIS,
-        DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HGDIOBJ, PAINTSTRUCT, TRANSPARENT,
+        BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, SelectObject,
+        SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_LEFT,
+        DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics, PeekMessageW, PostQuitMessage,
-        RegisterClassW, ShowWindow, TranslateMessage, MSG, PM_REMOVE, SM_CXSCREEN, SW_SHOWNOACTIVATE, WM_DESTROY,
-        WM_ERASEBKGND, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
-        WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetSystemMetrics, PeekMessageW,
+        PostQuitMessage, RegisterClassW, ShowWindow, TranslateMessage, MSG, PM_REMOVE, SM_CXSCREEN, SW_SHOWNOACTIVATE,
+        WM_DESTROY, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+        WS_EX_TRANSPARENT, WS_POPUP,
     };
 
     // COLORREF is 0x00BBGGRR.
