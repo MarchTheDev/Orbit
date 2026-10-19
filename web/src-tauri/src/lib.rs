@@ -820,7 +820,7 @@ async fn overlay_shot(app: tauri::AppHandle, stamp: String) -> Result<String, St
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::shot(&worker, &stamp);
-        overlay::announce_capture(&worker, "screenshot", &outcome);
+        overlay::announce_capture(&worker, "screenshot", &outcome, false);
         outcome
     })
     .await
@@ -832,7 +832,7 @@ async fn overlay_record(app: tauri::AppHandle, stamp: String) -> Result<String, 
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::record(&worker, &stamp);
-        overlay::announce_capture(&worker, "recording", &outcome);
+        overlay::announce_capture(&worker, "recording", &outcome, false);
         outcome
     })
     .await
@@ -844,7 +844,7 @@ async fn overlay_replay(app: tauri::AppHandle, seconds: u32, stamp: String) -> R
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::save_replay(&worker, seconds, &stamp);
-        overlay::announce_capture(&worker, "replay", &outcome);
+        overlay::announce_capture(&worker, "replay", &outcome, false);
         outcome
     })
     .await
@@ -976,6 +976,9 @@ fn window_ready(app: tauri::AppHandle, startup: State<'_, StartupVisibility>) {
     if !startup.start_in_background || startup.show_requested.load(Ordering::SeqCst) {
         show_main_window(&app);
     }
+    // The panel is built while the library is idle, so the first Alt+X does
+    // not have to wait for a web view to start.
+    overlay::warm(&app);
 }
 
 /// Pull the queued paths opened through Explorer, then clear the queue.

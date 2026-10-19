@@ -732,7 +732,9 @@ input[type='number']::-webkit-outer-spin-button {
   box-shadow: 0 16px 40px rgba(0, 0, 0, .4);
   backdrop-filter: blur(18px) saturate(1.08);
 }
-.orbit-toast-card--recording,
+/* A screenshot, a recording and a replay are three answers to the same
+   question, so they are three cards of the same colour. Gallery actions keep
+   the second accent: they are a different kind of news. */
 .orbit-toast-card--gallery {
   --toast-accent: var(--c-accent2);
 }

@@ -328,17 +328,6 @@ export function OverlayView() {
   /** The box the ring starts on when the pad is used before it has a target. */
   const startBox = (): PadTarget => (boxNode('capture') ? 'capture' : (shownBoxes()[0] ?? 'capture'));
 
-  /**
-   * B on a chosen box: the next box, wrapping at the end. The toolbar is a
-   * stop for the directions, but it is not a box, so B skips it.
-   */
-  const nextBox = (from: PadTarget | null): PadTarget => {
-    const stops = shownBoxes().filter((id): id is BoxId => id !== 'bar');
-    if (stops.length === 0) return from ?? startBox();
-    const index = from && from !== 'bar' ? stops.indexOf(from) : -1;
-    return stops[(index + 1) % stops.length];
-  };
-
   /** Leave a box's controls and go back to choosing boxes. */
   const leaveBox = (id: PadTarget) => {
     document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
@@ -552,16 +541,12 @@ export function OverlayView() {
         return;
       }
       if (action === 'back') {
-        // B backs out of a box's controls, then moves the ring on to the next
-        // box, the way the pad shortcut was asked for. Start+Select closes the
-        // overlay; with nothing chosen yet, B still leaves.
+        // B backs out of a box's controls. Out at the box level there is
+        // nothing left to back out of, so B closes the overlay, which is what
+        // a player reaching for B means once the ring is only hovering.
         const focus = padFocusRef.current;
         if (focus?.level === 'inside') {
           leaveBox(focus.id);
-          return;
-        }
-        if (focus) {
-          setPad({ level: 'box', id: nextBox(focus.id) });
           return;
         }
         void overlayHide();

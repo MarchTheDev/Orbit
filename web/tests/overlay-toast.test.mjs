@@ -63,6 +63,12 @@ check(
     /flash\('Capture failed', message, 'error'\)/.test(overlay),
 );
 check(
+  'a screenshot, a recording and a replay are the same card in the panel too',
+  /\.orbit-toast-card--gallery \{\s*--toast-accent: var\(--c-accent2\);\s*\}/.test(css) &&
+    !/\.orbit-toast-card--recording[^{]*\{[^}]*--c-accent2/s.test(css) &&
+    !/\.orbit-toast-card--replay[^{]*\{[^}]*--c-accent2/s.test(css),
+);
+check(
   'the library note is the same flat card, with a tinted icon square and no gradient',
   /orbit-note pointer-events-auto/.test(app) &&
     /orbit-note-icon mt-px grid size-5 shrink-0 place-items-center rounded-md/.test(app) &&
@@ -88,10 +94,11 @@ check(
 check(
   'the card rises and fades instead of appearing in one frame',
   notice.includes('WS_EX_LAYERED') &&
-    notice.includes('SetLayeredWindowAttributes') &&
-    notice.includes('SetWindowPos') &&
+    notice.includes('UpdateLayeredWindow') &&
+    notice.includes('SourceConstantAlpha: 0') &&
     notice.includes('let entering = (opened.elapsed().as_secs_f32() / ENTER)') &&
-    notice.includes('let leaving = (remaining / LEAVE)'),
+    notice.includes('let leaving = (remaining / LEAVE)') &&
+    notice.includes('point.y = top - offset'),
 );
 check(
   'the ring starts on a box, and A steps inside it',
@@ -100,10 +107,10 @@ check(
     /const enterBox = \(id: PadTarget\) => \{[\s\S]*?setPad\(\{ level: 'inside', id \}\)/.test(overlay),
 );
 check(
-  'B backs out of a box, then moves the ring to the next one',
+  'B backs out of a box, and closes the overlay while it is only hovering',
   /action === 'back'[\s\S]*?focus\?\.level === 'inside'[\s\S]*?leaveBox\(focus\.id\)/.test(overlay) &&
-    /const nextBox = \(from: PadTarget \| null\): PadTarget => \{/.test(overlay) &&
-    overlay.includes("setPad({ level: 'box', id: nextBox(focus.id) })"),
+    /action === 'back'[\s\S]*?void overlayHide\(\);/.test(overlay) &&
+    !overlay.includes('nextBox('),
 );
 check(
   'directions pick the nearest control or box instead of walking a list',
@@ -129,10 +136,10 @@ check(
   notice.includes('orbit-mark-mask.bin') && notice.includes('draw_mark(') && notice.includes('CHIP'),
 );
 check(
-  'the card draws the mark large enough to read, from a cropped high-resolution mask',
+  'the card draws the mark from a cropped high-resolution mask, lifted for its size',
   notice.includes('const MARK_SIZE: usize = 256;') &&
-    notice.includes('const MARK_DRAW: f32 = 32.0;') &&
-    notice.includes('const CHIP: f32 = 46.0;') &&
+    notice.includes('const MARK_DRAW: f32 = 20.0;') &&
+    notice.includes('const CHIP: f32 = 32.0;') &&
     notice.includes('powf(0.85)'),
 );
 check(

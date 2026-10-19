@@ -21,7 +21,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture;
-use crate::notice::{Card, Palette};
+use crate::notice::{Card, Icon, Palette};
 use crate::process;
 
 const WINDOW: &str = "overlay";
@@ -219,10 +219,14 @@ fn parse_colour(value: &str) -> Option<u32> {
 /// A capture finished. When the panel is gone there is no toast left to show
 /// it, so the card does: a save that was started before the overlay closed is
 /// exactly the one the player is waiting to hear about.
-pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>) {
+pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>, force: bool) {
     // A panel on screen - open, or resting against a pin - has its own toast
     // and its own chime. Only a capture that outlives it needs the card.
-    if panel_visible(app) {
+    //
+    // `force` is for the pad with the panel closed: that capture never had a
+    // panel to draw anything, and it must not be silenced by a panel that
+    // happened to open while the save was running.
+    if !force && panel_visible(app) {
         return;
     }
     let palette = lock().palette;
@@ -235,7 +239,15 @@ pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, Str
                 "recording" => "Recording started",
                 _ => "Saved to Gallery",
             };
-            Card::ok(title, capture_detail(kind, text), palette)
+            // The panel's toast uses the camera, the dot and the circular
+            // arrow for these three; the card must not invent a fourth look
+            // for the same save.
+            let icon = match kind {
+                "recording" => Icon::Record,
+                "replay" => Icon::Replay,
+                _ => Icon::Camera,
+            };
+            Card::ok(title, capture_detail(kind, text), palette).with_icon(icon)
         }
         Err(text) => Card::error("Capture failed", text, palette),
     };
@@ -704,7 +716,7 @@ fn spawn_capture(app: &AppHandle, capture: Capture) {
             Capture::Record => ("recording", record(&handle, &stamp)),
             Capture::Replay => ("replay", save_replay(&handle, seconds, &stamp)),
         };
-        announce_capture(&handle, kind, &result);
+        announce_capture(&handle, kind, &result, true);
     });
 }
 
@@ -1055,6 +1067,35 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         }
     });
     Some(window)
+}
+
+/// Build the panel before it is first asked for.
+///
+/// The first Alt+X used to pay for all of it: creating the window, starting
+/// WebView2, loading the bundle and the first React render. That is the second
+/// or two where the shortcut seems not to have registered. The work is done
+/// here while the library sits idle instead, so the first open is as quick as
+/// the ones after it. The window is created hidden, so it covers nothing, and
+/// nothing that asks whether the panel is up sees it.
+pub fn warm(app: &AppHandle) {
+    if STOP.load(Ordering::SeqCst) || !lock().enabled {
+        return;
+    }
+    let handle = app.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-warm".to_string())
+        .spawn(move || {
+            // The library's own first paint comes first; this is the idle work
+            // after it, not a competitor for the same CPU.
+            thread::sleep(Duration::from_secs(3));
+            if STOP.load(Ordering::SeqCst) {
+                return;
+            }
+            let panel = handle.clone();
+            let _ = handle.run_on_main_thread(move || {
+                let _ = ensure_window(&panel);
+            });
+        });
 }
 
 fn show_window(app: &AppHandle) {

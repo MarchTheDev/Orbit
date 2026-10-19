@@ -120,9 +120,9 @@ check(
     overlay.includes('Card::error("Capture failed"') &&
     // Announced from inside the blocking task, so closing the panel - and
     // dropping the command's future - cannot swallow it.
-    /spawn_blocking\(move \|\| \{[\s\S]*?overlay::announce_capture\(&worker, "screenshot", &outcome\)/.test(lib) &&
-    /overlay::announce_capture\(&worker, "recording", &outcome\)/.test(lib) &&
-    /overlay::announce_capture\(&worker, "replay", &outcome\)/.test(lib),
+    /spawn_blocking\(move \|\| \{[\s\S]*?overlay::announce_capture\(&worker, "screenshot", &outcome, false\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "recording", &outcome, false\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "replay", &outcome, false\)/.test(lib),
 );
 check(
   'a capture announced with no panel on screen brings its own chime',
@@ -138,12 +138,42 @@ check(
 check(
   'the game-start card is a themed Orbit card with the mark, not a plain rectangle',
   notice.includes('orbit-mark-mask.bin') &&
-    notice.includes('AlphaBlend') &&
-    notice.includes('CreateRoundRectRgn') &&
-    notice.includes('mix(panel, accent, 0.14)') &&
+    notice.includes('draw_mark(') &&
     notice.includes('pub struct Palette') &&
     lib.includes('fn overlay_theme(') &&
     lib.includes('overlay::set_palette'),
+);
+check(
+  'the card is composited from an antialiased, premultiplied bitmap',
+  // GDI+ paints it and UpdateLayeredWindow puts it on screen, so the rounded
+  // corners and the type are smooth instead of a clipped region and GDI text.
+  notice.includes('GdiplusStartup') &&
+    notice.includes('GdipFillPath') &&
+    notice.includes('GdipDrawString') &&
+    notice.includes('UpdateLayeredWindow') &&
+    notice.includes('PREMULTIPLIED_ARGB') &&
+    // Drawn at the monitor's own scale, not stretched by the compositor.
+    notice.includes('GetDpiForWindow') &&
+    !notice.includes('CreateRoundRectRgn'),
+);
+check(
+  'the card is the panel toast: same width, corners, chip and type sizes',
+  notice.includes('const WIDTH: f32 = 352.0;') &&
+    notice.includes('const HEIGHT: f32 = 64.0;') &&
+    notice.includes('const RADIUS: f32 = 16.0;') &&
+    notice.includes('const CHIP: f32 = 32.0;') &&
+    notice.includes('const TITLE_SIZE: f32 = 13.0;') &&
+    notice.includes('const DETAIL_SIZE: f32 = 11.0;'),
+);
+check(
+  'a capture card uses the same icon the panel toast uses for it',
+  notice.includes('pub enum Icon') &&
+    notice.includes('Icon::Camera') &&
+    notice.includes('Icon::Record') &&
+    notice.includes('Icon::Replay') &&
+    notice.includes('pub fn with_icon(mut self, icon: Icon)') &&
+    overlay.includes('Card::ok(title, capture_detail(kind, text), palette).with_icon(icon)') &&
+    /let icon = match kind \{[\s\S]*?"recording" => Icon::Record[\s\S]*?"replay" => Icon::Replay/.test(overlay),
 );
 check(
   'LB is the capture modifier: LB+RB shoots, LB+d-pad records and replays',
@@ -160,7 +190,10 @@ check(
 check(
   'a pad capture with the panel closed runs natively and reports in a card',
   overlay.includes('fn spawn_capture(') &&
-    overlay.includes('announce_capture(&handle, kind, &result)') &&
+    // Forced: a pad capture never had a panel, so a panel that opens while the
+    // save runs must not swallow the card.
+    overlay.includes('announce_capture(&handle, kind, &result, true)') &&
+    overlay.includes('if !force && panel_visible(app)') &&
     overlay.includes('thread::Builder::new().name("orbit-pad-capture"'),
 );
 check(
@@ -170,6 +203,13 @@ check(
     overlay.includes('window.emit("overlay-pad-axes"') &&
     // One idle report after the stick is let go, so the scroll stops.
     overlay.includes('if moving || watch.stick_moving'),
+);
+check(
+  'the panel is built before it is first asked for, so the first Alt+X is quick',
+  /pub fn warm\(app: &AppHandle\)/.test(overlay) &&
+    overlay.includes('thread::Builder::new()\n        .name("orbit-warm"') &&
+    overlay.includes('ensure_window(&panel)') &&
+    lib.includes('overlay::warm(&app);'),
 );
 check(
   'the card is printed in the local time zone, like the panel names its files',
