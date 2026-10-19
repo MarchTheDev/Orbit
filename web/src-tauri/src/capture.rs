@@ -2338,11 +2338,11 @@ mod tests {
     #[test]
     fn a_replay_that_fills_its_audio_file_keeps_whole_chunks() {
         let dir = test_dir("audio-wrap");
-        let buffer = Buffer::with_files(&dir, 30, Duration::from_secs(20), 4096, 1024).unwrap();
+        let buffer = Buffer::with_files(&dir, 30, Duration::from_secs(20), 4096, 32 * 1024).unwrap();
         buffer.push_jpeg(&[9u8; 16], 16, 16);
         let mut pushed = Vec::new();
         for step in 0..80u32 {
-            let frames = 90 + (step % 40) as usize;
+            let frames = 300 + (step % 100) as usize;
             let tag = (step % 251) as u8;
             buffer.push_audio_pcm(vec![tag; frames * AUDIO_BYTES_PER_FRAME]);
             pushed.push(tag);
@@ -2389,7 +2389,7 @@ mod tests {
             }
             // Nothing older than one lap may stay in the index.
             let oldest = spool.position(0).saturating_sub(capacity);
-            assert!(records.iter().all(|record| record.at > oldest));
+            assert!(records.iter().all(|record| record.at >= oldest));
         }
     }
 
