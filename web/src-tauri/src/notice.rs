@@ -24,10 +24,21 @@ pub struct Palette {
     pub accent: u32,
 }
 
+impl Palette {
+    /// Orbit's own Nebula theme, which is what a saved colour means. It is a
+    /// constant because the overlay keeps one in a `static`, and a `static`
+    /// cannot call a function to make its value.
+    pub const NEBULA: Self = Self {
+        panel: 0x14_12_2a,
+        text: 0xec_eb_ff,
+        muted: 0x9a_96_c4,
+        accent: 0x8b_5c_f6,
+    };
+}
+
 impl Default for Palette {
     fn default() -> Self {
-        // Orbit's own Nebula theme, which is what a saved colour means.
-        Self { panel: 0x14_12_2a, text: 0xec_eb_ff, muted: 0x9a_96_c4, accent: 0x8b_5c_f6 }
+        Self::NEBULA
     }
 }
 

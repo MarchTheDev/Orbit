@@ -136,7 +136,7 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     recording_name: String::new(),
     recording_path: PathBuf::new(),
     note: String::new(),
-    palette: Palette::default(),
+    palette: Palette::NEBULA,
 });
 static GATE: Mutex<()> = Mutex::new(());
 static PAD: Mutex<Watch> = Mutex::new(Watch {
