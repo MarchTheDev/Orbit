@@ -323,7 +323,8 @@ mod win {
         header.biHeight = -(size as i32);
         header.biPlanes = 1;
         header.biBitCount = 32;
-        header.biCompression = BI_RGB;
+        // The header field is a plain u32; BI_RGB is the wrapped constant.
+        header.biCompression = BI_RGB.0;
         let info = BITMAPINFO { bmiHeader: header, ..Default::default() };
 
         let mut bits: *mut c_void = std::ptr::null_mut();
