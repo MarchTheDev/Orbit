@@ -90,13 +90,15 @@ impl Spool {
             return Err("A replay record was too large for the replay buffer.".to_string());
         }
         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(file) = state.file.as_mut() else {
-            return Err("The replay buffer is no longer available.".to_string());
-        };
+        // The head is read and moved before the file is borrowed, because the
+        // handle and the position live in the same guarded record.
         if state.head.saturating_add(len) > self.capacity {
             state.head = 0;
         }
         let at = state.head;
+        let Some(file) = state.file.as_mut() else {
+            return Err("The replay buffer is no longer available.".to_string());
+        };
         file.seek(SeekFrom::Start(at)).map_err(|error| error.to_string())?;
         file.write_all(bytes).map_err(|error| error.to_string())?;
         state.head = at.saturating_add(len);
