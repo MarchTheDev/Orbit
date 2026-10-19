@@ -254,6 +254,26 @@ html.orbit-pad .orbit-pad-focus {
      A pill or a large card keeps the curve it already has. */
   border-radius: 1rem;
 }
+/* The pad rings a menu row or a dialog answer in the same instant it focuses
+   it. Until that class lands the browser paints its own square focus ring, so
+   the ring appeared to snap from square to round. These two surfaces are only
+   ever driven by the pad's own ring. */
+html.orbit-pad [role="menu"] button:focus:not(.orbit-pad-focus),
+html.orbit-pad [role="menu"] button:focus-visible:not(.orbit-pad-focus),
+html.orbit-pad .modal-panel-enter button:focus:not(.orbit-pad-focus),
+html.orbit-pad .modal-panel-enter button:focus-visible:not(.orbit-pad-focus) {
+  outline: none;
+}
+/* A menu row and a dialog answer keep their own corner. Outline draws at the
+   control's radius and is not transitioned, so the ring is round from the first
+   frame instead of the shared 1rem curve reshaping the control as it arrives. */
+html.orbit-pad [role="menu"] .orbit-pad-focus,
+html.orbit-pad .modal-panel-enter .orbit-pad-focus {
+  box-shadow: none;
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+  border-radius: 0.5rem;
+}
 html.orbit-pad .orbit-pad-focus.rounded-full {
   border-radius: 999px;
 }

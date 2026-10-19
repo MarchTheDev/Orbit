@@ -133,7 +133,7 @@ check(
     overlay.includes("openGalleryMenu(active)") &&
     // The ring is put back on the tile when the menu closes.
     /const closeGalleryMenu = \(\) => \{/.test(overlay) &&
-    overlay.includes('anchor.focus();'),
+    overlay.includes('focusPad(anchor)'),
 );
 check(
   'the menu and the delete dialog are answerable with the pad',
@@ -147,12 +147,31 @@ check(
     confirmDialog.includes('data-overlay={pad || undefined}'),
 );
 check(
-  'the game-start toast is the title alone, with no Alt+X line',
-  overlay.includes("setToast({ title: 'Game started', detail: '', kind: 'ready' })") &&
+  'the game-start toast names the overlay, not the game, and has no Alt+X line',
+  overlay.includes("const READY_TITLE = 'Overlay deployed in Orbit'") &&
+    overlay.includes("setToast({ title: status?.readyNotice || READY_TITLE, detail: '', kind: 'ready' })") &&
+    !overlay.includes('Game started') &&
     !overlay.includes('Press Alt+X to open Orbit Overlay') &&
-    overlaySource.includes('Card::ok(&title, "", palette)') &&
+    overlaySource.includes('const READY_TITLE: &str = "Overlay deployed in Orbit"') &&
+    overlaySource.includes('Card::ok(READY_TITLE, "", palette)') &&
+    !overlaySource.includes('Card::ok(&title') &&
     !overlaySource.includes('Orbit Overlay is ready') &&
-    !app.includes('Ready for captures. Press Alt+X to open it.'),
+    !app.includes('Ready for captures. Press Alt+X to open it.') &&
+    app.includes("announce({ text: 'Overlay deployed in Orbit' })") &&
+    app.includes('overlayReadyNotice().catch(fallbackNotice)'),
+);
+check(
+  'the pad rings a menu row and a dialog answer before it focuses them',
+  /function focusPad\(next: HTMLElement\) \{\n  markPad\(next\);\n  if \(document\.activeElement !== next\) next\.focus\(\);/.test(overlay) &&
+    /function listStep[\s\S]{0,400}focusPad\(next\)/.test(overlay) &&
+    /function focusFirst[\s\S]{0,400}focusPad\(first\)/.test(overlay) &&
+    !/first\.focus\(\);\n    markPad\(first\)/.test(overlay) &&
+    css.includes('html.orbit-pad [role="menu"] button:focus-visible') &&
+    css.includes('html.orbit-pad .modal-panel-enter button:focus-visible') &&
+    // The ring is drawn at the control's own corner, not a curve that reshapes it.
+    css.includes('html.orbit-pad [role="menu"] .orbit-pad-focus') &&
+    css.includes('html.orbit-pad .modal-panel-enter .orbit-pad-focus') &&
+    /html\.orbit-pad \.modal-panel-enter \.orbit-pad-focus \{\n  box-shadow: none;\n  outline: 2px solid var\(--c-accent\);\n  outline-offset: 1px;\n  border-radius: 0\.5rem;/.test(css),
 );
 check(
   'the pad shortcuts share the capture buttons',

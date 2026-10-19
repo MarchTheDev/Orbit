@@ -52,6 +52,8 @@ type OverlayToastKind = 'screenshot' | 'recording' | 'replay' | 'gallery' | 'rea
 // A failure has to stay long enough to be read; a confirmation does not.
 const TOAST_MS = 3600;
 const ERROR_TOAST_MS = 6500;
+/** The game-start toast says the overlay is up, not which game was launched. */
+const READY_TITLE = 'Overlay deployed in Orbit';
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
 const LAYOUT_REVISION = 4;
@@ -81,6 +83,18 @@ function markPad(next: HTMLElement) {
   document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
   next.classList.add('orbit-pad-focus');
   next.scrollIntoView({ block: 'nearest' });
+}
+
+/**
+ * Ring a control, then hand it focus.
+ *
+ * The other way round, the browser paints its own square focus ring for the
+ * instant before the rounded one lands, which reads as a shape that snaps.
+ * A control that is already ringed when it gains focus never shows the square.
+ */
+function focusPad(next: HTMLElement) {
+  markPad(next);
+  if (document.activeElement !== next) next.focus();
 }
 
 function move(delta: number, fromPad: boolean) {
@@ -157,16 +171,14 @@ function listStep(list: HTMLButtonElement[], delta: number) {
   if (list.length === 0) return;
   const at = list.findIndex((node) => node === document.activeElement);
   const next = list[(at < 0 ? (delta > 0 ? 0 : list.length - 1) : (at + delta + list.length) % list.length)];
-  next.focus();
-  markPad(next);
+  focusPad(next);
 }
 
 /** Retry until a just-opened list is in the document, then ring its first item. */
 function focusFirst(list: () => HTMLButtonElement[], tries = 8) {
   const first = list()[0];
   if (first) {
-    first.focus();
-    markPad(first);
+    focusPad(first);
     return;
   }
   if (tries > 0) window.setTimeout(() => focusFirst(list, tries - 1), 25);
@@ -389,8 +401,7 @@ export function OverlayView() {
     const anchor = menuAnchor.current;
     setGalleryMenu(null);
     if (anchor && document.contains(anchor)) {
-      anchor.focus();
-      markPad(anchor);
+      focusPad(anchor);
     }
   };
 
@@ -414,8 +425,7 @@ export function OverlayView() {
       return;
     }
     setPad({ level: 'inside', id });
-    inner[0].focus();
-    markPad(inner[0]);
+    focusPad(inner[0]);
   };
 
   /**
@@ -454,8 +464,7 @@ export function OverlayView() {
     const active = document.activeElement;
     const current = inner.find((node) => node === active) ?? inner[0];
     if (active !== current) {
-      current.focus();
-      markPad(current);
+      focusPad(current);
       return;
     }
     const origin = padBox(current);
@@ -467,8 +476,7 @@ export function OverlayView() {
     const index = padNearest(origin, targets.map((entry) => entry.box), direction);
     if (index == null) return;
     const next = targets[index].node;
-    next.focus();
-    markPad(next);
+    focusPad(next);
   };
 
   useEffect(() => {
@@ -641,8 +649,7 @@ export function OverlayView() {
             // The tile the menu came from keeps the ring once it closes.
             const anchor = menuAnchor.current;
             if (anchor && document.contains(anchor)) {
-              anchor.focus();
-              markPad(anchor);
+              focusPad(anchor);
             }
             item.click();
             return;
@@ -670,8 +677,7 @@ export function OverlayView() {
           const first = padControls('gallery', true).find((node) => node.hasAttribute('data-capture'));
           if (first) {
             setPad({ level: 'inside', id: 'gallery' });
-            first.focus();
-            markPad(first);
+            focusPad(first);
           } else {
             enterBox('gallery');
           }
@@ -779,8 +785,7 @@ export function OverlayView() {
     if (active instanceof HTMLElement && active.hasAttribute('data-overlay')) return;
     const first = padControls('gallery', true).find((node) => node.hasAttribute('data-capture'));
     if (!first) return;
-    first.focus();
-    markPad(first);
+    focusPad(first);
   }, [items]);
 
   useEffect(() => {
@@ -788,7 +793,7 @@ export function OverlayView() {
     if (!title) return;
     // The title says it. A second line explaining Alt+X was noise on a toast
     // that is already gone by the time the game's own intro finishes.
-    setToast({ title: 'Game started', detail: '', kind: 'ready' });
+    setToast({ title: status?.readyNotice || READY_TITLE, detail: '', kind: 'ready' });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   }, [status?.readyNotice]);

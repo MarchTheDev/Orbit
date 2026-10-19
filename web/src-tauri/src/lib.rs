@@ -783,7 +783,7 @@ fn overlay_playing(title: String) {
 }
 
 #[tauri::command]
-async fn overlay_ready_notice(app: tauri::AppHandle, title: String) -> Result<(), String> {
+async fn overlay_ready_notice(app: tauri::AppHandle) -> Result<(), String> {
     // The launch path calls this immediately after the game starts. Do not build
     // or show a WebView from the synchronous invoke handler: queue the native
     // window work onto Tauri's main thread and wait off-thread for its result.
@@ -791,7 +791,7 @@ async fn overlay_ready_notice(app: tauri::AppHandle, title: String) -> Result<()
         let (notice_tx, notice_rx) = std::sync::mpsc::channel();
         let notice_app = app.clone();
         app.run_on_main_thread(move || {
-            let _ = notice_tx.send(overlay::ready_notice(&notice_app, &title));
+            let _ = notice_tx.send(overlay::ready_notice(&notice_app));
         })
         .map_err(|error| error.to_string())?;
 

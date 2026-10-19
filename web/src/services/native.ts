@@ -1368,8 +1368,8 @@ export function overlayPlaying(title: string): Promise<void> {
   return call('overlay_playing', { title }, () => undefined);
 }
 
-export function overlayReadyNotice(title: string): Promise<void> {
-  return call('overlay_ready_notice', { title }, () => undefined);
+export function overlayReadyNotice(): Promise<void> {
+  return call('overlay_ready_notice', {}, () => undefined);
 }
 
 /**

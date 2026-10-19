@@ -26,6 +26,10 @@ use crate::process;
 
 const WINDOW: &str = "overlay";
 
+/// What the game-start card says. The game's name was there before; the player
+/// had just picked it, so it told them nothing they did not already know.
+const READY_TITLE: &str = "Overlay deployed in Orbit";
+
 static OPEN: AtomicBool = AtomicBool::new(false);
 static RESTING: AtomicBool = AtomicBool::new(false);
 static HAS_PINS: AtomicBool = AtomicBool::new(false);
@@ -517,8 +521,7 @@ pub fn game_started(title: &str) {
 /// refresh. Otherwise a native card is drawn instead: showing the overlay
 /// window for five seconds meant a second WebView2 instance, about 50 MB of
 /// processes, on every game start.
-pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
-    let title = safe_name(title);
+pub fn ready_notice(app: &AppHandle) -> Result<(), String> {
     let panel = panel_visible(app);
     let palette = {
         let mut live = lock();
@@ -526,16 +529,16 @@ pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
             return Ok(());
         }
         if panel {
-            live.ready_notice = Some(title);
+            live.ready_notice = Some(READY_TITLE.to_string());
             return Ok(());
         }
         // Nothing should keep a notice waiting for the next time the panel opens.
         live.ready_notice = None;
         live.palette
     };
-    // The game's name is the whole message. The line that used to explain
-    // Alt+X was read once and ignored every time after that.
-    crate::notice::show(Card::ok(&title, "", palette));
+    // One line, and no second one to explain Alt+X: it was read once and
+    // ignored every time after that.
+    crate::notice::show(Card::ok(READY_TITLE, "", palette));
     Ok(())
 }
 
