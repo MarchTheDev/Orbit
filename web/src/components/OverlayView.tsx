@@ -669,12 +669,14 @@ export function OverlayView() {
           <div
             role="status"
             aria-live="polite"
-            className={cn('orbit-toast orbit-toast-card flex max-w-[21rem] items-center gap-2.5 rounded-[10px] border px-3 py-2 text-white', `orbit-toast-card--${toast.kind}`)}
+            className={cn('orbit-toast orbit-toast-card flex max-w-[22rem] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-fg', `orbit-toast-card--${toast.kind}`)}
           >
-            <ToastIcon className="orbit-toast-icon size-4 shrink-0" aria-hidden="true" />
+            <span className="orbit-toast-chip grid size-8 shrink-0 place-items-center rounded-xl border">
+              <ToastIcon className="orbit-toast-icon size-4" aria-hidden="true" />
+            </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] font-medium leading-snug">{toast.title}</span>
-              {toast.detail && <span className="mt-0.5 block truncate text-[10.5px] leading-snug text-white/55">{toast.detail}</span>}
+              <span className="block truncate text-[13px] font-medium leading-snug">{toast.title}</span>
+              {toast.detail && <span className="mt-0.5 block truncate text-[11px] leading-snug text-white/50">{toast.detail}</span>}
             </span>
           </div>
         </div>

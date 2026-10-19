@@ -9,6 +9,7 @@ const audio = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'audio.rs'
 const overlay = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
 const settings = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
 const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
+const stats = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -56,6 +57,27 @@ check('recording and replay capture reuse their raw frame buffers', capture.incl
 check('replay snapshots keep only offsets, so a long clip costs no memory', capture.includes('struct FrameRef') && capture.includes('.skip(start).copied().collect()'));
 check('the game-start notice does not create a second web view', readyNotice.includes('crate::notice::show') && !readyNotice.includes('ensure_window') && !/window\.show\(\)/.test(readyNotice));
 check('the game-start notice is a native, click-through card', notice.includes('CreateWindowExW') && notice.includes('WS_EX_TRANSPARENT') && notice.includes('WS_EX_NOACTIVATE') && !notice.includes('WebviewWindow'));
+check(
+  'a replay save waits for the encoder to make progress, not for a fixed clock',
+  capture.includes('fn video_progress(&self)') &&
+    capture.includes('const STALLED: Duration = Duration::from_secs(15)') &&
+    capture.includes('last_progress = Instant::now()') &&
+    !capture.includes('let deadline = Instant::now() + Duration::from_secs(30)'),
+);
+check(
+  'the sink writer asks for a hardware encoder and falls back to software',
+  capture.includes('MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS') &&
+    capture.includes('Self::open_with(path, width, height, fps, false)'),
+);
+check(
+  'starting a replay probes the screen with a small picture, not a full frame',
+  capture.includes('let probe = Spec { max_width: 320, max_height: 180, ..spec };') &&
+    capture.includes('let _ = grab(probe)?;'),
+);
+check(
+  'closing the overlay closes the performance counters that watch every GPU engine',
+  stats.includes('fn gpu_release()') && stats.includes('PdhCloseQuery(query.query)') && stats.includes('gpu_release();'),
+);
 check('WASAPI loopback reads the default system output', capture.includes('AUDCLNT_STREAMFLAGS_LOOPBACK') && capture.includes('GetDefaultAudioEndpoint(eRender, eConsole)'));
 check('Windows MP4 output declares and writes an AAC audio stream', capture.includes('MFAudioFormat_AAC') && capture.includes('WriteSample(self.audio_stream, &sample)'));
 check('the built-in recording rejects a silent replay buffer', capture.includes('No system audio was captured, so Orbit did not save a silent replay.'));

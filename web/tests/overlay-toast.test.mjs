@@ -29,16 +29,23 @@ check(
 check('the toast styling uses Orbit theme accents', css.includes('.orbit-toast-card') && css.includes('--toast-accent: var(--c-accent)'));
 check('the toast no longer draws the glowing left rail', !overlay.includes('orbit-toast-edge') && !css.includes('.orbit-toast-edge'));
 check(
-  'the capture note is one compact card: small icon, a line of text, and nothing else',
-  /orbit-toast-icon size-4 shrink-0/.test(overlay) &&
+  'the capture note is one compact card: a tinted icon square, a line of text, and nothing else',
+  /orbit-toast-chip grid size-8 shrink-0 place-items-center rounded-xl border/.test(overlay) &&
+    /orbit-toast-icon size-4/.test(overlay) &&
     !overlay.includes('orbit-toast-orbit') &&
     !overlay.includes('orbit-toast-indicator') &&
     !overlay.includes('orbit-toast-progress') &&
     !overlay.includes('ORBIT · '),
 );
 check(
-  'the capture note is bounded to a small width',
-  /orbit-toast-card flex max-w-\[21rem\] items-center gap-2\.5 rounded-\[10px\]/.test(overlay),
+  'the capture note is bounded to a small width and uses the app card radius',
+  /orbit-toast-card flex max-w-\[22rem\] items-center gap-3 rounded-2xl/.test(overlay) &&
+    !overlay.includes('rounded-[10px]'),
+);
+check(
+  'the icon square is tinted by the same accent as the card',
+  /\.orbit-toast-chip\s*\{[^}]*var\(--toast-accent\)/s.test(css) &&
+    /\.orbit-toast-card\s*\{[^}]*--toast-accent:\s*var\(--c-accent\)/s.test(css),
 );
 check(
   'the capture note fades away after three and a half seconds',
@@ -53,8 +60,13 @@ check(
     /flash\('Capture failed', message, 'error'\)/.test(overlay),
 );
 check(
-  'the library note is the same flat card, not a gradient panel',
-  /orbit-note pointer-events-auto/.test(app) && !app.includes('bg-gradient-to-br from-panel/98') && !app.includes('bg-gradient-to-br from-rose-950/95'),
+  'the library note is the same flat card, with a tinted icon square and no gradient',
+  /orbit-note pointer-events-auto/.test(app) &&
+    /orbit-note-icon mt-px grid size-5 shrink-0 place-items-center rounded-md/.test(app) &&
+    /\.orbit-note-icon--ok/.test(css) &&
+    /\.orbit-note-icon--error/.test(css) &&
+    !app.includes('bg-gradient-to-br from-panel/98') &&
+    !app.includes('bg-gradient-to-br from-rose-950/95'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

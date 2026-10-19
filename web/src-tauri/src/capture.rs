@@ -576,7 +576,12 @@ pub fn start_recording(out: PathBuf, spec: Spec) -> Result<Hold, String> {
 }
 
 pub fn start_buffer(keep: Duration, spec: Spec, dir: PathBuf) -> Result<Hold, String> {
-    let _ = grab(spec)?;
+    // A small picture proves the screen can be read. Asking for the real size
+    // here would allocate a full 1080p frame on the caller's thread and throw
+    // it away again, which is memory the process may keep long after the game
+    // has closed. The capture thread allocates its one frame itself.
+    let probe = Spec { max_width: 320, max_height: 180, ..spec };
+    let _ = grab(probe)?;
     set_error("");
     let buffer = Buffer::new(&dir, spec.fps, keep)?;
     let shared = buffer.clone();
@@ -1402,14 +1407,34 @@ impl Writer {
 /// instead of one for every frame in the clip.
 #[cfg(windows)]
 fn wait_for_video_room(writer: &WindowsWriter) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while writer.video_queue_full() {
-        if Instant::now() > deadline {
-            return Err("The video encoder fell behind while the replay was being saved.".to_string());
+    // Encoding a clip does not run at the speed it was played. A software
+    // H.264 encoder, or a machine that is still rendering a game, can need
+    // longer for a minute of video than the minute itself, so a fixed budget
+    // for the whole save fails on exactly the machines that need it most.
+    // The wait ends when the encoder stops working, not when a clock runs out.
+    const STALLED: Duration = Duration::from_secs(15);
+    let mut processed = writer.video_progress().map(|(_, done)| done);
+    let mut last_progress = Instant::now();
+    loop {
+        let Some((received, done)) = writer.video_progress() else {
+            // The writer cannot report its queue, so there is nothing to wait
+            // on; the samples are still accepted in order.
+            return Ok(());
+        };
+        if pending_video_samples(received, done) < MAX_PENDING_VIDEO_SAMPLES {
+            return Ok(());
         }
-        thread::sleep(Duration::from_millis(2));
+        if Some(done) != processed {
+            processed = Some(done);
+            last_progress = Instant::now();
+        } else if last_progress.elapsed() > STALLED {
+            return Err(
+                "The video encoder stopped responding while the replay was being saved. Try a shorter clip."
+                    .to_string(),
+            );
+        }
+        thread::sleep(Duration::from_millis(5));
     }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -1843,16 +1868,28 @@ struct WindowsWriter {
 #[cfg(windows)]
 impl WindowsWriter {
     fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        // A hardware H.264 encoder keeps the CPU free for the game and encodes
+        // faster than real time. Not every machine offers one through the sink
+        // writer, and a driver that advertises it can still refuse the format,
+        // so the same writer is opened without asking for it as a fallback.
+        match Self::open_with(path, width, height, fps, true) {
+            Ok(writer) => Ok(writer),
+            Err(_) => Self::open_with(path, width, height, fps, false),
+        }
+    }
+
+    fn open_with(path: &Path, width: u32, height: u32, fps: u32, hardware: bool) -> Result<Self, String> {
         use std::os::windows::ffi::OsStrExt;
 
         use windows::core::PCWSTR;
         use windows::Win32::Media::MediaFoundation::{
-            MFCreateMediaType, MFCreateSinkWriterFromURL, IMFAttributes, IMFByteStream,
+            MFCreateAttributes, MFCreateMediaType, MFCreateSinkWriterFromURL, IMFAttributes, IMFByteStream,
             MFAudioFormat_AAC, MFAudioFormat_PCM, MFMediaType_Audio, MFVideoFormat_H264, MFVideoFormat_RGB32,
             MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
             MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
             MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES,
             MF_MT_MAJOR_TYPE, MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE,
+            MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
         };
         if width < 2 || height < 2 || width % 2 == 1 || height % 2 == 1 {
             return Err("The picture size could not be used.".to_string());
@@ -1862,9 +1899,18 @@ impl WindowsWriter {
         // local COM interfaces are released before Media Foundation shuts down.
         let runtime = MfRuntime::start()?;
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut options: Option<IMFAttributes> = None;
+        if hardware {
+            unsafe {
+                MFCreateAttributes(&mut options, 1).map_err(mf_fail)?;
+                if let Some(attributes) = options.as_ref() {
+                    let _ = attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1);
+                }
+            }
+        }
         // `Param` is implemented for `Option<&T>`, not `Option<T>`.
         let writer = unsafe {
-            MFCreateSinkWriterFromURL(PCWSTR(wide.as_ptr()), None::<&IMFByteStream>, None::<&IMFAttributes>)
+            MFCreateSinkWriterFromURL(PCWSTR(wide.as_ptr()), None::<&IMFByteStream>, options.as_ref())
         }
         .map_err(mf_fail)?;
         let bitrate = ((width as u64).saturating_mul(height as u64).saturating_mul(fps as u64) / 8)
@@ -1927,16 +1973,24 @@ impl WindowsWriter {
         })
     }
 
-    fn video_queue_full(&self) -> bool {
+    /// Samples handed to the video stream, and samples it has finished.
+    /// `None` when the writer cannot report them.
+    fn video_progress(&self) -> Option<(u64, u64)> {
         use windows::Win32::Media::MediaFoundation::MF_SINK_WRITER_STATISTICS;
 
-        let Some(writer) = self.writer.as_ref() else { return false };
+        let writer = self.writer.as_ref()?;
         let mut stats = MF_SINK_WRITER_STATISTICS::default();
         stats.cb = std::mem::size_of::<MF_SINK_WRITER_STATISTICS>() as u32;
         if unsafe { writer.GetStatistics(self.stream, &mut stats) }.is_err() {
-            return false;
+            return None;
         }
-        pending_video_samples(stats.qwNumSamplesReceived, stats.qwNumSamplesProcessed) >= MAX_PENDING_VIDEO_SAMPLES
+        Some((stats.qwNumSamplesReceived, stats.qwNumSamplesProcessed))
+    }
+
+    fn video_queue_full(&self) -> bool {
+        self.video_progress()
+            .map(|(received, processed)| pending_video_samples(received, processed) >= MAX_PENDING_VIDEO_SAMPLES)
+            .unwrap_or(false)
     }
 
     fn skip_video_frame(&mut self) {

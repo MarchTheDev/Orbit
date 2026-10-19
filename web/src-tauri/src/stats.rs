@@ -112,6 +112,10 @@ fn ensure_running() {
                 // Dispose the frame duplication on its owning thread before a
                 // fast reopen can start another worker.
                 frames = None;
+                // The performance counters hold a snapshot of every GPU engine
+                // on the machine. Closing the overlay should not keep that.
+                #[cfg(windows)]
+                gpu_release();
                 RUNNING.store(false, Ordering::SeqCst);
                 // A request can arrive between the idle check and clearing the
                 // running flag. Re-check after clearing it so that a fast reopen
@@ -330,26 +334,48 @@ fn primary_vram_adapter() -> Option<(u32, i32, u64)> {
 }
 
 #[cfg(windows)]
+struct GpuQuery {
+    query: windows::Win32::System::Performance::PDH_HQUERY,
+    util: windows::Win32::System::Performance::PDH_HCOUNTER,
+    util_3d: windows::Win32::System::Performance::PDH_HCOUNTER,
+    used: windows::Win32::System::Performance::PDH_HCOUNTER,
+    util_ok: bool,
+    util_3d_ok: bool,
+    used_ok: bool,
+}
+
+#[cfg(windows)]
+unsafe impl Send for GpuQuery {}
+
+/// Opened on first use and kept open only while somebody is sampling.
+#[cfg(windows)]
+static GPU_QUERY: Mutex<Option<GpuQuery>> = Mutex::new(None);
+
+/// Close the performance counters.
+///
+/// A wildcard GPU counter keeps a copy of every engine instance on the
+/// machine, and that is not something to hold once the overlay is closed and
+/// no box is asking for numbers.
+#[cfg(windows)]
+fn gpu_release() {
+    use windows::Win32::System::Performance::PdhCloseQuery;
+
+    let query = GPU_QUERY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+    if let Some(query) = query {
+        unsafe {
+            let _ = PdhCloseQuery(query.query);
+        }
+    }
+}
+
+#[cfg(windows)]
 fn pdh_gpu(adapter: Option<(u32, i32)>) -> (Option<u8>, Option<u64>) {
-    use std::sync::Mutex as GpuMutex;
     use windows::Win32::System::Performance::{
-        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
+        PdhAddEnglishCounterW, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
     };
     use windows::core::PCWSTR;
 
-    struct Query {
-        query: PDH_HQUERY,
-        util: PDH_HCOUNTER,
-        util_3d: PDH_HCOUNTER,
-        used: PDH_HCOUNTER,
-        util_ok: bool,
-        util_3d_ok: bool,
-        used_ok: bool,
-    }
-    unsafe impl Send for Query {}
-    static QUERY: GpuMutex<Option<Query>> = GpuMutex::new(None);
-
-    let mut guard = QUERY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = GPU_QUERY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if guard.is_none() {
         unsafe {
             let mut query = PDH_HQUERY(std::ptr::null_mut());
@@ -371,7 +397,7 @@ fn pdh_gpu(adapter: Option<(u32, i32)>) -> (Option<u8>, Option<u64>) {
                 return (None, None);
             }
             let _ = PdhCollectQueryData(query);
-            *guard = Some(Query { query, util, util_3d, used, util_ok, util_3d_ok, used_ok });
+            *guard = Some(GpuQuery { query, util, util_3d, used, util_ok, util_3d_ok, used_ok });
         }
     }
     let Some(query) = guard.as_ref() else { return (None, None) };

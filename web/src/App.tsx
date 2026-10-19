@@ -1348,15 +1348,19 @@ export default function App() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`orbit-note pointer-events-auto flex w-fit max-w-full items-start gap-2 rounded-[10px] border px-3 py-2 text-[13px] ${
+            className={`orbit-note pointer-events-auto flex w-fit max-w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[13px] ${
               t.tone === 'error' ? 'orbit-note--error' : ''
             }`}
           >
-            {t.tone === 'error' ? (
-              <CircleAlert className="mt-px size-3.5 shrink-0 text-rose-300" />
-            ) : (
-              <CircleCheck className="mt-px size-3.5 shrink-0 text-emerald-300" />
-            )}
+            <span
+              className={`orbit-note-icon mt-px grid size-5 shrink-0 place-items-center rounded-md ${
+                t.tone === 'error' ? 'orbit-note-icon--error' : 'orbit-note-icon--ok'
+              }`}
+            >
+              {t.tone === 'error'
+                ? <CircleAlert className="size-3.5" />
+                : <CircleCheck className="size-3.5" />}
+            </span>
             <div className="min-w-0 flex-1">
               <span className="block break-words leading-snug">{t.text}</span>
               {t.detail && <span className="mt-0.5 block text-[11px] leading-snug text-muted">{t.detail}</span>}

@@ -693,8 +693,9 @@ input[type='number']::-webkit-outer-spin-button {
   88% { opacity: 1; transform: translate3d(0, 0, 0); }
   100% { opacity: 0; transform: translate3d(0, -3px, 0); }
 }
-/* A note over the game. Flat, small, and gone in a moment: no glow, no
- * gradient, no progress rail. The icon carries the accent colour only. */
+/* A note over the game, in the same language as the panel's own boxes: a
+ * rounded card on the panel colour, a tinted square holding the icon, and a
+ * title with one quiet line under it. No gradient, no rail, no progress. */
 .orbit-toast {
   animation: orbit-toast 3.6s cubic-bezier(.2, .8, .2, 1) both;
 }
@@ -704,10 +705,10 @@ input[type='number']::-webkit-outer-spin-button {
 }
 .orbit-toast-card {
   --toast-accent: var(--c-accent);
-  border-color: color-mix(in srgb, var(--c-text) 10%, var(--c-border));
-  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
-  backdrop-filter: blur(14px);
+  border-color: color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 94%, transparent);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .4);
+  backdrop-filter: blur(18px) saturate(1.08);
 }
 .orbit-toast-card--recording,
 .orbit-toast-card--gallery {
@@ -715,21 +716,34 @@ input[type='number']::-webkit-outer-spin-button {
 }
 .orbit-toast-card--error {
   --toast-accent: #fb7185;
-  border-color: color-mix(in srgb, #fb7185 34%, var(--c-border));
+  border-color: color-mix(in srgb, #fb7185 28%, transparent);
+}
+.orbit-toast-chip {
+  color: var(--toast-accent);
+  border-color: color-mix(in srgb, var(--toast-accent) 26%, transparent);
+  background: color-mix(in srgb, var(--toast-accent) 13%, transparent);
 }
 .orbit-toast-icon {
-  color: color-mix(in srgb, var(--toast-accent) 78%, white);
+  color: var(--toast-accent);
 }
 
-/* The library's own note, bottom left. Same flat card as the overlay's. */
+/* The library's own note, bottom left. The same card, one size smaller. */
 .orbit-note {
-  border-color: color-mix(in srgb, var(--c-text) 10%, var(--c-border));
+  border-color: color-mix(in srgb, var(--c-text) 9%, transparent);
   background: color-mix(in srgb, var(--c-panel) 96%, transparent);
   color: var(--c-text);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .32);
 }
 .orbit-note--error {
-  border-color: color-mix(in srgb, #fb7185 30%, var(--c-border));
+  border-color: color-mix(in srgb, #fb7185 28%, transparent);
+}
+.orbit-note-icon--ok {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, .12);
+}
+.orbit-note-icon--error {
+  color: #fda4af;
+  background: rgba(244, 63, 94, .14);
 }
 
 @media (prefers-reduced-motion: reduce) {
