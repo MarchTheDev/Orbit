@@ -808,25 +808,44 @@ fn overlay_status() -> overlay::OverlayStatus {
     overlay::status()
 }
 
+/// A capture outlives the panel that asked for it. The panel shows its own
+/// toast while it is on screen; when it has closed in the meantime, the answer
+/// is drawn by the native card instead, so a save never finishes in silence.
 #[tauri::command]
 async fn overlay_shot(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || overlay::shot(&app, &stamp))
+    let worker = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::shot(&worker, &stamp))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    overlay::announce_capture(&app, "screenshot", &outcome);
+    outcome
 }
 
 #[tauri::command]
 async fn overlay_record(app: tauri::AppHandle, stamp: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || overlay::record(&app, &stamp))
+    let worker = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::record(&worker, &stamp))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    overlay::announce_capture(&app, "recording", &outcome);
+    outcome
 }
 
 #[tauri::command]
 async fn overlay_replay(app: tauri::AppHandle, seconds: u32, stamp: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || overlay::save_replay(&app, seconds, &stamp))
+    let worker = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || overlay::save_replay(&worker, seconds, &stamp))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    overlay::announce_capture(&app, "replay", &outcome);
+    outcome
+}
+
+/// The colours of the player's theme, for the native card. Called by the main
+/// window when settings load and whenever the theme changes.
+#[tauri::command]
+fn overlay_theme(panel: String, text: String, muted: String, accent: String) {
+    overlay::set_palette(&panel, &text, &muted, &accent);
 }
 
 #[tauri::command]
@@ -2513,6 +2532,7 @@ pub fn run() {
             overlay_playing,
             overlay_ready_notice,
             overlay_status,
+            overlay_theme,
             overlay_shot,
             overlay_record,
             overlay_replay,

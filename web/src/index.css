@@ -224,6 +224,15 @@ html.orbit-pad .orbit-detail .orbit-pad-focus {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
 }
+/* The controller picks a box before it steps inside one. The ring goes round
+   the whole card, not round the first button in it, so the choice being made is
+   the box itself. */
+html.orbit-pad .orbit-box-focus {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 4px;
+  border-radius: 1.5rem;
+}
+
 html.orbit-pad .orbit-pad-focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--c-accent);
@@ -724,6 +733,11 @@ input[type='number']::-webkit-outer-spin-button {
   background: color-mix(in srgb, var(--toast-accent) 13%, transparent);
 }
 .orbit-toast-icon {
+  color: var(--toast-accent);
+}
+/* The Orbit mark in the card that announces a game. It keeps the accent of
+ * the card, and the ring's rounded square keeps the curve of the icon chip. */
+.orbit-toast-mark {
   color: var(--toast-accent);
 }
 

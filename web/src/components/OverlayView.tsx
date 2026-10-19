@@ -34,7 +34,9 @@ import {
   type OverlayStatus,
 } from '../services/native';
 import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
+import { padNearest } from '../utils/gamepad';
 import { cn } from '../utils/cn';
+import { Logo } from './ui/Logo';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { AppMixer } from './AppMixer';
@@ -43,6 +45,9 @@ import { MediaPlayer } from './MediaPlayer';
 type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
 type GalleryMenuState = { x: number; y: number; item: GalleryItem };
+/** A stop for the controller: a box, or the small toolbar above the boxes. */
+type PadTarget = BoxId | 'bar';
+type PadFocus = { level: 'box' | 'inside'; id: PadTarget } | null;
 type OverlayToastKind = 'screenshot' | 'recording' | 'replay' | 'gallery' | 'ready' | 'error';
 // A failure has to stay long enough to be read; a confirmation does not.
 const TOAST_MS = 3600;
@@ -87,11 +92,63 @@ function move(delta: number, fromPad: boolean) {
   if (fromPad) markPad(next);
 }
 
-function focusSection(name: string) {
-  const next = document.querySelector(`[data-overlay-section="${name}"] button[data-overlay]:not([disabled])`);
-  if (!(next instanceof HTMLElement)) return;
-  next.focus();
-  markPad(next);
+type PadBox = { left: number; top: number; right: number; bottom: number };
+
+/** Where something is on screen, or null when it is not drawn at all. */
+function padBox(node: Element | null): PadBox | null {
+  if (!(node instanceof HTMLElement)) return null;
+  const box = node.getBoundingClientRect();
+  if (box.width <= 0 || box.height <= 0) return null;
+  return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+}
+
+function boxNode(id: PadTarget): HTMLElement | null {
+  const node = document.querySelector(`[data-overlay-section="${id}"]`);
+  return node instanceof HTMLElement ? node : null;
+}
+
+/**
+ * Every stop on screen, in the order they are drawn. The toolbar counts as one:
+ * it hides and shows boxes, and a player with only a controller still has to be
+ * able to reach it.
+ */
+function shownBoxes(): PadTarget[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-section]'))
+    .map((node) => node.getAttribute('data-overlay-section'))
+    .filter((id): id is PadTarget => id === 'bar' || (!!id && OVERLAY_BOXES.some((box) => box.id === id)))
+    .filter((id) => padBox(boxNode(id)) !== null);
+}
+
+/**
+ * The buttons a controller can reach inside one box. The body only, when asked:
+ * entering a box should land on its controls, not on the pin in its corner.
+ */
+function padControls(id: PadTarget, bodyOnly = false): HTMLButtonElement[] {
+  const root = boxNode(id);
+  if (!root) return [];
+  const scope = bodyOnly ? root.querySelector('[data-overlay-body]') ?? root : root;
+  return Array.from(scope.querySelectorAll<HTMLButtonElement>('button[data-overlay]:not([disabled])'))
+    .filter((node) => padBox(node) !== null);
+}
+
+/** Pixels per second from a stick axis, over its dead zone. A light tilt is slow. */
+function stickSpeed(value: number): number {
+  const dead = 0.12;
+  const abs = Math.abs(value);
+  if (abs <= dead) return 0;
+  const span = Math.min(1, (abs - dead) / (1 - dead));
+  return Math.sign(value) * span * span * 780;
+}
+
+/** The part of a box the right stick scrolls, if that box scrolls at all. */
+function scrollerFor(id: PadTarget | null): HTMLElement | null {
+  if (!id) return null;
+  const root = boxNode(id);
+  const tagged = root?.querySelector<HTMLElement>('[data-overlay-scroll]') ?? null;
+  // Only a box that was built to scroll: an overflow-hidden card can be
+  // scrolled by code too, and its contents would slide out of view.
+  if (!tagged || tagged.scrollHeight <= tagged.clientHeight + 1) return null;
+  return tagged;
 }
 
 function mixId(node: Element | null): string | null {
@@ -206,14 +263,31 @@ export function OverlayView() {
   const [galleryMenu, setGalleryMenu] = useState<GalleryMenuState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
   const [galleryError, setGalleryError] = useState('');
+  /**
+   * What the controller is pointing at. A box is chosen first, with a ring
+   * around the whole card, and A steps inside it: otherwise reaching the
+   * capture buttons from the FPS box means walking through every volume slider
+   * and clock face in between.
+   */
+  const [padFocus, setPadFocus] = useState<PadFocus>(null);
   const settingsRef = useRef<Settings | null>(null);
   const toastTimer = useRef(0);
   const placesRef = useRef(places);
   const hiddenRef = useRef(hidden);
+  const padFocusRef = useRef<PadFocus>(null);
+  const stick = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const stickFrame = useRef(0);
+  /** The capture buttons' actions, so the pad shortcuts use the same code. */
+  const captureRef = useRef<{ shot: () => void; record: () => void; replay: () => void }>({
+    shot: () => undefined,
+    record: () => undefined,
+    replay: () => undefined,
+  });
   const lastResizePress = useRef<{ id: BoxId; time: number; x: number; y: number } | null>(null);
   const gameKey = useRef('');
   placesRef.current = places;
   hiddenRef.current = hidden;
+  padFocusRef.current = padFocus;
 
   const refresh = () => {
     void overlayStatus().then(setStatus).catch(() => undefined);
@@ -243,6 +317,92 @@ export function OverlayView() {
     setToast({ title, detail, kind });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), kind === 'error' ? ERROR_TOAST_MS : TOAST_MS);
+  };
+
+  const setPad = (next: PadFocus) => {
+    padFocusRef.current = next;
+    setPadFocus(next);
+    document.documentElement.classList.add('orbit-pad');
+  };
+
+  /** The box the ring starts on when the pad is used before it has a target. */
+  const startBox = (): PadTarget => (boxNode('capture') ? 'capture' : (shownBoxes()[0] ?? 'capture'));
+
+  /** Leave a box's controls and go back to choosing boxes. */
+  const leaveBox = (id: PadTarget) => {
+    document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
+    const current = document.activeElement;
+    if (current instanceof HTMLElement && current.hasAttribute('data-overlay')) current.blur();
+    setPad({ level: 'box', id });
+  };
+
+  /**
+   * A on a box: step into it and land on its first control. A reading box has
+   * nothing to step into, so it stays selected rather than handing the ring to
+   * the pin in its corner.
+   */
+  const enterBox = (id: PadTarget) => {
+    const inner = padControls(id, true);
+    if (inner.length === 0) {
+      setPad({ level: 'box', id });
+      return;
+    }
+    setPad({ level: 'inside', id });
+    inner[0].focus();
+    markPad(inner[0]);
+  };
+
+  /**
+   * A direction on the pad. At box level the boxes are chosen by where they
+   * are on screen; inside one, the controls are found the same way, so left
+   * means the control to the left rather than the one written before it.
+   */
+  const padStep = (direction: 'up' | 'down' | 'left' | 'right') => {
+    let focus = padFocusRef.current;
+    if (!focus) {
+      // The first press both lands on the capture box and moves from it, so it
+      // never feels like a press that did nothing.
+      focus = { level: 'box', id: startBox() };
+      setPad(focus);
+    }
+    const at = focus;
+    if (at.level === 'box') {
+      const origin = padBox(boxNode(at.id));
+      if (!origin) {
+        setPad({ level: 'box', id: startBox() });
+        return;
+      }
+      const targets = shownBoxes()
+        .filter((id) => id !== at.id)
+        .map((id) => ({ id, box: padBox(boxNode(id)) }))
+        .filter((entry): entry is { id: PadTarget; box: PadBox } => entry.box !== null);
+      const index = padNearest(origin, targets.map((entry) => entry.box), direction);
+      if (index != null) setPad({ level: 'box', id: targets[index].id });
+      return;
+    }
+    const inner = padControls(at.id);
+    if (inner.length === 0) {
+      setPad({ level: 'box', id: at.id });
+      return;
+    }
+    const active = document.activeElement;
+    const current = inner.find((node) => node === active) ?? inner[0];
+    if (active !== current) {
+      current.focus();
+      markPad(current);
+      return;
+    }
+    const origin = padBox(current);
+    if (!origin) return;
+    const targets = inner
+      .filter((node) => node !== current)
+      .map((node) => ({ node, box: padBox(node) }))
+      .filter((entry): entry is { node: HTMLButtonElement; box: PadBox } => entry.box !== null);
+    const index = padNearest(origin, targets.map((entry) => entry.box), direction);
+    if (index == null) return;
+    const next = targets[index].node;
+    next.focus();
+    markPad(next);
   };
 
   useEffect(() => {
@@ -326,6 +486,8 @@ export function OverlayView() {
     const onPointer = () => {
       document.documentElement.classList.remove('orbit-pad');
       document.querySelectorAll('.orbit-pad-focus').forEach((node) => node.classList.remove('orbit-pad-focus'));
+      padFocusRef.current = null;
+      setPadFocus(null);
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('pointerdown', onPointer, true);
@@ -344,16 +506,13 @@ export function OverlayView() {
         setShutterOn(settings.overlay?.shutter !== false);
         setShutterVolume(settings.overlay?.shutterVolume ?? 40);
       }).catch(() => undefined);
-      window.setTimeout(() => {
-        const next = document.querySelector('[data-overlay-section="capture"] button[data-overlay]:not([disabled])');
-        if (next instanceof HTMLElement) next.focus();
-      }, 30);
     }).then((unlisten) => {
       stopShown = unlisten;
     }).catch(() => undefined);
     void listen('overlay-rest', () => {
       setAwake(true);
       setResting(true);
+      stick.current = { x: 0, y: 0 };
     }).then((unlisten) => {
       stopRest = unlisten;
     }).catch(() => undefined);
@@ -361,27 +520,49 @@ export function OverlayView() {
     void listen('overlay-hidden', () => {
       setAwake(false);
       setResting(false);
+      padFocusRef.current = null;
+      setPadFocus(null);
+      stick.current = { x: 0, y: 0 };
     }).then((unlisten) => {
       stopHidden = unlisten;
     }).catch(() => undefined);
     void listen<string>('overlay-pad', (event) => {
       const action = event.payload;
+      if (action === 'capture-shot') {
+        captureRef.current.shot();
+        return;
+      }
+      if (action === 'capture-record') {
+        captureRef.current.record();
+        return;
+      }
+      if (action === 'capture-replay') {
+        captureRef.current.replay();
+        return;
+      }
       if (action === 'back') {
+        // B backs out of a box before it closes the overlay.
+        const focus = padFocusRef.current;
+        if (focus?.level === 'inside') {
+          leaveBox(focus.id);
+          return;
+        }
         void overlayHide();
         return;
       }
-      if (action === 'page-left') {
-        focusSection('audio');
-        return;
-      }
-      if (action === 'page-right') {
-        focusSection('gallery');
-        return;
-      }
       if (action === 'activate') {
+        const focus = padFocusRef.current;
+        if (!focus) {
+          // A is the first press: it picks the box it would have entered.
+          setPad({ level: 'box', id: startBox() });
+          return;
+        }
+        if (focus.level === 'box') {
+          enterBox(focus.id);
+          return;
+        }
         const current = document.activeElement;
-        if (current instanceof HTMLButtonElement) current.click();
-        else controls()[0]?.click();
+        if (current instanceof HTMLButtonElement && current.hasAttribute('data-overlay')) current.click();
         return;
       }
       if ((action === 'left' || action === 'right') && mixId(document.activeElement)) {
@@ -390,10 +571,41 @@ export function OverlayView() {
         }));
         return;
       }
-      if (action === 'up' || action === 'left') move(-1, true);
-      if (action === 'down' || action === 'right') move(1, true);
+      if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
+        padStep(action);
+      }
     }).then((unlisten) => {
       stopPad = unlisten;
+    }).catch(() => undefined);
+    // The right stick scrolls the chosen box. The desktop sends the stick
+    // continuously; a frame loop turns that into a scroll the way a stick
+    // scrolls a page in the library.
+    let lastStick = 0;
+    const pump = (time: number) => {
+      stickFrame.current = 0;
+      const { x, y } = stick.current;
+      const across = stickSpeed(x);
+      const down = stickSpeed(y);
+      if (across === 0 && down === 0) {
+        lastStick = 0;
+        return;
+      }
+      const dt = lastStick ? Math.min(0.05, (time - lastStick) / 1000) : 0.016;
+      lastStick = time;
+      const target = scrollerFor(padFocusRef.current?.id ?? null);
+      if (target) target.scrollBy({ left: across * dt, top: down * dt });
+      stickFrame.current = window.requestAnimationFrame(pump);
+    };
+    let stopAxes = () => {};
+    void listen<[number, number]>('overlay-pad-axes', (event) => {
+      const value = Array.isArray(event.payload) ? event.payload : [0, 0];
+      stick.current = { x: Number(value[0]) || 0, y: Number(value[1]) || 0 };
+      if (!stickFrame.current) {
+        lastStick = 0;
+        stickFrame.current = window.requestAnimationFrame(pump);
+      }
+    }).then((unlisten) => {
+      stopAxes = unlisten;
     }).catch(() => undefined);
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -402,6 +614,8 @@ export function OverlayView() {
       stopRest();
       stopHidden();
       stopPad();
+      stopAxes();
+      window.cancelAnimationFrame(stickFrame.current);
       window.clearTimeout(toastTimer.current);
     };
   }, []);
@@ -626,6 +840,22 @@ export function OverlayView() {
   if (!ready) return <div className="h-full" />;
 
   const seconds = status?.seconds ?? 30;
+  // One path for the buttons and for the pad shortcuts, so both chime, both
+  // show the same toast, and both go quiet while a save is running.
+  const captureShot = () => {
+    primeShutter();
+    void run(() => overlayShot(stamp()), true, 'Screenshot saved');
+  };
+  const captureRecord = () => {
+    const stopping = !!status?.recording;
+    primeShutter();
+    void run(() => overlayRecord(stamp()), stopping, stopping ? 'Recording saved' : 'Recording started');
+  };
+  const captureReplay = () => {
+    primeShutter();
+    void run(() => overlayReplay(seconds, stamp()), true, 'Replay saved');
+  };
+  captureRef.current = { shot: captureShot, record: captureRecord, replay: captureReplay };
   const lengths = overlayLengths(status?.lengths);
   const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
   const fps = status?.fps === 60 ? 60 : 30;
@@ -634,6 +864,7 @@ export function OverlayView() {
   const safePage = Math.min(page, pages - 1);
   const pageItems = shownItems.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
   const visible = (id: BoxId) => awake && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
+  const padOn = (id: BoxId) => padFocus?.level === 'box' && padFocus.id === id;
   const toggleBox = (id: BoxId) => {
     const next = hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id];
     setHidden(next);
@@ -672,7 +903,9 @@ export function OverlayView() {
             className={cn('orbit-toast orbit-toast-card flex max-w-[22rem] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-fg', `orbit-toast-card--${toast.kind}`)}
           >
             <span className="orbit-toast-chip grid size-8 shrink-0 place-items-center rounded-xl border">
-              <ToastIcon className="orbit-toast-icon size-4" aria-hidden="true" />
+              {toast.kind === 'ready'
+                ? <Logo className="orbit-toast-mark size-[22px]" animated={false} />
+                : <ToastIcon className="orbit-toast-icon size-4" aria-hidden="true" />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium leading-snug">{toast.title}</span>
@@ -684,6 +917,7 @@ export function OverlayView() {
       {visible('audio') && (
         <Box
           id="audio"
+          padSelected={padOn('audio')}
           title="Audio"
           scroll
           place={places.audio}
@@ -697,13 +931,14 @@ export function OverlayView() {
         </Box>
       )}
       {visible('player') && (
-        <Box id="player" title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onResize={resize} onPin={pin} section="player">
+        <Box id="player" padSelected={padOn('player')} title="Playing" place={places.player} front={front === 'player'} onDrag={drag} onResize={resize} onPin={pin} section="player">
           <MediaPlayer pad />
         </Box>
       )}
       {visible('gallery') && (
         <Box
           id="gallery"
+          padSelected={padOn('gallery')}
           title="Gallery"
           place={places.gallery}
           front={front === 'gallery'}
@@ -806,6 +1041,7 @@ export function OverlayView() {
       {visible('capture') && (
         <Box
           id="capture"
+          padSelected={padOn('capture')}
           title={status?.game || 'No game playing'}
           place={places.capture}
           front={front === 'capture'}
@@ -827,22 +1063,18 @@ export function OverlayView() {
         >
           <p className="mb-2 text-center text-[11px] tabular-nums text-white/45">{quality} · {fps} fps</p>
           <div className="flex items-start justify-center gap-6 sm:gap-10">
-            <CaptureButton label="Screenshot" disabled={busy} onClick={() => { primeShutter(); void run(() => overlayShot(stamp()), true, 'Screenshot saved'); }}>
+            <CaptureButton label="Screenshot" disabled={busy} onClick={captureShot}>
               <Camera className="size-7" />
             </CaptureButton>
             <CaptureButton
               label={status?.recording ? 'Stop' : 'Record'}
               hot={!!status?.recording}
               disabled={busy}
-              onClick={() => {
-                const stopping = !!status?.recording;
-                primeShutter();
-                void run(() => overlayRecord(stamp()), stopping, stopping ? 'Recording saved' : 'Recording started');
-              }}
+              onClick={captureRecord}
             >
               {status?.recording ? <Square className="size-6 fill-white" /> : <Circle className="size-6 fill-white" />}
             </CaptureButton>
-            <CaptureButton label="Last" disabled={busy} onClick={() => { primeShutter(); void run(() => overlayReplay(seconds, stamp()), true, 'Replay saved'); }}>
+            <CaptureButton label="Last" disabled={busy} onClick={captureReplay}>
               <span className="text-2xl font-semibold tabular-nums leading-none">{seconds}</span>
             </CaptureButton>
           </div>
@@ -867,12 +1099,12 @@ export function OverlayView() {
         </Box>
       )}
       {visible('fps') && (
-        <Box id="fps" title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
+        <Box id="fps" padSelected={padOn('fps')} title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
           <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
         </Box>
       )}
       {visible('performance') && (
-        <Box id="performance" title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onResize={resize} onPin={pin} section="performance">
+        <Box id="performance" padSelected={padOn('performance')} title="Performance" place={places.performance} front={front === 'performance'} onDrag={drag} onResize={resize} onPin={pin} section="performance">
           <Meter label="GPU" value={stats?.gpu} />
           <Meter label="CPU" value={stats?.cpu} />
           <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
@@ -880,12 +1112,12 @@ export function OverlayView() {
         </Box>
       )}
       {visible('clock') && (
-        <Box id="clock" title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onResize={resize} onPin={pin} section="clock">
+        <Box id="clock" padSelected={padOn('clock')} title="Clock" place={places.clock} front={front === 'clock'} onDrag={drag} onResize={resize} onPin={pin} section="clock">
           <p className="truncate text-center text-4xl font-semibold tabular-nums leading-none">{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </Box>
       )}
       {visible('notes') && (
-        <Box id="notes" title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onResize={resize} onPin={pin} section="notes">
+        <Box id="notes" padSelected={padOn('notes')} title="Notes" place={places.notes} front={front === 'notes'} onDrag={drag} onResize={resize} onPin={pin} section="notes">
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -906,7 +1138,7 @@ export function OverlayView() {
         </Box>
       )}
       {!resting && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2">
+        <div data-overlay-section="bar" data-overlay-body="" className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2">
           <button
             type="button"
             data-overlay
@@ -987,6 +1219,7 @@ function Box({
   title,
   place,
   front,
+  padSelected = false,
   onDrag,
   onResize,
   onPin,
@@ -999,6 +1232,8 @@ function Box({
   title: string;
   place: Place;
   front: boolean;
+  /** The controller is on this box, before it has stepped inside. */
+  padSelected?: boolean;
   onDrag: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
   onResize: (id: BoxId, event: ReactPointerEvent<HTMLElement>) => void;
   onPin: (id: BoxId) => void;
@@ -1010,8 +1245,12 @@ function Box({
   return (
     <aside
       data-overlay-section={section}
+      data-overlay-box={id}
       data-pin={place.pinned ? '1' : '0'}
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md"
+      className={cn(
+        'pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
+        padSelected && 'orbit-box-focus',
+      )}
       style={{ left: place.x, top: place.y, width: place.w ?? BOX[id].w, height: place.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
@@ -1036,7 +1275,13 @@ function Box({
           </button>
         </span>
       </div>
-      <div className={cn('min-h-0 flex-1 px-4 pb-4 pt-2', scroll ? 'overflow-y-auto' : 'overflow-hidden')}>{children}</div>
+      <div
+        data-overlay-body=""
+        data-overlay-scroll={scroll ? '' : undefined}
+        className={cn('min-h-0 flex-1 px-4 pb-4 pt-2', scroll ? 'overflow-y-auto' : 'overflow-hidden')}
+      >
+        {children}
+      </div>
       <div
         role="separator"
         aria-orientation="horizontal"

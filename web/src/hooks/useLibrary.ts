@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Game, MetaData, Settings } from '../types';
 
-import { deleteGame as removeFromDb, listGames, saveGame, clearLibrary, writePlaythroughNotes } from '../services/native';
+import { deleteGame as removeFromDb, listGames, overlayTheme, saveGame, clearLibrary, writePlaythroughNotes } from '../services/native';
 import { rememberedPlaythrough } from '../services/playthroughs';
 import { loadSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
-import { applyFont, applyTheme } from '../data/themes';
+import { applyFont, applyTheme, nativePalette } from '../data/themes';
 
 /**
  * Fields a person fills in, as opposed to anything Orbit works out.
@@ -62,6 +62,9 @@ export function useLibrary() {
       setSettingsState(loadedSettings);
       applyTheme(loadedSettings.theme);
       applyFont(loadedSettings.fontFamily ?? 'system');
+      // The native cards are drawn outside the page, so they get the same
+      // colours the theme just put on the page.
+      void overlayTheme(nativePalette(loadedSettings.theme));
       setReady(true);
     })();
     return () => {
@@ -168,7 +171,10 @@ export function useLibrary() {
       if (!current) return current;
       const resolved = typeof patch === 'function' ? patch(current) : patch;
       const next = { ...current, ...resolved };
-      if (resolved.theme) applyTheme(resolved.theme);
+      if (resolved.theme) {
+        applyTheme(resolved.theme);
+        void overlayTheme(nativePalette(resolved.theme));
+      }
       if (resolved.fontFamily) applyFont(resolved.fontFamily);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;

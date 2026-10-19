@@ -25,10 +25,11 @@ check('the chime is gated by a save-capable action after the capture resolves', 
 check('a recording chimes based on the native save result, even if button status was stale', run.includes("const recordingSaved = typeof result === 'string' && /^Saved the recording as\\b/i.test(result);"));
 check('the Audio box no longer shows the helper sentence', !overlay.includes('Up to three active sources are shown. More opens the rest; left and right change a volume by 1.'));
 check('a saved capture plays using cached settings without waiting for settings I/O', run.includes('const current = settingsRef.current;') && !run.includes('await loadSettings()'));
-check('screenshots keep the existing chime', /primeShutter\(\); void run\(\(\) => overlayShot\(stamp\(\)\), true, 'Screenshot saved'\)/.test(overlay));
+check('screenshots keep the existing chime', /const captureShot = \(\) => \{\s*primeShutter\(\);\s*void run\(\(\) => overlayShot\(stamp\(\)\), true, 'Screenshot saved'\);/.test(overlay));
 check('starting a recording does not request a chime', /const stopping = !!status\?\.recording;[\s\S]*?run\(\(\) => overlayRecord\(stamp\(\)\), stopping, stopping \? 'Recording saved' : 'Recording started'\)/.test(overlay));
 check('stopping a recording requests the chime only after save succeeds', /run\(\(\) => overlayRecord\(stamp\(\)\), stopping, stopping \? 'Recording saved' : 'Recording started'\)/.test(overlay));
-check('a saved replay requests the same chime after save succeeds', /primeShutter\(\); void run\(\(\) => overlayReplay\(seconds, stamp\(\)\), true, 'Replay saved'\)/.test(overlay));
+check('a saved replay requests the same chime after save succeeds', /run\(\(\) => overlayReplay\(seconds, stamp\(\)\), true, 'Replay saved'\)/.test(overlay));
+check('the buttons and the pad shortcuts run the same capture code', overlay.includes('onClick={captureShot}') && overlay.includes('onClick={captureRecord}') && overlay.includes('onClick={captureReplay}') && overlay.includes("captureRef.current = { shot: captureShot, record: captureRecord, replay: captureReplay };"));
 check('settings describe the chime for screenshots, recordings, and replays', /after a screenshot, recording, or replay is saved/.test(settings) && !settings.includes('Recordings stay quiet'));
 
 console.log('library artwork avoids eager decoding for every game');

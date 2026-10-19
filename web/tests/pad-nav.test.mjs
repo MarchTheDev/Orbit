@@ -1,4 +1,4 @@
-import { directionsHeld, heldDirection, journalMove, mayHandleGamepadInput, padDistance, padEdges, padEdgesWhenOwned, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
+import { directionsHeld, heldDirection, journalMove, mayHandleGamepadInput, padDistance, padEdges, padEdgesWhenOwned, padNearest, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
 
 let failures = 0;
 const check = (name, pass) => {
@@ -58,5 +58,24 @@ check('Start is ignored while the library is unfocused', padEdgesWhenOwned(mayHa
 check('Start is ignored while the library is hidden', padEdgesWhenOwned(mayHandleGamepadInput(false, false, true), null, startPress).length === 0);
 check('the main window leaves input to the overlay when it is open', padEdgesWhenOwned(mayHandleGamepadInput(true, true, true), null, startPress).length === 0);
 check('a held Start button does not become a new press on refocus', padEdgesWhenOwned(mayHandleGamepadInput(false, true, true), startPress, startPress).length === 0);
+
+console.log('the overlay chooses boxes by where they are on screen');
+// The overlay's default layout, roughly: two small boxes on the left, the
+// performance reading with the notes under it, the capture bar at the bottom.
+const overlayBoxes = {
+  fps: { left: 24, top: 24, right: 200, bottom: 136 },
+  clock: { left: 24, top: 152, right: 200, bottom: 264 },
+  audio: { left: 24, top: 280, right: 324, bottom: 600 },
+  performance: { left: 340, top: 24, right: 580, bottom: 220 },
+  notes: { left: 340, top: 236, right: 640, bottom: 446 },
+  capture: { left: 360, top: 600, right: 920, bottom: 820 },
+};
+const list = Object.values(overlayBoxes);
+const choose = (from, direction) => padNearest(overlayBoxes[from], list, direction);
+check('right from the clock lands on the performance box', choose('clock', 'right') === 3);
+check('down from the notes lands on the capture bar', choose('notes', 'down') === 5);
+check('the box beside the audio box is the notes card, not a walk through the list', choose('audio', 'right') === 4);
+check('down from the audio box reaches the capture bar', choose('audio', 'down') === 5);
+check('nothing above the FPS box', choose('fps', 'up') === null);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

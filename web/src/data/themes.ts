@@ -41,6 +41,21 @@ export const FONTS = [
   { id: 'book', name: 'Book', stack: '"Palatino Linotype", "Book Antiqua", Palatino, serif', sample: 'A little more character' },
 ] as const;
 
+/** The theme, by id, with Nebula as the answer for anything unknown. */
+export function themeById(id: string): Theme {
+  return THEMES.find((item) => item.id === id) ?? THEMES[0];
+}
+
+/**
+ * The colours of a theme as plain hex, for the native card. That window is
+ * drawn by Rust, which cannot read a CSS variable, so it is handed the same
+ * palette the page uses.
+ */
+export function nativePalette(id: string): { panel: string; text: string; muted: string; accent: string } {
+  const theme = themeById(id);
+  return { panel: theme.panel, text: theme.text, muted: theme.muted, accent: theme.accent };
+}
+
 export function applyTheme(id: string) {
   const t = THEMES.find((x) => x.id === id) ?? THEMES[0];
   const r = document.documentElement.style;

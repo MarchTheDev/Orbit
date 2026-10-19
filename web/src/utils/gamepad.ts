@@ -108,6 +108,26 @@ export function padDistance(from: PadBox, to: PadBox, direction: 'up' | 'down' |
   return Math.max(0, gap) + align;
 }
 
+/**
+ * The nearest of a set of things in one direction, or null when none is that
+ * way. It is `padDistance` applied to a list: the overlay's boxes are found
+ * this way, so right from the FPS box lands on whatever is actually to its
+ * right instead of walking through every control in between.
+ */
+export function padNearest(
+  from: PadBox,
+  targets: PadBox[],
+  direction: 'up' | 'down' | 'left' | 'right',
+): number | null {
+  let best: { index: number; score: number } | null = null;
+  for (let index = 0; index < targets.length; index += 1) {
+    const score = padDistance(from, targets[index], direction);
+    if (score == null) continue;
+    if (!best || score < best.score) best = { index, score };
+  }
+  return best ? best.index : null;
+}
+
 export type JournalZone = 'journal-game' | 'journal-logs' | 'journal-notes';
 
 /**

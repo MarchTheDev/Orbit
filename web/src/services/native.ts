@@ -1372,6 +1372,14 @@ export function overlayReadyNotice(title: string): Promise<void> {
   return call('overlay_ready_notice', { title }, () => undefined);
 }
 
+/**
+ * Give the native card the colours of the player's theme. The card is drawn by
+ * Rust, so it is told the palette rather than reading it from the page.
+ */
+export function overlayTheme(colours: { panel: string; text: string; muted: string; accent: string }): Promise<void> {
+  return call('overlay_theme', colours, () => undefined);
+}
+
 export function overlayStatus(): Promise<OverlayStatus> {
   return call('overlay_status', {}, () => ({
     enabled: true,

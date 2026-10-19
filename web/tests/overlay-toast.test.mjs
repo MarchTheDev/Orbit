@@ -7,6 +7,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const overlay = readFileSync(path.join(root, 'web', 'src', 'components', 'OverlayView.tsx'), 'utf8');
 const app = readFileSync(path.join(root, 'web', 'src', 'App.tsx'), 'utf8');
 const css = readFileSync(path.join(root, 'web', 'src', 'index.css'), 'utf8');
+const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
+const settingsSource = readFileSync(path.join(root, 'web', 'src', 'hooks', 'useLibrary.ts'), 'utf8');
+const padSource = readFileSync(path.join(root, 'web', 'src', 'utils', 'gamepad.ts'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -67,6 +70,51 @@ check(
     /\.orbit-note-icon--error/.test(css) &&
     !app.includes('bg-gradient-to-br from-panel/98') &&
     !app.includes('bg-gradient-to-br from-rose-950/95'),
+);
+
+console.log('the controller picks a box before it reaches into one');
+check(
+  'a box gets a ring of its own, drawn outside the card',
+  overlay.includes('orbit-box-focus') && /html\.orbit-pad \.orbit-box-focus\s*\{[^}]*outline: 2px solid var\(--c-accent\)/s.test(css),
+);
+check(
+  'the ring starts on a box, and A steps inside it',
+  /type PadTarget = BoxId \| 'bar';/.test(overlay) &&
+    overlay.includes("type PadFocus = { level: 'box' | 'inside'; id: PadTarget } | null;") &&
+    /const enterBox = \(id: PadTarget\) => \{[\s\S]*?setPad\(\{ level: 'inside', id \}\)/.test(overlay),
+);
+check(
+  'B backs out of a box before it closes the overlay',
+  /action === 'back'[\s\S]*?focus\?\.level === 'inside'[\s\S]*?leaveBox\(focus\.id\)/.test(overlay),
+);
+check(
+  'directions pick the nearest control or box instead of walking a list',
+  overlay.includes('padNearest(origin, targets.map((entry) => entry.box), direction)') &&
+    overlay.includes("import { padNearest } from '../utils/gamepad';") &&
+    padSource.includes('export function padNearest('),
+);
+check(
+  'the pad shortcuts share the capture buttons',
+  overlay.includes("if (action === 'capture-shot')") &&
+    overlay.includes('captureRef.current.shot()') &&
+    overlay.includes("if (action === 'capture-record')") &&
+    overlay.includes("if (action === 'capture-replay')"),
+);
+check(
+  'the right stick scrolls the box that has the focus, smoothly',
+  overlay.includes("listen<[number, number]>('overlay-pad-axes'") &&
+    overlay.includes('target.scrollBy({ left: across * dt, top: down * dt })') &&
+    overlay.includes("root?.querySelector<HTMLElement>('[data-overlay-scroll]')"),
+);
+check(
+  'the game-start card carries the Orbit mark, not an empty square',
+  notice.includes('orbit-mark-mask.bin') && notice.includes('draw_mark(') && notice.includes('CHIP'),
+);
+check(
+  'the card takes the colours of the player theme',
+  notice.includes('pub struct Palette') &&
+    settingsSource.includes('nativePalette(loadedSettings.theme)') &&
+    settingsSource.includes('void overlayTheme(nativePalette(resolved.theme))'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

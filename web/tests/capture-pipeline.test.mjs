@@ -10,6 +10,7 @@ const overlay = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay
 const settings = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
 const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
 const stats = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
+const lib = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'lib.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -101,8 +102,63 @@ check('the replay frame pipe is paced at the selected real-time frame rate', pip
 check('replay encoding combines buffered video and audio into one MP4', replayEncoder.includes('write_audio_wav') && replayEncoder.includes('"1:a:0"') && replayEncoder.includes('"aac"'));
 check('Windows recording interleaves loopback packets against the video timeline', capture.includes('queue_pending_audio(&mut pending_audio') && capture.includes('flush_audio_samples(') && capture.includes('audio_time >= video_end_ticks'));
 check('Windows replay interleaves MP4 samples in presentation-time order', capture.includes('if video_time <= audio_time'));
-check('Windows screenshot tools can capture the Orbit overlay', !overlay.includes('.content_protected(true)') && !overlay.includes('WDA_EXCLUDEFROMCAPTURE') && !overlay.includes('exclude_from_capture('));
+check(
+  'the overlay is left out of pictures and videos, so a recording shows the game',
+  overlay.includes('.content_protected(true)') &&
+    notice.includes('WDA_EXCLUDEFROMCAPTURE') &&
+    !overlay.includes('exclude_from_capture('),
+);
 check('capture settings accurately explain system-output audio and microphone behavior', settings.includes('Recordings and replays use system-output audio when available; the microphone is not captured.') && !settings.includes('Game sound is not recorded yet.'));
 check('Linux audio capture workers are stopped and joined during app shutdown', overlay.includes('live.audio_buffer.take()') && overlay.includes('live.audio_thread.take()') && overlay.includes('if let Some(reader) = audio.1') && overlay.includes('reader.join()'));
+
+check(
+  'a capture that outlives the panel still reports itself',
+  /pub fn announce_capture/.test(overlay) &&
+    overlay.includes('if panel_visible(app)') &&
+    overlay.includes('Card::error("Capture failed"') &&
+    /overlay::announce_capture\(&app, "screenshot", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&app, "recording", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&app, "replay", &outcome\)/.test(lib),
+);
+check(
+  'the game-start card is a themed Orbit card with the mark, not a plain rectangle',
+  notice.includes('orbit-mark-mask.bin') &&
+    notice.includes('AlphaBlend') &&
+    notice.includes('CreateRoundRectRgn') &&
+    notice.includes('mix(panel, accent, 0.14)') &&
+    notice.includes('pub struct Palette') &&
+    lib.includes('fn overlay_theme(') &&
+    lib.includes('overlay::set_palette'),
+);
+check(
+  'LB is the capture modifier: LB+RB shoots, LB+d-pad records and replays',
+  overlay.includes('let shot = shoulder && trigger') &&
+    overlay.includes('let record = shoulder && dpad_left') &&
+    overlay.includes('let replay = shoulder && dpad_right') &&
+    overlay.includes('Some(Capture::Shot)') &&
+    overlay.includes('Some(Capture::Record)') &&
+    overlay.includes('Some(Capture::Replay)') &&
+    overlay.includes('"capture-shot"') &&
+    overlay.includes('"capture-record"') &&
+    overlay.includes('"capture-replay"'),
+);
+check(
+  'a pad capture with the panel closed runs natively and reports in a card',
+  overlay.includes('fn spawn_capture(') &&
+    overlay.includes('announce_capture(&handle, kind, &result)') &&
+    overlay.includes('thread::Builder::new().name("orbit-pad-capture"'),
+);
+check(
+  'the right stick is read from XInput and sent while the panel is open',
+  overlay.includes('state.Gamepad.sThumbRX') &&
+    overlay.includes('vec![x, y, rx, ry]') &&
+    overlay.includes('window.emit("overlay-pad-axes"') &&
+    // One idle report after the stick is let go, so the scroll stops.
+    overlay.includes('if moving || watch.stick_moving'),
+);
+check(
+  'the card is printed in the local time zone, like the panel names its files',
+  overlay.includes('GetLocalTime()') && overlay.includes('fn now_stamp()'),
+);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

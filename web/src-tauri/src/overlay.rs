@@ -21,6 +21,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture;
+use crate::notice::{Card, Palette};
 use crate::process;
 
 const WINDOW: &str = "overlay";
@@ -68,21 +69,40 @@ struct Live {
     recording_name: String,
     recording_path: PathBuf,
     note: String,
+    /// The colours of the player's theme, for the native card.
+    palette: Palette,
 }
 
 struct Watch {
     both: bool,
-    page_left: bool,
-    page_right: bool,
+    /// LB is the modifier for the capture shortcuts; RB only completes LB+RB.
+    left_shoulder: bool,
+    right_shoulder: bool,
+    dpad_left: bool,
+    dpad_right: bool,
     a: bool,
     b: bool,
     held: Option<&'static str>,
     ticks: u8,
+    /// Whether the right stick was out of its dead zone on the last poll, so
+    /// the one report that puts it back to rest is sent as well.
+    stick_moving: bool,
+}
+
+/// A capture asked for from the pad, while the panel is closed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Capture {
+    Shot,
+    Record,
+    Replay,
 }
 
 struct Step {
     toggle: bool,
     action: Option<&'static str>,
+    capture: Option<Capture>,
+    /// The right stick, while it is being pushed or the moment it is let go.
+    stick: Option<(f32, f32)>,
 }
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
@@ -116,16 +136,20 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     recording_name: String::new(),
     recording_path: PathBuf::new(),
     note: String::new(),
+    palette: Palette::default(),
 });
 static GATE: Mutex<()> = Mutex::new(());
 static PAD: Mutex<Watch> = Mutex::new(Watch {
     both: false,
-    page_left: false,
-    page_right: false,
+    left_shoulder: false,
+    right_shoulder: false,
+    dpad_left: false,
+    dpad_right: false,
     a: false,
     b: false,
     held: None,
     ticks: 0,
+    stick_moving: false,
 });
 
 #[derive(Clone, Serialize)]
@@ -156,6 +180,72 @@ fn gate() -> std::sync::MutexGuard<'static, ()> {
 
 pub fn is_open() -> bool {
     OPEN.load(Ordering::SeqCst)
+}
+
+/// The panel is on screen, opened or resting against a pin. Both draw their own
+/// toasts, so a native card would be a second copy of the same news.
+pub fn panel_visible(app: &AppHandle) -> bool {
+    app.get_webview_window(WINDOW)
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
+}
+
+/// Take the colours of the player's theme for the native card. The app sends
+/// them when the theme changes; the defaults are Orbit's Nebula.
+pub fn set_palette(panel: &str, text: &str, muted: &str, accent: &str) {
+    let mut live = lock();
+    let current = live.palette;
+    live.palette = Palette {
+        panel: parse_colour(panel).unwrap_or(current.panel),
+        text: parse_colour(text).unwrap_or(current.text),
+        muted: parse_colour(muted).unwrap_or(current.muted),
+        accent: parse_colour(accent).unwrap_or(current.accent),
+    };
+}
+
+fn parse_colour(value: &str) -> Option<u32> {
+    let digits = value.trim().trim_start_matches('#');
+    if digits.len() != 6 || !digits.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(digits, 16).ok()
+}
+
+/// A capture finished. When the panel is gone there is no toast left to show
+/// it, so the card does: a save that was started before the overlay closed is
+/// exactly the one the player is waiting to hear about.
+pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>) {
+    if panel_visible(app) {
+        return;
+    }
+    let palette = lock().palette;
+    let card = match result {
+        Ok(text) => {
+            let title = match kind {
+                "screenshot" => "Screenshot saved",
+                "replay" => "Replay saved",
+                "recording" if text.starts_with("Saved the recording") => "Recording saved",
+                "recording" => "Recording started",
+                _ => "Saved to Gallery",
+            };
+            Card::ok(title, capture_detail(kind, text), palette)
+        }
+        Err(text) => Card::error("Capture failed", text, palette),
+    };
+    crate::notice::show(card);
+}
+
+/// The same quiet second line the panel's own toast uses.
+fn capture_detail(kind: &str, text: &str) -> &'static str {
+    if kind == "recording" && !text.starts_with("Saved the recording") {
+        return "Your recording is underway";
+    }
+    if text.contains("Clipboard copy failed") {
+        "Saved to Gallery · clipboard copy was not available"
+    } else if text.contains("Copied to clipboard") {
+        "Saved to Gallery · copied to clipboard"
+    } else {
+        "Saved to Gallery"
+    }
 }
 
 /// Alt+X and Start+Select both end here. The window work happens later, off
@@ -297,10 +387,8 @@ pub fn game_started(title: &str) {
 /// processes, on every game start.
 pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
     let title = safe_name(title);
-    let panel = app
-        .get_webview_window(WINDOW)
-        .is_some_and(|window| window.is_visible().unwrap_or(false));
-    {
+    let panel = panel_visible(app);
+    let palette = {
         let mut live = lock();
         if !live.enabled {
             return Ok(());
@@ -311,8 +399,9 @@ pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
         }
         // Nothing should keep a notice waiting for the next time the panel opens.
         live.ready_notice = None;
-    }
-    crate::notice::show(&title);
+        live.palette
+    };
+    crate::notice::show(Card::ok(&title, "Orbit Overlay is ready. Press Alt+X to open it.", palette));
     Ok(())
 }
 
@@ -423,7 +512,8 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Start+Select, from the pad thread. Navigation is only sent while the panel is up.
+/// Start+Select, LB+RB and the LB shortcuts, from the pad thread. Navigation is
+/// only sent while the panel is up.
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
     let step = {
         let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -438,12 +528,80 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         request_toggle();
         return;
     }
-    let Some(action) = step.action else { return };
+    if let Some(capture) = step.capture {
+        // Opened: the panel runs the capture itself, so it gets the chime and
+        // its own toast. Closed: there is nothing to talk to, so it is done
+        // here and the card reports it.
+        if panel_visible(app) {
+            if let Some(window) = app.get_webview_window(WINDOW) {
+                let _ = window.emit("overlay-pad", capture_action(capture));
+            }
+        } else {
+            spawn_capture(app, capture);
+        }
+        return;
+    }
+    // Movement belongs to the opened panel. A resting panel is click-through,
+    // and a B press there would hide the pins instead of going back.
     if !is_open() {
         return;
     }
+    // The right stick scrolls the box that has the focus, the way it scrolls a
+    // page in the library. It is sent continuously because a smooth scroll is
+    // not a series of presses.
     if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.emit("overlay-pad", action);
+        if let Some(stick) = step.stick {
+            let _ = window.emit("overlay-pad-axes", stick);
+        }
+        if let Some(action) = step.action {
+            let _ = window.emit("overlay-pad", action);
+        }
+    }
+}
+
+fn capture_action(capture: Capture) -> &'static str {
+    match capture {
+        Capture::Shot => "capture-shot",
+        Capture::Record => "capture-record",
+        Capture::Replay => "capture-replay",
+    }
+}
+
+/// A LB shortcut with the panel closed still takes the picture, and says so in
+/// a card. It runs off the pad thread: a replay save can take a while, and the
+/// pad must keep answering Start+Select meanwhile.
+fn spawn_capture(app: &AppHandle, capture: Capture) {
+    let handle = app.clone();
+    let _ = thread::Builder::new().name("orbit-pad-capture".to_string()).spawn(move || {
+        let stamp = now_stamp();
+        let seconds = lock().seconds;
+        let (kind, result) = match capture {
+            Capture::Shot => ("screenshot", shot(&handle, &stamp)),
+            Capture::Record => ("recording", record(&handle, &stamp)),
+            Capture::Replay => ("replay", save_replay(&handle, seconds, &stamp)),
+        };
+        announce_capture(&handle, kind, &result);
+    });
+}
+
+/// The same stamp the panel makes: local time, `2026-10-19 15-04-12`.
+fn now_stamp() -> String {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::SystemInformation::GetLocalTime;
+        let now = unsafe { GetLocalTime() };
+        return format!(
+            "{:04}-{:02}-{:02} {:02}-{:02}-{:02}",
+            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        format!("{seconds}")
     }
 }
 
@@ -565,8 +723,9 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // Windows desktop capture includes the panel just like system screenshot
-    // tools. Other desktops still step aside for the one in-app picture.
+    // On Windows the panel is excluded from every capture path by its display
+    // affinity, so a picture taken from it is a picture of the game. Other
+    // desktops have no such flag, so the panel steps aside for the one frame.
     #[cfg(not(windows))]
     let was_open = is_open();
     #[cfg(not(windows))]
@@ -744,6 +903,11 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        // Leave the overlay out of the pictures and videos Orbit itself takes,
+        // and out of everyone else's too. On Windows this is
+        // WDA_EXCLUDEFROMCAPTURE, so the game behind the panel is what the
+        // capture sees.
+        .content_protected(true)
         .visible(false)
         .focused(false)
         .center()
@@ -1947,8 +2111,10 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 }
 
 /// The same edges the library uses: A activates, B goes back, and a stick
-/// crossing the dead zone counts once. Holding a direction repeats. LB jumps to
-/// the app volumes and RB jumps to the gallery. Start+Select is the overlay itself.
+/// crossing the dead zone counts once. Holding a direction repeats. Start+Select
+/// is the overlay itself. LB is the modifier for the capture shortcuts:
+/// LB+RB is a screenshot, LB+Left and LB+Right are record and replay. With LB
+/// down the stick and A/B keep quiet, so a shortcut cannot also move the ring.
 fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
@@ -1959,38 +2125,66 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let down = pressed(buttons, 13) || y > 0.45;
     let left = pressed(buttons, 14) || x < -0.45;
     let right = pressed(buttons, 15) || x > 0.45;
-    let page_left = pressed(buttons, 4);
-    let page_right = pressed(buttons, 5);
-    let a = pressed(buttons, 0);
-    let b = pressed(buttons, 1);
-    let shoulder = if page_left && !watch.page_left {
-        Some("page-left")
-    } else if page_right && !watch.page_right {
-        Some("page-right")
+    let shoulder = pressed(buttons, 4);
+    let trigger = pressed(buttons, 5);
+    let dpad_left = pressed(buttons, 14);
+    let dpad_right = pressed(buttons, 15);
+    // An edge on the second button of a chord, so holding it does not fire
+    // again every poll.
+    let shot = shoulder && trigger && !(watch.left_shoulder && watch.right_shoulder);
+    let record = shoulder && dpad_left && !(watch.left_shoulder && watch.dpad_left);
+    let replay = shoulder && dpad_right && !(watch.left_shoulder && watch.dpad_right);
+    watch.left_shoulder = shoulder;
+    watch.right_shoulder = trigger;
+    watch.dpad_left = dpad_left;
+    watch.dpad_right = dpad_right;
+    let capture = if toggle {
+        None
+    } else if shot {
+        Some(Capture::Shot)
+    } else if record {
+        Some(Capture::Record)
+    } else if replay {
+        Some(Capture::Replay)
     } else {
         None
     };
-    watch.page_left = page_left;
-    watch.page_right = page_right;
+    let dir = direction(up, down, left, right);
     // A stick already over is not a press. Record it before the panel opens,
     // or the next poll would move the first button. Holding it repeats.
-    let repeated = repeating(watch, direction(up, down, left, right));
-    let action = if toggle {
+    let repeated = if shoulder {
+        // The direction is treated as already dealt with, so letting LB go while
+        // still holding it does not step the ring.
+        watch.held = dir;
+        watch.ticks = 0;
         None
-    } else if let Some(page) = shoulder {
-        Some(page)
+    } else {
+        repeating(watch, dir)
+    };
+    let a = pressed(buttons, 0);
+    let b = pressed(buttons, 1);
+    let action = if toggle || capture.is_some() {
+        None
     } else if let Some(dir) = repeated {
         Some(dir)
-    } else if a && !watch.a {
+    } else if !shoulder && a && !watch.a {
         Some("activate")
-    } else if b && !watch.b {
+    } else if !shoulder && b && !watch.b {
         Some("back")
     } else {
         None
     };
     watch.a = a;
     watch.b = b;
-    Step { toggle, action }
+    // The right stick is streamed, not stepped: the page turns it into a
+    // scroll. One idle report is sent too, or the scroll would keep its last
+    // speed after the stick is let go.
+    let right_x = axes.get(2).copied().unwrap_or(0.0);
+    let right_y = axes.get(3).copied().unwrap_or(0.0);
+    let moving = right_x.abs() > 0.12 || right_y.abs() > 0.12;
+    let stick = if moving || watch.stick_moving { Some((right_x, right_y)) } else { None };
+    watch.stick_moving = moving;
+    Step { toggle, action, capture, stick }
 }
 
 fn direction(up: bool, down: bool, left: bool, right: bool) -> Option<&'static str> {
@@ -2230,7 +2424,11 @@ fn read_xinput(slot: &mut u32) -> Option<(Vec<bool>, Vec<f32>)> {
         let x = state.Gamepad.sThumbLX as f32 / 32767.0;
         // The library treats a negative Y as up. XInput's up is positive.
         let y = -(state.Gamepad.sThumbLY as f32 / 32767.0);
-        Some((buttons, vec![x, y, 0.0, 0.0]))
+        // The right stick scrolls. Same axes as the browser pad: 2 is across,
+        // 3 is down, so the sign of Y is flipped the same way.
+        let rx = state.Gamepad.sThumbRX as f32 / 32767.0;
+        let ry = -(state.Gamepad.sThumbRY as f32 / 32767.0);
+        Some((buttons, vec![x, y, rx, ry]))
     }
 
     if let Some(read) = read_index(*slot) {
@@ -2279,12 +2477,15 @@ mod tests {
     fn start_and_select_open_once_until_they_are_released() {
         let mut watch = Watch {
             both: false,
-            page_left: false,
-            page_right: false,
+            left_shoulder: false,
+            right_shoulder: false,
+            dpad_left: false,
+            dpad_right: false,
             a: false,
             b: false,
             held: None,
             ticks: 0,
+            stick_moving: false,
         };
         let mut buttons = vec![false; 16];
         buttons[8] = true;
@@ -2302,18 +2503,68 @@ mod tests {
         assert!(!released.toggle);
         assert!(again.toggle);
         assert!(first.action.is_none());
+        assert!(first.capture.is_none());
+    }
+
+    /// The shortcuts, and only once per press.
+    #[test]
+    fn the_shoulder_shortcuts_fire_on_the_second_button() {
+        let mut watch = Watch {
+            both: false,
+            left_shoulder: false,
+            right_shoulder: false,
+            dpad_left: false,
+            dpad_right: false,
+            a: false,
+            b: false,
+            held: None,
+            ticks: 0,
+            stick_moving: false,
+        };
+        let mut buttons = vec![false; 16];
+        let axes = [0.0, 0.0];
+        buttons[4] = true;
+        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        buttons[5] = true;
+        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Shot));
+        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        buttons[5] = false;
+        buttons[4] = false;
+        take_step(&mut watch, &buttons, &axes);
+        buttons[4] = true;
+        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        // LB plus the left d-pad is a recording, and it must not also move the ring.
+        buttons[14] = true;
+        let step = take_step(&mut watch, &buttons, &axes);
+        assert_eq!(step.capture, Some(Capture::Record));
+        assert!(step.action.is_none());
+        buttons[14] = false;
+        buttons[15] = true;
+        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Replay));
+        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+    }
+
+    #[test]
+    fn the_theme_colour_parser_takes_a_hex_triplet() {
+        assert_eq!(parse_colour("#8b5cf6"), Some(0x8b_5c_f6));
+        assert_eq!(parse_colour("14122a"), Some(0x14_12_2a));
+        assert_eq!(parse_colour("#12345"), None);
+        assert_eq!(parse_colour("nope"), None);
     }
 
     #[test]
     fn a_held_direction_waits_and_then_repeats() {
         let mut watch = Watch {
             both: false,
-            page_left: false,
-            page_right: false,
+            left_shoulder: false,
+            right_shoulder: false,
+            dpad_left: false,
+            dpad_right: false,
             a: false,
             b: false,
             held: None,
             ticks: 0,
+            stick_moving: false,
         };
         let axes = [1.0, 0.0];
         assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
