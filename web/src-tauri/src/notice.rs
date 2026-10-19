@@ -8,8 +8,8 @@
 //! uses instead.
 //!
 //! The card is deliberately the panel's own toast, drawn natively: the same 352
-//! by 64 shape, the same 16 pixel corners, the same 32 pixel chip, the same 13
-//! and 11 pixel type. It is painted with GDI+ into a premultiplied bitmap and
+//! by 64 shape, the same 16 pixel corners, the same 24 pixel icon column, the
+//! same 13 and 11 pixel type. It is painted with GDI+ into a premultiplied bitmap and
 //! handed to the compositor with `UpdateLayeredWindow`, so every edge is
 //! antialiased, the corners are real transparency rather than a clipped region,
 //! and a scaled display redraws the card at its own size instead of stretching
@@ -178,11 +178,12 @@ mod win {
     const HEIGHT: f32 = 64.0;
     const RADIUS: f32 = 16.0;
     const PAD: f32 = 14.0;
-    const CHIP: f32 = 32.0;
-    const CHIP_RADIUS: f32 = 11.0;
-    const GAP: f32 = 12.0;
-    const MARK_DRAW: f32 = 20.0;
-    const ICON_DRAW: f32 = 16.0;
+    /// The space the picture takes before the text starts. There is no chip
+    /// behind it any more, but the text still aligns to a fixed column.
+    const ICON_BOX: f32 = 24.0;
+    const GAP: f32 = 10.0;
+    const MARK_DRAW: f32 = 22.0;
+    const ICON_DRAW: f32 = 18.0;
     const TITLE_SIZE: f32 = 13.0;
     const DETAIL_SIZE: f32 = 11.0;
     const MARGIN_TOP: f32 = 48.0;
@@ -601,28 +602,28 @@ mod win {
             Icon::Camera => {
                 stroke_round(
                     g,
-                    x + size * 0.04,
-                    y + size * 0.28,
-                    x + size * 0.96,
-                    y + size * 0.88,
-                    size * 0.16,
+                    x + size * 0.03,
+                    y + size * 0.26,
+                    x + size * 0.97,
+                    y + size * 0.92,
+                    size * 0.18,
                     width,
                     color,
                 );
                 // The viewfinder bump sits on top of the body.
                 fill_round(
                     g,
-                    x + size * 0.30,
-                    y + size * 0.10,
-                    x + size * 0.70,
-                    y + size * 0.30,
-                    size * 0.05,
+                    x + size * 0.28,
+                    y + size * 0.08,
+                    x + size * 0.72,
+                    y + size * 0.28,
+                    size * 0.06,
                     color,
                 );
-                let lens = size * 0.18;
+                let lens = size * 0.22;
                 let stroke = pen(color, width);
                 if !stroke.is_null() {
-                    let _ = GdipDrawEllipse(g, stroke, cx - lens, cy + size * 0.06 - lens, lens * 2.0, lens * 2.0);
+                    let _ = GdipDrawEllipse(g, stroke, cx - lens, cy + size * 0.09 - lens, lens * 2.0, lens * 2.0);
                     let _ = GdipDeletePen(stroke);
                 }
             }
@@ -700,32 +701,21 @@ mod win {
         fill_round(g, 0.0, 0.0, w, h, radius, argb(240, panel));
         stroke_round(g, 0.5, 0.5, w - 0.5, h - 0.5, radius - 0.5, 1.0, argb(23, text));
 
+        // The picture has no square behind it: the accent colour is the mark.
+        // A tinted chip under a tinted glyph was two shapes saying one thing,
+        // and at this size the chip won.
         let pad = PAD * scale;
-        let chip = CHIP * scale;
-        let chip_left = pad;
-        let chip_top = (h - chip) / 2.0;
-        fill_round(g, chip_left, chip_top, chip_left + chip, chip_top + chip, CHIP_RADIUS * scale, argb(33, accent));
-        stroke_round(
-            g,
-            chip_left + 0.5,
-            chip_top + 0.5,
-            chip_left + chip - 0.5,
-            chip_top + chip - 0.5,
-            CHIP_RADIUS * scale - 0.5,
-            1.0,
-            argb(66, accent),
-        );
-
-        let mark = scaled(MARK_DRAW, scale);
+        let box = ICON_BOX * scale;
+        let box_left = pad;
+        let box_top = (h - box) / 2.0;
         if card.icon == Icon::Mark {
-            let mark_left = chip_left + (chip - mark as f32) / 2.0;
-            let mark_top = chip_top + (chip - mark as f32) / 2.0;
-            draw_mark(g, mark_left, mark_top, mark, accent);
+            let mark = scaled(MARK_DRAW, scale);
+            draw_mark(g, box_left + (box - mark as f32) / 2.0, box_top + (box - mark as f32) / 2.0, mark, accent);
         } else {
-            draw_icon(g, card.icon, chip_left + chip / 2.0, chip_top + chip / 2.0, ICON_DRAW * scale, accent);
+            draw_icon(g, card.icon, box_left + box / 2.0, box_top + box / 2.0, ICON_DRAW * scale, accent);
         }
 
-        let text_left = chip_left + chip + GAP * scale;
+        let text_left = box_left + box + GAP * scale;
         let text_width = (w - pad - text_left).max(1.0);
         let semibold = {
             let handle = family(w!("Segoe UI Semibold"));

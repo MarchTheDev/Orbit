@@ -742,16 +742,11 @@ input[type='number']::-webkit-outer-spin-button {
   --toast-accent: #fb7185;
   border-color: color-mix(in srgb, #fb7185 28%, transparent);
 }
-.orbit-toast-chip {
-  color: var(--toast-accent);
-  border-color: color-mix(in srgb, var(--toast-accent) 26%, transparent);
-  background: color-mix(in srgb, var(--toast-accent) 13%, transparent);
-}
+/* The icon is the whole mark: no square behind it, no border round it. A
+ * tinted chip behind a tinted glyph was two shapes saying the same thing. */
 .orbit-toast-icon {
   color: var(--toast-accent);
 }
-/* The Orbit mark in the card that announces a game. It keeps the accent of
- * the card, and the ring's rounded square keeps the curve of the icon chip. */
 .orbit-toast-mark {
   color: var(--toast-accent);
 }
@@ -766,13 +761,12 @@ input[type='number']::-webkit-outer-spin-button {
 .orbit-note--error {
   border-color: color-mix(in srgb, #fb7185 28%, transparent);
 }
+/* Same as the overlay toast: the note's icon is a colour, not a badge. */
 .orbit-note-icon--ok {
   color: #6ee7b7;
-  background: rgba(52, 211, 153, .12);
 }
 .orbit-note-icon--error {
   color: #fda4af;
-  background: rgba(244, 63, 94, .14);
 }
 
 @media (prefers-reduced-motion: reduce) {

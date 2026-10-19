@@ -1353,7 +1353,7 @@ export default function App() {
             }`}
           >
             <span
-              className={`orbit-note-icon mt-px grid size-5 shrink-0 place-items-center rounded-md ${
+              className={`orbit-note-icon mt-px grid size-5 shrink-0 place-items-center ${
                 t.tone === 'error' ? 'orbit-note-icon--error' : 'orbit-note-icon--ok'
               }`}
             >

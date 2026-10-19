@@ -120,9 +120,9 @@ check(
     overlay.includes('Card::error("Capture failed"') &&
     // Announced from inside the blocking task, so closing the panel - and
     // dropping the command's future - cannot swallow it.
-    /spawn_blocking\(move \|\| \{[\s\S]*?overlay::announce_capture\(&worker, "screenshot", &outcome, false\)/.test(lib) &&
-    /overlay::announce_capture\(&worker, "recording", &outcome, false\)/.test(lib) &&
-    /overlay::announce_capture\(&worker, "replay", &outcome, false\)/.test(lib),
+    /spawn_blocking\(move \|\| \{[\s\S]*?overlay::announce_capture\(&worker, "screenshot", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "recording", &outcome\)/.test(lib) &&
+    /overlay::announce_capture\(&worker, "replay", &outcome\)/.test(lib),
 );
 check(
   'a capture announced with no panel on screen brings its own chime',
@@ -157,13 +157,14 @@ check(
     !notice.includes('CreateRoundRectRgn'),
 );
 check(
-  'the card is the panel toast: same width, corners, chip and type sizes',
+  'the card is the panel toast: same width, corners, type and icon column',
   notice.includes('const WIDTH: f32 = 352.0;') &&
     notice.includes('const HEIGHT: f32 = 64.0;') &&
     notice.includes('const RADIUS: f32 = 16.0;') &&
-    notice.includes('const CHIP: f32 = 32.0;') &&
+    notice.includes('const ICON_BOX: f32 = 24.0;') &&
     notice.includes('const TITLE_SIZE: f32 = 13.0;') &&
-    notice.includes('const DETAIL_SIZE: f32 = 11.0;'),
+    notice.includes('const DETAIL_SIZE: f32 = 11.0;') &&
+    !notice.includes('CHIP'),
 );
 check(
   'a capture card uses the same icon the panel toast uses for it',
@@ -188,13 +189,16 @@ check(
     overlay.includes('"capture-replay"'),
 );
 check(
-  'a pad capture with the panel closed runs natively and reports in a card',
-  overlay.includes('fn spawn_capture(') &&
-    // Forced: a pad capture never had a panel, so a panel that opens while the
-    // save runs must not swallow the card.
-    overlay.includes('announce_capture(&handle, kind, &result, true)') &&
-    overlay.includes('if !force && panel_visible(app)') &&
-    overlay.includes('thread::Builder::new().name("orbit-pad-capture"'),
+  'the pad capture shortcuts do nothing unless the panel is open',
+  // LB and RB are ordinary game buttons. A chord that also fired with the
+  // panel closed took a screenshot or stopped a replay in the middle of a
+  // match, so the whole handler sits behind `is_open()`.
+  /fn on_pad[\s\S]*?if !is_open\(\) \{\s*return;\s*\}[\s\S]*?if let Some\(capture\) = step\.capture/.test(overlay) &&
+    !overlay.includes('fn spawn_capture(') &&
+    !overlay.includes('orbit-pad-capture') &&
+    // Start+Select still opens and closes the panel with it closed; the toggle
+    // is answered before that gate.
+    /if step\.toggle \{\s*request_toggle\(\);\s*return;\s*\}[\s\S]*?if !is_open\(\)/.test(overlay),
 );
 check(
   'the right stick is read from XInput and sent while the panel is open',
@@ -210,10 +214,6 @@ check(
     overlay.includes('thread::Builder::new()\n        .name("orbit-warm"') &&
     overlay.includes('ensure_window(&panel)') &&
     lib.includes('overlay::warm(&app);'),
-);
-check(
-  'the card is printed in the local time zone, like the panel names its files',
-  overlay.includes('GetLocalTime()') && overlay.includes('fn now_stamp()'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

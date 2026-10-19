@@ -820,7 +820,7 @@ async fn overlay_shot(app: tauri::AppHandle, stamp: String) -> Result<String, St
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::shot(&worker, &stamp);
-        overlay::announce_capture(&worker, "screenshot", &outcome, false);
+        overlay::announce_capture(&worker, "screenshot", &outcome);
         outcome
     })
     .await
@@ -832,7 +832,7 @@ async fn overlay_record(app: tauri::AppHandle, stamp: String) -> Result<String, 
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::record(&worker, &stamp);
-        overlay::announce_capture(&worker, "recording", &outcome, false);
+        overlay::announce_capture(&worker, "recording", &outcome);
         outcome
     })
     .await
@@ -844,7 +844,7 @@ async fn overlay_replay(app: tauri::AppHandle, seconds: u32, stamp: String) -> R
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = overlay::save_replay(&worker, seconds, &stamp);
-        overlay::announce_capture(&worker, "replay", &outcome, false);
+        overlay::announce_capture(&worker, "replay", &outcome);
         outcome
     })
     .await

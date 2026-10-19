@@ -32,9 +32,10 @@ check(
 check('the toast styling uses Orbit theme accents', css.includes('.orbit-toast-card') && css.includes('--toast-accent: var(--c-accent)'));
 check('the toast no longer draws the glowing left rail', !overlay.includes('orbit-toast-edge') && !css.includes('.orbit-toast-edge'));
 check(
-  'the capture note is one compact card: a tinted icon square, a line of text, and nothing else',
-  /orbit-toast-chip grid size-8 shrink-0 place-items-center rounded-xl border/.test(overlay) &&
-    /orbit-toast-icon size-4/.test(overlay) &&
+  'the capture note is one compact card: an icon, a line of text, and nothing else',
+  /orbit-toast-icon grid size-6 shrink-0 place-items-center/.test(overlay) &&
+    !overlay.includes('orbit-toast-chip') &&
+    !css.includes('.orbit-toast-chip') &&
     !overlay.includes('orbit-toast-orbit') &&
     !overlay.includes('orbit-toast-indicator') &&
     !overlay.includes('orbit-toast-progress') &&
@@ -46,9 +47,10 @@ check(
     !overlay.includes('rounded-[10px]'),
 );
 check(
-  'the icon square is tinted by the same accent as the card',
-  /\.orbit-toast-chip\s*\{[^}]*var\(--toast-accent\)/s.test(css) &&
-    /\.orbit-toast-card\s*\{[^}]*--toast-accent:\s*var\(--c-accent\)/s.test(css),
+  'the icon is the accent colour itself, with no square or border behind it',
+  /\.orbit-toast-icon\s*\{[^}]*color:\s*var\(--toast-accent\)/s.test(css) &&
+    /\.orbit-toast-card\s*\{[^}]*--toast-accent:\s*var\(--c-accent\)/s.test(css) &&
+    !/\.orbit-toast-icon\s*\{[^}]*(background|border)/s.test(css),
 );
 check(
   'the capture note fades away after three and a half seconds',
@@ -69,11 +71,12 @@ check(
     !/\.orbit-toast-card--replay[^{]*\{[^}]*--c-accent2/s.test(css),
 );
 check(
-  'the library note is the same flat card, with a tinted icon square and no gradient',
+  'the library note is the same flat card, with a bare coloured icon and no gradient',
   /orbit-note pointer-events-auto/.test(app) &&
-    /orbit-note-icon mt-px grid size-5 shrink-0 place-items-center rounded-md/.test(app) &&
+    /orbit-note-icon mt-px grid size-5 shrink-0 place-items-center/.test(app) &&
     /\.orbit-note-icon--ok/.test(css) &&
     /\.orbit-note-icon--error/.test(css) &&
+    !/\.orbit-note-icon--(ok|error)\s*\{[^}]*background/s.test(css) &&
     !app.includes('bg-gradient-to-br from-panel/98') &&
     !app.includes('bg-gradient-to-br from-rose-950/95'),
 );
@@ -133,14 +136,19 @@ check(
 );
 check(
   'the game-start card carries the Orbit mark, not an empty square',
-  notice.includes('orbit-mark-mask.bin') && notice.includes('draw_mark(') && notice.includes('CHIP'),
+  notice.includes('orbit-mark-mask.bin') && notice.includes('draw_mark(') && notice.includes('Icon::Mark'),
 );
 check(
   'the card draws the mark from a cropped high-resolution mask, lifted for its size',
   notice.includes('const MARK_SIZE: usize = 256;') &&
-    notice.includes('const MARK_DRAW: f32 = 20.0;') &&
-    notice.includes('const CHIP: f32 = 32.0;') &&
+    notice.includes('const MARK_DRAW: f32 = 22.0;') &&
     notice.includes('powf(0.85)'),
+);
+check(
+  'the card has no chip behind its icon either',
+  !notice.includes('CHIP') &&
+    notice.includes('const ICON_BOX: f32 = 24.0;') &&
+    /let text_left = box_left \+ box \+ GAP \* scale/.test(notice),
 );
 check(
   'the card takes the colours of the player theme',

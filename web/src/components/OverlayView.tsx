@@ -904,10 +904,12 @@ export function OverlayView() {
             aria-live="polite"
             className={cn('orbit-toast orbit-toast-card flex max-w-[22rem] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-fg', `orbit-toast-card--${toast.kind}`)}
           >
-            <span className="orbit-toast-chip grid size-8 shrink-0 place-items-center rounded-xl border">
+            {/* The icon itself, in the accent colour. It used to sit in a tinted
+                square; the palette already carries the meaning. */}
+            <span className="orbit-toast-icon grid size-6 shrink-0 place-items-center">
               {toast.kind === 'ready'
                 ? <Logo className="orbit-toast-mark size-[22px]" animated={false} />
-                : <ToastIcon className="orbit-toast-icon size-4" aria-hidden="true" />}
+                : <ToastIcon className="size-4" aria-hidden="true" />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium leading-snug">{toast.title}</span>

@@ -93,7 +93,7 @@ struct Watch {
     stick_moving: bool,
 }
 
-/// A capture asked for from the pad, while the panel is closed.
+/// A capture asked for from the pad, with the panel open.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Capture {
     Shot,
@@ -219,14 +219,10 @@ fn parse_colour(value: &str) -> Option<u32> {
 /// A capture finished. When the panel is gone there is no toast left to show
 /// it, so the card does: a save that was started before the overlay closed is
 /// exactly the one the player is waiting to hear about.
-pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>, force: bool) {
-    // A panel on screen - open, or resting against a pin - has its own toast
-    // and its own chime. Only a capture that outlives it needs the card.
-    //
-    // `force` is for the pad with the panel closed: that capture never had a
-    // panel to draw anything, and it must not be silenced by a panel that
-    // happened to open while the save was running.
-    if !force && panel_visible(app) {
+pub fn announce_capture(app: &AppHandle, kind: &str, result: &Result<String, String>) {
+    // A panel still on screen - open, or resting against a pin - draws its own
+    // toast. Only a capture that outlives it needs the card.
+    if panel_visible(app) {
         return;
     }
     let palette = lock().palette;
@@ -648,8 +644,8 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Start+Select, LB+RB and the LB shortcuts, from the pad thread. Navigation is
-/// only sent while the panel is up.
+/// Start+Select, LB+RB and the LB shortcuts, from the pad thread. Everything
+/// but Start+Select is only sent while the panel is open.
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
     let step = {
         let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -664,27 +660,25 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         request_toggle();
         return;
     }
-    if let Some(capture) = step.capture {
-        // Opened: the panel runs the capture itself, so it gets the chime and
-        // its own toast. Closed: there is nothing to talk to, so it is done
-        // here and the card reports it.
-        if panel_visible(app) {
-            if let Some(window) = app.get_webview_window(WINDOW) {
-                let _ = window.emit("overlay-pad", capture_action(capture));
-            }
-        } else {
-            spawn_capture(app, capture);
-        }
-        return;
-    }
-    // Movement belongs to the opened panel. A resting panel is click-through,
-    // and a B press there would hide the pins instead of going back.
+    // Every shortcut but Start+Select belongs to the opened panel. LB and RB
+    // are ordinary game buttons: a shooter uses them every few seconds, and a
+    // chord that also fired with the panel closed took a screenshot or stopped
+    // a replay buffer in the middle of a match. Reading the pad is passive, so
+    // a closed panel now costs the game nothing.
     if !is_open() {
         return;
     }
-    // The right stick scrolls the box that has the focus, the way it scrolls a
-    // page in the library. It is sent continuously because a smooth scroll is
-    // not a series of presses.
+    if let Some(capture) = step.capture {
+        // The panel runs the capture itself, so it gets the chime and its own
+        // toast in the one place the player is already looking.
+        if let Some(window) = app.get_webview_window(WINDOW) {
+            let _ = window.emit("overlay-pad", capture_action(capture));
+        }
+        return;
+    }
+    // Movement belongs to the opened panel too. The right stick scrolls the box
+    // that has the focus, the way it scrolls a page in the library. It is sent
+    // continuously because a smooth scroll is not a series of presses.
     if let Some(window) = app.get_webview_window(WINDOW) {
         if let Some(stick) = step.stick {
             let _ = window.emit("overlay-pad-axes", stick);
@@ -700,44 +694,6 @@ fn capture_action(capture: Capture) -> &'static str {
         Capture::Shot => "capture-shot",
         Capture::Record => "capture-record",
         Capture::Replay => "capture-replay",
-    }
-}
-
-/// A LB shortcut with the panel closed still takes the picture, and says so in
-/// a card. It runs off the pad thread: a replay save can take a while, and the
-/// pad must keep answering Start+Select meanwhile.
-fn spawn_capture(app: &AppHandle, capture: Capture) {
-    let handle = app.clone();
-    let _ = thread::Builder::new().name("orbit-pad-capture".to_string()).spawn(move || {
-        let stamp = now_stamp();
-        let seconds = lock().seconds;
-        let (kind, result) = match capture {
-            Capture::Shot => ("screenshot", shot(&handle, &stamp)),
-            Capture::Record => ("recording", record(&handle, &stamp)),
-            Capture::Replay => ("replay", save_replay(&handle, seconds, &stamp)),
-        };
-        announce_capture(&handle, kind, &result, true);
-    });
-}
-
-/// The same stamp the panel makes: local time, `2026-10-19 15-04-12`.
-fn now_stamp() -> String {
-    #[cfg(windows)]
-    {
-        use windows::Win32::System::SystemInformation::GetLocalTime;
-        let now = unsafe { GetLocalTime() };
-        return format!(
-            "{:04}-{:02}-{:02} {:02}-{:02}-{:02}",
-            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
-        );
-    }
-    #[cfg(not(windows))]
-    {
-        let seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
-        format!("{seconds}")
     }
 }
 
