@@ -371,7 +371,8 @@ fn gpu_release() {
 #[cfg(windows)]
 fn pdh_gpu(adapter: Option<(u32, i32)>) -> (Option<u8>, Option<u64>) {
     use windows::Win32::System::Performance::{
-        PdhAddEnglishCounterW, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_FMT_DOUBLE, PDH_FMT_LARGE,
+        PDH_HCOUNTER, PDH_HQUERY,
     };
     use windows::core::PCWSTR;
 
