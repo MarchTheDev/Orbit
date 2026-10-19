@@ -140,6 +140,38 @@ function stickSpeed(value: number): number {
   return Math.sign(value) * span * span * 780;
 }
 
+/** The items of an open menu, in the order they are drawn. */
+function menuButtons(): HTMLButtonElement[] {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]:not([disabled])'))
+    .filter((node) => padBox(node) !== null);
+}
+
+/** The two answers of an open confirmation dialog. */
+function dialogButtons(): HTMLButtonElement[] {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('.modal-panel-enter button[data-overlay]'))
+    .filter((node) => padBox(node) !== null);
+}
+
+/** Move the ring by one inside a short vertical list, wrapping at the ends. */
+function listStep(list: HTMLButtonElement[], delta: number) {
+  if (list.length === 0) return;
+  const at = list.findIndex((node) => node === document.activeElement);
+  const next = list[(at < 0 ? (delta > 0 ? 0 : list.length - 1) : (at + delta + list.length) % list.length)];
+  next.focus();
+  markPad(next);
+}
+
+/** Retry until a just-opened list is in the document, then ring its first item. */
+function focusFirst(list: () => HTMLButtonElement[], tries = 8) {
+  const first = list()[0];
+  if (first) {
+    first.focus();
+    markPad(first);
+    return;
+  }
+  if (tries > 0) window.setTimeout(() => focusFirst(list, tries - 1), 25);
+}
+
 /** The part of a box the right stick scrolls, if that box scrolls at all. */
 function scrollerFor(id: PadTarget | null): HTMLElement | null {
   if (!id) return null;
@@ -275,6 +307,11 @@ export function OverlayView() {
   const placesRef = useRef(places);
   const hiddenRef = useRef(hidden);
   const padFocusRef = useRef<PadFocus>(null);
+  /** What R (the pad's right click) opened, and the tile it was opened from. */
+  const galleryMenuRef = useRef<GalleryMenuState | null>(null);
+  const menuAnchor = useRef<HTMLElement | null>(null);
+  const deleteTargetRef = useRef<GalleryItem | null>(null);
+  const itemsRef = useRef<GalleryItem[]>([]);
   const stick = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const stickFrame = useRef(0);
   /** The capture buttons' actions, so the pad shortcuts use the same code. */
@@ -288,6 +325,9 @@ export function OverlayView() {
   placesRef.current = places;
   hiddenRef.current = hidden;
   padFocusRef.current = padFocus;
+  galleryMenuRef.current = galleryMenu;
+  deleteTargetRef.current = deleteTarget;
+  itemsRef.current = items;
 
   const refresh = () => {
     void overlayStatus().then(setStatus).catch(() => undefined);
@@ -327,6 +367,32 @@ export function OverlayView() {
 
   /** The box the ring starts on when the pad is used before it has a target. */
   const startBox = (): PadTarget => (boxNode('capture') ? 'capture' : (shownBoxes()[0] ?? 'capture'));
+
+  /**
+   * The pad's right click: the gallery menu on the tile under the ring, in the
+   * same place the pointer would have put it.
+   */
+  const openGalleryMenu = (node: HTMLElement): boolean => {
+    const path = node.getAttribute('data-capture');
+    const item = itemsRef.current.find((entry) => entry.path === path);
+    if (!item) return false;
+    const box = padBox(node);
+    menuAnchor.current = node;
+    setGalleryMenu({ x: box ? Math.round(box.left + 16) : 24, y: box ? Math.round(box.bottom + 6) : 24, item });
+    setFront('gallery');
+    focusFirst(menuButtons);
+    return true;
+  };
+
+  /** Close the menu with the pad, and put the ring back on the tile. */
+  const closeGalleryMenu = () => {
+    const anchor = menuAnchor.current;
+    setGalleryMenu(null);
+    if (anchor && document.contains(anchor)) {
+      anchor.focus();
+      markPad(anchor);
+    }
+  };
 
   /** Leave a box's controls and go back to choosing boxes. */
   const leaveBox = (id: PadTarget) => {
@@ -540,6 +606,79 @@ export function OverlayView() {
         captureRef.current.replay();
         return;
       }
+      // A confirmation and a menu are layers of their own: the pad answers
+      // them first, so B there means "not this" rather than "close the panel".
+      if (deleteTargetRef.current) {
+        if (action === 'back') {
+          setDeleteTarget(null);
+          return;
+        }
+        if (action === 'activate') {
+          const answer = document.activeElement;
+          const buttons = dialogButtons();
+          const target = buttons.includes(answer as HTMLButtonElement) ? (answer as HTMLButtonElement) : buttons[0];
+          target?.click();
+          return;
+        }
+        if (action === 'left' || action === 'up') {
+          listStep(dialogButtons(), -1);
+          return;
+        }
+        if (action === 'right' || action === 'down') {
+          listStep(dialogButtons(), 1);
+          return;
+        }
+        return;
+      }
+      if (galleryMenuRef.current) {
+        if (action === 'back' || action === 'menu') {
+          closeGalleryMenu();
+          return;
+        }
+        if (action === 'activate') {
+          const item = document.activeElement;
+          if (item instanceof HTMLButtonElement && item.closest('[role="menu"]')) {
+            // The tile the menu came from keeps the ring once it closes.
+            const anchor = menuAnchor.current;
+            if (anchor && document.contains(anchor)) {
+              anchor.focus();
+              markPad(anchor);
+            }
+            item.click();
+            return;
+          }
+          focusFirst(menuButtons);
+          return;
+        }
+        if (action === 'up' || action === 'down') {
+          listStep(menuButtons(), action === 'up' ? -1 : 1);
+          return;
+        }
+        return;
+      }
+      if (action === 'menu') {
+        // R is the pad's right click. On a tile it opens that tile's menu; on
+        // the gallery card itself it steps in, so a second R opens the menu.
+        const focus = padFocusRef.current;
+        const active = document.activeElement;
+        if (focus?.level === 'inside' && focus.id === 'gallery' && active instanceof HTMLElement) {
+          if (openGalleryMenu(active)) return;
+        }
+        if (focus?.level === 'box' && focus.id === 'gallery') {
+          // Land on the first capture rather than on the tabs: the tiles are
+          // what R has something to say about.
+          const first = padControls('gallery', true).find((node) => node.hasAttribute('data-capture'));
+          if (first) {
+            setPad({ level: 'inside', id: 'gallery' });
+            first.focus();
+            markPad(first);
+          } else {
+            enterBox('gallery');
+          }
+          return;
+        }
+        return;
+      }
       if (action === 'back') {
         // B backs out of a box's controls. Out at the box level there is
         // nothing left to back out of, so B closes the overlay, which is what
@@ -622,10 +761,34 @@ export function OverlayView() {
     };
   }, []);
 
+  // When the pad chose Delete, the dialog has to be answerable without a
+  // pointer: cancel is focused, so A keeps everything and a direction moves to
+  // the button that actually deletes.
+  useEffect(() => {
+    if (!deleteTarget) return;
+    if (!document.documentElement.classList.contains('orbit-pad')) return;
+    window.setTimeout(() => focusFirst(dialogButtons), 0);
+  }, [deleteTarget]);
+
+  // Deleting the capture the ring was on takes the ring with it. Put it back
+  // on the first tile that is left rather than dropping it into the tabs.
+  useEffect(() => {
+    const focus = padFocusRef.current;
+    if (focus?.level !== 'inside' || focus.id !== 'gallery') return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.hasAttribute('data-overlay')) return;
+    const first = padControls('gallery', true).find((node) => node.hasAttribute('data-capture'));
+    if (!first) return;
+    first.focus();
+    markPad(first);
+  }, [items]);
+
   useEffect(() => {
     const title = status?.readyNotice;
     if (!title) return;
-    setToast({ title: 'Game started', detail: `${title} is running. Press Alt+X to open Orbit Overlay.`, kind: 'ready' });
+    // The title says it. A second line explaining Alt+X was noise on a toast
+    // that is already gone by the time the game's own intro finishes.
+    setToast({ title: 'Game started', detail: '', kind: 'ready' });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   }, [status?.readyNotice]);
@@ -991,9 +1154,13 @@ export function OverlayView() {
                 key={item.path}
                 type="button"
                 data-overlay
+                data-capture={item.path}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  // The pad remembers this too, so closing the menu with B
+                  // puts the ring back where the menu came from.
+                  menuAnchor.current = event.currentTarget;
                   setGalleryMenu({ x: event.clientX, y: event.clientY, item });
                   setFront('gallery');
                 }}
@@ -1203,6 +1370,7 @@ export function OverlayView() {
       )}
       {deleteTarget && (
         <ConfirmDialog
+          pad
           title="Delete this capture?"
           description={`Delete “${deleteTarget.name}” from Orbit's Gallery? This cannot be undone.`}
           confirmLabel="Delete capture"

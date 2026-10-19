@@ -956,10 +956,7 @@ export default function App() {
     if (!started) return;
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
     if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
-      const fallbackNotice = () => announce({
-        text: 'Orbit Overlay is working',
-        detail: 'Ready for captures. Press Alt+X to open it.',
-      });
+      const fallbackNotice = () => announce({ text: 'Orbit Overlay is working' });
       if (isNative()) void overlayReadyNotice(g.title).catch(fallbackNotice);
       else fallbackNotice();
     }

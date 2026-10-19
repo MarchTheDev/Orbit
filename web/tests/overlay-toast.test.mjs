@@ -10,6 +10,8 @@ const css = readFileSync(path.join(root, 'web', 'src', 'index.css'), 'utf8');
 const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
 const settingsSource = readFileSync(path.join(root, 'web', 'src', 'hooks', 'useLibrary.ts'), 'utf8');
 const padSource = readFileSync(path.join(root, 'web', 'src', 'utils', 'gamepad.ts'), 'utf8');
+const confirmDialog = readFileSync(path.join(root, 'web', 'src', 'components', 'ui', 'ConfirmDialog.tsx'), 'utf8');
+const overlaySource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -120,6 +122,37 @@ check(
   overlay.includes('padNearest(origin, targets.map((entry) => entry.box), direction)') &&
     overlay.includes("import { padNearest } from '../utils/gamepad';") &&
     padSource.includes('export function padNearest('),
+);
+check(
+  'R is the pad right click: it opens the menu on the tile under the ring',
+  overlay.includes("data-capture={item.path}") &&
+    /function menuButtons\(\)/.test(overlay) &&
+    overlay.includes("'[role=\"menu\"] [role=\"menuitem\"]:not([disabled])'") &&
+    /const openGalleryMenu = \(node: HTMLElement\): boolean => \{/.test(overlay) &&
+    overlay.includes("if (action === 'menu')") &&
+    overlay.includes("openGalleryMenu(active)") &&
+    // The ring is put back on the tile when the menu closes.
+    /const closeGalleryMenu = \(\) => \{/.test(overlay) &&
+    overlay.includes('anchor.focus();'),
+);
+check(
+  'the menu and the delete dialog are answerable with the pad',
+  /if \(galleryMenuRef\.current\) \{/.test(overlay) &&
+    overlay.includes('listStep(menuButtons()') &&
+    overlay.includes('item.click();') &&
+    /if \(deleteTargetRef\.current\) \{/.test(overlay) &&
+    /function dialogButtons\(\)/.test(overlay) &&
+    overlay.includes('button[data-overlay]') &&
+    overlay.includes('<ConfirmDialog\n          pad') &&
+    confirmDialog.includes('data-overlay={pad || undefined}'),
+);
+check(
+  'the game-start toast is the title alone, with no Alt+X line',
+  overlay.includes("setToast({ title: 'Game started', detail: '', kind: 'ready' })") &&
+    !overlay.includes('Press Alt+X to open Orbit Overlay') &&
+    overlaySource.includes('Card::ok(&title, "", palette)') &&
+    !overlaySource.includes('Orbit Overlay is ready') &&
+    !app.includes('Ready for captures. Press Alt+X to open it.'),
 );
 check(
   'the pad shortcuts share the capture buttons',

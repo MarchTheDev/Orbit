@@ -533,7 +533,9 @@ pub fn ready_notice(app: &AppHandle, title: &str) -> Result<(), String> {
         live.ready_notice = None;
         live.palette
     };
-    crate::notice::show(Card::ok(&title, "Orbit Overlay is ready. Press Alt+X to open it.", palette));
+    // The game's name is the whole message. The line that used to explain
+    // Alt+X was read once and ignored every time after that.
+    crate::notice::show(Card::ok(&title, "", palette));
     Ok(())
 }
 
@@ -2236,6 +2238,7 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 /// is the overlay itself. LB is the modifier for the capture shortcuts:
 /// LB+RB is a screenshot, LB+Left and LB+Right are record and replay. With LB
 /// down the stick and A/B keep quiet, so a shortcut cannot also move the ring.
+/// RB alone is the pad's right click, the way a mouse opens a capture's menu.
 fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
@@ -2248,6 +2251,9 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let right = pressed(buttons, 15) || x > 0.45;
     let shoulder = pressed(buttons, 4);
     let trigger = pressed(buttons, 5);
+    // R on its own is the pad's right click: the gallery menu on the tile the
+    // ring is on. It has to be read before `right_shoulder` is updated below.
+    let menu = trigger && !watch.right_shoulder;
     let dpad_left = pressed(buttons, 14);
     let dpad_right = pressed(buttons, 15);
     // An edge on the second button of a chord, so holding it does not fire
@@ -2292,6 +2298,8 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
         Some("activate")
     } else if !shoulder && b && !watch.b {
         Some("back")
+    } else if !shoulder && menu {
+        Some("menu")
     } else {
         None
     };
@@ -2663,6 +2671,40 @@ mod tests {
         buttons[15] = true;
         assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Replay));
         assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+    }
+
+    /// R on its own is the pad's right click, and it is still one press.
+    #[test]
+    fn the_right_shoulder_alone_is_the_menu() {
+        let mut watch = Watch {
+            both: false,
+            left_shoulder: false,
+            right_shoulder: false,
+            dpad_left: false,
+            dpad_right: false,
+            a: false,
+            b: false,
+            held: None,
+            ticks: 0,
+            stick_moving: false,
+        };
+        let mut buttons = vec![false; 16];
+        let axes = [0.0, 0.0];
+        buttons[5] = true;
+        let step = take_step(&mut watch, &buttons, &axes);
+        assert_eq!(step.action, Some("menu"));
+        assert!(step.capture.is_none());
+        // Held, it does not keep opening menus.
+        assert!(take_step(&mut watch, &buttons, &axes).action.is_none());
+        // With LB down the same button is the screenshot, never the menu.
+        buttons[5] = false;
+        take_step(&mut watch, &buttons, &axes);
+        buttons[4] = true;
+        take_step(&mut watch, &buttons, &axes);
+        buttons[5] = true;
+        let step = take_step(&mut watch, &buttons, &axes);
+        assert_eq!(step.capture, Some(Capture::Shot));
+        assert!(step.action.is_none());
     }
 
     #[test]

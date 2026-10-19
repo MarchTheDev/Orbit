@@ -11,6 +11,7 @@ export function ConfirmDialog({
   confirmIcon: ConfirmIcon = Trash2,
   onConfirm,
   onCancel,
+  pad = false,
 }: {
   title: string;
   description: string;
@@ -19,6 +20,12 @@ export function ConfirmDialog({
   confirmIcon?: ComponentType<{ className?: string }>;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * Let the overlay's controller reach the two answers. They are buttons
+   * outside any box, so `data-overlay` is what tells the pad they are part of
+   * the panel it is driving.
+   */
+  pad?: boolean;
 }) {
   return (
     <Modal title={title} size="sm" onClose={onCancel}>
@@ -29,11 +36,12 @@ export function ConfirmDialog({
         <p className="text-sm leading-relaxed text-muted">{description}</p>
       </div>
       <div className="mt-6 flex justify-end gap-2">
-        <button type="button" className={btnGhost} onClick={onCancel}>
+        <button type="button" data-overlay={pad || undefined} className={btnGhost} onClick={onCancel}>
           {cancelLabel}
         </button>
         <button
           type="button"
+          data-overlay={pad || undefined}
           className="flex items-center gap-2 rounded-lg border border-rose-400/35 bg-rose-500/15 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-300/70 hover:bg-rose-500/25"
           onClick={onConfirm}
         >
