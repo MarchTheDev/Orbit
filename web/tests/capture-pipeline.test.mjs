@@ -30,10 +30,19 @@ const systemAudioDropStart = capture.indexOf('impl Drop for SystemAudio');
 const systemAudioDropEnd = capture.indexOf('fn audio_subtype', systemAudioDropStart);
 const systemAudioDrop = capture.slice(systemAudioDropStart, systemAudioDropEnd);
 
-check('the video and audio replay ring share one 96 MiB cap', /MAX_RING_BYTES:\s*usize\s*=\s*96\s*\*\s*1024\s*\*\s*1024/.test(capture));
+check(
+  'the rolling replay is a bounded temporary file, not a memory ring',
+  /const VIDEO_SPOOL_BYTES:\s*u64\s*=\s*256\s*\*\s*1024\s*\*\s*1024/.test(capture) &&
+    /const AUDIO_SPOOL_BYTES:\s*u64\s*=\s*32\s*\*\s*1024\s*\*\s*1024/.test(capture) &&
+    !capture.includes('MAX_RING_BYTES'),
+);
+check('the replay buffer writes into a circular file and reads records back', capture.includes('struct Spool') && capture.includes('fn append(&self, bytes: &[u8])') && capture.includes('fn read(&self, at: u64, len: u32)'));
+check('a snapshot keeps its own files so encoding cannot read a reused record', capture.includes('fn renew(&mut self)') && /ring\.renew\(\)\?;/.test(capture));
+check('a replay save waits for the encoder queue instead of growing with the clip', capture.includes('fn wait_for_video_room') && /wait_for_video_room\(&writer\)/.test(capture));
+check('a replay save decodes every frame into one reused buffer', capture.includes('fn decode_jpeg_into(bytes: &[u8], out: &mut Vec<u8>)') && /decode_jpeg_into\(&jpeg, &mut bgra\)/.test(capture));
 check('Linux capture scales each tile into the output without a full-screen BGRA staging buffer', !linuxGrab.includes('let mut raw = vec!') && linuxGrab.includes('bytes.resize(') && linuxGrab.includes('for dst_x in 0..out_w'));
 check('recording and replay capture reuse their raw frame buffers', capture.includes('grab_with_buffer(spec, std::mem::take(&mut scratch))') && capture.includes('fn grab_jpeg(spec: Spec, size: &mut Option<(u32, u32)>, scratch: &mut Vec<u8>)') && capture.includes('pixels.resize('));
-check('replay snapshots share compressed frames instead of cloning their payloads', capture.includes('VecDeque<Arc<[u8]>>') && capture.includes('.skip(start).cloned().collect()'));
+check('replay snapshots keep only offsets, so a long clip costs no memory', capture.includes('struct FrameRef') && capture.includes('.skip(start).copied().collect()'));
 check('WASAPI loopback reads the default system output', capture.includes('AUDCLNT_STREAMFLAGS_LOOPBACK') && capture.includes('GetDefaultAudioEndpoint(eRender, eConsole)'));
 check('Windows MP4 output declares and writes an AAC audio stream', capture.includes('MFAudioFormat_AAC') && capture.includes('WriteSample(self.audio_stream, &sample)'));
 check('the built-in recording rejects a silent replay buffer', capture.includes('No system audio was captured, so Orbit did not save a silent replay.'));

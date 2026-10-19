@@ -415,7 +415,7 @@ function OverlaySettings({
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"
-        hint="The rolling replay's video and audio together are capped at 96 MiB of memory. At 4K or for long clips, less than the selected duration may be available. Turn it off for the lightest resource use; nothing is written until you save a clip."
+        hint="The rolling replay is kept in a temporary file on disk (up to 288 MB), not in memory, and it is deleted when the game stops. Nothing becomes a saved clip until you save one. At 4K or for long clips, less than the selected duration may be available. Turn it off for the lightest resource use."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay lengths</p>

@@ -1344,26 +1344,24 @@ export default function App() {
 
       {/* Bottom left, the way the app talks to the player: out of the way of the
           player bar in the middle and the Stop button at the top right. */}
-      <div className="pointer-events-none fixed bottom-5 left-5 z-50 flex w-fit max-w-xs flex-col items-start gap-2">
+      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex w-fit max-w-full items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-2xl backdrop-blur-xl ${
-              t.tone === 'error'
-                ? 'border-rose-300/35 bg-gradient-to-br from-rose-950/95 to-panel/95 text-rose-100 ring-1 ring-rose-300/10'
-                : 'border-emerald-300/25 bg-gradient-to-br from-panel/98 to-emerald-950/35 text-fg ring-1 ring-white/5'
+            className={`orbit-note pointer-events-auto flex w-fit max-w-full items-start gap-2 rounded-[10px] border px-3 py-2 text-[13px] ${
+              t.tone === 'error' ? 'orbit-note--error' : ''
             }`}
           >
             {t.tone === 'error' ? (
-              <CircleAlert className="mt-0.5 size-5 shrink-0 text-rose-300" />
+              <CircleAlert className="mt-px size-3.5 shrink-0 text-rose-300" />
             ) : (
-              <CircleCheck className="mt-0.5 size-5 shrink-0 text-emerald-300" />
+              <CircleCheck className="mt-px size-3.5 shrink-0 text-emerald-300" />
             )}
             <div className="min-w-0 flex-1">
-              <span className="block break-words font-semibold">{t.text}</span>
-              {t.detail && <span className="mt-0.5 block text-xs leading-relaxed text-muted">{t.detail}</span>}
+              <span className="block break-words leading-snug">{t.text}</span>
+              {t.detail && <span className="mt-0.5 block text-[11px] leading-snug text-muted">{t.detail}</span>}
               {t.actions?.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-1.5 flex flex-wrap gap-1">
                   {t.actions.map((action) => (
                     <button
                       key={action.label}
@@ -1373,11 +1371,7 @@ export default function App() {
                         // goes as soon as one of them is pressed.
                         setToasts((current) => current.filter((x) => x.id !== t.id));
                       }}
-                      className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                        t.tone === 'error'
-                          ? 'border-rose-300/40 text-rose-50 hover:bg-rose-400/20'
-                          : 'border-accent/50 text-accent hover:bg-accent/15 hover:text-fg'
-                      }`}
+                      className="rounded-md border border-accent/40 px-1.5 py-0.5 text-[10px] font-medium text-accent transition hover:bg-accent/15 hover:text-fg"
                     >
                       {action.label}
                     </button>
@@ -1387,10 +1381,10 @@ export default function App() {
             </div>
             <button
               onClick={() => setToasts((current) => current.filter((x) => x.id !== t.id))}
-              className="shrink-0 text-muted hover:text-fg"
+              className="-mr-0.5 shrink-0 text-muted/60 transition hover:text-fg"
               aria-label="Dismiss"
             >
-              <X className="size-3.5" />
+              <X className="size-3" />
             </button>
           </div>
         ))}

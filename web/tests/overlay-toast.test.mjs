@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const overlay = readFileSync(path.join(root, 'web', 'src', 'components', 'OverlayView.tsx'), 'utf8');
+const app = readFileSync(path.join(root, 'web', 'src', 'App.tsx'), 'utf8');
 const css = readFileSync(path.join(root, 'web', 'src', 'index.css'), 'utf8');
 
 let failures = 0;
@@ -18,7 +19,7 @@ function check(name, ok) {
 
 check(
   'the toast sits in a full-width, centered fixed wrapper',
-  /fixed inset-x-0 top-12 z-\[100\] flex justify-center/.test(overlay),
+  /fixed inset-x-0 top-8 z-\[100\] flex justify-center/.test(overlay),
 );
 const toastCss = css.slice(css.indexOf('@keyframes orbit-toast'));
 check(
@@ -28,8 +29,24 @@ check(
 check('the toast styling uses Orbit theme accents', css.includes('.orbit-toast-card') && css.includes('--toast-accent: var(--c-accent)'));
 check('the toast no longer draws the glowing left rail', !overlay.includes('orbit-toast-edge') && !css.includes('.orbit-toast-edge'));
 check(
-  'screenshot, recording, replay, and game-ready states have distinct labels',
-  ['ORBIT · SCREENSHOT', 'ORBIT · RECORDING', 'ORBIT · REPLAY', 'ORBIT · READY'].every((label) => overlay.includes(label)),
+  'the capture note is one compact card: small icon, a line of text, and nothing else',
+  /orbit-toast-icon size-4 shrink-0/.test(overlay) &&
+    !overlay.includes('orbit-toast-orbit') &&
+    !overlay.includes('orbit-toast-indicator') &&
+    !overlay.includes('orbit-toast-progress') &&
+    !overlay.includes('ORBIT · '),
+);
+check(
+  'the capture note is bounded to a small width',
+  /orbit-toast-card flex max-w-\[21rem\] items-center gap-2\.5 rounded-\[10px\]/.test(overlay),
+);
+check(
+  'the capture note fades away after three and a half seconds',
+  /orbit-toast 3\.6s/.test(css) && /setToast\(null\), 3600\)/.test(overlay),
+);
+check(
+  'the library note is the same flat card, not a gradient panel',
+  /orbit-note pointer-events-auto/.test(app) && !app.includes('bg-gradient-to-br from-panel/98') && !app.includes('bg-gradient-to-br from-rose-950/95'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

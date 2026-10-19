@@ -279,10 +279,8 @@ pub fn game_started(title: &str) {
         !same
     };
     if restart {
-        let root = lock().root.clone();
-        if !root.as_os_str().is_empty() {
-            capture::sweep_replay_files(&root);
-        }
+        // A stale spool from a crash is cleared when the app starts. Do not
+        // sweep here: a buffer that is already running still owns its file.
         if let Err(error) = start_buffer(true) {
             if !error.is_empty() {
                 lock().note = error;
@@ -674,8 +672,8 @@ pub fn save_replay(app: &AppHandle, seconds: u32, stamp: &str) -> Result<String,
         remember(&Err(message.clone()));
         return Err(message);
     }
-    // The frames are already in memory. Hiding the panel does not change them,
-    // and it was what made a length button look like a reload.
+    // The clip is already written to its own file. Hiding the panel does not
+    // change it, and it was what made a length button look like a reload.
     let _ = app;
     let result = save_kept(seconds, stamp);
     remember(&result);
@@ -1101,10 +1099,22 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
     start_pipe_buffer()
 }
 
+/// The rolling replay is a temporary file, not a memory ring. Keeping it in
+/// Orbit's own folder lets a crash leave nothing in a game directory, and the
+/// files are removed as soon as the session ends.
+fn replay_workspace() -> PathBuf {
+    let root = lock().root.clone();
+    if root.as_os_str().is_empty() {
+        std::env::temp_dir().join("orbit-replay")
+    } else {
+        root.join("replay")
+    }
+}
+
 fn start_native_buffer() -> Result<(), String> {
     lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
-    let hold = capture::start_buffer(keep, current_spec())?;
+    let hold = capture::start_buffer(keep, current_spec(), replay_workspace())?;
     #[cfg(target_os = "linux")]
     let audio = {
         let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) else {
@@ -1134,7 +1144,8 @@ fn start_native_buffer() -> Result<(), String> {
     Ok(())
 }
 
-/// ffmpeg's pictures stay in memory. Nothing is written until the player saves.
+/// ffmpeg's pictures go into the same temporary replay file as the native path.
+/// Nothing is kept as a finished video until the player saves one.
 fn start_pipe_buffer() -> Result<(), String> {
     lock().note.clear();
     let ffmpeg = match find_ffmpeg(&lock().ffmpeg) {
@@ -1143,12 +1154,12 @@ fn start_pipe_buffer() -> Result<(), String> {
     };
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
     let fps = lock().fps.max(1);
-    let buffer = capture::Buffer::new(fps, keep);
+    let buffer = capture::Buffer::new(&replay_workspace(), fps, keep)?;
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
     push_grab(&mut command, Some(quality_fps(fps)))?;
     // This worker pipes JPEG frames only; system audio is captured into the same
-    // in-memory replay ring by the companion PCM worker below.
+    // replay file by the companion PCM worker below.
     command.arg("-an");
     let scale = quality_scale(&lock().quality).unwrap_or("");
     let filter = if scale.is_empty() {
@@ -1242,7 +1253,7 @@ fn save_kept(seconds: u32, stamp: &str) -> Result<String, String> {
         .file_name()
         .map(|item| item.to_string_lossy().to_string())
         .unwrap_or_else(|| "the clip".to_string());
-    let covered = kept.frames.len() as u32 / kept.fps.max(1);
+    let covered = kept.frame_count() as u32 / kept.fps.max(1);
     let copied = clipboard_note(&path);
     if covered + 1 < seconds {
         return Ok(format!("Saved what was kept, which is shorter than {seconds} seconds, as {name}.{copied}"));
@@ -1313,8 +1324,9 @@ fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result
         }
     };
     let write_result = child.stdin.as_mut().ok_or_else(|| "ffmpeg did not accept the pictures.".to_string()).and_then(|stdin| {
-        for frame in &kept.frames {
-            stdin.write_all(frame).map_err(|error| error.to_string())?;
+        for index in 0..kept.frame_count() {
+            let frame = kept.frame(index)?;
+            stdin.write_all(&frame).map_err(|error| error.to_string())?;
         }
         Ok(())
     });
@@ -1410,7 +1422,7 @@ fn read_jpeg_pipe(mut stdout: impl Read, buffer: capture::Buffer, stop: Arc<Atom
         pending.extend_from_slice(&chunk[..read]);
         while let Some(jpeg) = take_jpeg(&mut pending) {
             if let Some((width, height)) = capture::jpeg_size(&jpeg) {
-                buffer.push_jpeg(jpeg, width, height);
+                buffer.push_jpeg(&jpeg, width, height);
             }
         }
         if pending.len() > 8 * 1024 * 1024 {

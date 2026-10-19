@@ -1,23 +1,24 @@
 //! Screen capture that does not need ffmpeg.
 //!
 //! Windows copies the monitor with GDI. Linux does the same through the X11
-//! root window. A recording is one H.264 `.mp4`. A replay stays in memory
-//! until it is saved, so starting a game does not fill the disk.
+//! root window. A recording is one H.264 `.mp4`. The rolling replay is kept in
+//! a small temporary file instead of in memory, so a game session costs a few
+//! kilobytes of RAM rather than a hundred megabytes, and the file is removed
+//! as soon as the session ends.
 
 use std::collections::VecDeque;
-use std::fs;
-use std::io::{Cursor, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-/// Cap the rolling replay data and share compressed frames with snapshots so
-/// saving a replay does not immediately clone the ring's video payloads.
-const MAX_RING_BYTES: usize = 96 * 1024 * 1024;
-// Keep uncompressed loopback PCM from crowding out most of the video ring.
-const MAX_AUDIO_RING_BYTES: usize = 16 * 1024 * 1024;
+/// The rolling replay lives in these two circular files. They grow only as far
+/// as the kept frames reach, so a short session leaves a small file behind.
+const VIDEO_SPOOL_BYTES: u64 = 256 * 1024 * 1024;
+const AUDIO_SPOOL_BYTES: u64 = 32 * 1024 * 1024;
 const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_CHANNELS: usize = 2;
 const AUDIO_BYTES_PER_FRAME: usize = AUDIO_CHANNELS * 2;
@@ -48,42 +49,134 @@ struct Frame {
     bytes: Vec<u8>,
 }
 
+/// One circular file. Records are written end to end and the file is never
+/// allowed to write over a record that is still part of the replay, so a saved
+/// clip can be read back while the capture thread keeps working.
+struct Spool {
+    path: PathBuf,
+    capacity: u64,
+    state: Mutex<SpoolState>,
+}
+
+struct SpoolState {
+    file: Option<File>,
+    /// Where the next record starts. Records never straddle the end.
+    head: u64,
+}
+
+impl Spool {
+    fn create(dir: &Path, name: &str, capacity: u64) -> Result<Arc<Self>, String> {
+        fs::create_dir_all(dir).map_err(|error| format!("The replay buffer could not be prepared: {error}"))?;
+        let path = dir.join(name);
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .map_err(|error| format!("The replay buffer could not be prepared: {error}"))?;
+        Ok(Arc::new(Self {
+            path,
+            capacity: capacity.max(1),
+            state: Mutex::new(SpoolState { file: Some(file), head: 0 }),
+        }))
+    }
+
+    /// Write one record and report where it landed. The caller has already
+    /// dropped enough old records for it to fit without touching live data.
+    fn append(&self, bytes: &[u8]) -> Result<(u64, u32), String> {
+        let len = bytes.len() as u64;
+        if len == 0 || len > self.capacity {
+            return Err("A replay record was too large for the replay buffer.".to_string());
+        }
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(file) = state.file.as_mut() else {
+            return Err("The replay buffer is no longer available.".to_string());
+        };
+        if state.head.saturating_add(len) > self.capacity {
+            state.head = 0;
+        }
+        let at = state.head;
+        file.seek(SeekFrom::Start(at)).map_err(|error| error.to_string())?;
+        file.write_all(bytes).map_err(|error| error.to_string())?;
+        state.head = at.saturating_add(len);
+        Ok((at, len as u32))
+    }
+
+    fn read(&self, at: u64, len: u32) -> Result<Vec<u8>, String> {
+        let mut bytes = vec![0u8; len as usize];
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(file) = state.file.as_mut() else {
+            return Err("The replay buffer is no longer available.".to_string());
+        };
+        file.seek(SeekFrom::Start(at)).map_err(|error| error.to_string())?;
+        file.read_exact(&mut bytes).map_err(|error| error.to_string())?;
+        Ok(bytes)
+    }
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        // Close the handle before asking Windows to unlink the file.
+        if let Ok(state) = self.state.get_mut() {
+            let _ = state.file.take();
+        }
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FrameRef {
+    at: u64,
+    len: u32,
+}
+
+#[derive(Clone, Copy)]
+struct AudioRef {
+    at: u64,
+    len: u32,
+    first_frame: usize,
+    frames: usize,
+}
+
 struct Ring {
     width: u32,
     height: u32,
     fps: u32,
     max_frames: usize,
-    bytes: usize,
-    frames: VecDeque<Arc<[u8]>>,
-    audio: VecDeque<AudioChunk>,
-    audio_bytes: usize,
+    bytes: u64,
+    frames: VecDeque<FrameRef>,
+    audio: VecDeque<AudioRef>,
+    audio_bytes: u64,
     audio_frames: usize,
+    dir: PathBuf,
+    video: Option<Arc<Spool>>,
+    sound: Option<Arc<Spool>>,
 }
 
-struct AudioChunk {
-    bytes: Arc<[u8]>,
-    first_frame: usize,
-    frames: usize,
-}
-
-#[derive(Clone)]
-struct AudioSlice {
-    bytes: Arc<[u8]>,
-    first_frame: usize,
-    frames: usize,
-}
-
-/// The last few seconds, kept in memory. Cloning shares the same frames.
+/// The last few seconds, kept in a temporary file. Only the record index stays
+/// in memory, so the cost of a running replay does not grow with the preview.
 #[derive(Clone)]
 pub struct Buffer {
     inner: Arc<Mutex<Ring>>,
 }
 
+static SPOOL_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+fn new_spool(dir: &Path, kind: &str, capacity: u64) -> Result<Arc<Spool>, String> {
+    let serial = SPOOL_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let name = format!("live-{}-{serial}-{kind}.spool", std::process::id());
+    Spool::create(dir, &name, capacity)
+}
+
 impl Buffer {
-    pub fn new(fps: u32, keep: Duration) -> Self {
+    pub fn new(dir: &Path, fps: u32, keep: Duration) -> Result<Self, String> {
         let fps = fps.max(1);
         let seconds = keep.as_secs().max(1) as usize;
-        Self {
+        let dir = dir.to_path_buf();
+        let video = new_spool(&dir, "video", VIDEO_SPOOL_BYTES)?;
+        let sound = Some(new_spool(&dir, "audio", AUDIO_SPOOL_BYTES)?);
+        Ok(Self {
             inner: Arc::new(Mutex::new(Ring {
                 width: 0,
                 height: 0,
@@ -94,12 +187,14 @@ impl Buffer {
                 audio: VecDeque::new(),
                 audio_bytes: 0,
                 audio_frames: 0,
+                dir,
+                video: Some(video),
+                sound,
             })),
-        }
+        })
     }
 
-    pub fn push_jpeg(&self, jpeg: impl Into<Arc<[u8]>>, width: u32, height: u32) {
-        let jpeg = jpeg.into();
+    pub fn push_jpeg(&self, jpeg: &[u8], width: u32, height: u32) {
         if jpeg.len() < 4 || width < 2 || height < 2 {
             return;
         }
@@ -111,9 +206,24 @@ impl Buffer {
         if ring.width != width || ring.height != height {
             return;
         }
-        ring.bytes = ring.bytes.saturating_add(jpeg.len());
-        ring.frames.push_back(jpeg);
-        trim_video(&mut ring);
+        let len = jpeg.len() as u64;
+        if len > VIDEO_SPOOL_BYTES {
+            return;
+        }
+        // Room is made before the write, never after it: a circular file that
+        // overwrites first would corrupt the frames it is about to drop.
+        while ring.frames.len() >= ring.max_frames || ring.bytes.saturating_add(len) > VIDEO_SPOOL_BYTES {
+            let Some(old) = ring.frames.pop_front() else { break };
+            ring.bytes = ring.bytes.saturating_sub(old.len as u64);
+        }
+        let Some(video) = ring.video.clone() else { return };
+        match video.append(jpeg) {
+            Ok((at, len)) => {
+                ring.frames.push_back(FrameRef { at, len });
+                ring.bytes = ring.bytes.saturating_add(len as u64);
+            }
+            Err(error) => set_error(&error),
+        }
     }
 
     /// Add interleaved 48 kHz stereo signed-16 PCM to the rolling replay.
@@ -122,21 +232,23 @@ impl Buffer {
         if usable == 0 {
             return;
         }
-        let bytes: Arc<[u8]> = if usable == bytes.len() {
-            bytes.into()
-        } else {
-            bytes[..usable].into()
-        };
+        let bytes = &bytes[..usable];
         let frames = usable / AUDIO_BYTES_PER_FRAME;
         let mut ring = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        ring.audio_bytes = ring.audio_bytes.saturating_add(usable);
-        ring.audio_frames = ring.audio_frames.saturating_add(frames);
-        ring.audio.push_back(AudioChunk { bytes, first_frame: 0, frames });
-        trim_audio(&mut ring);
+        trim_audio(&mut *ring, usable as u64);
+        let Some(sound) = ring.sound.clone() else { return };
+        match sound.append(bytes) {
+            Ok((at, len)) => {
+                ring.audio_bytes = ring.audio_bytes.saturating_add(len as u64);
+                ring.audio_frames = ring.audio_frames.saturating_add(frames);
+                ring.audio.push_back(AudioRef { at, len, first_frame: 0, frames });
+            }
+            Err(error) => set_error(&error),
+        }
     }
 
     pub fn snapshot(&self, seconds: u32) -> Result<Kept, String> {
-        let ring = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut ring = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if ring.frames.is_empty() || ring.width == 0 {
             let error = last_error();
             if !error.is_empty() {
@@ -149,7 +261,7 @@ impl Buffer {
         let audio_video_frames = ring.audio_frames.saturating_mul(fps as usize) / AUDIO_SAMPLE_RATE as usize;
         let keep = if ring.audio_frames > 0 { keep.min(audio_video_frames.max(1)) } else { keep };
         let start = ring.frames.len().saturating_sub(keep);
-        let frames: Vec<_> = ring.frames.iter().skip(start).cloned().collect();
+        let frames: Vec<FrameRef> = ring.frames.iter().skip(start).copied().collect();
         let audio_wanted = frames.len().saturating_mul(AUDIO_SAMPLE_RATE as usize) / fps as usize;
         let mut audio_left = audio_wanted.min(ring.audio_frames);
         let mut audio = Vec::new();
@@ -158,68 +270,136 @@ impl Buffer {
                 break;
             }
             let take = audio_left.min(chunk.frames);
-            audio.push(AudioSlice {
-                bytes: Arc::clone(&chunk.bytes),
+            audio.push(AudioRef {
+                at: chunk.at,
+                len: chunk.len,
                 first_frame: chunk.first_frame + chunk.frames - take,
                 frames: take,
             });
             audio_left -= take;
         }
         audio.reverse();
+        let covered = audio_wanted.min(ring.audio_frames) - audio_left;
+        let (width, height) = (ring.width, ring.height);
+        let video = ring.video.clone();
+        let sound = ring.sound.clone();
+        // The clip gets the files that are already written, and the capture
+        // thread starts a fresh pair. Encoding then cannot read a record that
+        // the next minute of play has already needed to reuse.
+        ring.renew()?;
+        drop(ring);
         Ok(Kept {
-            width: ring.width,
-            height: ring.height,
+            width,
+            height,
             fps,
+            video,
             frames,
-            audio_frames: audio_wanted.min(ring.audio_frames) - audio_left,
+            sound,
             audio,
+            audio_frames: covered,
         })
     }
 }
 
-fn trim_video(ring: &mut Ring) {
-    while ring.frames.len() > ring.max_frames || ring.bytes.saturating_add(ring.audio_bytes) > MAX_RING_BYTES {
-        let Some(old) = ring.frames.pop_front() else { break };
-        ring.bytes = ring.bytes.saturating_sub(old.len());
+impl Ring {
+    /// Replace both files with empty ones, keeping the frame size.
+    fn renew(&mut self) -> Result<(), String> {
+        let video = new_spool(&self.dir, "video", VIDEO_SPOOL_BYTES)?;
+        let sound = new_spool(&self.dir, "audio", AUDIO_SPOOL_BYTES)?;
+        self.video = Some(video);
+        self.sound = Some(sound);
+        self.bytes = 0;
+        self.frames.clear();
+        self.audio_bytes = 0;
+        self.audio_frames = 0;
+        self.audio.clear();
+        Ok(())
     }
 }
 
-fn trim_audio(ring: &mut Ring) {
+fn trim_audio(ring: &mut Ring, incoming: u64) {
     let audio_limit = ring.max_frames.saturating_mul(AUDIO_SAMPLE_RATE as usize) / ring.fps.max(1) as usize;
     loop {
-        let combined_excess = ring.bytes.saturating_add(ring.audio_bytes).saturating_sub(MAX_RING_BYTES);
-        let audio_excess = ring.audio_bytes.saturating_sub(MAX_AUDIO_RING_BYTES);
-        let duration_excess = ring.audio_frames.saturating_sub(audio_limit);
-        let remove_frames = (combined_excess.saturating_add(AUDIO_BYTES_PER_FRAME - 1) / AUDIO_BYTES_PER_FRAME)
-            .max(audio_excess.saturating_add(AUDIO_BYTES_PER_FRAME - 1) / AUDIO_BYTES_PER_FRAME)
-            .max(duration_excess);
-        if remove_frames == 0 {
+        // Room for the record that is about to arrive, so `append` never has to
+        // write over a chunk that is still part of the replay.
+        let over_bytes = ring.audio_bytes.saturating_add(incoming) > AUDIO_SPOOL_BYTES;
+        let over_time = ring.audio_frames > audio_limit;
+        if !over_bytes && !over_time {
             break;
         }
+        let remove_frames = if over_bytes {
+            let excess = ring.audio_bytes.saturating_add(incoming).saturating_sub(AUDIO_SPOOL_BYTES);
+            ((excess.saturating_add(AUDIO_BYTES_PER_FRAME as u64 - 1)) / AUDIO_BYTES_PER_FRAME as u64).max(1) as usize
+        } else {
+            ring.audio_frames.saturating_sub(audio_limit).max(1)
+        };
         let Some(front) = ring.audio.front_mut() else { break };
         let remove = remove_frames.min(front.frames);
         front.first_frame += remove;
         front.frames -= remove;
         ring.audio_frames = ring.audio_frames.saturating_sub(remove);
-        let removed_bytes = remove.saturating_mul(AUDIO_BYTES_PER_FRAME);
+        let removed_bytes = remove.saturating_mul(AUDIO_BYTES_PER_FRAME) as u64;
         ring.audio_bytes = ring.audio_bytes.saturating_sub(removed_bytes);
         if front.frames == 0 {
             ring.audio.pop_front();
         }
     }
-    trim_video(ring);
 }
 
 pub struct Kept {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    pub frames: Vec<Arc<[u8]>>,
+    video: Option<Arc<Spool>>,
+    frames: Vec<FrameRef>,
+    sound: Option<Arc<Spool>>,
+    audio: Vec<AudioRef>,
     audio_frames: usize,
-    audio: Vec<AudioSlice>,
 }
 
 impl Kept {
+    #[cfg(test)]
+    fn empty() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            fps: 30,
+            video: None,
+            frames: Vec::new(),
+            sound: None,
+            audio: Vec::new(),
+            audio_frames: 0,
+        }
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Read one compressed frame back from the clip's file.
+    pub fn frame(&self, index: usize) -> Result<Vec<u8>, String> {
+        let spool = self.video.as_ref().ok_or_else(|| "The clip was empty.".to_string())?;
+        let frame = self.frames.get(index).ok_or_else(|| "A replay frame was missing.".to_string())?;
+        spool.read(frame.at, frame.len)
+    }
+
+    pub fn audio_chunk_count(&self) -> usize {
+        self.audio.len()
+    }
+
+    /// Read one audio chunk and trim it to the part the clip keeps.
+    pub fn audio_chunk(&self, index: usize) -> Result<(Vec<u8>, usize), String> {
+        let spool = self.sound.as_ref().ok_or_else(|| "The clip had no audio.".to_string())?;
+        let chunk = self.audio.get(index).ok_or_else(|| "The buffered audio was incomplete.".to_string())?;
+        let bytes = spool.read(chunk.at, chunk.len)?;
+        let start = chunk.first_frame.saturating_mul(AUDIO_BYTES_PER_FRAME);
+        let end = start.saturating_add(chunk.frames.saturating_mul(AUDIO_BYTES_PER_FRAME));
+        let slice = bytes
+            .get(start..end)
+            .ok_or_else(|| "The buffered audio was incomplete.".to_string())?;
+        Ok((slice.to_vec(), chunk.frames))
+    }
+
     pub fn has_audio(&self) -> bool {
         self.audio_frames > 0
     }
@@ -324,10 +504,10 @@ pub fn start_recording(out: PathBuf, spec: Spec) -> Result<Hold, String> {
     Ok(Hold { stop, thread: Some(thread), buffer: None })
 }
 
-pub fn start_buffer(keep: Duration, spec: Spec) -> Result<Hold, String> {
+pub fn start_buffer(keep: Duration, spec: Spec, dir: PathBuf) -> Result<Hold, String> {
     let _ = grab(spec)?;
     set_error("");
-    let buffer = Buffer::new(spec.fps, keep);
+    let buffer = Buffer::new(&dir, spec.fps, keep)?;
     let shared = buffer.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
@@ -348,7 +528,7 @@ pub fn finish(mut hold: Hold) -> Result<(), String> {
 
 /// Write one playable `.mp4`. An empty or tiny file is deleted, not left behind.
 pub fn write_mp4(path: &Path, kept: &Kept) -> Result<(), String> {
-    if kept.frames.is_empty() || kept.width < 2 || kept.height < 2 {
+    if kept.frame_count() == 0 || kept.width < 2 || kept.height < 2 {
         return Err("The clip was empty.".to_string());
     }
     if !kept.has_audio() {
@@ -389,25 +569,22 @@ pub fn write_audio_wav(path: &Path, kept: &Kept) -> Result<(), String> {
     file.write_all(&16u16.to_le_bytes()).map_err(|error| error.to_string())?;
     file.write_all(b"data").map_err(|error| error.to_string())?;
     file.write_all(&data_bytes.to_le_bytes()).map_err(|error| error.to_string())?;
-    for slice in &kept.audio {
-        let start = slice.first_frame.saturating_mul(AUDIO_BYTES_PER_FRAME);
-        let end = start.saturating_add(slice.frames.saturating_mul(AUDIO_BYTES_PER_FRAME));
-        let Some(bytes) = slice.bytes.get(start..end) else {
-            return Err("The buffered audio was incomplete.".to_string());
-        };
-        file.write_all(bytes).map_err(|error| error.to_string())?;
+    for index in 0..kept.audio_chunk_count() {
+        let (bytes, _frames) = kept.audio_chunk(index)?;
+        file.write_all(&bytes).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
 
-/// Remove the old per-second replay pieces. They are not videos.
+/// Remove old per-second replay pieces from version 1.1, and a spool file that
+/// a crash left behind. Neither is a saved clip.
 pub fn sweep_replay_files(root: &Path) {
     let replay = root.join("replay");
     if let Ok(entries) = fs::read_dir(&replay) {
         for entry in entries.flatten() {
             let path = entry.path();
             let ext = path.extension().and_then(|item| item.to_str()).unwrap_or("");
-            if ext == "orb" || ext == "mkv" || ext == "txt" {
+            if ext == "orb" || ext == "mkv" || ext == "txt" || ext == "spool" {
                 let _ = fs::remove_file(path);
             }
         }
@@ -688,7 +865,7 @@ fn run_buffer(buffer: Buffer, spec: Spec, stop: Arc<AtomicBool>) -> Result<(), S
     let mut audio_active = true;
     let interval = frame_interval(spec.fps);
     let mut size = None;
-    let mut last: Option<(Arc<[u8]>, u32, u32)> = None;
+    let mut last: Option<(Vec<u8>, u32, u32)> = None;
     let mut scratch = Vec::new();
     let mut next_frame = Instant::now();
     loop {
@@ -720,7 +897,7 @@ fn run_buffer(buffer: Buffer, spec: Spec, stop: Arc<AtomicBool>) -> Result<(), S
 
         if let Some((jpeg, width, height)) = last.as_ref() {
             while next_frame <= now && !stop.load(Ordering::SeqCst) {
-                buffer.push_jpeg(Arc::clone(jpeg), *width, *height);
+                buffer.push_jpeg(jpeg, *width, *height);
                 next_frame += interval;
             }
         }
@@ -729,9 +906,8 @@ fn run_buffer(buffer: Buffer, spec: Spec, stop: Arc<AtomicBool>) -> Result<(), S
             match result {
                 Ok(jpeg) => {
                     let (width, height) = size.unwrap_or((0, 0));
-                    let jpeg: Arc<[u8]> = jpeg.into();
                     if last.is_none() {
-                        buffer.push_jpeg(Arc::clone(&jpeg), width, height);
+                        buffer.push_jpeg(&jpeg, width, height);
                         next_frame = now + interval;
                     }
                     last = Some((jpeg, width, height));
@@ -1136,6 +1312,21 @@ impl Writer {
     }
 }
 
+/// Block until the sink writer holds fewer than `MAX_PENDING_VIDEO_SAMPLES`
+/// full-size pictures. This is the replay's memory ceiling: two 1080p samples
+/// instead of one for every frame in the clip.
+#[cfg(windows)]
+fn wait_for_video_room(writer: &WindowsWriter) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while writer.video_queue_full() {
+        if Instant::now() > deadline {
+            return Err("The video encoder fell behind while the replay was being saved.".to_string());
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
     if !kept.has_audio() {
@@ -1150,21 +1341,33 @@ fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
     let mut audio_index = 0usize;
     let mut audio_sample_index = 0usize;
     let fps = kept.fps.max(1) as u128;
-    while video_index < kept.frames.len() || audio_index < kept.audio.len() {
-        let video_time = if video_index < kept.frames.len() {
+    let audio_count = kept.audio_chunk_count();
+    // One decoded picture, reused for every frame. The old loop allocated a
+    // fresh full-resolution buffer per frame, which is what pushed the process
+    // past half a gigabyte while a replay was being encoded.
+    let mut bgra = Vec::new();
+    while video_index < kept.frame_count() || audio_index < audio_count {
+        let video_time = if video_index < kept.frame_count() {
             video_index as u128 * 10_000_000 / fps
         } else {
             u128::MAX
         };
-        let audio_time = if audio_index < kept.audio.len() {
+        let audio_time = if audio_index < audio_count {
             audio_sample_index as u128 * 10_000_000 / AUDIO_SAMPLE_RATE as u128
         } else {
             u128::MAX
         };
         if video_time <= audio_time {
-            let jpeg = &kept.frames[video_index];
-            let (width, height, bgra) = match decode_jpeg(jpeg) {
-                Ok(frame) => frame,
+            let jpeg = match kept.frame(video_index) {
+                Ok(jpeg) => jpeg,
+                Err(error) => {
+                    writer.abandon();
+                    let _ = fs::remove_file(path);
+                    return Err(error);
+                }
+            };
+            let (width, height) = match decode_jpeg_into(&jpeg, &mut bgra) {
+                Ok(size) => size,
                 Err(error) => {
                     writer.abandon();
                     let _ = fs::remove_file(path);
@@ -1176,6 +1379,14 @@ fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
                 let _ = fs::remove_file(path);
                 return Err("A replay frame was the wrong size.".to_string());
             }
+            // Wait for the sink writer to drain before handing it another
+            // full-size sample. Without this the encoder queue grows with the
+            // clip and the save balloons in memory.
+            if let Err(error) = wait_for_video_room(&writer) {
+                writer.abandon();
+                let _ = fs::remove_file(path);
+                return Err(error);
+            }
             if let Err(error) = writer.push_bgra(&bgra) {
                 writer.abandon();
                 let _ = fs::remove_file(path);
@@ -1184,20 +1395,20 @@ fn write_mp4_windows(path: &Path, kept: &Kept) -> Result<(), String> {
             written += 1;
             video_index += 1;
         } else {
-            let slice = &kept.audio[audio_index];
-            let start = slice.first_frame.saturating_mul(AUDIO_BYTES_PER_FRAME);
-            let end = start.saturating_add(slice.frames.saturating_mul(AUDIO_BYTES_PER_FRAME));
-            let Some(pcm) = slice.bytes.get(start..end) else {
-                writer.abandon();
-                let _ = fs::remove_file(path);
-                return Err("The buffered audio was incomplete.".to_string());
+            let (pcm, frames) = match kept.audio_chunk(audio_index) {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    writer.abandon();
+                    let _ = fs::remove_file(path);
+                    return Err(error);
+                }
             };
-            if let Err(error) = writer.push_audio(pcm, slice.frames) {
+            if let Err(error) = writer.push_audio(&pcm, frames) {
                 writer.abandon();
                 let _ = fs::remove_file(path);
                 return Err(error);
             }
-            audio_sample_index += slice.frames;
+            audio_sample_index += frames;
             audio_index += 1;
         }
     }
@@ -1800,6 +2011,17 @@ fn pack(high: u32, low: u32) -> u64 {
 }
 
 pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    let mut out = Vec::new();
+    let (width, height) = decode_jpeg_into(bytes, &mut out)?;
+    Ok((width, height, out))
+}
+
+/// Decode one JPEG into a caller-owned BGRA buffer.
+///
+/// Encoding a replay decodes a picture for every frame in the clip. Handing the
+/// same buffer back in keeps the largest allocation out of that loop: only the
+/// decoder's own RGB picture is still created per frame.
+pub(crate) fn decode_jpeg_into(bytes: &[u8], out: &mut Vec<u8>) -> Result<(u32, u32), String> {
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
     let pixels = decoder.decode().map_err(|error| format!("A frame could not be read: {error}"))?;
     let info = decoder.info().ok_or_else(|| "A frame could not be read.".to_string())?;
@@ -1808,24 +2030,32 @@ pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     if width < 2 || height < 2 {
         return Err("A frame could not be read.".to_string());
     }
-    let bgra = match info.pixel_format {
+    match info.pixel_format {
         jpeg_decoder::PixelFormat::RGB24 => {
-            let mut out = Vec::with_capacity((pixels.len() / 3) * 4);
-            for pixel in pixels.chunks_exact(3) {
-                out.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+            out.clear();
+            out.resize(pixels.len() / 3 * 4, 0);
+            for (index, pixel) in pixels.chunks_exact(3).enumerate() {
+                let at = index * 4;
+                out[at] = pixel[2];
+                out[at + 1] = pixel[1];
+                out[at + 2] = pixel[0];
+                out[at + 3] = 255;
             }
-            out
         }
         jpeg_decoder::PixelFormat::L8 => {
-            let mut out = Vec::with_capacity(pixels.len() * 4);
-            for gray in pixels {
-                out.extend_from_slice(&[gray, gray, gray, 255]);
+            out.clear();
+            out.resize(pixels.len() * 4, 0);
+            for (index, gray) in pixels.iter().enumerate() {
+                let at = index * 4;
+                out[at] = *gray;
+                out[at + 1] = *gray;
+                out[at + 2] = *gray;
+                out[at + 3] = 255;
             }
-            out
         }
         _ => return Err("A frame could not be read.".to_string()),
-    };
-    Ok((width, height, bgra))
+    }
+    Ok((width, height))
 }
 
 /// Width and height from a JPEG, so a piped frame can join the replay without a decoder.
@@ -1909,32 +2139,86 @@ mod tests {
         assert_eq!(out[3], 255);
     }
 
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("orbit-capture-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn the_replay_keeps_only_the_asked_length() {
-        let buffer = Buffer::new(2, Duration::from_secs(2));
+        let dir = test_dir("length");
+        let buffer = Buffer::new(&dir, 2, Duration::from_secs(2)).unwrap();
         let jpeg = sample_jpeg();
         for _ in 0..6 {
-            buffer.push_jpeg(jpeg.clone(), 16, 16);
+            buffer.push_jpeg(&jpeg, 16, 16);
         }
-        assert_eq!(buffer.snapshot(2).unwrap().frames.len(), 4);
-        assert_eq!(buffer.snapshot(1).unwrap().frames.len(), 2);
+        let kept = buffer.snapshot(2).unwrap();
+        assert_eq!(kept.frame_count(), 4);
+        assert_eq!(kept.frame(0).unwrap(), jpeg);
+        assert_eq!(kept.frame(3).unwrap(), jpeg);
+
+        let dir = test_dir("length-short");
+        let buffer = Buffer::new(&dir, 2, Duration::from_secs(2)).unwrap();
+        for _ in 0..6 {
+            buffer.push_jpeg(&jpeg, 16, 16);
+        }
+        assert_eq!(buffer.snapshot(1).unwrap().frame_count(), 2);
+    }
+
+    #[test]
+    fn a_snapshot_starts_a_fresh_pair_of_replay_files() {
+        let dir = test_dir("renew");
+        let buffer = Buffer::new(&dir, 2, Duration::from_secs(2)).unwrap();
+        let jpeg = sample_jpeg();
+        for _ in 0..4 {
+            buffer.push_jpeg(&jpeg, 16, 16);
+        }
+        let kept = buffer.snapshot(2).unwrap();
+        assert_eq!(kept.frame_count(), 4);
+        // The clip owns what was kept; the running buffer starts empty.
+        assert!(buffer.snapshot(2).is_err());
+        buffer.push_jpeg(&jpeg, 16, 16);
+        let second = buffer.snapshot(1).unwrap();
+        assert_eq!(second.frame_count(), 1);
+        // Even after another renewal, the first clip still owns its file.
+        assert_eq!(kept.frame(0).unwrap(), jpeg);
+        assert_eq!(second.frame(0).unwrap(), jpeg);
     }
 
     #[test]
     fn replay_snapshots_keep_audio_for_the_video_window() {
-        let buffer = Buffer::new(2, Duration::from_secs(2));
+        let dir = test_dir("audio");
+        let buffer = Buffer::new(&dir, 2, Duration::from_secs(2)).unwrap();
         let jpeg = sample_jpeg();
         for _ in 0..4 {
-            buffer.push_jpeg(jpeg.clone(), 16, 16);
+            buffer.push_jpeg(&jpeg, 16, 16);
         }
         let second = vec![0u8; AUDIO_SAMPLE_RATE as usize * AUDIO_BYTES_PER_FRAME];
         buffer.push_audio_pcm(second.clone());
         buffer.push_audio_pcm(second);
 
         let kept = buffer.snapshot(1).unwrap();
-        assert_eq!(kept.frames.len(), 2);
+        assert_eq!(kept.frame_count(), 2);
         assert_eq!(kept.audio_frames, AUDIO_SAMPLE_RATE as usize);
         assert!(kept.has_audio());
+        let (pcm, frames) = kept.audio_chunk(0).unwrap();
+        assert_eq!(frames, AUDIO_SAMPLE_RATE as usize);
+        assert_eq!(pcm.len(), frames * AUDIO_BYTES_PER_FRAME);
+    }
+
+    #[test]
+    fn a_circular_spool_wraps_without_losing_whole_records() {
+        let dir = test_dir("spool");
+        let spool = Spool::create(&dir, "round.spool", 64).unwrap();
+        assert_eq!(spool.append(&[1u8; 20]).unwrap(), (0, 20));
+        assert_eq!(spool.append(&[2u8; 20]).unwrap(), (20, 20));
+        assert_eq!(spool.read(0, 20).unwrap(), vec![1u8; 20]);
+        assert_eq!(spool.read(20, 20).unwrap(), vec![2u8; 20]);
+        // A record that would cross the end starts again at the beginning.
+        assert_eq!(spool.append(&[3u8; 30]).unwrap(), (0, 30));
+        assert_eq!(spool.read(0, 30).unwrap(), vec![3u8; 30]);
     }
 
     #[test]
@@ -1949,14 +2233,9 @@ mod tests {
 
     #[test]
     fn an_empty_clip_is_not_written() {
-        let kept = Kept {
-            width: 16,
-            height: 16,
-            fps: 30,
-            frames: Vec::new(),
-            audio_frames: 0,
-            audio: Vec::new(),
-        };
+        let kept = Kept::empty();
         assert!(write_mp4(Path::new("unused.mp4"), &kept).is_err());
+        assert_eq!(kept.frame_count(), 0);
+        assert!(!kept.has_audio());
     }
 }

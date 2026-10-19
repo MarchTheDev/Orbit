@@ -237,7 +237,7 @@ export function OverlayView() {
     if (settingsRef.current?.overlay?.captureToast === false) return;
     setToast({ title, detail, kind });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 4200);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   };
 
   useEffect(() => {
@@ -406,7 +406,7 @@ export function OverlayView() {
     if (!title) return;
     setToast({ title: 'Game started', detail: `${title} is running. Press Alt+X to open Orbit Overlay.`, kind: 'ready' });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 4200);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   }, [status?.readyNotice]);
 
   useEffect(() => {
@@ -650,46 +650,22 @@ export function OverlayView() {
     gallery: Copy,
     ready: Sparkles,
   })[toast.kind] : null;
-  const toastLabel = toast ? ({
-    screenshot: 'ORBIT · SCREENSHOT',
-    recording: 'ORBIT · RECORDING',
-    replay: 'ORBIT · REPLAY',
-    gallery: 'ORBIT · GALLERY',
-    ready: 'ORBIT · READY',
-  })[toast.kind] : '';
-  const toastStateLabel = toast?.kind === 'recording' && /started/i.test(toast.title)
-    ? 'LIVE'
-    : toast?.kind === 'ready'
-      ? 'READY'
-      : toast?.kind === 'gallery'
-        ? 'COPIED'
-        : 'SAVED';
 
   return (
     <div className="relative h-full text-white">
       {!resting && <div className="absolute inset-0 bg-black/45" onClick={() => void overlayHide()} />}
       {toast && ToastIcon && (
-        <div className="pointer-events-none fixed inset-x-0 top-12 z-[100] flex justify-center px-4">
+        <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">
           <div
             role="status"
             aria-live="polite"
-            className={cn('orbit-toast orbit-toast-card relative flex w-full max-w-[26rem] items-center gap-3.5 overflow-hidden rounded-[1.25rem] border px-4 py-3.5 text-white shadow-2xl backdrop-blur-2xl', `orbit-toast-card--${toast.kind}`)}
+            className={cn('orbit-toast orbit-toast-card flex max-w-[21rem] items-center gap-2.5 rounded-[10px] border px-3 py-2 text-white', `orbit-toast-card--${toast.kind}`)}
           >
-            <span className="orbit-toast-orbit pointer-events-none absolute -right-5 -top-8 z-0 size-24 rounded-full border" aria-hidden="true" />
-            <span className="orbit-toast-icon relative z-10 grid size-11 shrink-0 place-items-center rounded-2xl border">
-              <ToastIcon className="size-[19px]" aria-hidden="true" />
-              <span className="orbit-toast-indicator absolute -right-0.5 -top-0.5 size-2 rounded-full border-2 border-[#11101b]" aria-hidden="true" />
+            <ToastIcon className="orbit-toast-icon size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-medium leading-snug">{toast.title}</span>
+              {toast.detail && <span className="mt-0.5 block truncate text-[10.5px] leading-snug text-white/55">{toast.detail}</span>}
             </span>
-            <span className="relative z-10 min-w-0 flex-1">
-              <span className="mb-1 flex min-w-0 items-center gap-1.5">
-                <span className="orbit-toast-kicker truncate text-[9px] font-bold uppercase tracking-[.18em]">{toastLabel}</span>
-                <span className="size-1 shrink-0 rounded-full bg-white/30" aria-hidden="true" />
-                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[.12em] text-white/45">{toastStateLabel}</span>
-              </span>
-              <span className="block truncate text-sm font-semibold">{toast.title}</span>
-              <span className="mt-0.5 block truncate text-[11px] text-white/60">{toast.detail}</span>
-            </span>
-            <span className="orbit-toast-progress absolute inset-x-0 bottom-0 z-20 h-[2px] origin-left" aria-hidden="true" />
           </div>
         </div>
       )}

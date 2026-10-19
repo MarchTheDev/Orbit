@@ -84,9 +84,12 @@ In `\com.orbit.launcher`:
 
 - `orbit.db` - the library, every session and every log note, in SQLite
 - `settings.json` - theme, library folders, and whether to look games up
+- `replay\` - the last few seconds of the game that is running, kept in a
+  temporary file so it costs no memory; removed when the session ends
 
-Both are plain files you can back up or delete. Deleting `orbit.db` empties the
-library; nothing else on the machine is touched.
+The first two are plain files you can back up or delete, and the replay folder
+never outlives a session. Deleting `orbit.db` empties the library; nothing else
+on the machine is touched.
 
 ## Layout
 
