@@ -38,6 +38,9 @@ static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
+/// When the last toggle was taken. A held shortcut repeats; one press is one.
+static ASKED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const TOGGLE_GAP: Duration = Duration::from_millis(320);
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
@@ -376,6 +379,17 @@ fn capture_detail(kind: &str, text: &str) -> &'static str {
 /// Alt+X and Start+Select both end here. The window work happens later, off
 /// the shortcut handler, so that handler can return while its lock is still held.
 pub fn request_toggle() {
+    // Windows repeats a registered hotkey while it is held down. Without this
+    // a slightly long press opened and closed the panel in the same moment,
+    // which is the flash a player sees instead of the overlay.
+    let now = std::time::Instant::now();
+    {
+        let mut last = ASKED_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last.is_some_and(|at| now.duration_since(at) < TOGGLE_GAP) {
+            return;
+        }
+        *last = Some(now);
+    }
     ASKED.store(true, Ordering::SeqCst);
 }
 
@@ -973,9 +987,13 @@ fn toggle_on_main(app: &AppHandle) {
         return;
     };
     let visible = window.is_visible().unwrap_or(false);
-    let focused = window.is_focused().unwrap_or(false);
     // A pinned panel is visible but not the opened overlay. Alt+X should open it.
-    if visible && focused && !RESTING.load(Ordering::SeqCst) {
+    //
+    // The panel's own state decides, not whether Windows gave it the focus.
+    // A fullscreen game takes the focus back the moment the panel appears, and
+    // asking `is_focused` then made Alt+X open the panel again instead of
+    // closing it: the panel could not be closed and looked like a flash.
+    if visible && !RESTING.load(Ordering::SeqCst) {
         hide_window(app);
     } else {
         show_window(app);
@@ -1073,23 +1091,140 @@ fn show_window(app: &AppHandle) {
     let _ = window.unminimize();
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
+    // `set_focus` can be refused for a process that does not own the
+    // foreground. A hotkey press does hand that right over, so ask Windows
+    // directly as a second try; a game that keeps the focus leaves the panel
+    // unanswerable even though it is on screen.
+    raise(&window);
     OPEN.store(true, Ordering::SeqCst);
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
+    // A window built for this press has not loaded its page yet, so that first
+    // event lands before anything is listening. Send it again once the page has
+    // had time to mount: a panel that misses the event draws nothing, which is
+    // a flash with no overlay behind it.
+    let again = window.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-overlay-shown".to_string())
+        .spawn(move || {
+            thread::sleep(Duration::from_millis(400));
+            if is_open() && again.is_visible().unwrap_or(false) {
+                let _ = again.emit("overlay-shown", ());
+            }
+        });
 }
 
+/// Cover the monitor the game is on.
+///
+/// This used to be the primary monitor, always. On a desk with two screens the
+/// game is often on the second one, and a panel that opens on the other screen
+/// is not an overlay over the game: the player looks at the game, sees nothing,
+/// and presses Alt+X again, which closes the panel again. That is the flash.
+///
+/// The game is the foreground window. With no game in front (Orbit itself, the
+/// desktop) the panel goes to the monitor under the pointer, and the primary
+/// screen is the last answer.
 fn cover_screen(window: &tauri::WebviewWindow) {
-    let monitor = window
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.current_monitor().ok().flatten());
-    let Some(monitor) = monitor else { return };
+    let monitors = window.available_monitors().unwrap_or_default();
+    let chosen = game_monitor(&monitors)
+        .or_else(|| monitor_at_cursor(window, &monitors))
+        .or_else(|| {
+            window
+                .primary_monitor()
+                .ok()
+                .flatten()
+                .and_then(|primary| monitors.iter().position(|item| item.position() == primary.position()))
+        })
+        .or_else(|| if monitors.is_empty() { None } else { Some(0) });
+    let Some(index) = chosen else { return };
+    let monitor = &monitors[index];
     let pos = monitor.position();
     let size = monitor.size();
     let _ = window.set_position(tauri::PhysicalPosition::new(pos.x, pos.y));
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
+
+/// The monitor that holds most of the window in front, if that window belongs
+/// to another program. Orbit's own windows are not the game.
+fn game_monitor(monitors: &[tauri::Monitor]) -> Option<usize> {
+    let rect = foreground_rect()?;
+    monitor_for_rect(monitors, rect)
+}
+
+fn monitor_for_rect(monitors: &[tauri::Monitor], rect: (i32, i32, i32, i32)) -> Option<usize> {
+    let (left, top, right, bottom) = rect;
+    let mut best: Option<(i64, usize)> = None;
+    for (index, monitor) in monitors.iter().enumerate() {
+        let pos = monitor.position();
+        let size = monitor.size();
+        let x1 = left.max(pos.x);
+        let y1 = top.max(pos.y);
+        let x2 = right.min(pos.x.saturating_add(size.width as i32));
+        let y2 = bottom.min(pos.y.saturating_add(size.height as i32));
+        let area = (x2 - x1).max(0) as i64 * (y2 - y1).max(0) as i64;
+        if area > 0 && best.map(|(best, _)| area > best).unwrap_or(true) {
+            best = Some((area, index));
+        }
+    }
+    best.map(|(_, index)| index)
+}
+
+fn monitor_at_cursor(window: &tauri::WebviewWindow, monitors: &[tauri::Monitor]) -> Option<usize> {
+    let cursor = window.cursor_position().ok()?;
+    let x = cursor.x.round() as i32;
+    let y = cursor.y.round() as i32;
+    monitors.iter().position(|monitor| {
+        let pos = monitor.position();
+        let size = monitor.size();
+        x >= pos.x
+            && y >= pos.y
+            && x < pos.x.saturating_add(size.width as i32)
+            && y < pos.y.saturating_add(size.height as i32)
+    })
+}
+
+/// The rectangle of the window in front, when it is another program's.
+#[cfg(windows)]
+fn foreground_rect() -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
+    };
+    unsafe {
+        let handle = GetForegroundWindow();
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(handle, Some(&mut pid));
+        // A null handle answers zero here, so this covers it too. Orbit's own
+        // panel is not the game, and neither is a minimised window.
+        if pid == 0 || pid == std::process::id() || IsIconic(handle).as_bool() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(handle, &mut rect).is_err() || rect.right <= rect.left || rect.bottom <= rect.top {
+            return None;
+        }
+        Some((rect.left, rect.top, rect.right, rect.bottom))
+    }
+}
+
+#[cfg(not(windows))]
+fn foreground_rect() -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
+/// Put the panel in front of the game, and let it take the keyboard.
+#[cfg(windows)]
+fn raise(window: &tauri::WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+    if let Ok(handle) = window.hwnd() {
+        unsafe {
+            let _ = SetForegroundWindow(handle);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn raise(_window: &tauri::WebviewWindow) {}
 
 /// Hide even a pinned panel, for the one moment a picture is taken.
 #[cfg(not(windows))]

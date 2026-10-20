@@ -174,6 +174,41 @@ check(
     /html\.orbit-pad \.modal-panel-enter \.orbit-pad-focus \{\n  box-shadow: none;\n  outline: 2px solid var\(--c-accent\);\n  outline-offset: 1px;\n  border-radius: 0\.5rem;/.test(css),
 );
 check(
+  'the panel covers the monitor the game is on, not whichever one Windows calls primary',
+  overlaySource.includes('fn game_monitor(monitors: &[tauri::Monitor]) -> Option<usize>') &&
+    overlaySource.includes('fn monitor_for_rect(') &&
+    overlaySource.includes('fn monitor_at_cursor(') &&
+    overlaySource.includes('GetForegroundWindow') &&
+    overlaySource.includes('GetWindowRect') &&
+    // Orbit's own window is not the game.
+    overlaySource.includes('pid == std::process::id()') &&
+    /fn cover_screen[\s\S]{0,900}game_monitor\(&monitors\)/.test(overlaySource) &&
+    /fn cover_screen[\s\S]{0,1200}monitor_at_cursor\(window, &monitors\)/.test(overlaySource) &&
+    // The primary monitor is only the last answer now.
+    !/fn cover_screen[\s\S]{0,200}let monitor = window\n\s*\.primary_monitor/.test(overlaySource),
+);
+check(
+  'Alt+X toggles the panel it opened instead of trusting the focus Windows gave it',
+  /fn toggle_on_main[\s\S]{0,1400}if visible && !RESTING\.load\(Ordering::SeqCst\)/.test(overlaySource) &&
+    !overlaySource.includes('let focused = window.is_focused()') &&
+    // A refused set_focus is retried against the window handle directly.
+    overlaySource.includes('SetForegroundWindow') &&
+    /fn show_window[\s\S]{0,900}raise\(&window\)/.test(overlaySource),
+);
+check(
+  'the panel is told it is open even when its page loads after the first event',
+  /fn show_window[\s\S]{0,1600}let again = window\.clone\(\)/.test(overlaySource) &&
+    overlaySource.includes('if is_open() && again.is_visible().unwrap_or(false)') &&
+    overlaySource.includes('thread::sleep(Duration::from_millis(400))'),
+);
+check(
+  'a held shortcut is one toggle, not a flicker',
+  overlaySource.includes('static ASKED_AT: Mutex<Option<std::time::Instant>>') &&
+    overlaySource.includes('const TOGGLE_GAP: Duration = Duration::from_millis(320)') &&
+    /now\.duration_since\(at\) < TOGGLE_GAP/.test(overlaySource) &&
+    /fn request_toggle[\s\S]{0,700}ASKED\.store\(true/.test(overlaySource),
+);
+check(
   'the pad shortcuts share the capture buttons',
   overlay.includes("if (action === 'capture-shot')") &&
     overlay.includes('captureRef.current.shot()') &&
