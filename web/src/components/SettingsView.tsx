@@ -44,6 +44,7 @@ import {
   overlayQuality,
   clampOverlaySeconds,
   overlayLengths,
+  overlayStatus,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
@@ -338,6 +339,42 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
 
+/**
+ * What became of the panel last time.
+ *
+ * The overlay cannot say why it left the screen: there is nothing on screen
+ * left to say it in. So the panel writes one line as it goes, and this is where
+ * the line is read - next to the switches that decide what the panel does.
+ */
+function PanelDiag() {
+  const [line, setLine] = useState('');
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    const read = () => {
+      void overlayStatus().then((status) => {
+        if (alive) setLine(status.diag ?? '');
+      }).catch(() => undefined);
+    };
+    read();
+    const timer = window.setInterval(read, 3000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  if (!line) return null;
+  return (
+    <div className="rounded-2xl border border-line bg-panel2/30 p-3">
+      <p className="text-sm font-medium">Last time the overlay opened</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted">{line}.</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-muted">
+        The same line, with everything around it, is in Orbit's log folder under <span className="font-mono">com.orbit.launcher/logs</span>.
+      </p>
+    </div>
+  );
+}
+
 function OverlaySettings({
   settings,
   setSettings,
@@ -542,6 +579,7 @@ function OverlaySettings({
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
+      <PanelDiag />
       <Checkbox
         checked={overlay?.captureToast !== false}
         onChange={(on) => setOverlay({ captureToast: on })}

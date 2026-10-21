@@ -1209,6 +1209,8 @@ export interface OverlayStatus {
   readyNotice?: string | null;
   /** The last open was covered by the game itself; the panel says so. */
   coverNote?: boolean;
+  /** What became of the panel last time, for the Settings page. */
+  diag?: string;
 }
 
 export function clampOverlaySeconds(value: number | undefined): number {

@@ -44,6 +44,8 @@ static ASKED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static FRONT_WARNED: AtomicBool = AtomicBool::new(false);
 /// How many times the front has been taken back for this open.
 static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// What became of the panel's last minute or so, in one line, for Settings.
+static PANEL_DIAG: Mutex<String> = Mutex::new(String::new());
 /// What the panel's page said to on its last heartbeat, and when it opened.
 static HEARD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
@@ -206,6 +208,9 @@ pub struct OverlayStatus {
     /// The last open was covered by the game itself. Said inside the panel,
     /// because the card that tries to say it is behind the same window.
     pub cover_note: bool,
+    /// What became of the panel last time, for the Settings page. The panel
+    /// cannot answer that question once it is gone from the screen.
+    pub diag: String,
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Live> {
@@ -646,7 +651,7 @@ pub fn shutdown() {
 /// is still a window, and that is what left the panel up after Orbit closed.
 pub fn close_panel(app: &AppHandle) {
     if OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst) {
-        log::info!("overlay: the panel was closed");
+        note_panel("the panel was closed");
     }
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
@@ -775,11 +780,15 @@ pub fn status() -> OverlayStatus {
         },
         ready_notice,
         cover_note,
+        diag: PANEL_DIAG
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone(),
     }
 }
 
 pub fn hide(app: &AppHandle) {
-    log::info!("overlay: hide was asked for");
+    note_panel("hide was asked for by the page");
     hide_window(app);
 }
 
@@ -1148,7 +1157,7 @@ fn show_window(app: &AppHandle) {
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
     heartbeat();
     OPEN.store(true, Ordering::SeqCst);
-    log::info!("overlay: the panel opened");
+    note_panel("the panel opened");
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
     // A window built for this press has not loaded its page yet, so that first
@@ -1286,6 +1295,30 @@ pub fn heartbeat() {
     *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
 }
 
+/// How long the panel has been on screen, as words.
+fn shown_for() -> String {
+    let since = SHOWN_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .map(|at| at.elapsed());
+    match since {
+        Some(elapsed) => format!("{:.1} s", elapsed.as_secs_f32()),
+        None => "not open".to_string(),
+    }
+}
+
+/// Write down what the panel is doing.
+///
+/// The same words go to the log and to one line in Settings, because the
+/// question "why did it go away" cannot be answered from a screen that is no
+/// longer there. The time is always the time since the panel opened, which is
+/// the only clock that matters here.
+fn note_panel(text: &str) {
+    let line = format!("{text} (at {})", shown_for());
+    log::info!("overlay: {line}");
+    *PANEL_DIAG.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = line;
+}
+
 /// Rebuild the panel's window and open it again.
 fn revive(app: &AppHandle) {
     let allowed = {
@@ -1302,11 +1335,11 @@ fn revive(app: &AppHandle) {
     if !allowed {
         // A page that dies three times in a minute is not going to hold.
         OPEN.store(false, Ordering::SeqCst);
-        log::warn!("overlay: the panel did not stay loaded; leaving it closed");
+        note_panel("the page would not stay loaded; the panel was left closed");
         tell(app, "overlay-toast", "The overlay could not stay open. See Settings, then try again.");
         return;
     }
-    log::warn!("overlay: the panel went away; rebuilding it");
+    note_panel("the panel went away; it was rebuilt");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
         if window.destroy().is_err() {
@@ -1330,12 +1363,12 @@ fn guard_panel(app: &AppHandle) {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else {
-        log::warn!("overlay: the window is gone while the panel is open");
+        note_panel("its window was gone while the panel was open");
         revive(app);
         return;
     };
     if !window.is_visible().unwrap_or(false) {
-        log::warn!("overlay: the window was hidden while the panel is open");
+        note_panel("its window was hidden while the panel was open; it was shown again");
         let _ = window.show();
         let _ = window.set_always_on_top(true);
         raise(&window);
@@ -1347,7 +1380,7 @@ fn guard_panel(app: &AppHandle) {
     // see in it and nothing answers inside it, which is why it is checked here
     // and not only by the page's own heartbeat.
     if !webview_alive(&window) {
-        log::warn!("overlay: the window has no web view in it; rebuilding");
+        note_panel("its window had no web view in it; it was rebuilt");
         revive(app);
         return;
     }
@@ -1393,12 +1426,20 @@ fn guard_panel(app: &AppHandle) {
         FRONT_TRIES_CELL.store(tries + 1, Ordering::SeqCst);
         return;
     }
-    if !FRONT_WARNED.swap(true, Ordering::SeqCst) {
-        // Nothing Orbit draws can be put over a game that owns the screen, so
-        // the words are kept for the next open, which the player does see.
-        log::warn!("overlay: the game is holding the screen; the panel is behind it");
-        lock().cover_note = true;
+    if FRONT_WARNED.swap(true, Ordering::SeqCst) {
+        return;
     }
+    // Nothing Orbit draws can be put over a game that owns the screen: the
+    // panel is open and invisible. Saying so on a card is no good either, since
+    // the card is behind the same game, so the words go to the main window and
+    // are kept for the next open.
+    lock().cover_note = true;
+    tell(app, "overlay-covered", &shown_for());
+    // An invisible panel that still counts as open makes Alt+X look broken:
+    // the next press closes something the player cannot see. Close it here
+    // instead, so the next press is an honest attempt to open.
+    hide_window(app);
+    note_panel("the game is drawn over the panel and will not let go of the screen; the panel was closed");
 }
 
 /// Whether another program's window is in front and fills the monitor the
@@ -1539,7 +1580,7 @@ fn hide_window(app: &AppHandle) {
 }
 
 fn rest_window(app: &AppHandle) {
-    log::info!("overlay: the panel is resting against its pins");
+    note_panel("the panel is resting against its pins");
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(true, Ordering::SeqCst);
     FRONT_TRIES_CELL.store(0, Ordering::SeqCst);
@@ -1557,7 +1598,7 @@ fn rest_window(app: &AppHandle) {
 }
 
 fn mark_hidden(app: &AppHandle) {
-    log::info!("overlay: the panel's window was destroyed");
+    note_panel("the panel's window was destroyed");
     OPEN.store(false, Ordering::SeqCst);
     *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;

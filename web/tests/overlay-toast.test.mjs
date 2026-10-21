@@ -15,6 +15,7 @@ const overlaySource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'o
 const nativeSource = readFileSync(path.join(root, 'web', 'src', 'services', 'native.ts'), 'utf8');
 const libSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'lib.rs'), 'utf8');
 const statsSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
+const settingsSource2 = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -237,6 +238,33 @@ check(
     nativeSource.includes('export function overlayAlive()') &&
     overlay.includes('const beat = () => void overlayAlive()') &&
     overlay.includes('window.setInterval(beat, 1000)'),
+);
+check(
+  'the panel writes down what became of it, where Settings can read it',
+  overlaySource.includes('static PANEL_DIAG: Mutex<String>') &&
+    overlaySource.includes('fn note_panel(text: &str)') &&
+    overlaySource.includes('fn shown_for() -> String') &&
+    /fn note_panel[\s\S]{0,400}log::info!\("overlay: \{line\}"\)/.test(overlaySource) &&
+    overlaySource.includes('pub diag: String') &&
+    overlaySource.includes('diag: PANEL_DIAG') &&
+    // Every way the panel can end leaves a line, not just the happy ones.
+    overlaySource.includes('note_panel("the panel opened")') &&
+    overlaySource.includes('note_panel("the panel was closed")') &&
+    overlaySource.includes('note_panel("its window was hidden while the panel was open; it was shown again")') &&
+    overlaySource.includes('note_panel("its window had no web view in it; it was rebuilt")') &&
+    nativeSource.includes('diag?: string') &&
+    settingsSource2.includes('function PanelDiag()') &&
+    settingsSource2.includes('void overlayStatus().then((status) => {') &&
+    settingsSource2.includes('<PanelDiag />'),
+);
+check(
+  'the covered case is closed rather than left invisible and open',
+  /if FRONT_WARNED\.swap\(true, Ordering::SeqCst\) \{\n        return;\n    \}/.test(overlaySource) &&
+    /lock\(\)\.cover_note = true;[\s\S]{0,600}hide_window\(app\);[\s\S]{0,300}note_panel\("the game is drawn over the panel/.test(overlaySource) &&
+    // The player is told in the main window, since the card is behind the game.
+    overlaySource.includes('tell(app, "overlay-covered", &shown_for());') &&
+    app.includes("void listen<string>('overlay-covered', () => {") &&
+    app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again."),
 );
 check(
   'a covered panel says so where the player can see it: the next open',

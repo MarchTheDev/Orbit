@@ -206,6 +206,18 @@ export default function App() {
     }).then((unlisten) => {
       stopAsk = unlisten;
     }).catch(() => undefined);
+    // The panel was drawn over by the game itself. Nothing Orbit can draw is
+    // visible at that moment, so the words land here, where the player will be
+    // as soon as the game lets go.
+    let stopCovered = () => {};
+    void listen<string>('overlay-covered', () => {
+      toast({
+        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again.",
+        tone: 'error',
+      });
+    }).then((unlisten) => {
+      stopCovered = unlisten;
+    }).catch(() => undefined);
     void listen<CloudPulse>('cloud-transfer', (event) => {
       if (!cloudTransferActive()) return;
       setCloudJob(event.payload);
@@ -218,6 +230,7 @@ export default function App() {
       stopPulse();
       stopOverlayNote();
       stopOverlaySettings();
+      stopCovered();
       stopNotes();
       stopWatch();
     };
