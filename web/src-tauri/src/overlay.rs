@@ -40,7 +40,13 @@ static STOP: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
 /// When the last toggle was taken. A held shortcut repeats; one press is one.
 static ASKED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// Whether this open said the game is covering the panel. Once per open.
+static FRONT_WARNED: AtomicBool = AtomicBool::new(false);
 const TOGGLE_GAP: Duration = Duration::from_millis(320);
+/// How often an opened panel checks that it is still in front.
+const PANEL_GUARD: Duration = Duration::from_millis(700);
+/// How many times it takes the front back before it says why it cannot.
+const FRONT_TRIES: u8 = 4;
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
 struct Live {
@@ -934,6 +940,8 @@ fn should_buffer() -> bool {
 fn watch(app: AppHandle) {
     let mut slot = 0u32;
     let mut connected = false;
+    let mut guarded = std::time::Instant::now();
+    let mut tries = 0u8;
     loop {
         if STOP.load(Ordering::SeqCst) {
             break;
@@ -942,6 +950,19 @@ fn watch(app: AppHandle) {
             // The call borrows this thread's handle. The callback needs its own.
             let panel = app.clone();
             let _ = app.run_on_main_thread(move || toggle_on_main(&panel));
+        }
+        // The panel is an ordinary topmost window, and a game can put itself
+        // back in front of one. While the panel is open, keep it where the
+        // player left it.
+        if OPEN.load(Ordering::SeqCst) {
+            if guarded.elapsed() >= PANEL_GUARD {
+                guarded = std::time::Instant::now();
+                if let Some(window) = app.get_webview_window(WINDOW) {
+                    tries = keep_in_front(&window, tries);
+                }
+            }
+        } else {
+            tries = 0;
         }
         if RESTING.load(Ordering::SeqCst)
             && !OPEN.load(Ordering::SeqCst)
@@ -1096,6 +1117,7 @@ fn show_window(app: &AppHandle) {
     // directly as a second try; a game that keeps the focus leaves the panel
     // unanswerable even though it is on screen.
     raise(&window);
+    FRONT_WARNED.store(false, Ordering::SeqCst);
     OPEN.store(true, Ordering::SeqCst);
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
@@ -1109,6 +1131,9 @@ fn show_window(app: &AppHandle) {
         .spawn(move || {
             thread::sleep(Duration::from_millis(400));
             if is_open() && again.is_visible().unwrap_or(false) {
+                // A game that took the foreground back in the meantime has the
+                // panel behind it; the second look is a good moment to return.
+                raise(&again);
                 let _ = again.emit("overlay-shown", ());
             }
         });
@@ -1210,6 +1235,75 @@ fn foreground_rect() -> Option<(i32, i32, i32, i32)> {
 #[cfg(not(windows))]
 fn foreground_rect() -> Option<(i32, i32, i32, i32)> {
     None
+}
+
+/// Keep an opened panel in front of the game.
+///
+/// The panel is a separate topmost window. A game that takes the foreground
+/// back after Alt+X, or one that returns to exclusive fullscreen once the panel
+/// has stolen a moment of its screen, ends up above it: the panel is still open
+/// and still drawing, and the player sees only the game. That is what an
+/// overlay that closes itself a few seconds after opening really is.
+///
+/// Only a window that fills the monitor counts here. A player who switched to
+/// an ordinary window meant to, and it is not this panel's business.
+fn keep_in_front(window: &tauri::WebviewWindow, tries: u8) -> u8 {
+    if !window.is_visible().unwrap_or(false) {
+        // Something outside Orbit hid the window while it is meant to be open.
+        let _ = window.show();
+        let _ = window.set_always_on_top(true);
+        raise(window);
+        let _ = window.emit("overlay-shown", ());
+        return tries;
+    }
+    if !foreground_covers(window) {
+        return 0;
+    }
+    if tries < FRONT_TRIES {
+        // The first try is the foreground alone. After that the panel also
+        // re-enters the top of the always-on-top group, which needs no right to
+        // the foreground and so cannot be refused.
+        if tries > 0 {
+            let _ = window.set_always_on_top(false);
+            let _ = window.set_always_on_top(true);
+        }
+        raise(window);
+        return tries + 1;
+    }
+    if !FRONT_WARNED.swap(true, Ordering::SeqCst) {
+        // Nothing can be drawn over an exclusive fullscreen presentation, so
+        // the one useful thing left is to say what to change.
+        crate::notice::show(Card::error(
+            "The game is covering Orbit's overlay",
+            "Switch the game to borderless windowed fullscreen.",
+            lock().palette,
+        ));
+        log::warn!("overlay: the game is holding the foreground; suggesting borderless");
+    }
+    tries
+}
+
+/// Whether another program's window is in front and fills the monitor the
+/// panel is on. Orbit's own windows do not count: the panel itself is one.
+fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
+    let Some((left, top, right, bottom)) = foreground_rect() else { return false };
+    let Some(monitor) = window.current_monitor().ok().flatten() else { return false };
+    let pos = monitor.position();
+    let size = monitor.size();
+    let width = size.width as i32;
+    let height = size.height as i32;
+    if width <= 0 || height <= 0 {
+        return false;
+    }
+    let x1 = left.max(pos.x);
+    let y1 = top.max(pos.y);
+    let x2 = right.min(pos.x.saturating_add(width));
+    let y2 = bottom.min(pos.y.saturating_add(height));
+    let across = (x2 - x1).max(0);
+    let down = (y2 - y1).max(0);
+    // Nine tenths is enough: a borderless game can be a few pixels short of the
+    // monitor, while a windowed one never comes close.
+    across * 10 >= width * 9 && down * 10 >= height * 9
 }
 
 /// Put the panel in front of the game, and let it take the keyboard.

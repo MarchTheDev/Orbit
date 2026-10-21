@@ -196,6 +196,23 @@ check(
     /fn show_window[\s\S]{0,900}raise\(&window\)/.test(overlaySource),
 );
 check(
+  'the open panel puts itself back in front of a fullscreen game',
+  overlaySource.includes('fn keep_in_front(window: &tauri::WebviewWindow, tries: u8) -> u8') &&
+    overlaySource.includes('const PANEL_GUARD: Duration = Duration::from_millis(700)') &&
+    overlaySource.includes('const FRONT_TRIES: u8 = 4;') &&
+    /fn watch\(app: AppHandle\)[\s\S]{0,1400}if OPEN\.load\(Ordering::SeqCst\)[\s\S]{0,400}keep_in_front\(&window, tries\)/.test(overlaySource) &&
+    // Only a window that fills the monitor is fought over; a window the player
+    // switched to on purpose is left alone.
+    overlaySource.includes('fn foreground_covers(window: &tauri::WebviewWindow) -> bool') &&
+    overlaySource.includes('across * 10 >= width * 9 && down * 10 >= height * 9') &&
+    /fn keep_in_front[\s\S]{0,700}if !foreground_covers\(window\) \{\n        return 0;/.test(overlaySource) &&
+    // It says why it cannot win rather than going quiet.
+    /fn keep_in_front[\s\S]{0,1800}Card::error\(/.test(overlaySource) &&
+    overlaySource.includes('Switch the game to borderless windowed fullscreen.') &&
+    overlaySource.includes('static FRONT_WARNED: AtomicBool') &&
+    /fn show_window[\s\S]{0,1400}FRONT_WARNED\.store\(false/.test(overlaySource),
+);
+check(
   'the panel is told it is open even when its page loads after the first event',
   /fn show_window[\s\S]{0,1600}let again = window\.clone\(\)/.test(overlaySource) &&
     overlaySource.includes('if is_open() && again.is_visible().unwrap_or(false)') &&
