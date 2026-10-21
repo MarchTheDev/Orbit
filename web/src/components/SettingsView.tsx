@@ -347,13 +347,13 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
  * the line is read - next to the switches that decide what the panel does.
  */
 function PanelDiag() {
-  const [line, setLine] = useState('');
+  const [lines, setLines] = useState<string[]>([]);
   useEffect(() => {
     if (!isNative()) return;
     let alive = true;
     const read = () => {
       void overlayStatus().then((status) => {
-        if (alive) setLine(status.diag ?? '');
+        if (alive) setLines(status.diag ?? []);
       }).catch(() => undefined);
     };
     read();
@@ -363,13 +363,22 @@ function PanelDiag() {
       window.clearInterval(timer);
     };
   }, []);
-  if (!line) return null;
+  if (lines.length === 0) return null;
   return (
     <div className="rounded-2xl border border-line bg-panel2/30 p-3">
-      <p className="text-sm font-medium">Last time the overlay opened</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted">{line}.</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-muted">
-        The same line, with everything around it, is in Orbit's log folder under <span className="font-mono">com.orbit.launcher/logs</span>.
+      <p className="text-sm font-medium">What the overlay did</p>
+      {/* Newest last, the way it happened. One line was not enough: the close
+          that followed a reason used to overwrite the reason. */}
+      <ol className="mt-1.5 space-y-1">
+        {lines.map((line, i) => (
+          <li key={i} className="text-xs leading-relaxed text-muted">
+            <span className="mr-1.5 tabular-nums opacity-60">{i + 1}.</span>
+            {line}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+        The same lines are in Orbit's log folder under <span className="font-mono">com.orbit.launcher/logs</span>.
       </p>
     </div>
   );

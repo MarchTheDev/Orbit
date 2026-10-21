@@ -193,7 +193,9 @@ check(
 );
 check(
   'Alt+X toggles the panel it opened instead of trusting the focus Windows gave it',
-  /fn toggle_on_main[\s\S]{0,1400}if visible && !RESTING\.load\(Ordering::SeqCst\)/.test(overlaySource) &&
+  /fn toggle_on_main[\s\S]{0,1600}if visible && !RESTING\.load\(Ordering::SeqCst\) && !covered/.test(overlaySource) &&
+    // Alt+X retries instead of closing a panel that the game has drawn over.
+    /let covered = visible && covered_by_game\(&window\);/.test(overlaySource) &&
     !overlaySource.includes('let focused = window.is_focused()') &&
     // A refused set_focus is retried against the window handle directly.
     overlaySource.includes('SetForegroundWindow') &&
@@ -205,18 +207,17 @@ check(
     overlaySource.includes('const PANEL_GUARD: Duration = Duration::from_millis(700)') &&
     overlaySource.includes('const FRONT_TRIES: u8 = 4;') &&
     /fn watch\(app: AppHandle\)[\s\S]{0,1600}if OPEN\.load\(Ordering::SeqCst\)[\s\S]{0,600}guard_panel\(&panel\)/.test(overlaySource) &&
-    // Only a window that fills the monitor is fought over; a window the player
-    // switched to on purpose is left alone.
-    overlaySource.includes('fn foreground_covers(window: &tauri::WebviewWindow) -> bool') &&
-    overlaySource.includes('across * 10 >= width * 9 && down * 10 >= height * 9') &&
-    /fn guard_panel[\s\S]{0,2600}if !foreground_covers\(&window\) \{\n        return;/.test(overlaySource) &&
+    // Only a window that really is above the panel is fought over.
+    overlaySource.includes('fn covered_by_game(window: &tauri::WebviewWindow) -> bool') &&
+    overlaySource.includes('fills_monitor(monitor, (rect.left, rect.top, rect.right, rect.bottom))') &&
+    /fn guard_panel[\s\S]{0,2600}if !covered_by_game\(&window\) \{\n        return;/.test(overlaySource) &&
     // The part that cannot be refused: the top of the always-on-top group.
     overlaySource.includes('fn topmost(window: &tauri::WebviewWindow)') &&
     overlaySource.includes('SetWindowPos') &&
     overlaySource.includes('SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW') &&
     // A maximised window has a title bar; a game filling the screen does not.
     overlaySource.includes('GWL_STYLE, WS_CAPTION') &&
-    /fn foreground_covers[\s\S]{0,400}if !frameless \{\n        return false;/.test(overlaySource),
+    /fn covered_by_game[\s\S]{0,2000}if style & WS_CAPTION\.0 != 0 \{\n            return false;/.test(overlaySource),
 );
 check(
   'a panel that is gone, hidden or empty is put back rather than left as a hole',
@@ -241,31 +242,58 @@ check(
 );
 check(
   'the panel writes down what became of it, where Settings can read it',
-  overlaySource.includes('static PANEL_DIAG: Mutex<String>') &&
+  overlaySource.includes('static PANEL_DIAG: Mutex<Vec<String>>') &&
     overlaySource.includes('fn note_panel(text: &str)') &&
     overlaySource.includes('fn shown_for() -> String') &&
     /fn note_panel[\s\S]{0,400}log::info!\("overlay: \{line\}"\)/.test(overlaySource) &&
-    overlaySource.includes('pub diag: String') &&
+    overlaySource.includes('pub diag: Vec<String>') &&
     overlaySource.includes('diag: PANEL_DIAG') &&
     // Every way the panel can end leaves a line, not just the happy ones.
     overlaySource.includes('note_panel("the panel opened")') &&
     overlaySource.includes('note_panel("the panel was closed")') &&
     overlaySource.includes('note_panel("its window was hidden while the panel was open; it was shown again")') &&
     overlaySource.includes('note_panel("its window had no web view in it; it was rebuilt")') &&
-    nativeSource.includes('diag?: string') &&
+    nativeSource.includes('diag?: string[]') &&
     settingsSource2.includes('function PanelDiag()') &&
     settingsSource2.includes('void overlayStatus().then((status) => {') &&
     settingsSource2.includes('<PanelDiag />'),
 );
 check(
-  'the covered case is closed rather than left invisible and open',
+  'the panel history keeps the reason instead of being overwritten by the close',
+  overlaySource.includes('static PANEL_DIAG: Mutex<Vec<String>>') &&
+    overlaySource.includes('const PANEL_DIAG_LINES: usize = 8;') &&
+    /fn note_panel[\s\S]{0,600}lines\.push\(line\)/.test(overlaySource) &&
+    overlaySource.includes('pub diag: Vec<String>') &&
+    nativeSource.includes('diag?: string[]') &&
+    settingsSource2.includes('const [lines, setLines] = useState<string[]>([])') &&
+    settingsSource2.includes('lines.map((line, i) =>') &&
+    // Orbit's own destroy is expected; it must not be written down as a reason.
+    overlaySource.includes('static CLOSING: AtomicBool') &&
+    /fn mark_hidden[\s\S]{0,260}if CLOSING\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
+    /fn close_panel[\s\S]{0,1200}CLOSING\.store\(true, Ordering::SeqCst\);/.test(overlaySource),
+);
+check(
+  'the game counts as covering the panel only when it is really above it',
+  // The foreground window alone is not proof: the panel is always-on-top, so a
+  // borderless game is in front while the panel still draws over it.
+  overlaySource.includes('fn covered_by_game(window: &tauri::WebviewWindow) -> bool') &&
+    overlaySource.includes('GW_HWNDPREV') &&
+    /fn covered_by_game[\s\S]{0,2200}let mut at = GetWindow\(ours, GW_HWNDPREV\)\.ok\(\);/.test(overlaySource) &&
+    overlaySource.includes('fn fills_monitor(monitor: (i32, i32, i32, i32), rect: (i32, i32, i32, i32)) -> bool') &&
+    !overlaySource.includes('fn foreground_covers'),
+);
+check(
+  'a covered panel is left open and explained rather than closed',
   /if FRONT_WARNED\.swap\(true, Ordering::SeqCst\) \{\n        return;\n    \}/.test(overlaySource) &&
-    /lock\(\)\.cover_note = true;[\s\S]{0,600}hide_window\(app\);[\s\S]{0,300}note_panel\("the game is drawn over the panel/.test(overlaySource) &&
+    /lock\(\)\.cover_note = true;[\s\S]{0,700}note_panel\("the game is drawn over the panel/.test(overlaySource) &&
+    // Closing the panel here is what made it look like the overlay closed itself.
+    !/fn guard_panel[\s\S]{0,2600}hide_window\(app\)/.test(overlaySource) &&
     // The player is told in the main window, since the card is behind the game.
     overlaySource.includes('tell(app, "overlay-covered", &shown_for());') &&
     app.includes("void listen<string>('overlay-covered', () => {") &&
     app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again."),
 );
+
 check(
   'a covered panel says so where the player can see it: the next open',
   overlaySource.includes('pub cover_note: bool') &&

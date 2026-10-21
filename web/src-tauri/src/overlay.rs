@@ -44,8 +44,16 @@ static ASKED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static FRONT_WARNED: AtomicBool = AtomicBool::new(false);
 /// How many times the front has been taken back for this open.
 static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-/// What became of the panel's last minute or so, in one line, for Settings.
-static PANEL_DIAG: Mutex<String> = Mutex::new(String::new());
+/// What became of the panel, newest last: a short history rather than one line.
+///
+/// One line was not enough: the close that follows a reason overwrote the
+/// reason, so every report read "the window was destroyed" and said nothing
+/// about why it was destroyed.
+static PANEL_DIAG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const PANEL_DIAG_LINES: usize = 8;
+/// Set while Orbit is taking its own panel down, so its `Destroyed` event is
+/// not mistaken for something unexplained.
+static CLOSING: AtomicBool = AtomicBool::new(false);
 /// What the panel's page said to on its last heartbeat, and when it opened.
 static HEARD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
@@ -210,7 +218,7 @@ pub struct OverlayStatus {
     pub cover_note: bool,
     /// What became of the panel last time, for the Settings page. The panel
     /// cannot answer that question once it is gone from the screen.
-    pub diag: String,
+    pub diag: Vec<String>,
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Live> {
@@ -665,6 +673,10 @@ pub fn close_panel(app: &AppHandle) {
     tell(app, "overlay-visible", "false");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
+        // Orbit is taking its own window down. The `Destroyed` event that
+        // follows is expected, and must not be written down as the reason the
+        // panel went away.
+        CLOSING.store(true, Ordering::SeqCst);
         if window.destroy().is_err() {
             let _ = window.close();
         }
@@ -1042,13 +1054,16 @@ fn toggle_on_main(app: &AppHandle) {
         return;
     };
     let visible = window.is_visible().unwrap_or(false);
+    // A panel the game has drawn over is not something the player can see, so
+    // Alt+X tries to bring it back rather than closing what cannot be found.
+    let covered = visible && covered_by_game(&window);
     // A pinned panel is visible but not the opened overlay. Alt+X should open it.
     //
     // The panel's own state decides, not whether Windows gave it the focus.
     // A fullscreen game takes the focus back the moment the panel appears, and
     // asking `is_focused` then made Alt+X open the panel again instead of
     // closing it: the panel could not be closed and looked like a flash.
-    if visible && !RESTING.load(Ordering::SeqCst) {
+    if visible && !RESTING.load(Ordering::SeqCst) && !covered {
         hide_window(app);
     } else {
         show_window(app);
@@ -1316,7 +1331,12 @@ fn shown_for() -> String {
 fn note_panel(text: &str) {
     let line = format!("{text} (at {})", shown_for());
     log::info!("overlay: {line}");
-    *PANEL_DIAG.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = line;
+    let mut lines = PANEL_DIAG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    lines.push(line);
+    let extra = lines.len().saturating_sub(PANEL_DIAG_LINES);
+    if extra > 0 {
+        lines.drain(0..extra);
+    }
 }
 
 /// Rebuild the panel's window and open it again.
@@ -1342,6 +1362,7 @@ fn revive(app: &AppHandle) {
     note_panel("the panel went away; it was rebuilt");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
+        CLOSING.store(true, Ordering::SeqCst);
         if window.destroy().is_err() {
             let _ = window.close();
         }
@@ -1408,8 +1429,8 @@ fn guard_panel(app: &AppHandle) {
         return;
     }
     // The window is healthy. The only thing left that can hide it is the game
-    // painting over it.
-    if !foreground_covers(&window) {
+    // painting over it - and only when the game is really above it.
+    if !covered_by_game(&window) {
         return;
     }
     let tries = FRONT_TRIES_CELL.load(Ordering::SeqCst);
@@ -1429,35 +1450,30 @@ fn guard_panel(app: &AppHandle) {
     if FRONT_WARNED.swap(true, Ordering::SeqCst) {
         return;
     }
-    // Nothing Orbit draws can be put over a game that owns the screen: the
-    // panel is open and invisible. Saying so on a card is no good either, since
-    // the card is behind the same game, so the words go to the main window and
-    // are kept for the next open.
+    // Nothing Orbit draws can be put over a game that owns the screen. Saying
+    // so on a card is no good either, since the card is behind the same game,
+    // so the words go to the main window and are kept for the next open.
+    //
+    // The panel is left open. Closing it here is what turned "the game is on
+    // top" into "the overlay closed itself": the player saw the panel go and
+    // had nothing left to read.
     lock().cover_note = true;
     tell(app, "overlay-covered", &shown_for());
-    // An invisible panel that still counts as open makes Alt+X look broken:
-    // the next press closes something the player cannot see. Close it here
-    // instead, so the next press is an honest attempt to open.
-    hide_window(app);
-    note_panel("the game is drawn over the panel and will not let go of the screen; the panel was closed");
+    note_panel("the game is drawn over the panel and will not let go of the screen");
 }
 
-/// Whether another program's window is in front and fills the monitor the
-/// panel is on. Orbit's own windows do not count: the panel itself is one.
-fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
-    let Some((left, top, right, bottom, frameless)) = foreground_rect() else { return false };
-    // A maximised window has a title bar. A game filling the screen does not:
-    // without this, alt-tabbing to any maximised program would look like a
-    // fullscreen game and the panel would keep taking the front back.
-    if !frameless {
-        return false;
-    }
-    // The monitor the panel was put on. Not every driver answers
-    // `current_monitor` for a window that is not focused, so the panel's own
-    // rectangle is the fallback: it was sized to the monitor when it opened.
-    // Copied out of the monitor, which lives only inside these closures.
-    let at = |monitor: &tauri::Monitor| (monitor.position().clone(), monitor.size().clone());
-    let monitor = window
+/// The monitor the panel was put on: where it starts, and how big it is.
+///
+/// Not every driver answers `current_monitor` for a window that is not focused,
+/// so the panel's own place is the fallback - it was sized to the monitor when
+/// it opened, and the primary one is the last answer.
+fn panel_monitor(window: &tauri::WebviewWindow) -> Option<(i32, i32, i32, i32)> {
+    let at = |monitor: &tauri::Monitor| {
+        let pos = *monitor.position();
+        let size = *monitor.size();
+        (pos.x, pos.y, size.width as i32, size.height as i32)
+    };
+    window
         .current_monitor()
         .ok()
         .flatten()
@@ -1469,11 +1485,11 @@ fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
                     .unwrap_or_default()
                     .into_iter()
                     .find(|monitor| {
-                        let (pos, size) = at(monitor);
-                        place.x >= pos.x
-                            && place.y >= pos.y
-                            && place.x < pos.x.saturating_add(size.width as i32)
-                            && place.y < pos.y.saturating_add(size.height as i32)
+                        let (x, y, w, h) = at(monitor);
+                        place.x >= x
+                            && place.y >= y
+                            && place.x < x.saturating_add(w)
+                            && place.y < y.saturating_add(h)
                     })
                     .map(|monitor| at(&monitor))
             })
@@ -1484,22 +1500,84 @@ fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
                 .unwrap_or_default()
                 .first()
                 .map(|monitor| at(monitor))
-        });
-    let Some((pos, size)) = monitor else { return false };
-    let width = size.width as i32;
-    let height = size.height as i32;
-    if width <= 0 || height <= 0 {
+        })
+}
+
+/// Whether a rectangle covers nine tenths of a monitor, both ways. A borderless
+/// game can be a few pixels short of it; a windowed one never comes close.
+fn fills_monitor(monitor: (i32, i32, i32, i32), rect: (i32, i32, i32, i32)) -> bool {
+    let (mx, my, mw, mh) = monitor;
+    let (left, top, right, bottom) = rect;
+    if mw <= 0 || mh <= 0 {
         return false;
     }
-    let x1 = left.max(pos.x);
-    let y1 = top.max(pos.y);
-    let x2 = right.min(pos.x.saturating_add(width));
-    let y2 = bottom.min(pos.y.saturating_add(height));
-    let across = (x2 - x1).max(0);
-    let down = (y2 - y1).max(0);
-    // Nine tenths is enough: a borderless game can be a few pixels short of the
-    // monitor, while a windowed one never comes close.
-    across * 10 >= width * 9 && down * 10 >= height * 9
+    let across = (right.min(mx.saturating_add(mw)) - left.max(mx)).max(0);
+    let down = (bottom.min(my.saturating_add(mh)) - top.max(my)).max(0);
+    across * 10 >= mw * 9 && down * 10 >= mh * 9
+}
+
+/// Whether the game really is drawn over the panel.
+///
+/// Being the foreground window is not the same thing. The panel is in the
+/// always-on-top band, so a borderless game is the window in front while the
+/// panel is still drawn on top of it - and an earlier check that only looked at
+/// the foreground window concluded the opposite. It then spent four tries
+/// fighting a game it had already beaten, and closed the panel.
+///
+/// The Z order answers the question properly: walking the windows in front of
+/// the panel reaches the game only when the game is genuinely above it.
+#[cfg(windows)]
+fn covered_by_game(window: &tauri::WebviewWindow) -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+        IsIconic, GWL_STYLE, GW_HWNDPREV, WS_CAPTION,
+    };
+    let (Ok(ours), Some(monitor)) = (window.hwnd(), panel_monitor(window)) else {
+        return false;
+    };
+    unsafe {
+        let front = GetForegroundWindow();
+        if front.0 == ours.0 || front.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(front, Some(&mut pid));
+        // Orbit's own windows are not the game, and a minimised one is nowhere.
+        if pid == 0 || pid == std::process::id() || IsIconic(front).as_bool() {
+            return false;
+        }
+        // A maximised window has a title bar; a game filling the screen has none.
+        let style = GetWindowLongW(front, GWL_STYLE) as u32;
+        if style & WS_CAPTION.0 != 0 {
+            return false;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(front, &mut rect).is_err()
+            || !fills_monitor(monitor, (rect.left, rect.top, rect.right, rect.bottom))
+        {
+            return false;
+        }
+        // The one question left: is that window above the panel, or below it?
+        let mut at = GetWindow(ours, GW_HWNDPREV).ok();
+        let mut steps = 0;
+        while let Some(handle) = at {
+            if handle.0 == front.0 {
+                return true;
+            }
+            steps += 1;
+            if steps > 64 {
+                return false;
+            }
+            at = GetWindow(handle, GW_HWNDPREV).ok();
+        }
+        false
+    }
+}
+
+#[cfg(not(windows))]
+fn covered_by_game(_window: &tauri::WebviewWindow) -> bool {
+    false
 }
 
 /// Whether the panel's window still hosts a web view.
@@ -1598,7 +1676,12 @@ fn rest_window(app: &AppHandle) {
 }
 
 fn mark_hidden(app: &AppHandle) {
-    note_panel("the panel's window was destroyed");
+    if CLOSING.swap(false, Ordering::SeqCst) {
+        // The close above already wrote down why. This event is its echo.
+        OPEN.store(false, Ordering::SeqCst);
+        return;
+    }
+    note_panel("the panel's window was destroyed by something outside Orbit");
     OPEN.store(false, Ordering::SeqCst);
     *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
