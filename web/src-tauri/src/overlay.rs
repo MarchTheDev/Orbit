@@ -1406,32 +1406,35 @@ fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
     // The monitor the panel was put on. Not every driver answers
     // `current_monitor` for a window that is not focused, so the panel's own
     // rectangle is the fallback: it was sized to the monitor when it opened.
+    // Copied out of the monitor, which lives only inside these closures.
+    let at = |monitor: &tauri::Monitor| (monitor.position().clone(), monitor.size().clone());
     let monitor = window
         .current_monitor()
         .ok()
         .flatten()
-        .map(|monitor| (monitor.position(), monitor.size()))
-        .or_else(|| window.outer_position().ok().and_then(|at| {
-            window
-                .available_monitors()
-                .unwrap_or_default()
-                .into_iter()
-                .find(|monitor| {
-                    let pos = monitor.position();
-                    let size = monitor.size();
-                    at.x >= pos.x
-                        && at.y >= pos.y
-                        && at.x < pos.x.saturating_add(size.width as i32)
-                        && at.y < pos.y.saturating_add(size.height as i32)
-                })
-                .map(|monitor| (monitor.position(), monitor.size()))
-        }))
+        .map(|monitor| at(&monitor))
+        .or_else(|| {
+            window.outer_position().ok().and_then(|place| {
+                window
+                    .available_monitors()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|monitor| {
+                        let (pos, size) = at(monitor);
+                        place.x >= pos.x
+                            && place.y >= pos.y
+                            && place.x < pos.x.saturating_add(size.width as i32)
+                            && place.y < pos.y.saturating_add(size.height as i32)
+                    })
+                    .map(|monitor| at(&monitor))
+            })
+        })
         .or_else(|| {
             window
                 .available_monitors()
                 .unwrap_or_default()
                 .first()
-                .map(|monitor| (monitor.position(), monitor.size()))
+                .map(|monitor| at(monitor))
         });
     let Some((pos, size)) = monitor else { return false };
     let width = size.width as i32;
