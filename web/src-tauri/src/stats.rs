@@ -549,9 +549,30 @@ struct FrameWatch {
     /// Each mark is the frames seen since the previous mark.
     #[cfg(windows)]
     marks: Vec<(Instant, u32)>,
+    /// When this watch was made, and when the duplication was last tried.
+    ///
+    /// Opening a desktop duplication is not a private act: DWM has to drop the
+    /// direct path to the display for it, which is enough to take a fullscreen
+    /// game out of its presentation and back. A panel that opens at the same
+    /// moment as one of those is the panel that gets covered when the game
+    /// comes back. So the first try waits for the panel to be up, and a failed
+    /// one waits before trying again, instead of a retry every 200 ms.
+    #[cfg(windows)]
+    started: Instant,
+    #[cfg(windows)]
+    tried: Option<Instant>,
     #[cfg(not(windows))]
     _private: (),
 }
+
+#[cfg(windows)]
+static FRAMES_READABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(windows)]
+static FRAMES_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(windows)]
+const FRAMES_FIRST: Duration = Duration::from_millis(1400);
+#[cfg(windows)]
+const FRAMES_RETRY: Duration = Duration::from_secs(2);
 
 #[cfg(windows)]
 struct WindowsFrames {
@@ -565,7 +586,7 @@ struct WindowsFrames {
 fn watch_frames() -> Option<FrameWatch> {
     #[cfg(windows)]
     {
-        return Some(FrameWatch { inner: WindowsFrames::open(), marks: Vec::new() });
+        return Some(FrameWatch { inner: None, marks: Vec::new(), started: Instant::now(), tried: None });
     }
     #[cfg(not(windows))]
     {
@@ -578,7 +599,22 @@ impl FrameWatch {
         #[cfg(windows)]
         {
             if self.inner.is_none() {
+                let wait = if self.tried.is_none() { FRAMES_FIRST } else { FRAMES_RETRY };
+                let since = self.tried.unwrap_or(self.started);
+                if since.elapsed() < wait {
+                    return None;
+                }
+                self.tried = Some(Instant::now());
                 self.inner = WindowsFrames::open();
+                // Once each way, so a log from a player's machine says whether
+                // the FPS box ever had a frame stream to count.
+                if self.inner.is_some() {
+                    if !FRAMES_READABLE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        log::info!("stats: desktop frames are readable");
+                    }
+                } else if !FRAMES_REFUSED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::info!("stats: the desktop duplication was refused; the FPS box has no count");
+                }
             }
             let watch = self.inner.as_mut()?;
             match watch.drain() {
@@ -587,8 +623,11 @@ impl FrameWatch {
                     // The right-hand side of an assignment would open the new
                     // one first, while the old frame was still acquired.
                     self.inner = None;
-                    self.inner = WindowsFrames::open();
                     self.marks.clear();
+                    // The next try is made by `take`, which spaces the
+                    // attempts out. Reopening here on every 200 ms poll is what
+                    // turned one refused duplication into a stream of them.
+                    self.tried = Some(Instant::now());
                     None
                 }
                 FramePull::Waiting => {

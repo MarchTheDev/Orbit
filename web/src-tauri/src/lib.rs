@@ -808,6 +808,17 @@ fn overlay_status() -> overlay::OverlayStatus {
     overlay::status()
 }
 
+/// The panel's page saying it is still drawn.
+///
+/// A WebView2 renderer that dies leaves the native window on screen with
+/// nothing in it, which cannot be told apart from an overlay that closed
+/// itself. The thread that keeps the panel in front uses this to know the
+/// difference and rebuilds the window when the answer stops.
+#[tauri::command]
+fn overlay_alive() {
+    overlay::heartbeat();
+}
+
 /// A capture outlives the panel that asked for it. The panel shows its own
 /// toast while it is on screen; when it has closed in the meantime, the answer
 /// is drawn by the native card instead, so a save never finishes in silence.
@@ -2545,6 +2556,7 @@ pub fn run() {
             overlay_playing,
             overlay_ready_notice,
             overlay_status,
+            overlay_alive,
             overlay_theme,
             overlay_shot,
             overlay_record,

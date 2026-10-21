@@ -12,6 +12,7 @@ import {
   overlayGallery,
   overlayDelete,
   overlayCopy,
+  overlayAlive,
   overlayHide,
   overlayHits,
   overlayLengths,
@@ -788,6 +789,20 @@ export function OverlayView() {
     focusPad(first);
   }, [items]);
 
+  // The card that should have explained a covered panel is behind the same
+  // game, so the panel says it on the next open instead: the one moment the
+  // player can see it.
+  useEffect(() => {
+    if (!status?.coverNote) return;
+    setToast({
+      title: 'The game is covering the overlay',
+      detail: 'Switch the game to borderless windowed fullscreen.',
+      kind: 'error',
+    });
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), ERROR_TOAST_MS);
+  }, [status?.coverNote]);
+
   useEffect(() => {
     const title = status?.readyNotice;
     if (!title) return;
@@ -803,6 +818,17 @@ export function OverlayView() {
     const timer = window.setInterval(() => {
       void overlayStatus().then(setStatus).catch(() => undefined);
     }, 2000);
+    return () => window.clearInterval(timer);
+  }, [ready, awake]);
+
+  // A page that is still drawn says so once a second. The native side uses
+  // this to tell "the overlay closed" from "the window is there but empty",
+  // and rebuilds the window in the second case instead of leaving a hole.
+  useEffect(() => {
+    if (!ready || !awake) return;
+    const beat = () => void overlayAlive().catch(() => undefined);
+    beat();
+    const timer = window.setInterval(beat, 1000);
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 

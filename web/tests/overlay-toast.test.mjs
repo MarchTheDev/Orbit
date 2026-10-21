@@ -12,6 +12,8 @@ const settingsSource = readFileSync(path.join(root, 'web', 'src', 'hooks', 'useL
 const padSource = readFileSync(path.join(root, 'web', 'src', 'utils', 'gamepad.ts'), 'utf8');
 const confirmDialog = readFileSync(path.join(root, 'web', 'src', 'components', 'ui', 'ConfirmDialog.tsx'), 'utf8');
 const overlaySource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
+const nativeSource = readFileSync(path.join(root, 'web', 'src', 'services', 'native.ts'), 'utf8');
+const libSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'lib.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -197,20 +199,50 @@ check(
 );
 check(
   'the open panel puts itself back in front of a fullscreen game',
-  overlaySource.includes('fn keep_in_front(window: &tauri::WebviewWindow, tries: u8) -> u8') &&
+  overlaySource.includes('fn guard_panel(app: &AppHandle)') &&
     overlaySource.includes('const PANEL_GUARD: Duration = Duration::from_millis(700)') &&
     overlaySource.includes('const FRONT_TRIES: u8 = 4;') &&
-    /fn watch\(app: AppHandle\)[\s\S]{0,1400}if OPEN\.load\(Ordering::SeqCst\)[\s\S]{0,400}keep_in_front\(&window, tries\)/.test(overlaySource) &&
+    /fn watch\(app: AppHandle\)[\s\S]{0,1600}if OPEN\.load\(Ordering::SeqCst\)[\s\S]{0,600}guard_panel\(&panel\)/.test(overlaySource) &&
     // Only a window that fills the monitor is fought over; a window the player
     // switched to on purpose is left alone.
     overlaySource.includes('fn foreground_covers(window: &tauri::WebviewWindow) -> bool') &&
     overlaySource.includes('across * 10 >= width * 9 && down * 10 >= height * 9') &&
-    /fn keep_in_front[\s\S]{0,700}if !foreground_covers\(window\) \{\n        return 0;/.test(overlaySource) &&
-    // It says why it cannot win rather than going quiet.
-    /fn keep_in_front[\s\S]{0,1800}Card::error\(/.test(overlaySource) &&
-    overlaySource.includes('Switch the game to borderless windowed fullscreen.') &&
-    overlaySource.includes('static FRONT_WARNED: AtomicBool') &&
-    /fn show_window[\s\S]{0,1400}FRONT_WARNED\.store\(false/.test(overlaySource),
+    /fn guard_panel[\s\S]{0,2600}if !foreground_covers\(&window\) \{\n        return;/.test(overlaySource) &&
+    // The part that cannot be refused: the top of the always-on-top group.
+    overlaySource.includes('fn topmost(window: &tauri::WebviewWindow)') &&
+    overlaySource.includes('SetWindowPos') &&
+    overlaySource.includes('SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW') &&
+    // A maximised window has a title bar; a game filling the screen does not.
+    overlaySource.includes('GWL_STYLE, WS_CAPTION') &&
+    /fn foreground_covers[\s\S]{0,400}if !frameless \{\n        return false;/.test(overlaySource),
+);
+check(
+  'a panel that is gone, hidden or empty is put back rather than left as a hole',
+  overlaySource.includes('pub fn heartbeat()') &&
+    libSource.includes('fn overlay_alive()') &&
+    overlaySource.includes('fn revive(app: &AppHandle)') &&
+    overlaySource.includes('const PAGE_START: Duration = Duration::from_secs(7)') &&
+    overlaySource.includes('const PAGE_SILENT: Duration = Duration::from_secs(3)') &&
+    overlaySource.includes('const REVIVALS: usize = 3') &&
+    /fn guard_panel[\s\S]{0,900}let Some\(window\) = app\.get_webview_window\(WINDOW\) else \{[\s\S]{0,200}revive\(app\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,1600}if !window\.is_visible\(\)[\s\S]{0,400}window\.show\(\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,2600}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
+    /fn revive[\s\S]{0,1400}show_window\(app\)/.test(overlaySource) &&
+    libSource.includes('fn overlay_alive() {') &&
+    nativeSource.includes('export function overlayAlive()') &&
+    overlay.includes('const beat = () => void overlayAlive()') &&
+    overlay.includes('window.setInterval(beat, 1000)'),
+);
+check(
+  'a covered panel says so where the player can see it: the next open',
+  overlaySource.includes('pub cover_note: bool') &&
+    overlaySource.includes('let cover_note = std::mem::replace(&mut live.cover_note, false);') &&
+    overlaySource.includes('lock().cover_note = true;') &&
+    overlay.includes("if (!status?.coverNote) return;") &&
+    overlay.includes("title: 'The game is covering the overlay'") &&
+    overlay.includes("detail: 'Switch the game to borderless windowed fullscreen.'") &&
+    // An invisible card is not a message.
+    !/fn guard_panel[\s\S]{0,3200}crate::notice::show/.test(overlaySource),
 );
 check(
   'the panel is told it is open even when its page loads after the first event',

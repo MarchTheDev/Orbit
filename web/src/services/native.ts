@@ -1207,6 +1207,8 @@ export interface OverlayStatus {
   folder: string;
   note: string;
   readyNotice?: string | null;
+  /** The last open was covered by the game itself; the panel says so. */
+  coverNote?: boolean;
 }
 
 export function clampOverlaySeconds(value: number | undefined): number {
@@ -1415,6 +1417,11 @@ export function overlayReplay(seconds: number, stamp: string): Promise<string> {
 
 export function overlayHide(): Promise<void> {
   return call('overlay_hide', {}, () => undefined);
+}
+
+/** Proof for the native side that this page is still drawn, sent every second. */
+export function overlayAlive(): Promise<void> {
+  return call('overlay_alive', {}, () => undefined);
 }
 
 export function overlayFolder(): Promise<string> {

@@ -57,6 +57,17 @@ check('Linux capture scales each tile into the output without a full-screen BGRA
 check('recording and replay capture reuse their raw frame buffers', capture.includes('grab_with_buffer(spec, std::mem::take(&mut scratch))') && capture.includes('fn grab_jpeg(spec: Spec, size: &mut Option<(u32, u32)>, scratch: &mut Vec<u8>)') && capture.includes('pixels.resize('));
 check('replay snapshots keep only offsets, so a long clip costs no memory', capture.includes('struct FrameRef') && capture.includes('.skip(start).copied().collect()'));
 check('the game-start notice does not create a second web view', readyNotice.includes('crate::notice::show') && !readyNotice.includes('ensure_window') && !/window\.show\(\)/.test(readyNotice));
+check(
+  'the FPS box waits for the panel and does not hammer the display for a duplication',
+  stats.includes('const FRAMES_FIRST: Duration = Duration::from_millis(1400)') &&
+    stats.includes('const FRAMES_RETRY: Duration = Duration::from_secs(2)') &&
+    /if since\.elapsed\(\) < wait \{\n                    return None;/.test(stats) &&
+    // A refused or lost duplication is not reopened on every 200 ms poll.
+    !/FramePull::Dead => \{[\s\S]{0,400}self\.inner = WindowsFrames::open\(\);/.test(stats) &&
+    stats.includes('self.tried = Some(Instant::now());') &&
+    stats.includes('stats: desktop frames are readable') &&
+    stats.includes('stats: the desktop duplication was refused'),
+);
 check('the game-start notice is a native, click-through card', notice.includes('CreateWindowExW') && notice.includes('WS_EX_TRANSPARENT') && notice.includes('WS_EX_NOACTIVATE') && !notice.includes('WebviewWindow'));
 check(
   'a replay save waits for the encoder to make progress, not for a fixed clock',
