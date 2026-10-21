@@ -747,6 +747,16 @@ fn machine_stats(want_fps: bool) -> stats::MachineStats {
     stats::sample(want_fps)
 }
 
+/// Whether the last run ended while the panel was reading live stats.
+///
+/// The main window asks once at startup. When it is true, it turns the reading
+/// off in the saved settings and says so: an overlay that opens and stays is
+/// worth more than an FPS number.
+#[tauri::command]
+fn live_stats_suspect() -> bool {
+    stats::suspect()
+}
+
 /// Add the overlay's notes under the journal notes for the game that is running.
 ///
 /// The words are not kept on the overlay. Closing the game throws the draft
@@ -2199,6 +2209,9 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("Orbit"));
+            // Read the note the last run may have left behind: it says whether
+            // the panel went away while it was reading live stats.
+            stats::install(&root);
             let store = Store::new(root);
             let db = Arc::new(
                 db::Db::open(&store.root().join("orbit.db")).map_err(std::io::Error::other)?,
@@ -2551,6 +2564,7 @@ pub fn run() {
             audio_use_device,
             audio_set_named,
             machine_stats,
+            live_stats_suspect,
             append_playthrough_notes,
             overlay_open_settings,
             overlay_playing,

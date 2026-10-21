@@ -5,6 +5,9 @@
 //! is filling the screen. It is not a guess from the recorder.
 
 use serde::Serialize;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -43,7 +46,79 @@ const fn blank() -> MachineStats {
 }
 
 static CACHE: Mutex<Cache> = Mutex::new(Cache { stats: blank(), asked: None, fps_asked: false });
-static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// A note on disk that says live stats were being read when the app stopped.
+///
+/// The FPS box is the only part of the panel that reaches into the desktop:
+/// reading frames opens a DXGI duplication, and the numbers themselves come
+/// from the system's own performance counters. Either can end a process rather
+/// than return an error. Nothing in Orbit can catch that from the inside, so a
+/// file is left behind instead: found again on the next start, it means the
+/// panel went away while it was reading, and the reading is what to turn off.
+///
+/// A clean close removes it, and so does a short run of samples that clearly
+/// worked. What is left is the accident.
+struct Probe {
+    path: Option<PathBuf>,
+    written: bool,
+    samples: u8,
+}
+
+static PROBE: Mutex<Probe> = Mutex::new(Probe { path: None, written: false, samples: 0 });
+static SUSPECT: AtomicBool = AtomicBool::new(false);
+/// Samples that count as proof the reading works before the note is dropped.
+const PROBE_OKS: u8 = 8;
+
+/// Point the probe at the app's data folder, and read what the last run left.
+pub fn install(root: &Path) {
+    let marker = root.join("live-stats-probe");
+    if marker.exists() {
+        SUSPECT.store(true, Ordering::SeqCst);
+        let _ = fs::remove_file(&marker);
+        log::warn!("stats: the last session ended while the panel was reading live stats");
+    }
+    if let Ok(mut probe) = PROBE.lock() {
+        probe.path = Some(marker);
+        probe.written = false;
+        probe.samples = 0;
+    }
+}
+
+/// Whether the last run ended while the panel was reading live stats.
+pub fn suspect() -> bool {
+    SUSPECT.load(Ordering::SeqCst)
+}
+
+/// One sample was asked for. The first one of a run is written down.
+fn probe_tick() {
+    let Ok(mut probe) = PROBE.lock() else { return };
+    let Some(path) = probe.path.clone() else { return };
+    if !probe.written {
+        if fs::write(&path, b"live stats").is_ok() {
+            probe.written = true;
+            log::info!("stats: the panel started reading live stats");
+        }
+    }
+    probe.samples = probe.samples.saturating_add(1);
+    if probe.samples >= PROBE_OKS && probe.written {
+        let _ = fs::remove_file(&path);
+        probe.written = false;
+        log::info!("stats: live stats are working");
+    }
+}
+
+/// Hide the panel's probe: the reading ended on purpose.
+pub fn probe_clear() {
+    let Ok(mut probe) = PROBE.lock() else { return };
+    if probe.written {
+        if let Some(path) = &probe.path {
+            let _ = fs::remove_file(path);
+        }
+        probe.written = false;
+    }
+    probe.samples = 0;
+}
 
 /// Drop the sampler. Closing the overlay should not keep a desktop duplication open.
 pub fn release() {
@@ -51,9 +126,11 @@ pub fn release() {
         cache.asked = None;
         cache.fps_asked = false;
     }
+    probe_clear();
 }
 
 pub fn sample(want_fps: bool) -> MachineStats {
+    probe_tick();
     // A bad counter or a lost desktop frame must come back as missing numbers.
     // Unwinding out of this command is what used to take the whole app down
     // the moment the overlay asked for them.

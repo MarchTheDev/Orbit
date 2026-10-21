@@ -55,6 +55,8 @@ const TOAST_MS = 3600;
 const ERROR_TOAST_MS = 6500;
 /** The game-start toast says the overlay is up, not which game was launched. */
 const READY_TITLE = 'Overlay deployed in Orbit';
+/// The panel is on screen a moment before it asks for the numbers.
+const FPS_ARM_MS = 3000;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
 const LAYOUT_REVISION = 4;
@@ -297,6 +299,16 @@ export function OverlayView() {
   const [hidden, setHidden] = useState<BoxId[]>([]);
   const [shutterOn, setShutterOn] = useState(true);
   const [shutterVolume, setShutterVolume] = useState(40);
+  /**
+   * Whether the panel may read the FPS and performance numbers.
+   *
+   * Those are the only readings in here that reach into the desktop, and the
+   * numbers are what the panel is asking for in the second before it goes
+   * away. Turning them off leaves a panel that opens, draws and stays.
+   */
+  const [liveStats, setLiveStats] = useState(true);
+  /** The FPS reading waits a few seconds, so the panel is up before it starts. */
+  const [fpsArmed, setFpsArmed] = useState(false);
   const [front, setFront] = useState<BoxId>('capture');
   const [page, setPage] = useState(0);
   const [boxesOpen, setBoxesOpen] = useState(false);
@@ -538,6 +550,7 @@ export function OverlayView() {
       setHidden(hiddenBoxes);
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
+      setLiveStats(settings.overlay?.liveStats !== false);
       setResting(mode.resting && !mode.open);
       setAwake(mode.open || mode.resting);
       void overlayPins(anyPinned(next, hiddenBoxes));
@@ -580,6 +593,7 @@ export function OverlayView() {
         hiddenRef.current = hiddenBoxes;
         setShutterOn(settings.overlay?.shutter !== false);
         setShutterVolume(settings.overlay?.shutterVolume ?? 40);
+        setLiveStats(settings.overlay?.liveStats !== false);
       }).catch(() => undefined);
     }).then((unlisten) => {
       stopShown = unlisten;
@@ -1009,16 +1023,29 @@ export function OverlayView() {
     setNoteError('');
   }, [status]);
 
-  const wantFps = awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
-  const wantPerformance = awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
+  const wantFps = liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
+  const wantPerformance = liveStats && awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
   const wantStats = wantFps || wantPerformance;
+  // Opening the panel is the moment the game is most likely to be redrawing
+  // everything. The readings wait until the panel has been on screen for a
+  // moment, so a reading that goes wrong cannot be mistaken for the panel
+  // failing to appear.
+  useEffect(() => {
+    if (!awake) {
+      setFpsArmed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setFpsArmed(true), FPS_ARM_MS);
+    return () => window.clearTimeout(timer);
+  }, [awake]);
   useEffect(() => {
     if (!wantStats) return;
-    const pull = () => void machineStats(wantFps).then(setStats).catch(() => undefined);
+    const askFps = wantFps && fpsArmed;
+    const pull = () => void machineStats(askFps).then(setStats).catch(() => undefined);
     pull();
     const timer = window.setInterval(pull, 1000);
     return () => window.clearInterval(timer);
-  }, [wantStats, wantFps]);
+  }, [wantStats, wantFps, fpsArmed]);
 
   useEffect(() => {
     const count = items.filter((item) => item.kind === tab).length;
@@ -1303,6 +1330,7 @@ export function OverlayView() {
       {visible('fps') && (
         <Box id="fps" padSelected={padOn('fps')} title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
           <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
+          {!liveStats && <p className="mt-1 text-center text-[10px] leading-tight text-white/45">Reading is off</p>}
         </Box>
       )}
       {visible('performance') && (
@@ -1311,6 +1339,7 @@ export function OverlayView() {
           <Meter label="CPU" value={stats?.cpu} />
           <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
           <Meter label="VRAM" value={stats?.vram} detail={stats ? `${gigabytes(stats.vramUsed)} / ${gigabytes(stats.vramTotal, true)} GB` : ''} />
+          {!liveStats && <p className="mt-1 text-center text-[10px] leading-tight text-white/45">Reading is off</p>}
         </Box>
       )}
       {visible('clock') && (

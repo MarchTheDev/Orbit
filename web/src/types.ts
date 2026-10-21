@@ -571,6 +571,13 @@ export interface Settings {
     captureToast?: boolean;
     /** A note in Orbit when a game starts, not when the overlay opens. On unless turned off. */
     readyNotice?: boolean;
+    /**
+     * Read the FPS and performance numbers while the panel is open. On unless
+     * turned off. Reading them is the one thing in the panel that reaches into
+     * the desktop, and it is turned off by itself when it is the thing that
+     * closed the panel last time.
+     */
+    liveStats?: boolean;
     /** Boxes the player turned off. Missing means every box is shown. */
     hidden?: OverlayBoxId[];
     /** Optional folders for each capture type. Empty means its folder in Orbit's data directory. */

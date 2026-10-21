@@ -41,6 +41,7 @@ import {
   overlayConfigure,
   overlayFps,
   overlayPlaying,
+  liveStatsSuspect,
   overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
@@ -660,6 +661,26 @@ export default function App() {
     const layout = settings.overlay?.layout;
     if (layout && Object.values(layout).some((box) => box?.pinned)) void overlayShowPins();
   }, [booted, settings]);
+
+  // The panel's FPS and performance readings are the one part of it that
+  // reaches into the desktop, and a run that ended while they were reading
+  // leaves a note behind. Turn them off rather than open a panel that goes
+  // away again, and say why so the switch can be found.
+  const statsChecked = useRef(false);
+  useEffect(() => {
+    if (!isNative() || !booted || !settings || statsChecked.current) return;
+    statsChecked.current = true;
+    if (settings.overlay?.liveStats === false) return;
+    void liveStatsSuspect().then((suspected) => {
+      if (!suspected) return;
+      console.warn('orbit: live stats are off; the last run ended while the panel was reading them');
+      setSettings((current) => ({ overlay: { ...current.overlay, liveStats: false } }));
+      toast({
+        text: 'Live stats are off: reading them is what closed the overlay last time. Turn them back on in Settings, Overlay.',
+        tone: 'error',
+      });
+    }).catch(() => undefined);
+  }, [booted, settings, setSettings, toast]);
 
   useEffect(() => {
     if (!isNative() || !session || session.manual) return;

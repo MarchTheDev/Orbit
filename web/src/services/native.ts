@@ -1342,6 +1342,11 @@ export interface MachineStats {
   fps: number | null;
 }
 
+/** Whether the last run ended while the panel was reading live stats. */
+export function liveStatsSuspect(): Promise<boolean> {
+  return call('live_stats_suspect', {}, () => false);
+}
+
 export function machineStats(wantFps: boolean): Promise<MachineStats> {
   return call('machine_stats', { wantFps }, () => ({
     cpu: null,

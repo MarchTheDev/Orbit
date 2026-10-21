@@ -1343,6 +1343,14 @@ fn guard_panel(app: &AppHandle) {
         let _ = window.emit("overlay-shown", ());
         return;
     }
+    // A window whose web view has gone is an empty frame. There is nothing to
+    // see in it and nothing answers inside it, which is why it is checked here
+    // and not only by the page's own heartbeat.
+    if !webview_alive(&window) {
+        log::warn!("overlay: the window has no web view in it; rebuilding");
+        revive(app);
+        return;
+    }
     // The page has to have spoken. A slow first load is given longer than a
     // page that has already answered once and then went quiet.
     let quiet = HEARD
@@ -1451,6 +1459,26 @@ fn foreground_covers(window: &tauri::WebviewWindow) -> bool {
     // Nine tenths is enough: a borderless game can be a few pixels short of the
     // monitor, while a windowed one never comes close.
     across * 10 >= width * 9 && down * 10 >= height * 9
+}
+
+/// Whether the panel's window still hosts a web view.
+///
+/// WRY puts the WebView2 controller in a child window. When the browser
+/// process dies, the frame stays on screen with that child gone: the panel is
+/// then a transparent rectangle that does nothing.
+#[cfg(windows)]
+fn webview_alive(window: &tauri::WebviewWindow) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_CHILD};
+    match window.hwnd() {
+        Ok(handle) => unsafe { GetWindow(handle, GW_CHILD).is_ok() },
+        // A handle that cannot be read is not proof of anything.
+        Err(_) => true,
+    }
+}
+
+#[cfg(not(windows))]
+fn webview_alive(_window: &tauri::WebviewWindow) -> bool {
+    true
 }
 
 /// Put the window at the front of the always-on-top group without asking for

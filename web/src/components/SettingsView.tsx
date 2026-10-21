@@ -554,6 +554,16 @@ function OverlaySettings({
         label="Show that the overlay is working"
         hint="A small note in Orbit's main window when you start a game. It does not appear when you open the overlay."
       />
+      <Checkbox
+        checked={overlay?.liveStats !== false}
+        onChange={(on) => setOverlay({ liveStats: on })}
+        label="Read live stats (FPS, CPU, GPU)"
+        hint={
+          overlay?.liveStats === false
+            ? 'Off. The FPS and performance boxes stay empty. Orbit turns this off by itself if the overlay closed while it was reading them.'
+            : 'The FPS box reads the picture the desktop presents. Turn this off if the overlay closes by itself over a game.'
+        }
+      />
       <div className="rounded-2xl border border-line bg-panel2/30 p-3">
         <p className="text-sm font-medium">Capture folders</p>
         <p className="mt-1 text-xs leading-relaxed text-muted">Choose a separate location for screenshots, recordings, and replays. Each one gets a subfolder for the game.</p>

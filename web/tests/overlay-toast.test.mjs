@@ -14,6 +14,7 @@ const confirmDialog = readFileSync(path.join(root, 'web', 'src', 'components', '
 const overlaySource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
 const nativeSource = readFileSync(path.join(root, 'web', 'src', 'services', 'native.ts'), 'utf8');
 const libSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'lib.rs'), 'utf8');
+const statsSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -227,6 +228,10 @@ check(
     /fn guard_panel[\s\S]{0,900}let Some\(window\) = app\.get_webview_window\(WINDOW\) else \{[\s\S]{0,200}revive\(app\)/.test(overlaySource) &&
     /fn guard_panel[\s\S]{0,1600}if !window\.is_visible\(\)[\s\S]{0,400}window\.show\(\)/.test(overlaySource) &&
     /fn guard_panel[\s\S]{0,2600}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
+    // A window with no web view in it is an empty frame, not a closed panel.
+    overlaySource.includes('fn webview_alive(window: &tauri::WebviewWindow) -> bool') &&
+    overlaySource.includes('GetWindow(handle, GW_CHILD)') &&
+    /fn guard_panel[\s\S]{0,2200}if !webview_alive\(&window\) \{[\s\S]{0,160}revive\(app\)/.test(overlaySource) &&
     /fn revive[\s\S]{0,1400}show_window\(app\)/.test(overlaySource) &&
     libSource.includes('fn overlay_alive() {') &&
     nativeSource.includes('export function overlayAlive()') &&
@@ -243,6 +248,34 @@ check(
     overlay.includes("detail: 'Switch the game to borderless windowed fullscreen.'") &&
     // An invisible card is not a message.
     !/fn guard_panel[\s\S]{0,3200}crate::notice::show/.test(overlaySource),
+);
+check(
+  'the FPS reading can be turned off, and turns itself off when it is what closed the panel',
+  // The switch happens before anything is asked for, so "off" means no call at
+  // all: no performance counters and no desktop duplication.
+  overlay.includes("const [liveStats, setLiveStats] = useState(true);") &&
+    /const wantFps = liveStats && awake/.test(overlay) &&
+    /const wantPerformance = liveStats && awake/.test(overlay) &&
+    statsSource.includes('pub fn install(root: &Path)') &&
+    statsSource.includes('let marker = root.join("live-stats-probe");') &&
+    statsSource.includes('pub fn suspect() -> bool') &&
+    statsSource.includes('if probe.samples >= PROBE_OKS && probe.written') &&
+    statsSource.includes('stats: live stats are working') &&
+    libSource.includes('stats::install(&root);') &&
+    libSource.includes('fn live_stats_suspect() -> bool') &&
+    nativeSource.includes("return call('live_stats_suspect', {}, () => false);") &&
+    app.includes('void liveStatsSuspect().then((suspected) => {') &&
+    app.includes('overlay: { ...current.overlay, liveStats: false }') &&
+    app.includes('Live stats are off: reading them is what closed the overlay last time.'),
+);
+check(
+  'the readings start only once the panel has been up for a moment',
+  overlay.includes('const FPS_ARM_MS = 3000;') &&
+    overlay.includes('const [fpsArmed, setFpsArmed] = useState(false);') &&
+    overlay.includes('const timer = window.setTimeout(() => setFpsArmed(true), FPS_ARM_MS);') &&
+    overlay.includes('const askFps = wantFps && fpsArmed;') &&
+    overlay.includes('machineStats(askFps)') &&
+    overlay.split('Reading is off').length - 1 >= 2,
 );
 check(
   'the panel is told it is open even when its page loads after the first event',
