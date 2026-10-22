@@ -2447,7 +2447,7 @@ pub fn run() {
             // building the panel from that handler can stall its lock.
             if let Err(error) = app.global_shortcut().on_shortcut("Alt+X", |_app, _shortcut, event| {
                 if matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
-                    overlay::request_toggle("Alt+X");
+                    overlay::shortcut_toggle();
                 }
             }) {
                 log::warn!("Alt+X could not be registered: {error}");

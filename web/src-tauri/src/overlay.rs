@@ -52,6 +52,16 @@ static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::Atomic
 static PANEL_DIAG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Who last asked for the toggle, for the history: Alt+X or the pad's chord.
 static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("Alt+X");
+/// Whether Alt+X has been seen up since the last press Orbit acted on.
+///
+/// Windows keeps posting the same hotkey for as long as the keys stay down.
+/// That is not a second press, and treating it as one closes the panel the
+/// player has just opened.
+static HOTKEY_UP: AtomicBool = AtomicBool::new(true);
+/// Whether this open has already been told about a held key.
+static REPEAT_NOTED: AtomicBool = AtomicBool::new(false);
+/// A close that arrives this soon after the open is not someone's decision.
+const OPEN_GRACE: Duration = Duration::from_millis(700);
 const PANEL_DIAG_LINES: usize = 8;
 /// Set while Orbit is taking its own panel down, so its `Destroyed` event is
 /// not mistaken for something unexplained.
@@ -418,6 +428,40 @@ fn capture_detail(kind: &str, text: &str) -> &'static str {
 
 /// Alt+X and Start+Select both end here. The window work happens later, off
 /// the shortcut handler, so that handler can return while its lock is still held.
+/// The keyboard shortcut's own press.
+///
+/// Alt+X fires again and again while it is held, at the keyboard's repeat rate,
+/// and the first repeat comes sooner than the debounce below. So the panel
+/// opened on the press and the repeat closed it again a moment later: the
+/// overlay was there for a second, then gone, with nothing in the way and no
+/// game in front. Only a press that follows a release is a new press.
+pub fn shortcut_toggle() {
+    let fresh = HOTKEY_UP.swap(false, Ordering::SeqCst) || shortcut_keys_up();
+    if !fresh {
+        if is_open() && !REPEAT_NOTED.swap(true, Ordering::SeqCst) {
+            note_panel("a held-down Alt+X was ignored, so the panel stayed open");
+        }
+        log::debug!("overlay: the repeat of a held Alt+X was ignored");
+        return;
+    }
+    request_toggle("Alt+X");
+}
+
+#[cfg(windows)]
+fn shortcut_keys_up() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU};
+    let alt = (unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } as u16) & 0x8000 != 0;
+    let x = (unsafe { GetAsyncKeyState(b'X' as i32) } as u16) & 0x8000 != 0;
+    // Both up means this press has just begun, whatever the message ordering
+    // did; a repeat only ever arrives with the keys still down.
+    !(alt && x)
+}
+
+#[cfg(not(windows))]
+fn shortcut_keys_up() -> bool {
+    true
+}
+
 pub fn request_toggle(why: &'static str) {
     // Windows repeats a registered hotkey while it is held down. Without this
     // a slightly long press opened and closed the panel in the same moment,
@@ -1041,6 +1085,12 @@ fn watch(app: AppHandle) {
         }
         #[cfg(windows)]
         {
+            // Sampled here rather than asked for when a press arrives: the
+            // question is whether the keys were ever let go in between, and
+            // only a poll can answer that.
+            if shortcut_keys_up() {
+                HOTKEY_UP.store(true, Ordering::SeqCst);
+            }
             if let Some((buttons, axes)) = read_xinput(&mut slot) {
                 if connected != Some(slot) {
                     // Plugged in, woken up, or swapped for another pad: take
@@ -1086,6 +1136,17 @@ fn toggle_on_main(app: &AppHandle) {
     // asking `is_focused` then made Alt+X open the panel again instead of
     // closing it: the panel could not be closed and looked like a flash.
     if visible && !RESTING.load(Ordering::SeqCst) && !covered {
+        // A panel closed within a moment of opening was not read by anyone:
+        // that is a second press from the same held key, or a chord reported
+        // twice, and not someone deciding to put the panel away.
+        let just_opened = SHOWN_AT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some_and(|at| at.elapsed() < OPEN_GRACE);
+        if just_opened {
+            note_panel("the panel had only just opened, so the second press was ignored");
+            return;
+        }
         let why = *TOGGLE_WHY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         hide_window(app, &format!("{why} asked again"));
     } else {
@@ -1195,6 +1256,7 @@ fn show_window(app: &AppHandle) {
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
     heartbeat();
     OPEN.store(true, Ordering::SeqCst);
+    REPEAT_NOTED.store(false, Ordering::SeqCst);
     note_panel("the panel opened");
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());

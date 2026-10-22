@@ -271,8 +271,25 @@ check(
     overlaySource.includes('hide_window(app, &format!("{why} asked again"));') &&
     overlaySource.includes('static TOGGLE_WHY: Mutex<&\'static str>') &&
     /pub fn request_toggle\(why: &'static str\)/.test(overlaySource) &&
-    libSource.includes('overlay::request_toggle("Alt+X");') &&
+    libSource.includes('overlay::shortcut_toggle();') &&
     overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
+);
+check(
+  'a held Alt+X opens the panel once instead of opening and closing it',
+  // Windows repeats the hotkey for as long as the keys are down, and the first
+  // repeat is sooner than the debounce. The repeat is what closed the panel a
+  // second after it appeared, with no game anywhere near it.
+  overlaySource.includes('static HOTKEY_UP: AtomicBool') &&
+    overlaySource.includes('const OPEN_GRACE: Duration = Duration::from_millis(700)') &&
+    /pub fn shortcut_toggle\(\) \{\n    let fresh = HOTKEY_UP\.swap\(false, Ordering::SeqCst\) \|\| shortcut_keys_up\(\);/.test(overlaySource) &&
+    /fn shortcut_keys_up\(\) -> bool \{[\s\S]{0,400}!\(alt && x\)/.test(overlaySource) &&
+    // The keys are sampled, because the question is what happened in between.
+    /if shortcut_keys_up\(\) \{\n                HOTKEY_UP\.store\(true, Ordering::SeqCst\);/.test(overlaySource) &&
+    libSource.includes('overlay::shortcut_toggle();') &&
+    // Nothing closes in the moment after it opened: that is never a decision.
+    /let just_opened = SHOWN_AT[\s\S]{0,300}at\.elapsed\(\) < OPEN_GRACE/.test(overlaySource) &&
+    overlaySource.includes('note_panel("the panel had only just opened, so the second press was ignored")') &&
+    overlaySource.includes('note_panel("a held-down Alt+X was ignored, so the panel stayed open")'),
 );
 check(
   'a pad the loop has just started reading is not a pressed button',
@@ -386,7 +403,7 @@ check(
 );
 check(
   'the panel is told it is open even when its page loads after the first event',
-  /fn show_window[\s\S]{0,1600}let again = window\.clone\(\)/.test(overlaySource) &&
+  /fn show_window[\s\S]{0,2200}let again = window\.clone\(\)/.test(overlaySource) &&
     overlaySource.includes('if is_open() && again.is_visible().unwrap_or(false)') &&
     overlaySource.includes('thread::sleep(Duration::from_millis(400))'),
 );
