@@ -15,6 +15,7 @@ import {
   overlayAlive,
   overlayHide,
   overlayHits,
+  overlayHold,
   overlayLengths,
   overlayMode,
   overlayOpen,
@@ -264,6 +265,31 @@ function gigabytes(bytes: number, roundTotal = false): string {
   const value = bytes / 1024 / 1024 / 1024;
   if (roundTotal) return String(Math.round(value));
   return value >= 10 ? value.toFixed(0) : value.toFixed(1);
+}
+
+/**
+ * Where the open panel has something to click, in physical screen pixels.
+ *
+ * The panel covers the whole screen, so on Windows it also takes every click
+ * on it. A player who opens the overlay over a game - or over the desktop -
+ * then cannot click anything else until it is closed. Only the places with
+ * something to click are handed to the native side, which lets the rest of
+ * the screen through to whatever is behind the panel.
+ */
+function openHits(): { x: number; y: number; w: number; h: number }[] {
+  const scale = window.devicePixelRatio || 1;
+  // A few pixels of slack, so the edge of a box does not flicker between
+  // taking the pointer and letting it go.
+  const slack = 6;
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-hit="1"]')).map((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      x: rect.left * scale - slack,
+      y: rect.top * scale - slack,
+      w: rect.width * scale + slack * 2,
+      h: rect.height * scale + slack * 2,
+    };
+  });
 }
 
 function physicalHits(): { x: number; y: number; w: number; h: number }[] {
@@ -846,17 +872,40 @@ export function OverlayView() {
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 
+  // Where the panel has something to click, told to the native side.
+  //
+  // The panel covers the whole screen, so on Windows it also takes every click
+  // on it. Open, that is the wrong bargain: a player who opens the overlay
+  // cannot click anything else until it is closed. Only the boxes and the
+  // floating menus are reported, and the rest of the screen is let through to
+  // whatever is behind the panel. A resting panel reports its pins the same way.
   useEffect(() => {
-    if (!ready || !resting) return;
-    const send = () => void overlayHits(physicalHits());
+    if (!ready || !awake) return;
+    const send = () => void overlayHits(resting ? physicalHits() : openHits());
     send();
-    const timer = window.setInterval(send, 700);
+    const timer = window.setInterval(send, 250);
     window.addEventListener('resize', send);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('resize', send);
     };
-  }, [ready, resting, places]);
+  }, [ready, awake, resting, places, hidden, boxesOpen, galleryMenu, deleteTarget]);
+
+  // A press that starts in the panel keeps the pointer until it ends. A box
+  // follows the cursor while it is dragged, and letting the rest of that
+  // gesture fall through to the game would drop the box where it was.
+  useEffect(() => {
+    const down = () => void overlayHold(true);
+    const up = () => void overlayHold(false);
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    return () => {
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    };
+  }, []);
 
   const run = async (work: () => Promise<unknown>, chimeOnSuccess = false, done = '') => {
     if (busy) return;
@@ -1117,21 +1166,13 @@ export function OverlayView() {
 
   return (
     <div className="relative h-full text-white">
-      {/* The dim is only a dim. It used to close the panel on any click, which
-          meant a click meant for the game - the panel covers the whole screen
-          and takes the focus - quietly shut the overlay the player had just
-          opened. A click there now says how the panel is closed instead, so
-          the same click cannot look like the overlay closing itself. */}
-      {!resting && (
-        <div
-          className="absolute inset-0 bg-black/45"
-          onPointerDown={() => {
-            setToast({ title: 'The overlay stays open', detail: 'Press Escape, B, or the ✕ in a box to close it.', kind: 'ready' });
-            window.clearTimeout(toastTimer.current);
-            toastTimer.current = window.setTimeout(() => setToast(null), 3600);
-          }}
-        />
-      )}
+      {/* The dim only dims. It used to close the panel on any click, which
+          meant a click meant for the game quietly shut the overlay the player
+          had just opened. The whole screen outside the boxes is the game's now
+          - the native side lets those clicks through - so the dim answers
+          nothing at all. Escape, the pad's B, or a box's own close button end
+          the panel. */}
+      {!resting && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
       {toast && ToastIcon && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">
           <div
@@ -1387,6 +1428,7 @@ export function OverlayView() {
           <button
             type="button"
             data-overlay
+            data-overlay-hit="1"
             aria-expanded={boxesOpen}
             onClick={() => setBoxesOpen((open) => !open)}
             className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/15 bg-[#141416]/92 px-3 py-1.5 text-[11px] text-white/80 backdrop-blur-md"
@@ -1395,7 +1437,7 @@ export function OverlayView() {
             Boxes
           </button>
           {boxesOpen && (
-            <div className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
+            <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="flex flex-wrap gap-1.5">
                 {OVERLAY_BOXES.map((box) => {
                   const shown = !hidden.includes(box.id);
@@ -1492,6 +1534,7 @@ function Box({
     <aside
       data-overlay-section={section}
       data-overlay-box={id}
+      data-overlay-hit="1"
       data-pin={place.pinned ? '1' : '0'}
       className={cn(
         'pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',

@@ -90,6 +90,9 @@ export function ContextMenu({
     <div
       ref={box}
       role="menu"
+      // The overlay is click-through everywhere it has nothing to click. This
+      // is one of the places that does, so the panel must stay awake over it.
+      data-overlay-hit="1"
       style={{ left: x, top: y }}
       className={cn('fixed z-50 min-w-52 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl', className)}
     >

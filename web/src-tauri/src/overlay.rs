@@ -34,6 +34,8 @@ static OPEN: AtomicBool = AtomicBool::new(false);
 static RESTING: AtomicBool = AtomicBool::new(false);
 static HAS_PINS: AtomicBool = AtomicBool::new(false);
 static IGNORE: AtomicBool = AtomicBool::new(false);
+/// Whether a press is down inside the panel, which keeps the pointer with it.
+static HOLD: AtomicBool = AtomicBool::new(false);
 static CHECKING: AtomicBool = AtomicBool::new(false);
 static ASKED: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -719,6 +721,7 @@ pub fn close_panel(app: &AppHandle, why: &str) {
     FRONT_TRIES_CELL.store(0, Ordering::SeqCst);
     lock().ready_notice = None;
     HAS_PINS.store(false, Ordering::SeqCst);
+    HOLD.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     crate::stats::release();
     tell(app, "overlay-visible", "false");
@@ -1070,8 +1073,7 @@ fn watch(app: AppHandle) {
                 let _ = app.run_on_main_thread(move || guard_panel(&panel));
             }
         }
-        if RESTING.load(Ordering::SeqCst)
-            && !OPEN.load(Ordering::SeqCst)
+        if (OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst))
             && !CHECKING.swap(true, Ordering::SeqCst)
         {
             let panel = app.clone();
@@ -1237,6 +1239,7 @@ fn show_window(app: &AppHandle) {
     // would repeat one frame for as long as the panel stayed open.
     RESTING.store(false, Ordering::SeqCst);
     IGNORE.store(false, Ordering::SeqCst);
+    HOLD.store(false, Ordering::SeqCst);
     capture::set_paused(false);
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_focusable(true);
@@ -3104,6 +3107,11 @@ pub fn set_hits(boxes: Vec<HitBox>) {
     *HITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = boxes;
 }
 
+/// A press is down in the page, so the pointer stays with the panel until it ends.
+pub fn set_hold(on: bool) {
+    HOLD.store(on, Ordering::SeqCst);
+}
+
 /// A pinned box should already be on screen when Orbit opens, without Alt+X.
 pub fn show_pins(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) || !lock().enabled {
@@ -3114,18 +3122,31 @@ pub fn show_pins(app: &AppHandle) {
 }
 
 
+/// Let the screen through wherever the panel has nothing to click.
+///
+/// The panel covers the whole monitor, so Windows hands it every click on that
+/// monitor. Over a game that is the point, but with nothing behind it the
+/// panel becomes a wall: the player opens the overlay and can no longer click
+/// anywhere on their desk. Only the places the page reports as clickable take
+/// the pointer; everywhere else the click goes to whatever is behind the panel.
 fn sync_click_through(app: &AppHandle) {
-    if !RESTING.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+    let open = OPEN.load(Ordering::SeqCst);
+    if !open && !RESTING.load(Ordering::SeqCst) {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else { return };
-    let over = cursor_over_hits(&window);
+    // A press that began in the panel keeps the pointer until it is let go:
+    // a box follows the cursor while it is dragged, and half a drag would be
+    // worse than no drag at all.
+    let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);
     let ignore = !over;
     if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
         return;
     }
     let _ = window.set_ignore_cursor_events(ignore);
-    let _ = window.set_focusable(!ignore);
+    // A resting panel is not a thing to type into. The open one keeps its
+    // keyboard wherever the pointer is: Escape has to reach it.
+    let _ = window.set_focusable(!ignore || open);
 }
 
 fn cursor_over_hits(window: &tauri::WebviewWindow) -> bool {

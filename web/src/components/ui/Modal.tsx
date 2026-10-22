@@ -85,6 +85,9 @@ export function Modal({
   // opened from.
   return createPortal(
     <div
+      // A dialog is modal: over the overlay it has to hold the pointer for the
+      // whole screen, which is what its backdrop already looks like.
+      data-overlay-hit="1"
       className={cn(
         'modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center p-4',
         bare ? 'bg-bg/85' : 'bg-black/60 backdrop-blur-sm',

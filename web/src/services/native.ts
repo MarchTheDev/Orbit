@@ -1288,6 +1288,16 @@ export function overlayHits(boxes: { x: number; y: number; w: number; h: number 
   return call('overlay_hits', { boxes }, () => undefined);
 }
 
+/**
+ * Keep the pointer on the panel until the press ends.
+ *
+ * Between two reports of where the boxes are, the pointer moving off one would
+ * otherwise hand the rest of a drag to whatever is behind the panel.
+ */
+export function overlayHold(on: boolean): Promise<void> {
+  return call('overlay_hold', { on }, () => undefined);
+}
+
 export function overlayShowPins(): Promise<void> {
   return call('overlay_show_pins', {}, () => undefined);
 }

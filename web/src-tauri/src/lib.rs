@@ -712,6 +712,12 @@ fn overlay_hits(boxes: Vec<overlay::HitBox>) {
     overlay::set_hits(boxes);
 }
 
+/// The page has a press down, so the panel keeps the pointer until it ends.
+#[tauri::command]
+fn overlay_hold(on: bool) {
+    overlay::set_hold(on);
+}
+
 #[tauri::command]
 fn overlay_show_pins(app: tauri::AppHandle) {
     overlay::show_pins(&app);
@@ -2557,6 +2563,7 @@ pub fn run() {
             overlay_mode,
             overlay_pins,
             overlay_hits,
+            overlay_hold,
             overlay_show_pins,
             media_now,
             media_control,

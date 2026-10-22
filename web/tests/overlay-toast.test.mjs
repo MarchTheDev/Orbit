@@ -16,6 +16,8 @@ const nativeSource = readFileSync(path.join(root, 'web', 'src', 'services', 'nat
 const libSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'lib.rs'), 'utf8');
 const statsSource = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
 const settingsSource2 = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
+const menuSource = readFileSync(path.join(root, 'web', 'src', 'components', 'ui', 'ContextMenu.tsx'), 'utf8');
+const modalSource = readFileSync(path.join(root, 'web', 'src', 'components', 'ui', 'Modal.tsx'), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -193,13 +195,13 @@ check(
 );
 check(
   'Alt+X toggles the panel it opened instead of trusting the focus Windows gave it',
-  /fn toggle_on_main[\s\S]{0,1600}if visible && !RESTING\.load\(Ordering::SeqCst\) && !covered/.test(overlaySource) &&
+  /fn toggle_on_main[\s\S]{0,2200}if visible && !RESTING\.load\(Ordering::SeqCst\) && !covered/.test(overlaySource) &&
     // Alt+X retries instead of closing a panel that the game has drawn over.
     /let covered = visible && covered_by_game\(&window\);/.test(overlaySource) &&
     !overlaySource.includes('let focused = window.is_focused()') &&
     // A refused set_focus is retried against the window handle directly.
     overlaySource.includes('SetForegroundWindow') &&
-    /fn show_window[\s\S]{0,900}raise\(&window\)/.test(overlaySource),
+    /fn show_window[\s\S]{0,1600}raise\(&window\)/.test(overlaySource),
 );
 check(
   'the open panel puts itself back in front of a fullscreen game',
@@ -314,17 +316,37 @@ check(
     overlay.includes("overlayHide('the close button')"),
 );
 check(
-  'the dim behind the boxes does not close the panel on a stray click',
+  'the dim behind the boxes closes nothing and takes nothing',
   // The panel covers the whole screen and takes the focus, so the click a
   // player aims at the game landed on the dim - and shut the overlay.
-  overlay.includes('className="absolute inset-0 bg-black/45"') &&
+  overlay.includes('pointer-events-none absolute inset-0 bg-black/45') &&
     !/bg-black\/45" onClick/.test(overlay) &&
-    // A click that used to close the panel now explains how it closes.
-    overlay.includes('The overlay stays open') &&
-    overlay.includes('Press Escape, B, or the ✕ in a box to close it.') &&
     !overlay.includes('onClick={() => void overlayHide()}') &&
     // The mouse still has a way out, and so do the keyboard and the pad.
     overlay.split("overlayHide('the close button')").length - 1 === 2,
+);
+check(
+  'the open panel lets the screen through where it has nothing to click',
+  // Without this the overlay is a wall: the player opens it and can no longer
+  // click anywhere else on the desk until it is closed again.
+  overlay.includes('function openHits()') &&
+    /function openHits\(\)[\s\S]{0,600}querySelectorAll<HTMLElement>\('\[data-overlay-hit="1"\]'\)/.test(overlay) &&
+    // Every surface with something to click says so: the boxes, the boxes
+    // menu and the two floating layers shared with the library.
+    /data-overlay-box=\{id\}\n      data-overlay-hit="1"/.test(overlay) &&
+    overlay.includes('data-overlay-hit="1" className="pointer-events-auto absolute left-1/2') &&
+    menuSource.includes('data-overlay-hit="1"') &&
+    modalSource.includes('data-overlay-hit="1"') &&
+    // Both states report the same way, so the native side always knows.
+    overlay.includes('void overlayHits(resting ? physicalHits() : openHits())') &&
+    nativeSource.includes('export function overlayHold(on: boolean): Promise<void> {') &&
+    overlaySource.includes('pub fn set_hold(on: bool)') &&
+    libSource.includes('fn overlay_hold(on: bool)') &&
+    // The press keeps the pointer: half a drag is worse than none.
+    overlaySource.includes('let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);') &&
+    // Driven in both states, not only while the panel rests against its pins.
+    /if \(OPEN\.load\(Ordering::SeqCst\) \|\| RESTING\.load\(Ordering::SeqCst\)\)/.test(overlaySource) &&
+    /fn sync_click_through[\s\S]{0,900}let _ = window\.set_ignore_cursor_events\(ignore\);/.test(overlaySource),
 );
 check(
   'the panel history keeps the reason instead of being overwritten by the close',
