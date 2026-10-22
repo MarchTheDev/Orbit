@@ -209,7 +209,7 @@ check(
     !overlay.includes('orbit-pad-capture') &&
     // Start+Select still opens and closes the panel with it closed; the toggle
     // is answered before that gate.
-    /if step\.toggle \{\s*request_toggle\(\);\s*return;\s*\}[\s\S]*?if !is_open\(\)/.test(overlay),
+    /if step\.toggle \{\s*request_toggle\("the pad's Start\+Select"\);\s*return;\s*\}[\s\S]*?if !is_open\(\)/.test(overlay),
 );
 check(
   'the right stick is read from XInput and sent while the panel is open',

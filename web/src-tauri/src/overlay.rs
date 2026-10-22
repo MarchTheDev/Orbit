@@ -50,6 +50,8 @@ static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::Atomic
 /// reason, so every report read "the window was destroyed" and said nothing
 /// about why it was destroyed.
 static PANEL_DIAG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Who last asked for the toggle, for the history: Alt+X or the pad's chord.
+static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("Alt+X");
 const PANEL_DIAG_LINES: usize = 8;
 /// Set while Orbit is taking its own panel down, so its `Destroyed` event is
 /// not mistaken for something unexplained.
@@ -416,7 +418,7 @@ fn capture_detail(kind: &str, text: &str) -> &'static str {
 
 /// Alt+X and Start+Select both end here. The window work happens later, off
 /// the shortcut handler, so that handler can return while its lock is still held.
-pub fn request_toggle() {
+pub fn request_toggle(why: &'static str) {
     // Windows repeats a registered hotkey while it is held down. Without this
     // a slightly long press opened and closed the panel in the same moment,
     // which is the flash a player sees instead of the overlay.
@@ -428,6 +430,10 @@ pub fn request_toggle() {
         }
         *last = Some(now);
     }
+    // The second press closes the panel, so this is the only way to say which
+    // press it was. A toggle nobody meant - a pad reporting Start and Select
+    // together - has to be tellable from the player's own Alt+X.
+    *TOGGLE_WHY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = why;
     ASKED.store(true, Ordering::SeqCst);
 }
 
@@ -540,7 +546,7 @@ pub fn configure(
         if let Some(app) = app {
             // Hiding leaves the second web view running. Turning the overlay
             // off has to close that window, or its processes stay behind.
-            close_panel(app);
+            close_panel(app, "the overlay was turned off in Settings");
         }
     }
 }
@@ -657,9 +663,10 @@ pub fn shutdown() {
 
 /// Hide and destroy the overlay window. Hiding is not enough: a hidden window
 /// is still a window, and that is what left the panel up after Orbit closed.
-pub fn close_panel(app: &AppHandle) {
-    if OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst) {
-        note_panel("the panel was closed");
+pub fn close_panel(app: &AppHandle, why: &str) {
+    if (OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst)) && !why.is_empty() {
+        // A close with no reason written down is a mystery by construction.
+        note_panel(&format!("the panel was closed ({why})"));
     }
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
@@ -724,7 +731,7 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         step
     };
     if step.toggle {
-        request_toggle();
+        request_toggle("the pad's Start+Select");
         return;
     }
     // Every shortcut but Start+Select belongs to the opened panel. LB and RB
@@ -807,7 +814,8 @@ pub fn status() -> OverlayStatus {
 
 pub fn hide(app: &AppHandle, reason: &str) {
     note_panel(&format!("hide was asked for by the page ({reason})"));
-    hide_window(app);
+    // The page's reason is the line above; a second one would only repeat it.
+    hide_window(app, "");
 }
 
 pub fn open_folder() -> Result<String, String> {
@@ -995,7 +1003,9 @@ fn should_buffer() -> bool {
 
 fn watch(app: AppHandle) {
     let mut slot = 0u32;
-    let mut connected = false;
+    // Which pad is being read, if any. A pad that is new to us is not a press:
+    // its first report only says where its buttons already were.
+    let mut connected: Option<u32> = None;
     let mut guarded = std::time::Instant::now();
     loop {
         if STOP.load(Ordering::SeqCst) {
@@ -1032,10 +1042,16 @@ fn watch(app: AppHandle) {
         #[cfg(windows)]
         {
             if let Some((buttons, axes)) = read_xinput(&mut slot) {
-                connected = true;
+                if connected != Some(slot) {
+                    // Plugged in, woken up, or swapped for another pad: take
+                    // what it reports now as its resting state. Start and
+                    // Select standing together in a first report used to read
+                    // as the overlay's chord and close the panel by itself.
+                    connected = Some(slot);
+                    seed_pad(&buttons, &axes);
+                }
                 on_pad(&app, &buttons, &axes);
-            } else if connected {
-                connected = false;
+            } else if connected.take().is_some() {
                 on_pad(&app, &[false; 16], &[0.0; 4]);
             }
         }
@@ -1070,7 +1086,8 @@ fn toggle_on_main(app: &AppHandle) {
     // asking `is_focused` then made Alt+X open the panel again instead of
     // closing it: the panel could not be closed and looked like a flash.
     if visible && !RESTING.load(Ordering::SeqCst) && !covered {
-        hide_window(app);
+        let why = *TOGGLE_WHY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        hide_window(app, &format!("{why} asked again"));
     } else {
         show_window(app);
     }
@@ -1653,14 +1670,14 @@ fn conceal(app: &AppHandle) {
     }
 }
 
-fn hide_window(app: &AppHandle) {
+fn hide_window(app: &AppHandle, why: &str) {
     if HAS_PINS.load(Ordering::SeqCst) {
         rest_window(app);
         return;
     }
     // A hidden panel is still a web view. Closing it drops those processes
     // until the overlay is opened again. A pinned box has to stay.
-    close_panel(app);
+    close_panel(app, why);
 }
 
 fn rest_window(app: &AppHandle) {
@@ -2795,6 +2812,31 @@ fn launch_path(path: &Path) -> Result<(), String> {
 
 fn ffmpeg_missing() -> String {
     "Recording needs ffmpeg, and Orbit did not find it. Install it, or set its path in Settings → Overlay.".to_string()
+}
+
+/// Take a pad's first report as the state it arrived in, not as a press.
+///
+/// Nothing that is already true on a pad we have just started reading counts
+/// as an edge: a chord that happens to be held, a stick already over, a trigger
+/// resting. Without this, a pad that connects while Start and Select sit
+/// together - and some devices report exactly that - closes the panel the
+/// moment it is first seen.
+fn seed_pad(buttons: &[bool], axes: &[f32]) {
+    let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    watch.both = pressed(buttons, 9) && pressed(buttons, 8);
+    watch.a = pressed(buttons, 0);
+    watch.b = pressed(buttons, 1);
+    watch.left_shoulder = pressed(buttons, 4);
+    watch.right_shoulder = pressed(buttons, 5);
+    watch.dpad_left = pressed(buttons, 14);
+    watch.dpad_right = pressed(buttons, 15);
+    watch.held = direction(
+        pressed(buttons, 12) || axes.get(1).copied().unwrap_or(0.0) < -0.45,
+        pressed(buttons, 13) || axes.get(1).copied().unwrap_or(0.0) > 0.45,
+        pressed(buttons, 14) || axes.first().copied().unwrap_or(0.0) < -0.45,
+        pressed(buttons, 15) || axes.first().copied().unwrap_or(0.0) > 0.45,
+    );
+    watch.ticks = 0;
 }
 
 fn pressed(buttons: &[bool], index: usize) -> bool {

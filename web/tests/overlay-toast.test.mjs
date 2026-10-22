@@ -250,13 +250,38 @@ check(
     overlaySource.includes('diag: PANEL_DIAG') &&
     // Every way the panel can end leaves a line, not just the happy ones.
     overlaySource.includes('note_panel("the panel opened")') &&
-    overlaySource.includes('note_panel("the panel was closed")') &&
+    overlaySource.includes('note_panel(&format!("the panel was closed ({why})"))') &&
     overlaySource.includes('note_panel("its window was hidden while the panel was open; it was shown again")') &&
     overlaySource.includes('note_panel("its window had no web view in it; it was rebuilt")') &&
     nativeSource.includes('diag?: string[]') &&
     settingsSource2.includes('function PanelDiag()') &&
     settingsSource2.includes('void overlayStatus().then((status) => {') &&
     settingsSource2.includes('<PanelDiag />'),
+);
+check(
+  'every native close says who closed the panel',
+  // "the panel was closed" with nothing after it was the line that started
+  // this: a close with no reason is a mystery by construction.
+  /pub fn close_panel\(app: &AppHandle, why: &str\)/.test(overlaySource) &&
+    overlaySource.includes('note_panel(&format!("the panel was closed ({why})"))') &&
+    overlaySource.includes('close_panel(app, "the overlay was turned off in Settings");') &&
+    libSource.includes('overlay::close_panel(app, "Orbit is quitting");') &&
+    libSource.includes('overlay::close_panel(&handle, "Orbit\'s window was closed");') &&
+    // The second press is the close, so it has to name itself as well.
+    overlaySource.includes('hide_window(app, &format!("{why} asked again"));') &&
+    overlaySource.includes('static TOGGLE_WHY: Mutex<&\'static str>') &&
+    /pub fn request_toggle\(why: &'static str\)/.test(overlaySource) &&
+    libSource.includes('overlay::request_toggle("Alt+X");') &&
+    overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
+);
+check(
+  'a pad the loop has just started reading is not a pressed button',
+  // A device that connects while Start and Select sit together used to read as
+  // the overlay chord and close the panel on its own.
+  overlaySource.includes('fn seed_pad(buttons: &[bool], axes: &[f32])') &&
+    /fn seed_pad[\s\S]{0,700}watch\.both = pressed\(buttons, 9\) && pressed\(buttons, 8\);/.test(overlaySource) &&
+    overlaySource.includes('let mut connected: Option<u32> = None;') &&
+    /if connected != Some\(slot\) \{[\s\S]{0,900}seed_pad\(&buttons, &axes\);/.test(overlaySource),
 );
 check(
   'a panel that closes itself says which way out was taken',
@@ -370,7 +395,7 @@ check(
   overlaySource.includes('static ASKED_AT: Mutex<Option<std::time::Instant>>') &&
     overlaySource.includes('const TOGGLE_GAP: Duration = Duration::from_millis(320)') &&
     /now\.duration_since\(at\) < TOGGLE_GAP/.test(overlaySource) &&
-    /fn request_toggle[\s\S]{0,700}ASKED\.store\(true/.test(overlaySource),
+    /fn request_toggle\(why: &'static str\)[\s\S]{0,900}ASKED\.store\(true/.test(overlaySource),
 );
 check(
   'the pad shortcuts share the capture buttons',

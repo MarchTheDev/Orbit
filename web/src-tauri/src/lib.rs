@@ -1627,7 +1627,7 @@ fn ask_to_wait(app: &tauri::AppHandle) {
 }
 
 fn quit_now(app: &tauri::AppHandle) {
-    overlay::close_panel(app);
+    overlay::close_panel(app, "Orbit is quitting");
     if let Some(orbit) = app.try_state::<Orbit>() {
         orbit.runner.close_for_app_exit();
     }
@@ -2407,7 +2407,7 @@ pub fn run() {
                             }
                             // The overlay is its own window. Closing Orbit has to close it too,
                             // or the panel stays up and keeps working on its own.
-                            overlay::close_panel(&handle);
+                            overlay::close_panel(&handle, "Orbit's window was closed");
                             if hide {
                                 api.prevent_close();
                                 if let Some(window) = handle.get_webview_window("main") {
@@ -2447,7 +2447,7 @@ pub fn run() {
             // building the panel from that handler can stall its lock.
             if let Err(error) = app.global_shortcut().on_shortcut("Alt+X", |_app, _shortcut, event| {
                 if matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
-                    overlay::request_toggle();
+                    overlay::request_toggle("Alt+X");
                 }
             }) {
                 log::warn!("Alt+X could not be registered: {error}");
@@ -2606,7 +2606,7 @@ pub fn run() {
                 // process::exit below does not run destructors, and on Linux it
                 // also runs the handlers that abort. The page is killed first.
                 ambient::stop();
-                overlay::close_panel(app);
+                overlay::close_panel(app, "Orbit is quitting");
                 overlay::shutdown();
                 // WebKitGTK's page process aborts in its own exit, which the
                 // desktop shows as a crash. Kill that process, then end this
