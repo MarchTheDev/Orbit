@@ -2169,6 +2169,19 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     linux_window::prepare();
 
+    // Before anything WebKit touches, too. On Wayland with the proprietary
+    // NVIDIA driver, the compositor's explicit-sync path can strand a surface
+    // after its first frames - a window that flashes up and then never paints
+    // again. This is the stack's standard answer (and can only lose its job
+    // to a value the user set themselves).
+    #[cfg(target_os = "linux")]
+    if linux_window::wayland_backend()
+        && linux_window::nvidia_driver()
+        && std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none()
+    {
+        std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
+    }
+
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
     let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));

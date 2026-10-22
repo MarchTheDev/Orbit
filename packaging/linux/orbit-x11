@@ -17,6 +17,11 @@
 #   * If the only symptom is a blank or white window, often on NVIDIA, then
 #     WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit keeps the native backend and is
 #     the smaller hammer. Try that first.
+#   * If it is only the overlay that flashes up and vanishes on Wayland with
+#     the proprietary NVIDIA driver, it does not need this wrapper at all:
+#     Orbit already builds that window solid on that stack, and
+#     ORBIT_OVERLAY_TRANSPARENT=1 orbit tries the see-through window anyway
+#     (and =0 forces the solid one on any other stack).
 #
 # Arguments are passed through, so `orbit-x11 --whatever` behaves as `orbit
 # --whatever` would.

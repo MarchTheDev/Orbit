@@ -11,7 +11,7 @@
 //! unminimizes — feels immediate.
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -45,6 +45,32 @@ static ICON_HOOKED: AtomicBool = AtomicBool::new(false);
 static ICON_NOTIFY_HOOKED: AtomicBool = AtomicBool::new(false);
 static APPLYING_ICON: AtomicBool = AtomicBool::new(false);
 static PAGE_ENDED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the proprietary NVIDIA kernel module is driving this machine.
+/// `/sys/module/nvidia` is present for the closed and the open kernel modules
+/// alike, and both share the Wayland surface behaviour this is asked about.
+pub fn nvidia_driver() -> bool {
+    Path::new("/sys/module/nvidia").is_dir()
+}
+
+/// Whether GTK will draw through its Wayland backend in this session. The
+/// orbit-x11 wrapper pins `GDK_BACKEND=x11`, and then a window problem
+/// belongs to the X composite path, where the overlay's window kind works.
+pub fn wayland_backend() -> bool {
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return false;
+    }
+    // GDK_BACKEND can be a preference list like "wayland,x11"; only a session
+    // pinned to X first counts as an X session.
+    match std::env::var("GDK_BACKEND") {
+        Ok(value) => value
+            .split(',')
+            .next()
+            .map(|first| !first.trim().eq_ignore_ascii_case("x11"))
+            .unwrap_or(true),
+        Err(_) => true,
+    }
+}
 
 /// Whether minimise should leave the taskbar. Updated when settings change.
 pub fn set_armed(on: bool) {

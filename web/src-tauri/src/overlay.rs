@@ -1156,6 +1156,32 @@ fn toggle_on_main(app: &AppHandle) {
     }
 }
 
+/// Whether the panel asks for a see-through window.
+///
+/// Every desktop holds one except Linux with the proprietary NVIDIA driver on
+/// Wayland: KWin there drops WebKitGTK's RGBA toplevel within its first
+/// frames, and what is left is a mapped and beating window that paints
+/// nothing - the flash that reads as the overlay closing itself while Orbit
+/// still counts it open. An opaque window never touches that path, so on that
+/// one stack the panel stands on Orbit's dark ground instead of the game's
+/// picture: it loses the see-through between the boxes, but an invisible
+/// panel loses everything. ORBIT_OVERLAY_TRANSPARENT=1 forces see-through
+/// for the stacks that have this fixed, =0 forces solid; the guess above is
+/// for everyone else.
+#[cfg(target_os = "linux")]
+fn panel_see_through() -> bool {
+    if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
+        let forced = forced.to_string_lossy();
+        return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
+    }
+    !(crate::linux_window::wayland_backend() && crate::linux_window::nvidia_driver())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn panel_see_through() -> bool {
+    true
+}
+
 fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if STOP.load(Ordering::SeqCst) {
         return None;
@@ -1163,6 +1189,16 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
+    // See-through everywhere it holds. On the one Linux stack that drops an
+    // RGBA window the panel paints on Orbit's own ground instead: the page's
+    // dim and boxes then sit on the same colour they sit on in the main
+    // window, and the panel cannot vanish while it is open.
+    let see_through = panel_see_through();
+    let background = if see_through {
+        tauri::window::Color(0, 0, 0, 0)
+    } else {
+        tauri::window::Color(0x0b, 0x0a, 0x16, 255)
+    };
     // Leave capture protection off so Windows screenshot tools can include the
     // overlay. Orbit's own screen captures can include it as well.
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
@@ -1170,7 +1206,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .inner_size(1280.0, 720.0)
         .resizable(false)
         .decorations(false)
-        .transparent(true)
+        .transparent(see_through)
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -1182,7 +1218,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .visible(false)
         .focused(false)
         .center()
-        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .background_color(background)
         .initialization_script(
             "window.__ORBIT_OVERLAY__=true;var orbitOverlayStyle=document.createElement('style');orbitOverlayStyle.textContent='html,body,#root{background:transparent!important;height:100%}body::before{display:none!important}';(document.head||document.documentElement).appendChild(orbitOverlayStyle);",
         )
@@ -1192,6 +1228,11 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
+    if !see_through {
+        // Written down like every other thing the panel does, so Settings can
+        // say why this panel looks different from the screenshots.
+        note_panel("the panel was built solid; this Wayland + NVIDIA stack drops see-through windows, and ORBIT_OVERLAY_TRANSPARENT=1 tries one anyway");
+    }
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
