@@ -118,7 +118,7 @@ check(
 check(
   'B backs out of a box, and closes the overlay while it is only hovering',
   /action === 'back'[\s\S]*?focus\?\.level === 'inside'[\s\S]*?leaveBox\(focus\.id\)/.test(overlay) &&
-    /action === 'back'[\s\S]*?void overlayHide\(\);/.test(overlay) &&
+    /action === 'back'[\s\S]*?void overlayHide\("the pad's B button"\);/.test(overlay) &&
     !overlay.includes('nextBox('),
 );
 check(
@@ -257,6 +257,32 @@ check(
     settingsSource2.includes('function PanelDiag()') &&
     settingsSource2.includes('void overlayStatus().then((status) => {') &&
     settingsSource2.includes('<PanelDiag />'),
+);
+check(
+  'a panel that closes itself says which way out was taken',
+  // Three ways out, and each names itself, so "the page asked" is never the
+  // whole story again.
+  nativeSource.includes("export function overlayHide(reason = 'no reason given'): Promise<void> {") &&
+    nativeSource.includes("return call('overlay_hide', { reason }, () => undefined);") &&
+    libSource.includes('fn overlay_hide(app: tauri::AppHandle, reason: Option<String>)') &&
+    libSource.includes('overlay::hide(&app, reason.as_deref().unwrap_or("no reason given"));') &&
+    /pub fn hide\(app: &AppHandle, reason: &str\) \{\n    note_panel\(&format!\("hide was asked for by the page \(\{reason\}\)"\)\);/.test(overlaySource) &&
+    overlay.includes("overlayHide('Escape')") &&
+    overlay.includes('overlayHide("the pad\'s B button")') &&
+    overlay.includes("overlayHide('the close button')"),
+);
+check(
+  'the dim behind the boxes does not close the panel on a stray click',
+  // The panel covers the whole screen and takes the focus, so the click a
+  // player aims at the game landed on the dim - and shut the overlay.
+  overlay.includes('className="absolute inset-0 bg-black/45"') &&
+    !/bg-black\/45" onClick/.test(overlay) &&
+    // A click that used to close the panel now explains how it closes.
+    overlay.includes('The overlay stays open') &&
+    overlay.includes('Press Escape, B, or the ✕ in a box to close it.') &&
+    !overlay.includes('onClick={() => void overlayHide()}') &&
+    // The mouse still has a way out, and so do the keyboard and the pad.
+    overlay.split("overlayHide('the close button')").length - 1 === 2,
 );
 check(
   'the panel history keeps the reason instead of being overwritten by the close',

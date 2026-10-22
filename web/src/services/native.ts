@@ -1422,8 +1422,8 @@ export function overlayReplay(seconds: number, stamp: string): Promise<string> {
   });
 }
 
-export function overlayHide(): Promise<void> {
-  return call('overlay_hide', {}, () => undefined);
+export function overlayHide(reason = 'no reason given'): Promise<void> {
+  return call('overlay_hide', { reason }, () => undefined);
 }
 
 /** Proof for the native side that this page is still drawn, sent every second. */

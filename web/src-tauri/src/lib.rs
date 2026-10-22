@@ -782,7 +782,7 @@ fn append_playthrough_notes(app: tauri::AppHandle, orbit: State<'_, Orbit>, note
 /// The overlay cannot write settings. It asks the main window to open them.
 #[tauri::command]
 fn overlay_open_settings(app: tauri::AppHandle) {
-    overlay::hide(&app);
+    overlay::hide(&app, "the settings button");
     reveal_window(&app);
     let _ = app.emit("overlay-open-settings", ());
 }
@@ -880,8 +880,10 @@ fn overlay_theme(panel: String, text: String, muted: String, accent: String) {
 }
 
 #[tauri::command]
-fn overlay_hide(app: tauri::AppHandle) {
-    overlay::hide(&app);
+fn overlay_hide(app: tauri::AppHandle, reason: Option<String>) {
+    // The page says which of its own ways out was taken. Without that, every
+    // report of a panel closing itself read the same: "the page asked".
+    overlay::hide(&app, reason.as_deref().unwrap_or("no reason given"));
 }
 
 #[tauri::command]

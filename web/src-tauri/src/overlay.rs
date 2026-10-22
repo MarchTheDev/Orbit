@@ -751,6 +751,12 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
             let _ = window.emit("overlay-pad-axes", stick);
         }
         if let Some(action) = step.action {
+            // A B the player did not press is a ghost: a second device, a stuck
+            // pedal, a pad that reports the wrong index. Saying when the pad
+            // sent it tells that apart from the player's own press.
+            if action == "back" {
+                note_panel("the pad sent B");
+            }
             let _ = window.emit("overlay-pad", action);
         }
     }
@@ -799,8 +805,8 @@ pub fn status() -> OverlayStatus {
     }
 }
 
-pub fn hide(app: &AppHandle) {
-    note_panel("hide was asked for by the page");
+pub fn hide(app: &AppHandle, reason: &str) {
+    note_panel(&format!("hide was asked for by the page ({reason})"));
     hide_window(app);
 }
 

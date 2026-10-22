@@ -560,7 +560,7 @@ export function OverlayView() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        void overlayHide();
+        void overlayHide('Escape');
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
         event.preventDefault();
@@ -709,7 +709,7 @@ export function OverlayView() {
           leaveBox(focus.id);
           return;
         }
-        void overlayHide();
+        void overlayHide("the pad's B button");
         return;
       }
       if (action === 'activate') {
@@ -1006,7 +1006,7 @@ export function OverlayView() {
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
-      if (resting && !anyPinned(next, hiddenRef.current)) void overlayHide();
+      if (resting && !anyPinned(next, hiddenRef.current)) void overlayHide('the last pin was let go');
     });
   };
 
@@ -1117,7 +1117,21 @@ export function OverlayView() {
 
   return (
     <div className="relative h-full text-white">
-      {!resting && <div className="absolute inset-0 bg-black/45" onClick={() => void overlayHide()} />}
+      {/* The dim is only a dim. It used to close the panel on any click, which
+          meant a click meant for the game - the panel covers the whole screen
+          and takes the focus - quietly shut the overlay the player had just
+          opened. A click there now says how the panel is closed instead, so
+          the same click cannot look like the overlay closing itself. */}
+      {!resting && (
+        <div
+          className="absolute inset-0 bg-black/45"
+          onPointerDown={() => {
+            setToast({ title: 'The overlay stays open', detail: 'Press Escape, B, or the ✕ in a box to close it.', kind: 'ready' });
+            window.clearTimeout(toastTimer.current);
+            toastTimer.current = window.setTimeout(() => setToast(null), 3600);
+          }}
+        />
+      )}
       {toast && ToastIcon && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">
           <div
@@ -1176,7 +1190,7 @@ export function OverlayView() {
               type="button"
               data-overlay
               aria-label="Close"
-              onClick={() => void overlayHide()}
+              onClick={() => void overlayHide('the close button')}
               className="grid size-7 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
             >
               <X className="size-4" />
@@ -1283,7 +1297,7 @@ export function OverlayView() {
               type="button"
               data-overlay
               aria-label="Close"
-              onClick={() => void overlayHide()}
+              onClick={() => void overlayHide('the close button')}
               className="grid size-7 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
             >
               <X className="size-4" />
