@@ -182,7 +182,12 @@ export function padJustActivated(withinMs = 800): boolean {
 function activate() {
   const current = document.activeElement;
   if (!(current instanceof HTMLElement)) return;
-  if (current.matches('[data-orbit-pad="tile"]')) padActivateAt = performance.now();
+  // A tile in the library opens its drawer on a pad press; a cover in TV mode
+  // is the thing to play, so both are marked as pad presses for the page that
+  // receives the click to tell apart from a mouse click.
+  if (current.matches('[data-orbit-pad="tile"], [data-tv-cover], [data-tv-play]')) {
+    padActivateAt = performance.now();
+  }
   current.click();
 }
 

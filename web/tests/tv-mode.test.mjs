@@ -148,6 +148,8 @@ check('there are no shelves or category tabs to choose between first',
 check('the page opens on the game you played last', title() === 'Middle Of It' && selected() === '0', `${title()} / ${selected()}`);
 check('nothing labels the mode on the screen itself',
   !document.querySelector('[data-orbit-tv]')?.textContent?.includes('a controller drives'));
+check('the keys are not spelled out along the bottom any more',
+  !document.querySelector('[data-orbit-tv] footer'));
 check('the top bar has no TV chip beside the name', !document.querySelector('[data-orbit-tv] header')?.textContent?.includes('TV'));
 check('and that game has the rail’s focus', document.activeElement?.getAttribute('data-tv-cover') === '0');
 
@@ -174,6 +176,13 @@ check('right in the buttons goes to the next button, not the next game',
 check('and the game on screen did not change', selected() === '3', String(selected()));
 await key('ArrowLeft');
 check('left comes back to Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
+await key('ArrowUp');
+check('up from the buttons reaches the top bar, where the way out is',
+  document.activeElement?.closest('[data-tv-topbar]') !== null);
+check('and there is a button there that leaves TV mode',
+  [...document.querySelectorAll('[data-tv-topbar] button')].some(
+    (button) => button.getAttribute('aria-label') === 'Leave TV mode',
+  ));
 await key('ArrowDown');
 check('down comes back to the rail', document.activeElement?.getAttribute('data-tv-cover') === '3');
 
@@ -183,25 +192,73 @@ await act(async () => {
 check('clicking a cover selects it without playing it',
   title() === 'Also Half Done' && played.length === 1, `${title()} / ${played.length}`);
 
-await act(async () => {
-  buttonWith('Details').click();
-});
-check('details hands the game back to the app', details === 'p2', String(details));
-
 // Enter belongs to a focused button when one is focused, or pressing it twice
-// would both open the details and start the game behind them.
+// would both open the details and start the game behind it.
 played.length = 0;
-details = null;
 await key('ArrowUp');
 await key('ArrowRight');
 await act(async () => {
   document.activeElement.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 });
-check('a focused button answers its own Enter/click', details === 'p2' && played.length === 0,
-  `details ${details} / played ${played.length}`);
+check('a focused button answers its own Enter/click',
+  played.length === 0 && !document.querySelector('[data-tv-cover]'),
+  `played ${played.length}`);
+
+console.log('details is a page of the hub, not a way out of it');
+
+check('Details shows the game in TV mode rather than leaving it',
+  details === 'p2' && !document.querySelector('[data-tv-cover]'),
+  `${details} / rail ${!!document.querySelector('[data-tv-cover]')}`);
+const page = document.querySelector('[data-orbit-tv]');
+check('the game\'s own page is on screen, at TV size',
+  page.textContent.includes('Back to the rail') && !!page.querySelector('h1'));
+check('it says what has been played of it',
+  page.textContent.includes('played') || !!page.querySelector('h1'));
+check('and how long the main story takes', page.textContent.toLowerCase().includes('main story'));
+check('a pad or a keyboard lands on Back first', document.activeElement?.getAttribute('data-tv-action') === 'back');
+
+await key('ArrowRight');
+check('right moves between the page\'s own buttons', document.activeElement?.getAttribute('data-tv-action') === 'play');
+await key('ArrowLeft');
+check('and left comes back', document.activeElement?.getAttribute('data-tv-action') === 'back');
 
 await key('Escape');
-check('escape leaves TV mode', left === 1);
+check('escape on a game\'s page goes back to the rail rather than out of TV mode',
+  !!document.querySelector('[data-tv-cover]') && left === 0,
+  `rail ${!!document.querySelector('[data-tv-cover]')} / left ${left}`);
+check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
+
+await key('Escape');
+check('escape on the rail leaves TV mode', left === 1);
+
+console.log('a controller drives the same hub');
+
+await render(library);
+const pad = (name, detail) => {
+  act(() => {
+    window.dispatchEvent(new dom.window.CustomEvent(name, { detail }));
+  });
+};
+played.length = 0;
+await key('ArrowRight');
+act(() => {
+  window.dispatchEvent(new dom.window.CustomEvent('orbit-pad-play'));
+});
+check('Start on the controller plays the game the hub is about',
+  played.join() === 'p2', JSON.stringify(played));
+
+pad('orbit-pad-back');
+await act(async () => wait(20));
+check('Back on the controller leaves TV mode from the rail', left === 2, String(left));
+
+// From a game's page the same press steps back to the rail, not out of the mode.
+await render(library);
+await act(async () => {
+  buttonWith('Details').click();
+});
+pad('orbit-pad-back');
+await act(async () => wait(20));
+check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 2);
 
 console.log('the rail can be read by name instead of by memory');
 
@@ -224,6 +281,10 @@ check('switching order does not lose the rail', covers().length === 4);
 // than an ellipsis on the first.
 check('rail titles are allowed to wrap instead of being cut',
   !!document.querySelector('[data-tv-cover] span.line-clamp-2'));
+const other = document.querySelectorAll('[data-tv-cover]')[1]?.querySelector('span');
+check('hovering a cover speaks the same accent as selecting one',
+  other?.className.includes('group-hover:border-accent') === true,
+  String(other?.className));
 
 console.log('a running game says so, and can be stopped from the hub');
 

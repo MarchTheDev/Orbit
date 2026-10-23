@@ -2,10 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   Clock,
-  CornerDownLeft,
   Gamepad2,
   HardDrive,
   Hourglass,
@@ -21,7 +18,9 @@ import { inLibraryShelf } from '../utils/library';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
 import { Logo } from './ui/Logo';
+import { TvDetails } from './TvDetails';
 import { MusicButton } from './MusicButton';
+import { padJustActivated } from '../hooks/useGamepad';
 
 /** How the one list on the page is ordered. */
 export type TvOrder = 'recent' | 'az';
@@ -211,12 +210,16 @@ export function TvMode({
   const [order, setOrder] = useState<TvOrder>('recent');
   const list = useMemo(() => orderedForTv(games, order), [games, order]);
 
+  /** The game being read on its own page, if one is. */
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   // A game that stops being playable - or a new one that lands at the front -
   // must not leave the selection pointing past the end of the rail.
   const at = Math.min(index, Math.max(0, list.length - 1));
   const active = list[at] ?? null;
   const running = active !== null && active.id === runningId;
+  /** The game whose own page is open, when it is still one of the playable ones. */
+  const detailed = detailId ? (list.find((game) => game.id === detailId) ?? null) : null;
   const playingNow = list.find((game) => game.id === runningId) ?? null;
 
   const rail = useRef<HTMLUListElement>(null);
@@ -297,8 +300,9 @@ export function TvMode({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // A dialog opened over the hub owns the keyboard while it is up.
-      if (document.querySelector('[role="dialog"]')) return;
+      // A game's own page reads its own keys, and a dialog over the hub owns
+      // them outright.
+      if (detailed || document.querySelector('[role="dialog"]')) return;
       const inActions = onAction(document.activeElement);
       switch (event.key) {
         case 'Escape':
@@ -323,10 +327,19 @@ export function TvMode({
           select(at + (event.key === 'ArrowRight' ? 1 : -1));
           return;
         }
-        case 'ArrowUp':
+        case 'ArrowUp': {
           event.preventDefault();
+          // Up from the rail reaches the game's own buttons; up again leaves
+          // the page for the bar at the top, where the sound and the way out
+          // are. Without that second step the bar would need a mouse.
+          if (inActions) {
+            const bar = document.querySelector<HTMLElement>('[data-tv-topbar] button');
+            bar?.focus({ preventScroll: true });
+            return;
+          }
           (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
           return;
+        }
         case 'ArrowDown':
           event.preventDefault();
           coverOf(at)?.focus({ preventScroll: true });
@@ -351,7 +364,41 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, onExit, select, start]);
+  }, [at, detailed, onExit, select, start]);
+
+  /**
+   * The controller.
+   *
+   * A pad does not send arrow keys: it moves the focus ring itself, and the
+   * hub follows the ring, so walking the rail with a stick works without any of
+   * this. What it cannot do on its own is the two things the mode is named for:
+   * a confirm press on a cover plays the game rather than only selecting it,
+   * and Back steps out of a game's page - or out of TV mode when there is no
+   * page to step out of.
+   */
+  useEffect(() => {
+    const onPadPlay = () => {
+      if (detailed) {
+        if (detailed.id === runningId) onStop();
+        else onPlay(detailed);
+        return;
+      }
+      start();
+    };
+    const onPadBack = (event: Event) => {
+      // Answered here rather than by the shell: only the hub knows whether it
+      // is on the rail or on a game's page.
+      event.stopImmediatePropagation();
+      if (detailed) setDetailId(null);
+      else onExit();
+    };
+    window.addEventListener('orbit-pad-play', onPadPlay);
+    window.addEventListener('orbit-pad-back', onPadBack, true);
+    return () => {
+      window.removeEventListener('orbit-pad-play', onPadPlay);
+      window.removeEventListener('orbit-pad-back', onPadBack, true);
+    };
+  }, [detailed, onExit, onPlay, onStop, runningId, start]);
 
   const left =
     active?.hltb?.main && active.hltb.main > 0
@@ -371,7 +418,7 @@ export function TvMode({
 
       {/* The top panel: where you are, and the room's small facts. It floats on
           the artwork rather than sitting in a bar of its own. */}
-      <header className="relative z-20 flex shrink-0 items-center gap-3 px-5 pb-4 pt-4 sm:px-9 sm:pt-5">
+      <header data-tv-topbar className="relative z-20 flex shrink-0 items-center gap-3 px-5 pb-4 pt-4 sm:px-9 sm:pt-5">
         <span className="flex items-center gap-3">
           <Logo className="size-7 drop-shadow-[0_2px_10px_var(--c-accent)]" animated />
           <span className="hidden text-lg font-bold tracking-tight text-white/90 sm:block">Orbit</span>
@@ -411,14 +458,25 @@ export function TvMode({
           onClick={onExit}
           title="Leave TV mode (Esc)"
           aria-label="Leave TV mode"
-          className="grid size-9 place-items-center rounded-full text-white/50 transition hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-accent"
+          className="grid size-9 place-items-center rounded-full text-white/50 transition hover:bg-accent/15 hover:text-white focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Minimize2 className="size-5" />
         </button>
       </header>
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col">
-        {!active ? (
+        {detailed ? (
+          <TvDetails
+            game={detailed}
+            running={detailed.id === runningId}
+            onPlay={() => onPlay(detailed)}
+            onStop={onStop}
+            onBack={() => {
+              setDetailId(null);
+              setIndex(list.findIndex((game) => game.id === detailed.id));
+            }}
+          />
+        ) : !active ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
             <span className="grid size-20 place-items-center rounded-3xl border border-dashed border-line text-muted">
               <Gamepad2 className="size-9" />
@@ -506,7 +564,10 @@ export function TvMode({
                     )}
                     <button
                       data-tv-action="details"
-                      onClick={() => onDetails(active)}
+                      onClick={() => {
+                        setDetailId(active.id);
+                        onDetails(active);
+                      }}
                       className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/[0.07] px-6 py-3.5 text-[15px] font-semibold text-white/90 backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.12] focus-visible:ring-4 focus-visible:ring-accent/40"
                     >
                       <Info className="size-4" />
@@ -542,7 +603,7 @@ export function TvMode({
                       title={id === 'recent' ? 'Ordered by what you played last' : 'Ordered by name'}
                       className={cn(
                         'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus-visible:ring-2 focus-visible:ring-accent',
-                        order === id ? 'bg-white/15 text-white' : 'text-white/45 hover:text-white/80',
+                        order === id ? 'bg-accent/25 text-white' : 'text-white/45 hover:text-accent',
                       )}
                     >
                       <Icon className="size-3" />
@@ -561,7 +622,7 @@ export function TvMode({
                   if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
                   if (rail.current) rail.current.scrollLeft += event.deltaY;
                 }}
-                className="tv-rail flex items-start gap-3.5 overflow-x-auto px-5 pb-5 pt-2 sm:px-9"
+                className="tv-rail orbit-scroll flex items-start gap-3.5 overflow-x-auto px-5 pb-5 pt-2 sm:px-9"
               >
                 {list.map((game, n) => {
                   const chosen = n === at;
@@ -570,7 +631,17 @@ export function TvMode({
                       <button
                         data-tv-cover={n}
                         onFocus={() => setIndex(n)}
-                        onClick={() => setIndex(n)}
+                        onClick={() => {
+                          // The same button is the mouse's "look at this" and
+                          // the pad's "play this", so the press that produced
+                          // the click is what tells them apart.
+                          if (padJustActivated(400)) {
+                            if (game.id === runningId) onStop();
+                            else onPlay(game);
+                            return;
+                          }
+                          setIndex(n);
+                        }}
                         onDoubleClick={() => {
                           if (game.id !== runningId) onPlay(game);
                         }}
@@ -583,8 +654,8 @@ export function TvMode({
                           className={cn(
                             'relative block aspect-[2/3] w-full overflow-hidden rounded-xl border transition duration-200',
                             chosen
-                              ? 'border-accent/70 shadow-[0_0_0_2px_rgba(139,92,246,.85),0_18px_45px_rgba(0,0,0,.65)]'
-                              : 'border-white/10 opacity-50 shadow-lg group-hover:opacity-90',
+                              ? 'border-accent/70 opacity-100 shadow-[0_0_0_2px_rgba(139,92,246,.85),0_18px_45px_rgba(0,0,0,.65)]'
+                              : 'border-white/10 opacity-55 shadow-lg group-hover:border-accent/50 group-hover:opacity-100',
                           )}
                         >
                           <Cover game={game} className="size-full [&_span]:text-xl" />
@@ -600,7 +671,7 @@ export function TvMode({
                         <span
                           className={cn(
                             'mt-1.5 line-clamp-2 min-h-[2.1rem] text-center text-[11px] font-medium leading-[1.15] transition',
-                            chosen ? 'text-white' : 'text-white/45 group-hover:text-white/75',
+                            chosen ? 'text-white' : 'text-white/45 group-hover:text-accent',
                           )}
                         >
                           {game.title}
@@ -615,27 +686,6 @@ export function TvMode({
         )}
       </main>
 
-      {/* The prompts, small, along the bottom: a console tells you which button
-          does what rather than making you find a menu to ask. */}
-      <footer className="relative z-20 flex shrink-0 items-center gap-5 bg-gradient-to-t from-[#05040d] to-transparent px-5 pb-3 pt-2 text-[11px] text-white/35 sm:px-9">
-        <span className="flex items-center gap-1.5">
-          <ChevronLeft className="size-3.5" />
-          <ChevronRight className="size-3.5" />
-          browse
-        </span>
-        <span className="hidden items-center gap-1.5 sm:flex">
-          <kbd className="rounded border border-white/15 px-1.5 py-0.5 font-sans text-[10px]">↑</kbd>
-          buttons
-        </span>
-        <span className="flex items-center gap-1.5">
-          <CornerDownLeft className="size-3.5" />
-          play
-        </span>
-        <span className="flex items-center gap-1.5">
-          <kbd className="rounded border border-white/15 px-1.5 py-0.5 font-sans text-[10px]">Esc</kbd>
-          leave
-        </span>
-      </footer>
     </div>
   );
 }

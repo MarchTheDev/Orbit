@@ -1095,10 +1095,9 @@ export default function App() {
       if (picked) void startGame(picked);
     };
     const onBack = () => {
-      if (tv) {
-        leaveTv();
-        return;
-      }
+      // Back in TV mode is answered by the hub, which knows whether it should
+      // step out of a game's page or out of the mode itself.
+      if (tv) return;
       if (selectedId) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
     };
@@ -1127,7 +1126,7 @@ export default function App() {
       window.removeEventListener('orbit-pad-back', onBack);
       window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder, tv, leaveTv]);
+  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder, tv]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -1202,13 +1201,9 @@ export default function App() {
         showBars={settings.musicBars !== false}
         onPlay={(game) => void startGame(game)}
         onStop={() => void stop()}
-        onDetails={(game) => {
-          // The hub says enough to choose; anything more is the app's own page,
-          // so Details hands the game back to the shell and leaves TV mode.
-          leaveTv();
-          setPage('library');
-          openDetail(game.id);
-        }}
+        // Details is a page of the hub: the game is read in TV mode, at the
+        // size TV mode is read, and Back returns to the rail.
+        onDetails={() => undefined}
         onExit={leaveTv}
         onOpenSettings={() => {
           leaveTv();

@@ -168,10 +168,12 @@ export function TopNav({
           onClick={onTv}
           aria-label="TV mode"
           title="TV mode: the library fullscreen, for a controller and a couch"
-          className="group flex items-center gap-2 rounded-full border border-line bg-panel/60 py-1.5 pl-2.5 pr-3 text-xs font-semibold text-muted transition hover:border-accent hover:text-fg"
+          className="orbit-tv-button group flex items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-xs font-semibold"
         >
-          <Tv className="size-4" strokeWidth={1.8} />
-          <span className="hidden sm:inline">TV</span>
+          <span className="grid size-7 place-items-center rounded-full">
+            <Tv className="size-4" strokeWidth={1.9} />
+          </span>
+          <span className="hidden pr-0.5 sm:inline">TV</span>
         </button>
         {showMusic && (
           <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />

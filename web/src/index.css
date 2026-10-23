@@ -850,3 +850,42 @@ html.orbit-pad .tv-root [data-tv-action].orbit-pad-focus {
   .tv-rail { scroll-behavior: auto; }
   .tv-cover span { transition: none; }
 }
+
+/* The way into TV mode, in the top bar.
+ *
+ * It is not a page and it is not a setting: it changes what the whole window
+ * is, which is why it gets the accent and a little depth rather than the flat
+ * grey outline of the buttons around it. The icon sits in its own disc so the
+ * button reads as one shape at a glance from across a room, and the glow only
+ * arrives on hover - a permanent halo next to the volume would pull the eye
+ * away from the library, which is what the bar is for. */
+.orbit-tv-button {
+  border: 1px solid color-mix(in srgb, var(--c-accent) 35%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 16%, transparent), color-mix(in srgb, var(--c-accent) 8%, transparent));
+  color: color-mix(in srgb, var(--c-accent) 62%, var(--c-text));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+  transition: border-color .15s ease, box-shadow .2s ease, color .15s ease, transform .12s ease;
+}
+.orbit-tv-button .grid {
+  background: color-mix(in srgb, var(--c-accent) 22%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 80%, var(--c-text));
+  transition: background-color .15s ease;
+}
+.orbit-tv-button:hover {
+  border-color: var(--c-accent);
+  color: var(--c-text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--c-accent) 16%, transparent),
+    0 6px 18px color-mix(in srgb, var(--c-accent) 28%, transparent);
+}
+.orbit-tv-button:hover .grid {
+  background: color-mix(in srgb, var(--c-accent) 40%, transparent);
+  color: #fff;
+}
+.orbit-tv-button:active { transform: translateY(1px); }
+.orbit-tv-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c-accent) 65%, transparent);
+  outline-offset: 2px;
+}
