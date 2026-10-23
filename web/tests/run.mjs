@@ -49,6 +49,7 @@ const checks = [
   'tests/plan-dialog.test.mjs',
   'tests/plan-cache.test.mjs',
   'tests/requirements.test.mjs',
+  'tests/tv-mode.test.mjs',
 ];
 
 try {

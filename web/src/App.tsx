@@ -53,6 +53,8 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { TvMode } from './components/TvMode';
+import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Hero } from './components/Hero';
@@ -112,6 +114,26 @@ export default function App() {
     ready,
   } = useLibrary();
   const [page, setPage] = useState<Page>('library');
+  /** TV mode: the library fullscreen, read from a couch. */
+  const [tv, setTv] = useState(false);
+
+  /**
+   * Fill the screen, and give it back.
+   *
+   * The window is made fullscreen by whoever asked for TV mode, not by the page
+   * itself, because a browser only honours the request while a click is still
+   * being handled. A refusal is not a failure: the hub works in the window it
+   * has, so nothing is undone and nothing is said about it.
+   */
+  const enterTv = useCallback(() => {
+    setTv(true);
+    void enterFullscreen();
+  }, []);
+
+  const leaveTv = useCallback(() => {
+    setTv(false);
+    void leaveFullscreen();
+  }, []);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
@@ -1053,7 +1075,11 @@ export default function App() {
   // clears a selection, then leaves the page. Escape, which the pad also
   // sends, already closes a dialog that is open.
   useEffect(() => {
+    // TV mode has its own keys, and the shelf it is on is not this page's
+    // selection. Anything the pad does there is answered by the hub, so the
+    // library's own handlers step aside rather than starting a second game.
     const onPlay = () => {
+      if (tv) return;
       if (session) {
         void stop();
         return;
@@ -1069,10 +1095,16 @@ export default function App() {
       if (picked) void startGame(picked);
     };
     const onBack = () => {
+      if (tv) {
+        leaveTv();
+        return;
+      }
       if (selectedId) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
     };
     const onPage = (event: Event) => {
+      // The shoulders page the library, which is not what is on screen.
+      if (tv) return;
       // The details drawer listens too, but both listeners are on the window, and
       // a capture listener added later does not run first. While the drawer is
       // open the shoulders belong to its tabs, not to these pages.
@@ -1095,7 +1127,7 @@ export default function App() {
       window.removeEventListener('orbit-pad-back', onBack);
       window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder]);
+  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder, tv, leaveTv]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -1156,6 +1188,36 @@ export default function App() {
     );
   }
 
+  // TV mode is the whole window, not a panel over it: the app's own shell is
+  // not drawn at all while it is on, so nothing behind it can take focus, be
+  // clicked through, or keep the controller ring wandering off the shelves.
+  if (tv) {
+    return (
+      <TvMode
+        games={played}
+        runningId={runningGame?.id ?? null}
+        sound={settings.sound}
+        setSound={(sound) => setSettings({ sound })}
+        showMusic={settings.topbarMusic !== false}
+        showBars={settings.musicBars !== false}
+        onPlay={(game) => void startGame(game)}
+        onStop={() => void stop()}
+        onDetails={(game) => {
+          // The hub says enough to choose; anything more is the app's own page,
+          // so Details hands the game back to the shell and leaves TV mode.
+          leaveTv();
+          setPage('library');
+          openDetail(game.id);
+        }}
+        onExit={leaveTv}
+        onOpenSettings={() => {
+          leaveTv();
+          openSettings('orbit-sound');
+        }}
+      />
+    );
+  }
+
   // The opening is on unless it has been turned off, and it is the same switch
   // that fades the shell in behind it. It plays once, when the app starts.
   const opening = !booted && settings.startupAnimation !== false;
@@ -1182,6 +1244,7 @@ export default function App() {
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
         showBars={settings.musicBars !== false}
+        onTv={enterTv}
       />
 
       {dragOver && !showAdd && (

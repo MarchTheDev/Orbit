@@ -41,6 +41,12 @@ story`, written by hand and editable afterwards.
 **Storage** - the games grouped by drive, with how much room every library
 folder takes and a Move button that keeps the library pointing at the game.
 
+**TV mode** - the same library read from a sofa: the window goes fullscreen and
+the games become shelves of covers - what you are playing, what you put down,
+what is waiting - with one game held out large and Play as the only decision on
+the screen. Arrows move, Enter plays, Escape leaves; a controller does the same
+thing. It is the TV button beside the sound controls in the top bar.
+
 ## Starting a game
 
 | Kind | What Orbit does |
@@ -98,6 +104,7 @@ web/
   src/                     the interface
     components/            screens and pieces of them
     hooks/                 useLibrary (data), useSession (the running game)
+    components/TvMode.tsx  the fullscreen hub, and how its shelves are chosen
     services/metadata.ts   the store lookup
     services/native.ts     every call into Rust, with browser fallbacks
     services/desktop.ts    the file pickers, links and drag and drop
