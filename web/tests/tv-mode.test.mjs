@@ -30,7 +30,7 @@ dom.window.Element.prototype.scrollBy = () => {};
 
 const { act, createElement } = await import('react');
 const { createRoot } = await import('react-dom/client');
-const { TvMode, orderedForTv, playableGames } = await import('../src/components/TvMode.tsx');
+const { TvMode, backdropsFor, orderedForTv, playableGames } = await import('../src/components/TvMode.tsx');
 const { enterFullscreen, leaveFullscreen, fullscreenError } = await import('../src/services/tv.ts');
 
 let failures = 0;
@@ -85,6 +85,22 @@ check('A–Z is there for finding one particular game',
   orderedForTv(library, 'az').map((game) => game.title).join());
 check('an empty library has an empty rail', orderedForTv([], 'recent').length === 0);
 
+console.log('the picture behind the page is the sharp one');
+
+const steamGame = {
+  ...SAMPLE_GAMES[1],
+  id: 'art',
+  title: 'Art Test',
+  meta: { ...SAMPLE_GAMES[1].meta, steamAppId: 1245620, backgroundUrl: 'https://store/background.jpg', headerUrl: 'https://store/header.jpg' },
+};
+const art = backdropsFor(steamGame);
+check('the store’s big screen artwork is asked for first, not the header',
+  art[0] === 'https://cdn.cloudflare.steamstatic.com/steam/apps/1245620/library_hero.jpg', art[0]);
+check('the library’s own pictures are the fallbacks', art.slice(1).join() === 'https://store/background.jpg,https://store/header.jpg');
+check('a game from Steam by its launch target still gets it',
+  backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'steam', appId: 220 } })[0].includes('/220/'));
+check('a game with no store id has nothing to guess at', backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'none' } }).length === 0);
+
 console.log('the hub: one rail, and the selected game all over the screen');
 
 const played = [];
@@ -130,6 +146,9 @@ check('there are no shelves or category tabs to choose between first',
   !document.querySelector('[data-tv-shelf]') &&
     !['Up next', 'Favourites', 'Jump back in'].some((label) => document.body.textContent.includes(label)));
 check('the page opens on the game you played last', title() === 'Middle Of It' && selected() === '0', `${title()} / ${selected()}`);
+check('nothing labels the mode on the screen itself',
+  !document.querySelector('[data-orbit-tv]')?.textContent?.includes('a controller drives'));
+check('the top bar has no TV chip beside the name', !document.querySelector('[data-orbit-tv] header')?.textContent?.includes('TV'));
 check('and that game has the rail’s focus', document.activeElement?.getAttribute('data-tv-cover') === '0');
 
 await key('ArrowRight');
@@ -146,7 +165,15 @@ await key('Enter');
 check('enter plays the game the hub is about', played.join() === 'hand', JSON.stringify(played));
 
 await key('ArrowUp');
-check('up reaches the buttons', document.activeElement?.tagName === 'BUTTON' && document.activeElement.textContent.includes('Play'));
+check('up reaches the buttons', document.activeElement?.getAttribute('data-tv-action') === 'play');
+await key('ArrowRight');
+check('right in the buttons goes to the next button, not the next game',
+  document.activeElement?.getAttribute('data-tv-action') === 'details' &&
+    document.activeElement?.getAttribute('data-tv-cover') === null,
+  String(document.activeElement?.getAttribute('data-tv-action')));
+check('and the game on screen did not change', selected() === '3', String(selected()));
+await key('ArrowLeft');
+check('left comes back to Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowDown');
 check('down comes back to the rail', document.activeElement?.getAttribute('data-tv-cover') === '3');
 
@@ -161,6 +188,18 @@ await act(async () => {
 });
 check('details hands the game back to the app', details === 'p2', String(details));
 
+// Enter belongs to a focused button when one is focused, or pressing it twice
+// would both open the details and start the game behind them.
+played.length = 0;
+details = null;
+await key('ArrowUp');
+await key('ArrowRight');
+await act(async () => {
+  document.activeElement.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+});
+check('a focused button answers its own Enter/click', details === 'p2' && played.length === 0,
+  `details ${details} / played ${played.length}`);
+
 await key('Escape');
 check('escape leaves TV mode', left === 1);
 
@@ -169,8 +208,11 @@ console.log('the rail can be read by name instead of by memory');
 await render(library);
 const sortButton = buttonWith('Recent');
 check('the order the rail is in is on the page, and can be changed', !!sortButton);
+check('the sort sits with the rail, not up in the top bar',
+  sortButton.parentElement.closest('header') === null &&
+    sortButton.closest('section') !== null);
 await act(async () => {
-  sortButton.click();
+  buttonWith('A–Z').click();
 });
 check('A–Z puts the rail in name order',
   covers().map((cover) => cover.getAttribute('title')).join() ===
@@ -178,6 +220,10 @@ check('A–Z puts the rail in name order',
   covers().map((cover) => cover.getAttribute('title')).join());
 check('and says which order it is in', !!buttonWith('A–Z'));
 check('switching order does not lose the rail', covers().length === 4);
+// A long name is the one thing a rail cannot guess at: it gets two lines rather
+// than an ellipsis on the first.
+check('rail titles are allowed to wrap instead of being cut',
+  !!document.querySelector('[data-tv-cover] span.line-clamp-2'));
 
 console.log('a running game says so, and can be stopped from the hub');
 

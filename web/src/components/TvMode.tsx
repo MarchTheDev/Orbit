@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   Clock,
   CornerDownLeft,
   Gamepad2,
+  HardDrive,
   Hourglass,
   Info,
   ListOrdered,
   Minimize2,
   Play,
   Square,
-  Tv,
 } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
@@ -49,12 +50,119 @@ export function playableGames(games: Game[]): Game[] {
 export function orderedForTv(games: Game[], order: TvOrder): Game[] {
   const shown = playableGames(games);
   if (order === 'az') return [...shown].sort((a, b) => a.title.localeCompare(b.title));
-  const stamp = (game: Game) => game.lastPlayed ?? game.addedAt ?? '';
   return [...shown].sort((a, b) => {
     const played = (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? '');
     if (played !== 0) return played;
-    return stamp(b).localeCompare(stamp(a)) || a.title.localeCompare(b.title);
+    return (
+      (b.addedAt ?? '').localeCompare(a.addedAt ?? '') || a.title.localeCompare(b.title)
+    );
   });
+}
+
+/** The store's id for a game, whether it is in the details or in the launch target. */
+function steamIdOf(game: Game): number | null {
+  const fromMeta = game.meta?.steamAppId ?? null;
+  if (fromMeta) return fromMeta;
+  const launch = game.launch;
+  return launch && 'appId' in launch && typeof launch.appId === 'number' ? launch.appId : null;
+}
+
+/**
+ * The pictures this game can put behind the hub, sharpest first.
+ *
+ * The store's `background_image` is a page backdrop at a few hundred pixels,
+ * which is exactly what a 4K television makes obvious: blown up across the
+ * whole screen it is a smear. Steam publishes a `library_hero` for most games at
+ * around 3840 across, which is the picture its own big-screen UI uses, and it is
+ * addressed by app id alone - so it is asked for first and the older pictures
+ * are only there in case a game has none. A URL that does not exist costs one
+ * failed request and nothing else; the next one in the list is tried.
+ */
+export function backdropsFor(game: Game): string[] {
+  const id = steamIdOf(game);
+  const out: string[] = [];
+  if (id) out.push(`https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_hero.jpg`);
+  if (game.meta?.backgroundUrl) out.push(game.meta.backgroundUrl);
+  if (game.meta?.headerUrl) out.push(game.meta.headerUrl);
+  return out;
+}
+
+/**
+ * The artwork behind the hub, swapped as the selection moves.
+ *
+ * Two layers on purpose. The cheap picture - the one already in the library's
+ * own cache - is stretched and blurred underneath, so the screen is never empty
+ * while the big one travels; the sharp one fades in over it once it is actually
+ * decoded. A failed picture steps down the list rather than leaving a hole.
+ */
+function Backdrop({ game }: { game: Game }) {
+  const [step, setStep] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const shown = useRef<HTMLImageElement>(null);
+  const list = backdropsFor(game);
+  const src = list[step] ?? null;
+
+  useEffect(() => {
+    setStep(0);
+    setLoaded(false);
+  }, [game.id]);
+
+  // A picture already in the cache can finish before React's load listener is
+  // attached, and would then never be shown at all.
+  useEffect(() => {
+    if (shown.current?.complete) setLoaded(true);
+  }, [src]);
+
+  const soft = game.meta?.headerUrl ?? game.meta?.backgroundUrl ?? null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      {soft && (
+        <img
+          key={`soft-${game.id}`}
+          src={soft}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-70 blur-2xl"
+        />
+      )}
+      {src ? (
+        <img
+          key={src}
+          ref={shown}
+          src={src}
+          alt=""
+          aria-hidden
+          onLoad={() => setLoaded(true)}
+          onError={() => {
+            setLoaded(false);
+            setStep((at) => at + 1);
+          }}
+          className={cn(
+            'absolute inset-0 h-full w-full object-cover transition duration-700 ease-out',
+            loaded ? 'scale-[1.02] opacity-100' : 'scale-[1.06] opacity-0',
+          )}
+        />
+      ) : (
+        <Cover game={game} className="absolute inset-0 size-full [&_span]:hidden" />
+      )}
+      {/* The scrims. Everything over the picture is read against the darkest
+          corner of it, and the picture fades into the rail rather than ending
+          at a line above it. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-[#05040d] via-[#05040d]/55 to-[#05040d]/10" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#05040d] via-[#05040d]/45 to-transparent" />
+    </div>
+  );
+}
+
+/** A small fact about the game, in the row under its name. */
+function Fact({ icon: Icon, children }: { icon: typeof Clock; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12.5px] font-medium text-white/80 backdrop-blur-sm">
+      <Icon className="size-3.5 text-white/50" />
+      {children}
+    </span>
+  );
 }
 
 /**
@@ -65,14 +173,13 @@ export function orderedForTv(games: Game[], order: TvOrder): Game[] {
  * behind everything, its name, its numbers and its Play button in front - and
  * the rest of the library is one rail of covers along the bottom that you move
  * along. No categories, no shelves to choose between first: every game you can
- * start is on that one rail, in the order you are likely to want it, and the
- * page is decided the moment it opens.
+ * start is on that one rail, and the page is decided the moment it opens.
  *
  * Everything is one axis of movement, which is what makes it work from a couch:
- * left and right walk the rail, and the game the page is about changes with it.
- * Up reaches the buttons, down comes back; Enter plays; Escape gives the screen
- * back. The pad drives the same rail through the focus ring the rest of the app
- * uses, so a controller and a keyboard are the same interface.
+ * left and right walk the rail and the game the page is about changes with it.
+ * Up reaches the buttons, where left and right then move between them, and down
+ * comes back to the rail. Enter plays; Escape gives the screen back. The pad
+ * drives the same rail through the focus ring the rest of the app uses.
  */
 export function TvMode({
   games,
@@ -113,10 +220,9 @@ export function TvMode({
   const playingNow = list.find((game) => game.id === runningId) ?? null;
 
   const rail = useRef<HTMLUListElement>(null);
-  const playButton = useRef<HTMLButtonElement>(null);
-  const cover = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
+  const coverOf = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
 
-  /** The clock in the corner, the way a console has one. */
+  /** The clock, the way a console has one. */
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 20_000);
@@ -137,19 +243,22 @@ export function TvMode({
    * highlight and the game the page describes are always the same game, whether
    * the move came from a key, a stick or a press.
    */
-  const select = useCallback((next: number) => {
-    if (list.length === 0) return;
-    const wrapped = (next + list.length) % list.length;
-    setIndex(wrapped);
-    const button = cover(wrapped);
-    if (button && document.activeElement !== button) button.focus({ preventScroll: true });
-  }, [list.length]);
+  const select = useCallback(
+    (next: number) => {
+      if (list.length === 0) return;
+      const wrapped = (next + list.length) % list.length;
+      setIndex(wrapped);
+      const button = coverOf(wrapped);
+      if (button && document.activeElement !== button) button.focus({ preventScroll: true });
+    },
+    [list.length],
+  );
 
-  // The selected cover is kept in the middle of the rail, which is what makes
-  // it read as a carousel rather than a list that happens to be horizontal.
+  // The selected cover is kept in the middle of the rail, which is what makes it
+  // read as a carousel rather than a list that happens to be horizontal.
   useEffect(() => {
     const scroller = rail.current;
-    const button = cover(at);
+    const button = coverOf(at);
     if (!scroller || !button) return;
     const left = button.offsetLeft - (scroller.clientWidth - button.clientWidth) / 2;
     scroller.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
@@ -161,7 +270,7 @@ export function TvMode({
     const timer = window.requestAnimationFrame(() => {
       const current = document.activeElement;
       if (current instanceof HTMLElement && rail.current?.contains(current)) return;
-      cover(at)?.focus({ preventScroll: true });
+      coverOf(at)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(timer);
     // Only ever on the way in: afterwards the rail holds its own focus.
@@ -174,11 +283,23 @@ export function TvMode({
     else onPlay(active);
   }, [active, onPlay, onStop, running]);
 
+  /**
+   * The buttons of the game on screen, in the order the eye reads them.
+   *
+   * Only the row under the game's name: the sound and the way out are up in
+   * the top bar, and a sideways press at the bottom of the screen should never
+   * quietly move focus into it.
+   */
+  const actionButtons = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-actions] [data-tv-action]'));
+  const onAction = (el: EventTarget | null) =>
+    el instanceof HTMLElement && el.closest('[data-tv-action]') !== null;
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // A dialog opened over the hub (the music panel is not one, the app's own
-      // dialogs are) owns the keyboard while it is up.
+      // A dialog opened over the hub owns the keyboard while it is up.
       if (document.querySelector('[role="dialog"]')) return;
+      const inActions = onAction(document.activeElement);
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
@@ -186,25 +307,40 @@ export function TvMode({
           onExit();
           return;
         case 'ArrowLeft':
-        case 'ArrowRight':
+        case 'ArrowRight': {
           event.preventDefault();
+          // Inside the row of buttons, left and right mean the next button -
+          // Play then Details - and not the next game. The rail is where a
+          // sideways press changes which game is being looked at.
+          if (inActions) {
+            const buttons = actionButtons();
+            const here = buttons.indexOf(document.activeElement as HTMLElement);
+            const step = event.key === 'ArrowRight' ? 1 : -1;
+            const next = buttons[(here + step + buttons.length) % buttons.length];
+            next?.focus({ preventScroll: true });
+            return;
+          }
           select(at + (event.key === 'ArrowRight' ? 1 : -1));
           return;
+        }
         case 'ArrowUp':
           event.preventDefault();
-          playButton.current?.focus({ preventScroll: true });
+          (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
           return;
         case 'ArrowDown':
           event.preventDefault();
-          cover(at)?.focus({ preventScroll: true });
+          coverOf(at)?.focus({ preventScroll: true });
           return;
         case 'Enter':
+          // A focused button gets its own Enter; anything else plays the game
+          // the hub is about.
+          if (inActions) return;
           event.preventDefault();
           start();
           return;
         case 'Tab':
-          // Tabbing out of the rail into the window is how a keyboard loses the
-          // interface entirely; the rail is the interface.
+          // Tabbing out of the rail is how a keyboard loses the interface
+          // entirely; the rail is the interface.
           if (event.shiftKey) return;
           event.preventDefault();
           select(at + 1);
@@ -217,7 +353,6 @@ export function TvMode({
     return () => window.removeEventListener('keydown', onKey);
   }, [at, onExit, select, start]);
 
-  const art = active?.meta?.backgroundUrl ?? active?.meta?.headerUrl ?? null;
   const left =
     active?.hltb?.main && active.hltb.main > 0
       ? Math.max(0, Math.round(active.hltb.main - active.playSecs / 3600))
@@ -229,25 +364,26 @@ export function TvMode({
 
   return (
     <div data-orbit-tv="1" className="tv-root fixed inset-0 z-50 flex flex-col overflow-hidden bg-bg text-fg">
-      {/* The top panel: where you are, on the left; the room's small facts on
-          the right - the order the rail is in, the time, the exit. */}
-      <header className="relative z-20 flex shrink-0 items-center gap-3 px-5 py-3.5 sm:gap-5 sm:px-9 sm:py-4">
+      {active && <Backdrop game={active} />}
+      {/* A wash under the top bar, so its few words stay readable over a game
+          whose artwork happens to be bright exactly there. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
+
+      {/* The top panel: where you are, and the room's small facts. It floats on
+          the artwork rather than sitting in a bar of its own. */}
+      <header className="relative z-20 flex shrink-0 items-center gap-3 px-5 pb-4 pt-4 sm:px-9 sm:pt-5">
         <span className="flex items-center gap-3">
           <Logo className="size-7 drop-shadow-[0_2px_10px_var(--c-accent)]" animated />
-          <span className="hidden text-lg font-bold tracking-tight sm:block">Orbit</span>
-          <span className="flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-accent">
-            <Tv className="size-3" />
-            TV
-          </span>
+          <span className="hidden text-lg font-bold tracking-tight text-white/90 sm:block">Orbit</span>
         </span>
 
         {playingNow && (
-          <span className="flex min-w-0 items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+          <span className="ml-1 flex min-w-0 items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300 backdrop-blur-sm">
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
             <span className="truncate">{playingNow.title}</span>
             <button
               onClick={onStop}
-              className="ml-0.5 rounded-full p-0.5 text-emerald-200/80 transition hover:bg-emerald-400/20 hover:text-white"
+              className="ml-0.5 rounded-full p-0.5 text-emerald-200/80 transition hover:bg-emerald-400/20 hover:text-white focus-visible:ring-2 focus-visible:ring-emerald-300"
               title="Stop the session"
               aria-label="Stop the session"
             >
@@ -258,18 +394,11 @@ export function TvMode({
 
         <span className="flex-1" />
 
-        <button
-          onClick={() => setOrder(order === 'recent' ? 'az' : 'recent')}
-          title={order === 'recent' ? 'Ordered by what you played last. Switch to A–Z' : 'Ordered A–Z. Switch to recent'}
-          className="flex items-center gap-2 rounded-full border border-line bg-panel/50 px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-accent hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
-        >
-          {order === 'recent' ? <Clock className="size-3.5" /> : <ListOrdered className="size-3.5" />}
-          {order === 'recent' ? 'Recent' : 'A–Z'}
-        </button>
-
         <span className="hidden flex-col items-end leading-tight sm:flex">
-          <span className="font-mono text-sm text-fg">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          <span className="text-[10px] uppercase tracking-widest text-muted">
+          <span className="font-mono text-sm text-white/85">
+            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className="text-[10px] uppercase tracking-[0.16em] text-white/40">
             {now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
         </span>
@@ -282,35 +411,15 @@ export function TvMode({
           onClick={onExit}
           title="Leave TV mode (Esc)"
           aria-label="Leave TV mode"
-          className="grid size-9 place-items-center rounded-full text-muted transition hover:bg-panel/70 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+          className="grid size-9 place-items-center rounded-full text-white/50 transition hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Minimize2 className="size-5" />
         </button>
       </header>
 
-      <main className="relative flex min-h-0 flex-1 flex-col">
-        {/* The selected game owns the screen. Its artwork is the page, and every
-            part of it fades towards the corner the words are in, so the words
-            are readable on whatever the picture happens to be. */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          {active ? (
-            art ? (
-              <img
-                key={art}
-                src={art}
-                alt=""
-                className="tv-art absolute inset-0 h-full w-full scale-[1.03] object-cover"
-              />
-            ) : (
-              <Cover game={active} className="tv-art absolute inset-0 size-full [&_span]:hidden" />
-            )
-          ) : null}
-          <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/70 to-bg/20" />
-          <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/55 to-transparent" />
-        </div>
-
+      <main className="relative z-10 flex min-h-0 flex-1 flex-col">
         {!active ? (
-          <div className="relative flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
             <span className="grid size-20 place-items-center rounded-3xl border border-dashed border-line text-muted">
               <Gamepad2 className="size-9" />
             </span>
@@ -332,74 +441,73 @@ export function TvMode({
         ) : (
           <>
             {/* What the game is, in the corner the eye lands on first. */}
-            <div className="relative flex min-h-0 flex-1 items-end px-5 pb-5 sm:px-9">
-              <div className="flex w-full items-end gap-7">
+            <div className="flex min-h-0 flex-1 items-end px-5 sm:px-9">
+              <div className="flex w-full items-end gap-8 pb-2">
                 <Cover
                   game={active}
-                  className="orbit-hero-enter hidden h-52 w-[9.5rem] shrink-0 rounded-2xl border border-white/10 shadow-[0_24px_60px_rgba(0,0,0,.6)] md:flex [&_span]:text-3xl"
+                  className="orbit-hero-enter hidden h-[clamp(7.5rem,26vh,14rem)] w-[clamp(5.4rem,18vh,10.2rem)] shrink-0 rounded-2xl border border-white/15 shadow-[0_28px_70px_rgba(0,0,0,.7)] md:flex [&_span]:text-3xl"
                 />
-                <div className="min-w-0 max-w-2xl pb-1">
-                  <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-accent">
+                <div className="min-w-0 max-w-3xl pb-1">
+                  <p className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.32em] text-accent">
                     {running ? (
                       <>
                         <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
                         Playing now
                       </>
+                    ) : active.status === 'playing' ? (
+                      'In progress'
+                    ) : active.status === 'completed' ? (
+                      'Finished'
                     ) : (
-                      <>
-                        {active.status === 'playing'
-                          ? 'In progress'
-                          : active.status === 'completed'
-                            ? 'Finished — back for more?'
-                            : 'Ready to play'}
-                      </>
+                      'Ready to play'
                     )}
                   </p>
-                  <h1 className="orbit-hero-enter text-4xl font-black leading-[1.05] tracking-tight md:text-6xl">
+                  <h1 className="orbit-hero-enter line-clamp-2 text-[clamp(1.9rem,4.2vh+1.2vw,4.2rem)] font-black leading-[0.98] tracking-[-0.02em] text-white [text-shadow:0_2px_30px_rgba(0,0,0,.55)]">
                     {active.title}
                   </h1>
 
-                  <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted">
-                    <span className="font-semibold text-fg/90">{fmtMinutes(active.playSecs / 60)} played</span>
-                    {active.lastPlayed && <span>· last {fmtDate(active.lastPlayed)}</span>}
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Fact icon={Clock}>{fmtMinutes(active.playSecs / 60)} played</Fact>
+                    {active.lastPlayed && <Fact icon={Calendar}>last {fmtDate(active.lastPlayed)}</Fact>}
                     {left !== null && (
-                      <span className="flex items-center gap-1.5">
-                        <Hourglass className="size-3.5" />
+                      <Fact icon={Hourglass}>
                         {left > 0 ? `${left}h left` : 'almost done'}
-                        {progress !== null && <span className="text-muted/70">({progress}%)</span>}
-                      </span>
+                        {progress !== null && <span className="text-white/40">· {progress}%</span>}
+                      </Fact>
                     )}
-                    {active.sizeBytes > 0 && <span>· {fmtBytes(active.sizeBytes)}</span>}
-                  </p>
+                    {active.sizeBytes > 0 && <Fact icon={HardDrive}>{fmtBytes(active.sizeBytes)}</Fact>}
+                  </div>
 
                   {active.meta?.summary && (
-                    <p className="mt-3 line-clamp-2 max-w-xl text-sm leading-relaxed text-muted">
+                    <p className="mt-3.5 hidden max-w-xl text-sm leading-relaxed text-white/55 [@media(min-height:800px)]:line-clamp-2 [@media(min-height:800px)]:sm:block">
                       {active.meta.summary}
                     </p>
                   )}
 
-                  <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <div data-tv-actions className="mt-6 flex flex-wrap items-center gap-3">
                     {running ? (
                       <button
+                        data-tv-action="stop"
                         onClick={onStop}
-                        className="flex items-center gap-2.5 rounded-full bg-rose-500 px-8 py-3.5 font-bold text-white transition hover:brightness-110 focus-visible:ring-4 focus-visible:ring-rose-400/40"
+                        className="flex items-center gap-2.5 rounded-full bg-rose-500 px-8 py-3.5 text-[15px] font-bold text-white shadow-[0_10px_40px_rgba(244,63,94,.35)] transition hover:brightness-110 focus-visible:ring-4 focus-visible:ring-rose-400/40"
                       >
                         <Square className="size-4" fill="currentColor" strokeWidth={0} />
                         Stop session
                       </button>
                     ) : (
                       <button
-                        ref={playButton}
+                        data-tv-action="play"
                         onClick={start}
-                        className="flex items-center gap-2.5 rounded-full bg-fg px-9 py-3.5 font-bold text-bg transition hover:scale-[1.03] focus-visible:ring-4 focus-visible:ring-fg/30"
+                        className="flex items-center gap-2.5 rounded-full bg-white px-9 py-3.5 text-[15px] font-bold text-black shadow-[0_10px_40px_rgba(255,255,255,.22)] transition hover:scale-[1.03] hover:bg-white focus-visible:ring-4 focus-visible:ring-white/35"
                       >
                         <Play className="size-4" fill="currentColor" strokeWidth={0} />
                         Play
                       </button>
                     )}
                     <button
+                      data-tv-action="details"
                       onClick={() => onDetails(active)}
-                      className="flex items-center gap-2.5 rounded-full border border-line bg-panel/70 px-6 py-3.5 font-semibold backdrop-blur transition hover:border-accent focus-visible:ring-4 focus-visible:ring-accent/30"
+                      className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/[0.07] px-6 py-3.5 text-[15px] font-semibold text-white/90 backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.12] focus-visible:ring-4 focus-visible:ring-accent/40"
                     >
                       <Info className="size-4" />
                       Details
@@ -409,20 +517,51 @@ export function TvMode({
               </div>
             </div>
 
-            {/* The rail: every game that can be started, in one row, with the
-                selected one lifted out of it. Nothing is grouped or sorted into
-                categories - there is one list and one way along it. */}
-            <div className="relative shrink-0 pb-2">
+            {/* The library itself: one row of covers, with the sort where the
+                row is read rather than up in the bar with the clock. */}
+            <section className="relative mt-4 shrink-0">
+              <div className="mb-2 flex items-center gap-3 px-5 sm:px-9">
+                <h2 className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/40">
+                  Your library
+                </h2>
+                <span className="font-mono text-[11px] text-white/25">
+                  {at + 1} / {list.length}
+                </span>
+                <span className="flex-1" />
+                <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.06] p-0.5 backdrop-blur-sm">
+                  {(
+                    [
+                      ['recent', 'Recent', Clock],
+                      ['az', 'A–Z', ListOrdered],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      onClick={() => setOrder(id)}
+                      aria-pressed={order === id}
+                      title={id === 'recent' ? 'Ordered by what you played last' : 'Ordered by name'}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus-visible:ring-2 focus-visible:ring-accent',
+                        order === id ? 'bg-white/15 text-white' : 'text-white/45 hover:text-white/80',
+                      )}
+                    >
+                      <Icon className="size-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <ul
                 ref={rail}
-                // A mouse wheel over the rail is meant for the rail: the page
-                // behind it cannot scroll, so a vertical flick would otherwise
-                // do nothing at all in the one place the pointer already is.
+                // A wheel over the rail is meant for the rail: nothing behind
+                // the hub can scroll, so a vertical flick would otherwise do
+                // nothing at all in the one place the pointer already is.
                 onWheel={(event) => {
                   if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
                   if (rail.current) rail.current.scrollLeft += event.deltaY;
                 }}
-                className="tv-rail flex items-end gap-4 overflow-x-auto px-5 pb-4 pt-3 sm:px-9"
+                className="tv-rail flex items-start gap-3.5 overflow-x-auto px-5 pb-5 pt-2 sm:px-9"
               >
                 {list.map((game, n) => {
                   const chosen = n === at;
@@ -438,27 +577,30 @@ export function TvMode({
                         aria-current={chosen ? 'true' : undefined}
                         aria-label={game.title}
                         title={game.title}
-                        className={cn(
-                          'tv-cover group relative block rounded-xl outline-none transition duration-200',
-                          'h-40 w-[7rem] sm:h-52 sm:w-[9.1rem]',
-                          chosen
-                            ? 'scale-105 ring-2 ring-accent/80 ring-offset-2 ring-offset-[#05040d]'
-                            : 'opacity-55 hover:opacity-90',
-                        )}
+                        className="tv-cover group block w-[clamp(5.8rem,15vh,9.4rem)] rounded-xl outline-none"
                       >
-                        <span className="block h-full w-full overflow-hidden rounded-xl border border-white/10 shadow-lg">
-                          <Cover game={game} className="size-full [&_span]:text-xl" />
-                        </span>
-                        {game.id === runningId && (
-                          <span className="absolute left-1 top-1 flex items-center gap-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">
-                            <span className="size-1 animate-pulse rounded-full bg-black/70" />
-                            On
-                          </span>
-                        )}
                         <span
                           className={cn(
-                            'mt-1.5 block truncate text-center text-[11px] font-medium',
-                            chosen ? 'text-fg' : 'text-muted/80',
+                            'relative block aspect-[2/3] w-full overflow-hidden rounded-xl border transition duration-200',
+                            chosen
+                              ? 'border-accent/70 shadow-[0_0_0_2px_rgba(139,92,246,.85),0_18px_45px_rgba(0,0,0,.65)]'
+                              : 'border-white/10 opacity-50 shadow-lg group-hover:opacity-90',
+                          )}
+                        >
+                          <Cover game={game} className="size-full [&_span]:text-xl" />
+                          {game.id === runningId && (
+                            <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">
+                              <span className="size-1 animate-pulse rounded-full bg-black/70" />
+                              On
+                            </span>
+                          )}
+                        </span>
+                        {/* Two lines, never cut to an ellipsis on the first: a
+                            long name is the one thing a rail cannot guess at. */}
+                        <span
+                          className={cn(
+                            'mt-1.5 line-clamp-2 min-h-[2.1rem] text-center text-[11px] font-medium leading-[1.15] transition',
+                            chosen ? 'text-white' : 'text-white/45 group-hover:text-white/75',
                           )}
                         >
                           {game.title}
@@ -468,40 +610,30 @@ export function TvMode({
                   );
                 })}
               </ul>
-
-              {/* Where you are in the list, said quietly, so a rail of forty
-                  games does not feel like a rail of forty games. */}
-              <span className="pointer-events-none absolute right-5 top-1 rounded-full bg-black/45 px-2.5 py-1 font-mono text-[10px] text-white/70 backdrop-blur sm:right-9">
-                {at + 1} / {list.length}
-              </span>
-            </div>
+            </section>
           </>
         )}
       </main>
 
       {/* The prompts, small, along the bottom: a console tells you which button
           does what rather than making you find a menu to ask. */}
-      <footer className="relative z-20 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-1 border-t border-white/10 bg-black/40 px-5 py-2.5 text-[11px] text-muted backdrop-blur sm:px-9">
+      <footer className="relative z-20 flex shrink-0 items-center gap-5 bg-gradient-to-t from-[#05040d] to-transparent px-5 pb-3 pt-2 text-[11px] text-white/35 sm:px-9">
         <span className="flex items-center gap-1.5">
           <ChevronLeft className="size-3.5" />
           <ChevronRight className="size-3.5" />
           browse
         </span>
+        <span className="hidden items-center gap-1.5 sm:flex">
+          <kbd className="rounded border border-white/15 px-1.5 py-0.5 font-sans text-[10px]">↑</kbd>
+          buttons
+        </span>
         <span className="flex items-center gap-1.5">
           <CornerDownLeft className="size-3.5" />
           play
         </span>
-        <span className="hidden items-center gap-1.5 sm:flex">
-          <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px]">↑</kbd>
-          buttons
-        </span>
         <span className="flex items-center gap-1.5">
-          <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px]">Esc</kbd>
-          leave TV mode
-        </span>
-        <span className="ml-auto hidden items-center gap-1.5 opacity-70 sm:flex">
-          <Gamepad2 className="size-3.5" />
-          a controller drives the same rail
+          <kbd className="rounded border border-white/15 px-1.5 py-0.5 font-sans text-[10px]">Esc</kbd>
+          leave
         </span>
       </footer>
     </div>
