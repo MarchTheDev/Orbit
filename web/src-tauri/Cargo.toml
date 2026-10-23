@@ -49,7 +49,9 @@ gtk = "0.18.2"
 # A real `fcntl`, not a hand-declared variadic. The hand-declared one was
 # enough to take the process down when a controller was opened.
 libc = "0.2"
-x11rb = "0.13.2"
+# The screen grab for captures, and the Present extension the FPS box counts
+# a game's frames with.
+x11rb = { version = "0.13.2", features = ["present"] }
 webkit2gtk = { version = "2.0.2", features = ["v2_40"] }
 
 [target.'cfg(windows)'.dependencies]

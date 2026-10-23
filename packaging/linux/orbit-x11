@@ -18,10 +18,12 @@
 #     WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit keeps the native backend and is
 #     the smaller hammer. Try that first.
 #   * If it is only the overlay that flashes up and vanishes on Wayland with
-#     the proprietary NVIDIA driver, it does not need this wrapper at all:
-#     Orbit already builds that window solid on that stack, and
-#     ORBIT_OVERLAY_TRANSPARENT=1 orbit tries the see-through window anyway
-#     (and =0 forces the solid one on any other stack).
+#     the proprietary NVIDIA driver, it does not need this wrapper at all: the
+#     explicit-sync workaround already goes into the environment on that stack
+#     before any web view exists, and see-through is on again there. For a
+#     desktop that still strands the see-through window,
+#     ORBIT_OVERLAY_TRANSPARENT=0 orbit gives the panel a solid ground it
+#     cannot vanish from (and =1 forces the see-through one anywhere).
 #
 # Arguments are passed through, so `orbit-x11 --whatever` behaves as `orbit
 # --whatever` would.

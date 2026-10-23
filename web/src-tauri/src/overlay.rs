@@ -1158,23 +1158,22 @@ fn toggle_on_main(app: &AppHandle) {
 
 /// Whether the panel asks for a see-through window.
 ///
-/// Every desktop holds one except Linux with the proprietary NVIDIA driver on
-/// Wayland: KWin there drops WebKitGTK's RGBA toplevel within its first
-/// frames, and what is left is a mapped and beating window that paints
-/// nothing - the flash that reads as the overlay closing itself while Orbit
-/// still counts it open. An opaque window never touches that path, so on that
-/// one stack the panel stands on Orbit's dark ground instead of the game's
-/// picture: it loses the see-through between the boxes, but an invisible
-/// panel loses everything. ORBIT_OVERLAY_TRANSPARENT=1 forces see-through
-/// for the stacks that have this fixed, =0 forces solid; the guess above is
-/// for everyone else.
+/// Linux with the proprietary NVIDIA driver on Wayland used to drop
+/// WebKitGTK's RGBA toplevel within its first frames - mapped, heartbeating,
+/// painting nothing, the flash that read as the overlay closing itself. The
+/// explicit-sync workaround now goes into the environment before the first
+/// web view exists, which is what that stack needed to hold such a window, so
+/// the panel is see-through there again. A stack that still strands it gets
+/// the solid panel back with ORBIT_OVERLAY_TRANSPARENT=0; =1 forces the
+/// see-through window on any stack, so the question "does this desktop hold
+/// it" stays one launch away.
 #[cfg(target_os = "linux")]
 fn panel_see_through() -> bool {
     if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
         let forced = forced.to_string_lossy();
         return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
     }
-    !(crate::linux_window::wayland_backend() && crate::linux_window::nvidia_driver())
+    true
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1189,10 +1188,10 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
-    // See-through everywhere it holds. On the one Linux stack that drops an
-    // RGBA window the panel paints on Orbit's own ground instead: the page's
-    // dim and boxes then sit on the same colour they sit on in the main
-    // window, and the panel cannot vanish while it is open.
+    // See-through everywhere, with the startup workaround covering the one
+    // stack that used to drop an RGBA window. A desktop that still cannot
+    // hold it paints the same page on Orbit's own ground instead - the way
+    // out is ORBIT_OVERLAY_TRANSPARENT=0 - and the panel cannot silently vanish.
     let see_through = panel_see_through();
     let background = if see_through {
         tauri::window::Color(0, 0, 0, 0)
@@ -1228,10 +1227,15 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
+    // Written down like every other thing the panel does, so Settings can say
+    // which face of the panel this desktop asked for - and what to change when
+    // the choice is wrong for the very machine reading it.
     if !see_through {
-        // Written down like every other thing the panel does, so Settings can
-        // say why this panel looks different from the screenshots.
-        note_panel("the panel was built solid; this Wayland + NVIDIA stack drops see-through windows, and ORBIT_OVERLAY_TRANSPARENT=1 tries one anyway");
+        note_panel("the panel was built solid, as ORBIT_OVERLAY_TRANSPARENT=0 asked");
+    }
+    #[cfg(target_os = "linux")]
+    if see_through && std::env::var_os("ORBIT_OVERLAY_TRANSPARENT").is_none() && crate::linux_window::wayland_backend() && crate::linux_window::nvidia_driver() {
+        note_panel("the panel is see-through with the NVIDIA Wayland workaround; if it ever flashes away here, ORBIT_OVERLAY_TRANSPARENT=0 brings the solid panel back");
     }
     cover_screen(&window);
     let app_for_close = app.clone();

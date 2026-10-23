@@ -620,6 +620,143 @@ fn wide_text(value: windows::core::PWSTR) -> String {
     String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(value.0, len) })
 }
 
+/// A present counter for the Linux frame rate.
+///
+/// Windows reads the desktop's duplication for this number; there is no
+/// desktop duplication to read on Linux. What every X11 and XWayland game
+/// does share is the Present extension: a swapchain flip is a present, and
+/// the X server reports its completion to anyone listening on the window.
+/// Steam games count too - Proton runs them through XWayland even on a
+/// Wayland session. A Wayland-native game never touches an X server, so its
+/// frames stay invisible here and the box keeps its dash; that is the edge of
+/// what can be seen from the outside, not a broken reading.
+#[cfg(target_os = "linux")]
+struct LinuxFrames {
+    conn: x11rb::rust_connection::RustConnection,
+    /// The window completes are counted on. Chosen at open; replaced by the
+    /// next open after it goes away.
+    window: u32,
+}
+
+/// What one drain of the X connection came back with.
+#[cfg(target_os = "linux")]
+enum LinuxPull {
+    Dead,
+    Count(u32),
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxFrames {
+    fn open() -> Option<Self> {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::present::{ConnectionExt as _, EventMask, X11_EXTENSION_NAME};
+        use x11rb::rust_connection::RustConnection;
+
+        // XWayland hands Wayland sessions a DISPLAY, which is how this reaches
+        // the games Proton starts in one. No DISPLAY means no X server anywhere.
+        if std::env::var_os("DISPLAY").is_none() {
+            return None;
+        }
+        let (conn, screen_num) = RustConnection::connect(None).ok()?;
+        // A server without Present never answers the version query, so ask
+        // cheaply first and leave quietly.
+        if conn.extension_information(X11_EXTENSION_NAME).ok()?.is_none() {
+            return None;
+        }
+        conn.present_query_version(1, 0).ok()?.reply().ok()?;
+        let root = conn.setup().roots.get(screen_num)?.root;
+        let window = biggest_foreign_window(&conn, root)?;
+        let event_id = conn.generate_id().ok()?;
+        conn.present_select_input(event_id, window, EventMask::COMPLETE_NOTIFY).ok()?.check().ok()?;
+        Some(LinuxFrames { conn, window })
+    }
+
+    fn drain(&mut self) -> LinuxPull {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::ConnectionExt as _;
+        use x11rb::protocol::Event;
+
+        // A window that died under the counter turns every later request into
+        // an error; asking it once directly is cheaper than waiting for that.
+        let alive = self
+            .conn
+            .get_geometry(self.window)
+            .map(|pending| pending.reply().is_ok())
+            .unwrap_or(false);
+        if !alive {
+            return LinuxPull::Dead;
+        }
+        let _ = self.conn.flush();
+        let mut count = 0u32;
+        loop {
+            match self.conn.poll_for_event() {
+                // Completes were selected on this one window alone, so a
+                // complete here is one of its presents finishing. The window
+                // check keeps a straggler from a previous window out of the
+                // new window's count.
+                Ok(Some(Event::PresentCompleteNotify(complete))) => {
+                    if complete.window == self.window {
+                        count = count.saturating_add(1);
+                    }
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(_) => return LinuxPull::Dead,
+            }
+        }
+        LinuxPull::Count(count)
+    }
+}
+
+/// The biggest top-level window belonging to another process, which for this
+/// reading is the game whenever there is one. Orbit's own windows are skipped
+/// by pid: on an X11 session the panel itself is the biggest window on the
+/// screen, and its own boxes would count as a game's frames.
+#[cfg(target_os = "linux")]
+fn biggest_foreign_window(conn: &x11rb::rust_connection::RustConnection, root: u32) -> Option<u32> {
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState};
+
+    let client_list = conn.intern_atom(false, b"_NET_CLIENT_LIST").ok()?.reply().ok()?.atom;
+    let wm_pid = conn.intern_atom(false, b"_NET_WM_PID").ok()?.reply().ok()?.atom;
+    let reply = conn
+        .get_property(false, root, client_list, AtomEnum::WINDOW, 0, 4096)
+        .ok()?
+        .reply()
+        .ok()?;
+    let ours = std::process::id();
+    let mut best: Option<(u64, u32)> = None;
+    for window in reply.value32()? {
+        let pid = conn
+            .get_property(false, window, wm_pid, AtomEnum::CARDINAL, 0, 1)
+            .ok()
+            .and_then(|pending| pending.reply().ok())
+            .and_then(|reply| reply.value32().and_then(|mut values| values.next()));
+        if pid == Some(ours) {
+            continue;
+        }
+        let viewable = conn
+            .get_window_attributes(window)
+            .ok()
+            .and_then(|pending| pending.reply().ok())
+            .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE);
+        if !viewable {
+            continue;
+        }
+        // A window that went away between the list and this question just
+        // does not get picked; the next open plays the game that is there.
+        let geometry = conn
+            .get_geometry(window)
+            .ok()
+            .and_then(|pending| pending.reply().ok());
+        let Some(geometry) = geometry else { continue };
+        let area = geometry.width as u64 * geometry.height as u64;
+        if area > 0 && best.is_none_or(|(largest, _)| area > largest) {
+            best = Some((area, window));
+        }
+    }
+    best.map(|(_, window)| window)
+}
+
 struct FrameWatch {
     #[cfg(windows)]
     inner: Option<WindowsFrames>,
@@ -638,9 +775,34 @@ struct FrameWatch {
     started: Instant,
     #[cfg(windows)]
     tried: Option<Instant>,
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    linux: LinuxWatch,
+    #[cfg(all(not(windows), not(target_os = "linux")))]
     _private: (),
 }
+
+/// The present counter's state, kept apart the way Windows keeps its
+/// duplication: drained on every poll, opened again a pause after a failure
+/// rather than on every one.
+#[cfg(target_os = "linux")]
+struct LinuxWatch {
+    frames: Option<LinuxFrames>,
+    /// Each mark is the completes seen since the previous mark.
+    marks: Vec<(Instant, u32)>,
+    started: Instant,
+    tried: Option<Instant>,
+}
+
+#[cfg(target_os = "linux")]
+static LINUX_READABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(target_os = "linux")]
+static LINUX_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// A first sample right as the panel opens counts whatever window is still
+/// settling its own swapchain; the wait matches the duplication's first try.
+#[cfg(target_os = "linux")]
+const LINUX_FRAMES_FIRST: Duration = Duration::from_millis(1400);
+#[cfg(target_os = "linux")]
+const LINUX_FRAMES_RETRY: Duration = Duration::from_secs(2);
 
 #[cfg(windows)]
 static FRAMES_READABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -665,7 +827,13 @@ fn watch_frames() -> Option<FrameWatch> {
     {
         return Some(FrameWatch { inner: None, marks: Vec::new(), started: Instant::now(), tried: None });
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        return Some(FrameWatch {
+            linux: LinuxWatch { frames: None, marks: Vec::new(), started: Instant::now(), tried: None },
+        });
+    }
+    #[cfg(all(not(windows), not(target_os = "linux")))]
     {
         None
     }
@@ -728,7 +896,54 @@ impl FrameWatch {
                 }
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        {
+            let linux = &mut self.linux;
+            if linux.frames.is_none() {
+                let wait = if linux.tried.is_none() { LINUX_FRAMES_FIRST } else { LINUX_FRAMES_RETRY };
+                let since = linux.tried.unwrap_or(linux.started);
+                if since.elapsed() < wait {
+                    return None;
+                }
+                linux.tried = Some(Instant::now());
+                linux.frames = LinuxFrames::open();
+                // Once each way, so a player's log answers whether the FPS box
+                // ever had a present stream to count.
+                if linux.frames.is_some() {
+                    if !LINUX_READABLE.swap(true, Ordering::Relaxed) {
+                        log::info!("stats: counting presents with XPresent");
+                    }
+                } else if !LINUX_REFUSED.swap(true, Ordering::Relaxed) {
+                    log::info!("stats: no X present stream to count; the FPS box keeps its dash where there is only a Wayland-native game");
+                }
+            }
+            let frames = linux.frames.as_mut()?;
+            match frames.drain() {
+                LinuxPull::Dead => {
+                    linux.frames = None;
+                    linux.marks.clear();
+                    // Look for the next window after a pause rather than on
+                    // every 200ms poll, the way the duplication's reopen is paced.
+                    linux.tried = Some(Instant::now());
+                    None
+                }
+                LinuxPull::Count(count) => {
+                    let now = Instant::now();
+                    if linux.marks.is_empty() {
+                        linux.marks.push((now, 0));
+                    }
+                    linux.marks.push((now, count));
+                    let cutoff = now.checked_sub(Duration::from_secs(1)).unwrap_or(now);
+                    while linux.marks.len() > 2 && linux.marks.get(1).is_some_and(|(at, _)| *at < cutoff) {
+                        linux.marks.remove(0);
+                    }
+                    let start = linux.marks.first().map(|(at, _)| *at).unwrap_or(now);
+                    let presents = linux.marks.iter().skip(1).fold(0u32, |sum, (_, seen)| sum.saturating_add(*seen));
+                    frames_per_second(presents, now.saturating_duration_since(start).as_secs_f64())
+                }
+            }
+        }
+        #[cfg(all(not(windows), not(target_os = "linux")))]
         {
             None
         }
