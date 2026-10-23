@@ -9,6 +9,7 @@ import { disable, enable } from '@tauri-apps/plugin-autostart';
 import type {
   ActiveSession,
   Game,
+  GameFacts,
   GameLog,
   Playthrough,
   LaunchInfo,
@@ -532,6 +533,44 @@ export function gameSuggestions(title: string): Promise<GameSuggestion[]> {
       name: `${name}${title.trim() ? ` (${title.trim()})` : ''}`,
       coverUrl: null,
     }));
+  });
+}
+
+/**
+ * The factsheet for one store app id: what the game is, who made it, what it
+ * costs, how it was received, its screenshots and trailers.
+ *
+ * Bonker's cache of the Steam catalogue answers most of it and Steam's own
+ * page fills the gaps, both asked on the Rust side where the browser's rules
+ * do not reach. A browser preview has no store to ask, so it shows a
+ * deterministic stand-in and says so.
+ */
+export function gameFacts(appId: number): Promise<GameFacts> {
+  return call('game_facts', { appId }, async () => {
+    await sleep(500);
+    return {
+      appId,
+      name: `Store app ${appId}`,
+      summary: 'In the desktop app this is what the store says about the game. The browser preview has no store to ask.',
+      description: '',
+      genres: ['Preview'],
+      releaseYear: null,
+      releaseDate: null,
+      comingSoon: false,
+      isFree: true,
+      priceText: null,
+      developer: null,
+      publisher: null,
+      homepage: null,
+      headerUrl: null,
+      heroUrl: null,
+      portraitUrl: null,
+      logoUrl: null,
+      screenshots: [],
+      movies: [],
+      reviews: null,
+      pcMinimum: null,
+    };
   });
 }
 

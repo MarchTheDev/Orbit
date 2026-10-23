@@ -1269,6 +1269,15 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
     hltb::lookup(&title).await
 }
 
+/// The factsheet the planning sheet shows for a store app id.
+///
+/// Bonker's cache of the Steam catalogue carries it, with Steam's own page
+/// filling the gaps - the answer needs no key from the player either way.
+#[tauri::command]
+async fn game_facts(app_id: u64) -> Result<metadata::Facts, String> {
+    metadata::facts(app_id).await
+}
+
 /// Everything Orbit can find out about a game with no setup at all.
 ///
 /// The Steam store needs no key. SteamGridDB is asked for a portrait only when
@@ -2567,6 +2576,7 @@ pub fn run() {
             metadata_lookup,
             metadata_suggest,
             metadata_cards,
+            game_facts,
             achievements_fetch,
             artwork_candidates,
             artwork_choices,

@@ -23,6 +23,7 @@ import { fmtDate, fmtMinutes, hashHue, uid } from '../utils/format';
 import { moveInOrder } from '../utils/reorder';
 import { inLibraryShelf, onBacklogPage, onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
+import { PlanSheet } from './detail/PlanSheet';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { cn } from '../utils/cn';
@@ -116,6 +117,8 @@ export function BacklogView({
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<GameSuggestion[]>([]);
   const [looking, setLooking] = useState(false);
+  /** The suggestion being looked at in its own sheet, before it is anyone's game. */
+  const [previewing, setPreviewing] = useState<GameSuggestion | null>(null);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
 
@@ -454,8 +457,8 @@ export function BacklogView({
                 <li key={s.appId}>
                   <button
                     type="button"
-                    onClick={() => void plan(s.name, s.appId, s.coverUrl ?? undefined, true)}
-                    title={`Add ${s.name} to the backlog`}
+                    onClick={() => setPreviewing(s)}
+                    title={`Open the page for ${s.name}`}
                     className="flex items-center gap-2 rounded-xl border border-line bg-panel2/40 py-1.5 pl-1.5 pr-3 text-left transition hover:border-accent"
                   >
                     {s.coverUrl ? (
@@ -472,6 +475,20 @@ export function BacklogView({
             </ul>
           )}
         </form>
+      )}
+
+      {/* Deciding is not adding: the suggestion opens the game's own page, and
+          the page's button is the one that writes it down. */}
+      {previewing && (
+        <PlanSheet
+          suggestion={previewing}
+          adding={busy}
+          onClose={() => setPreviewing(null)}
+          onAdd={({ name, appId, coverUrl }) => {
+            setPreviewing(null);
+            void plan(name, appId, coverUrl ?? undefined, true);
+          }}
+        />
       )}
 
       <Section

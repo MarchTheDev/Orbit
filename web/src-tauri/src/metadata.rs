@@ -140,6 +140,31 @@ struct SteamApp {
     screenshots: Vec<Screenshot>,
     #[serde(default)]
     metacritic: Option<Metacritic>,
+    #[serde(default)]
+    is_free: bool,
+    price_overview: Option<SteamPrice>,
+    /// The trailers, with their playable files - the only place to get those.
+    #[serde(default)]
+    movies: Vec<SteamMovie>,
+}
+
+/// A trailer off the store page, in both containers the store publishes.
+#[derive(Debug, Default, Deserialize)]
+struct SteamMovie {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    thumbnail: String,
+    #[serde(default)]
+    mp4: HashMap<String, String>,
+    #[serde(default)]
+    webm: HashMap<String, String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SteamPrice {
+    /// "€19.99", already in the reader's currency.
+    final_formatted: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -422,6 +447,12 @@ struct BonkerImages {
     library_capsule: Option<String>,
     library_capsule_2x: Option<String>,
     header: Option<String>,
+    /// The hero art a page backdrop wants, the portrait a library tile wants,
+    /// and the logo that names a picture's subject on its own - the planning
+    /// sheet's three places to hang them.
+    library_hero: Option<String>,
+    library_600x900: Option<String>,
+    logo: Option<String>,
 }
 
 /// Portrait covers for a title whose old Steam file names came back empty.
@@ -465,6 +496,340 @@ fn push_portrait(picks: &mut Vec<ArtworkPick>, url: Option<&str>, label: &str) {
         kind: "portrait".into(),
         label: label.into(),
     });
+}
+
+// ------------------------------------------------------------ the full sheet
+
+/// Everything a planning sheet can know about a game before it is anyone's:
+/// what it is about, who made it, what it costs, what it looks like, how it
+/// was received and what runs it. Bonker's cache of the Steam catalogue
+/// answers most of it with one request; the store page itself fills the
+/// pictures that move and any gap Bonker left.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Facts {
+    pub app_id: u64,
+    pub name: String,
+    pub summary: String,
+    /// The longer store text, already plain and trimmed to a page rather than
+    /// an article.
+    pub description: String,
+    pub genres: Vec<String>,
+    pub release_year: Option<i32>,
+    /// The date as the store writes it: the year alone sorts a list, but a
+    /// page reads "Aug 21, 2012".
+    pub release_date: Option<String>,
+    pub coming_soon: bool,
+    pub is_free: bool,
+    /// What the store asks, as the store writes it.
+    pub price_text: Option<String>,
+    pub developer: Option<String>,
+    pub publisher: Option<String>,
+    pub homepage: Option<String>,
+    /// The wide banner every page has.
+    pub header_url: Option<String>,
+    /// The bigger, softer art the page hangs behind everything.
+    pub hero_url: Option<String>,
+    /// The portrait this page's row grows from.
+    pub portrait_url: Option<String>,
+    pub logo_url: Option<String>,
+    pub screenshots: Vec<Shot>,
+    pub movies: Vec<Clip>,
+    /// How players received it, in the store's own words and numbers.
+    pub reviews: Option<Reviews>,
+    /// The low end of what runs it, in the store's words.
+    pub pc_minimum: Option<String>,
+}
+
+impl Facts {
+    fn from_bonker(app_id: u64, app: BonkerFull) -> Facts {
+        let BonkerFull {
+            name,
+            short_description,
+            long_description,
+            header_image,
+            background_image,
+            is_free,
+            genres,
+            release_date,
+            price_overview,
+            pc_requirements,
+            images,
+            config,
+        } = app;
+        let long_text = plain(&long_description);
+        let extended = config.and_then(|config| config.extended);
+        let at = images.as_ref();
+        Facts {
+            app_id,
+            name: name.trim().to_string(),
+            summary: plain(&short_description),
+            // An empty long text keeps the short one: one of them is nearly
+            // always written.
+            description: if long_text.is_empty() { plain(&short_description) } else { long_text },
+            genres: names(&genres),
+            release_year: year_in(&release_date.date),
+            release_date: neat(Some(release_date.date)),
+            coming_soon: release_date.coming_soon,
+            is_free,
+            price_text: price_overview.and_then(|price| neat(price.final_formatted)),
+            developer: extended.as_ref().and_then(|ext| neat(ext.developer.clone())),
+            publisher: extended.as_ref().and_then(|ext| neat(ext.publisher.clone())),
+            homepage: extended.and_then(|ext| neat(ext.homepage)),
+            header_url: neat(Some(header_image)),
+            hero_url: at
+                .and_then(|library| neat(library.library_hero.clone()))
+                .or_else(|| neat(Some(background_image))),
+            // The 600x900 portrait is the cover the row beside this page
+            // already shows; newer titles carry it under the capsule name.
+            portrait_url: at
+                .and_then(|library| neat(library.library_600x900.clone()))
+                .or_else(|| at.and_then(|library| neat(library.library_capsule.clone())))
+                .or_else(|| at.and_then(|library| neat(library.library_capsule_2x.clone()))),
+            logo_url: images.and_then(|library| neat(library.logo)),
+            screenshots: Vec::new(),
+            movies: Vec::new(),
+            reviews: None,
+            pc_minimum: pc_requirements
+                .and_then(|req| req.minimum)
+                .map(|text| plain(&text))
+                .filter(|text| !text.is_empty()),
+        }
+    }
+
+    /// Fill whatever Bonker left empty from the store page itself. The two
+    /// describe the same catalogue, so filling is never a fight.
+    fn fill_from_steam(&mut self, app: &SteamApp) {
+        if self.name.is_empty() {
+            self.name = app.name.trim().to_string();
+        }
+        if self.summary.is_empty() {
+            self.summary = plain(&app.short_description);
+        }
+        if self.description.is_empty() {
+            self.description = plain(&app.detailed_description);
+        }
+        for genre in names(&app.genres) {
+            if !self.genres.iter().any(|have| have.eq_ignore_ascii_case(&genre)) {
+                self.genres.push(genre);
+            }
+        }
+        if self.release_year.is_none() {
+            self.release_year = year_in(&app.release_date.date);
+        }
+        if self.release_date.is_none() {
+            self.release_date = neat(Some(app.release_date.date.clone()));
+        }
+        if self.developer.is_none() {
+            self.developer = app.developers.iter().find(|name| !name.trim().is_empty()).cloned();
+        }
+        if self.publisher.is_none() {
+            self.publisher = app.publishers.iter().find(|name| !name.trim().is_empty()).cloned();
+        }
+        self.is_free = self.is_free || app.is_free;
+        if self.price_text.is_none() && !self.is_free {
+            self.price_text = app.price_overview.as_ref().and_then(|price| neat(price.final_formatted.clone()));
+        }
+        if self.header_url.is_none() {
+            self.header_url = neat(Some(app.header_image.clone()));
+        }
+        if self.hero_url.is_none() {
+            self.hero_url = neat(Some(app.background_raw.clone())).or_else(|| neat(Some(app.background_image.clone())));
+        }
+        // Moving pictures only exist here: Bonker's media level lists trailers
+        // by name and thumbnail, but the playable file is on the store page.
+        if self.screenshots.is_empty() {
+            self.screenshots = app
+                .screenshots
+                .iter()
+                .filter(|shot| !shot.path_full.trim().is_empty())
+                .map(|shot| Shot {
+                    thumb: if shot.path_thumbnail.trim().is_empty() {
+                        shot.path_full.clone()
+                    } else {
+                        shot.path_thumbnail.clone()
+                    },
+                    full: shot.path_full.clone(),
+                })
+                .collect();
+        }
+        if self.movies.is_empty() {
+            self.movies = app
+                .movies
+                .iter()
+                .map(|movie| Clip {
+                    name: movie.name.clone(),
+                    thumbnail: movie.thumbnail.clone(),
+                    mp4: pick_media(&movie.mp4),
+                    webm: pick_media(&movie.webm),
+                })
+                .filter(|clip| clip.mp4.is_some() || clip.webm.is_some() || !clip.thumbnail.trim().is_empty())
+                .collect();
+        }
+    }
+}
+
+/// A still from the store page, thumbnailed and full.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shot {
+    pub thumb: String,
+    pub full: String,
+}
+
+/// A trailer, with the playable file the store page publishes.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Clip {
+    pub name: String,
+    pub thumbnail: String,
+    pub mp4: Option<String>,
+    pub webm: Option<String>,
+}
+
+/// How players received the game, in the store's own words and numbers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reviews {
+    /// "Very Positive" and its friends.
+    pub summary: String,
+    pub percent: u32,
+    pub total: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct BonkerFact {
+    data: Option<BonkerFull>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerFull {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    short_description: String,
+    #[serde(default)]
+    long_description: String,
+    #[serde(default)]
+    header_image: String,
+    #[serde(default)]
+    background_image: String,
+    #[serde(default)]
+    is_free: bool,
+    #[serde(default)]
+    genres: Vec<Named>,
+    #[serde(default)]
+    release_date: BonkerRelease,
+    price_overview: Option<BonkerPrice>,
+    pc_requirements: Option<BonkerRequirements>,
+    images: Option<BonkerImages>,
+    config: Option<BonkerConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerRelease {
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    coming_soon: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerPrice {
+    /// "€19.99", already in the reader's currency.
+    final_formatted: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerRequirements {
+    minimum: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerConfig {
+    /// Bonker's read of the app's own registry blob, where who made it and who
+    /// ships it live even when the store front page forgets them.
+    extended: Option<BonkerExtended>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BonkerExtended {
+    developer: Option<String>,
+    publisher: Option<String>,
+    homepage: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BonkerSentiment {
+    #[serde(default)]
+    success: bool,
+    #[serde(default)]
+    review_score_desc: String,
+    #[serde(default)]
+    positive_percentage: u32,
+    #[serde(default)]
+    total_reviews: u64,
+}
+
+/// Trimmed to something worth showing, or None: empty strings are everywhere.
+fn neat(text: Option<String>) -> Option<String> {
+    text.map(|text| text.trim().to_string()).filter(|text| !text.is_empty())
+}
+
+/// The largest file a trailer has, stepping down a size when that is missing.
+fn pick_media(map: &HashMap<String, String>) -> Option<String> {
+    map.get("max")
+        .or_else(|| map.get("480"))
+        .or_else(|| map.values().next())
+        .filter(|url| !url.trim().is_empty())
+        .cloned()
+}
+
+/// What a planning sheet needs, for one app id.
+///
+/// Bonker answers first, the store page fills the gaps, and the reviews close
+/// the picture. Only a game neither has a page for is an error: a sheet that
+/// can say nothing is worse than a sheet missing a screenshot.
+pub async fn facts(app_id: u64) -> Result<Facts, String> {
+    let client = client()?;
+    let mut facts = match bonker_full(&client, app_id).await {
+        Ok(app) => Facts::from_bonker(app_id, app),
+        Err(_) => Facts { app_id, ..Facts::default() },
+    };
+    if let Ok(app) = app_details(&client, app_id).await {
+        facts.fill_from_steam(&app);
+    }
+    if facts.name.is_empty() {
+        return Err(format!("the store has no page for app {app_id}"));
+    }
+    facts.reviews = bonker_sentiment(&client, app_id).await;
+    Ok(facts)
+}
+
+async fn bonker_full(client: &reqwest::Client, app_id: u64) -> Result<BonkerFull, String> {
+    let url = format!("{BONKER}/api/appdetails?appids={app_id}&detail=full");
+    let page: BonkerFact = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("the store's cache is unreachable: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("the store's cache answered something unexpected: {e}"))?;
+    page.data.ok_or_else(|| format!("the store's cache has no page for app {app_id}"))
+}
+
+async fn bonker_sentiment(client: &reqwest::Client, app_id: u64) -> Option<Reviews> {
+    let url = format!("{BONKER}/api/appreviews?appids={app_id}");
+    let reply: BonkerSentiment = client.get(url).send().await.ok()?.json().await.ok()?;
+    if !reply.success || reply.total_reviews == 0 || reply.review_score_desc.is_empty() {
+        return None;
+    }
+    Some(Reviews {
+        summary: reply.review_score_desc,
+        percent: reply.positive_percentage,
+        total: reply.total_reviews,
+    })
 }
 
 /// The store's id for a title, when the library does not know it.

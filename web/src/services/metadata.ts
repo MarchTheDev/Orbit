@@ -5,8 +5,8 @@
  * and asks for no key. A cover from SteamGridDB or IGDB is added only when
  * those keys are in Settings, and only when Steam has no portrait.
  */
-import type { GameSuggestion, MetaData } from '../types';
-import { gameSuggestions, metadataLookup, metadataSuggest } from './native';
+import type { GameFacts, GameSuggestion, MetaData } from '../types';
+import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest } from './native';
 
 /**
  * Details for one title.
@@ -27,4 +27,15 @@ export function searchTitles(title: string): Promise<string[]> {
 /** The same suggestions, as games with pictures rather than names. */
 export function searchGames(title: string): Promise<GameSuggestion[]> {
   return gameSuggestions(title);
+}
+
+/**
+ * Everything the store can say about a game before it is anyone's.
+ *
+ * The planning sheet's whole page: description, prices, the people behind it,
+ * how it was received, screenshots and trailers. Bonker's cache of the Steam
+ * catalogue answers, the store page fills the gaps.
+ */
+export function fetchFacts(appId: number): Promise<GameFacts> {
+  return gameFacts(appId);
 }

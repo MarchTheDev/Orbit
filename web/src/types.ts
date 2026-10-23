@@ -196,6 +196,64 @@ export interface GameSuggestion {
   coverUrl: string | null;
 }
 
+/** A still from the store page, thumbnailed and full. */
+export interface GameFactShot {
+  thumb: string;
+  full: string;
+}
+
+/** A trailer, with the playable file the store page publishes. */
+export interface GameFactMovie {
+  name: string;
+  thumbnail: string;
+  mp4: string | null;
+  webm: string | null;
+}
+
+/** How players received the game, in the store's own words and numbers. */
+export interface GameFactReviews {
+  summary: string;
+  percent: number;
+  total: number;
+}
+
+/**
+ * Everything the store can say about a game before it is anyone's.
+ *
+ * Shown by the planning sheet that opens from a search suggestion: what the
+ * game is, who made it, what it costs, how it was received, and the pictures
+ * that make a decision. Filled from Bonker's cache of the Steam catalogue with
+ * the store page filling the gaps; how long it takes arrives separately, from
+ * HowLongToBeat, because the store does not know it.
+ */
+export interface GameFacts {
+  appId: number;
+  name: string;
+  summary: string;
+  /** The longer store text, plain and trimmed to a page. */
+  description: string;
+  genres: string[];
+  releaseYear: number | null;
+  /** The date as the store writes it, "Aug 21, 2012". */
+  releaseDate: string | null;
+  comingSoon: boolean;
+  isFree: boolean;
+  /** What the store asks, already in the reader's currency. */
+  priceText: string | null;
+  developer: string | null;
+  publisher: string | null;
+  homepage: string | null;
+  headerUrl: string | null;
+  heroUrl: string | null;
+  portraitUrl: string | null;
+  logoUrl: string | null;
+  screenshots: GameFactShot[];
+  movies: GameFactMovie[];
+  reviews: GameFactReviews | null;
+  /** The low end of what runs it, in the store's own words. */
+  pcMinimum: string | null;
+}
+
 /** A program found while looking through a folder, for the import dialog. */
 export interface FolderProgram {
   folder: string;
