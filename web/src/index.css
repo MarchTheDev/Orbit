@@ -808,6 +808,31 @@ html.orbit-tv body {
     #05040d;
 }
 
+/* Coming in and going out.
+   The hub takes the whole window, so handing it over has to be a move rather
+   than a cut: it settles in from just behind the glass, and on the way out it
+   sinks and fades before the library appears underneath. The shift is small -
+   a television does not slide, it focuses. */
+@keyframes tv-in {
+  from { opacity: 0; transform: scale(1.04); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tv-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.985); }
+}
+.tv-root {
+  animation: tv-in 340ms cubic-bezier(.22, 1, .36, 1) both;
+  transform-origin: center;
+}
+.tv-root.tv-root-leaving {
+  animation: tv-out 220ms ease-in both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-root,
+  .tv-root.tv-root-leaving { animation: none; }
+}
+
 /* The rail scrolls sideways, and a scrollbar under a row of covers is a line
    the eye keeps landing on. The masks fade the covers themselves at both ends,
    so the row reads as continuing past the screen rather than stopping at it;

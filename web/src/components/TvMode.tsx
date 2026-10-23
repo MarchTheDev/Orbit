@@ -208,6 +208,8 @@ export function TvMode({
   onOpenSettings: () => void;
 }) {
   const [order, setOrder] = useState<TvOrder>('recent');
+  /** True for the moment the screen takes to fade out before the app returns. */
+  const [leaving, setLeaving] = useState(false);
   const list = useMemo(() => orderedForTv(games, order), [games, order]);
 
   /** The game being read on its own page, if one is. */
@@ -223,7 +225,28 @@ export function TvMode({
   const playingNow = list.find((game) => game.id === runningId) ?? null;
 
   const rail = useRef<HTMLUListElement>(null);
+  const exitTimer = useRef(0);
   const coverOf = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
+
+  /**
+   * Give the screen back.
+   *
+   * The hub is the whole window, so it cannot simply stop being drawn: the
+   * library appearing in its place in the same frame is a jump cut, and a jump
+   * cut is the one thing a television never does. It fades and settles first,
+   * then hands the window back. A second press while that is happening is not a
+   * second exit.
+   */
+  const exit = useCallback(() => {
+    if (leaving) return;
+    setLeaving(true);
+    const calm =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    exitTimer.current = window.setTimeout(() => onExit(), calm ? 0 : 220);
+  }, [leaving, onExit]);
+
+  useEffect(() => () => window.clearTimeout(exitTimer.current), []);
 
   /** The clock, the way a console has one. */
   const [now, setNow] = useState(() => new Date());
@@ -297,6 +320,11 @@ export function TvMode({
     Array.from(document.querySelectorAll<HTMLElement>('[data-tv-actions] [data-tv-action]'));
   const onAction = (el: EventTarget | null) =>
     el instanceof HTMLElement && el.closest('[data-tv-action]') !== null;
+  /** The controls in the bar along the top: the sound and the way out. */
+  const barButtons = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-topbar] button'));
+  const inTopbar = (el: EventTarget | null) =>
+    el instanceof HTMLElement && el.closest('[data-tv-topbar]') !== null;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -304,6 +332,7 @@ export function TvMode({
       // them outright.
       if (detailed || document.querySelector('[role="dialog"]')) return;
       const inActions = onAction(document.activeElement);
+      const inBar = inTopbar(document.activeElement);
       // Nothing is focused yet - the first press of a controller lands here.
       // Without this, a direction from nowhere would do nothing at all.
       if (
@@ -319,11 +348,20 @@ export function TvMode({
         case 'Escape':
           event.preventDefault();
           event.stopPropagation();
-          onExit();
+          exit();
           return;
         case 'ArrowLeft':
         case 'ArrowRight': {
           event.preventDefault();
+          // Up in the bar, sideways is the next control in the bar - the sound,
+          // then the way out - rather than the next game behind it.
+          if (inBar) {
+            const buttons = barButtons();
+            const here = buttons.indexOf(document.activeElement as HTMLElement);
+            const step = event.key === 'ArrowRight' ? 1 : -1;
+            buttons[(here + step + buttons.length) % buttons.length]?.focus({ preventScroll: true });
+            return;
+          }
           // Inside the row of buttons, left and right mean the next button -
           // Play then Details - and not the next game. The rail is where a
           // sideways press changes which game is being looked at.
@@ -339,6 +377,7 @@ export function TvMode({
           return;
         }
         case 'ArrowUp': {
+          if (inBar) return;
           event.preventDefault();
           // Up from the rail reaches the game's own buttons; up again leaves
           // the page for the bar at the top, where the sound and the way out
@@ -351,14 +390,28 @@ export function TvMode({
           (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
           return;
         }
-        case 'ArrowDown':
+        case 'ArrowDown': {
           event.preventDefault();
+          // Down out of the bar lands back on the game's buttons, so the way up
+          // into the bar is also the way back down out of it.
+          if (inBar) {
+            (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
+            return;
+          }
           coverOf(at)?.focus({ preventScroll: true });
           return;
+        }
         case 'Enter':
-          // A focused button gets its own Enter; anything else plays the game
-          // the hub is about.
-          if (inActions) return;
+          // A focused button gets its own Enter - the sound, the way out, Play,
+          // Details - so pressing it twice cannot also start the game behind
+          // it. The press is turned into the click here rather than left to the
+          // browser, so that a controller and a keyboard arrive at the same
+          // button the same way. Only a bare hub has no button to give it to.
+          if (inActions || inBar) {
+            event.preventDefault();
+            (document.activeElement as HTMLElement | null)?.click();
+            return;
+          }
           event.preventDefault();
           start();
           return;
@@ -375,7 +428,7 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, detailed, onExit, select, start]);
+  }, [at, detailed, exit, select, start]);
 
   /**
    * The controller.
@@ -401,7 +454,7 @@ export function TvMode({
       // is on the rail or on a game's page.
       event.stopImmediatePropagation();
       if (detailed) setDetailId(null);
-      else onExit();
+      else exit();
     };
     window.addEventListener('orbit-pad-play', onPadPlay);
     window.addEventListener('orbit-pad-back', onPadBack, true);
@@ -409,7 +462,7 @@ export function TvMode({
       window.removeEventListener('orbit-pad-play', onPadPlay);
       window.removeEventListener('orbit-pad-back', onPadBack, true);
     };
-  }, [detailed, onExit, onPlay, onStop, runningId, start]);
+  }, [detailed, exit, onPlay, onStop, runningId, start]);
 
   const left =
     active?.hltb?.main && active.hltb.main > 0
@@ -421,7 +474,13 @@ export function TvMode({
       : null;
 
   return (
-    <div data-orbit-tv="1" className="tv-root fixed inset-0 z-50 flex flex-col overflow-hidden bg-bg text-fg">
+    <div
+      data-orbit-tv="1"
+      className={cn(
+        'tv-root fixed inset-0 z-50 flex flex-col overflow-hidden bg-bg text-fg',
+        leaving && 'tv-root-leaving pointer-events-none',
+      )}
+    >
       {active && <Backdrop game={active} />}
       {/* A wash under the top bar, so its few words stay readable over a game
           whose artwork happens to be bright exactly there. */}
@@ -466,7 +525,7 @@ export function TvMode({
         )}
 
         <button
-          onClick={onExit}
+          onClick={exit}
           title="Leave TV mode (Esc)"
           aria-label="Leave TV mode"
           className="grid size-9 place-items-center rounded-full text-white/50 transition hover:bg-accent/15 hover:text-white focus-visible:ring-2 focus-visible:ring-accent"
@@ -500,7 +559,7 @@ export function TvMode({
               </p>
             </div>
             <button
-              onClick={onExit}
+              onClick={exit}
               className="mt-2 flex items-center gap-2 rounded-full border border-line bg-panel px-5 py-2.5 text-sm font-semibold hover:border-accent"
             >
               <ArrowLeft className="size-4" />
@@ -657,8 +716,12 @@ export function TvMode({
                           if (game.id !== runningId) onPlay(game);
                         }}
                         aria-current={chosen ? 'true' : undefined}
+                        // The name is on the cover, in the page and in the
+                        // aria-label. A `title` would add the browser's own
+                        // little badge after a second of stillness, which is
+                        // what the pointer does while an arrow key is moving
+                        // the rail underneath it.
                         aria-label={game.title}
-                        title={game.title}
                         className="tv-cover group block w-[clamp(5.8rem,15vh,9.4rem)] rounded-xl outline-none"
                       >
                         {/* The ring around the artwork, and only the artwork:

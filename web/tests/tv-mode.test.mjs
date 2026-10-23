@@ -114,7 +114,7 @@ let left = 0;
 const root = createRoot(document.getElementById('root'));
 /** A new mount each time, so one section's selection does not leak into the next. */
 let mounts = 0;
-const render = async (games, runningId = null) => {
+const render = async (games, runningId = null, extra = {}) => {
   await act(async () => {
     root.render(
       createElement(TvMode, {
@@ -136,6 +136,7 @@ const render = async (games, runningId = null) => {
           left += 1;
         },
         onOpenSettings: () => {},
+        ...extra,
       }),
     );
   });
@@ -187,8 +188,15 @@ check('and there is a button there that leaves TV mode',
   [...document.querySelectorAll('[data-tv-topbar] button')].some(
     (button) => button.getAttribute('aria-label') === 'Leave TV mode',
   ));
+await key('ArrowRight');
+check('right in the bar stays in the bar instead of walking the rail',
+  document.activeElement?.closest('[data-tv-topbar]') !== null && selected() === '3');
 await key('ArrowDown');
-check('down comes back to the rail', document.activeElement?.getAttribute('data-tv-cover') === '3');
+check('down out of the bar lands on the game\'s buttons',
+  document.activeElement?.getAttribute('data-tv-action') === 'play');
+await key('ArrowDown');
+check('and down again comes back to the rail',
+  document.activeElement?.getAttribute('data-tv-cover') === '3');
 
 await act(async () => {
   document.querySelector('[data-tv-cover="1"]').click();
@@ -201,10 +209,8 @@ check('clicking a cover selects it without playing it',
 played.length = 0;
 await key('ArrowUp');
 await key('ArrowRight');
-await act(async () => {
-  document.activeElement.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
-});
-check('a focused button answers its own Enter/click',
+await key('Enter');
+check('enter on a focused button is that button\'s own press',
   played.length === 0 && !document.querySelector('[data-tv-cover]'),
   `played ${played.length}`);
 
@@ -241,7 +247,13 @@ check('escape on a game\'s page goes back to the rail rather than out of TV mode
 check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
 
 await key('Escape');
-check('escape on the rail leaves TV mode', left === 1);
+check('the screen fades before it gives the window back',
+  document
+    .querySelector('[data-orbit-tv]')
+    ?.className.includes('tv-root-leaving') === true && left === 0,
+  `leaving ${document.querySelector('[data-orbit-tv]')?.className} / left ${left}`);
+await act(async () => wait(300));
+check('and then escape on the rail leaves TV mode', left === 1);
 
 console.log('a controller drives the same hub');
 
@@ -260,7 +272,7 @@ check('Start on the controller plays the game the hub is about',
   played.join() === 'p2', JSON.stringify(played));
 
 pad('orbit-pad-back');
-await act(async () => wait(20));
+await act(async () => wait(320));
 check('Back on the controller leaves TV mode from the rail', left === 2, String(left));
 
 // From a game's page the same press steps back to the rail, not out of the mode.
@@ -284,15 +296,17 @@ await act(async () => {
   buttonWith('A–Z').click();
 });
 check('A–Z puts the rail in name order',
-  covers().map((cover) => cover.getAttribute('title')).join() ===
+  covers().map((cover) => cover.getAttribute('aria-label')).join() ===
     'Also Half Done,Middle Of It,Put Down,Timed By Hand',
-  covers().map((cover) => cover.getAttribute('title')).join());
+  covers().map((cover) => cover.getAttribute('aria-label')).join());
 check('and says which order it is in', !!buttonWith('A–Z'));
 check('switching order does not lose the rail', covers().length === 4);
 // A long name is the one thing a rail cannot guess at: it gets two lines rather
 // than an ellipsis on the first.
 check('rail titles are allowed to wrap instead of being cut',
   !!document.querySelector('[data-tv-cover] span.line-clamp-2'));
+check('the rail carries no title attribute, so no badge appears over a name',
+  document.querySelectorAll('[data-tv-cover][title]').length === 0);
 // The ring is drawn on the artwork, in the theme's own accent, for hover and
 // selection alike - and never around the name underneath.
 const css = await import('node:fs').then((fs) =>
@@ -312,6 +326,10 @@ check('the ring goes around the artwork, not the name under it',
   css.includes('.tv-cover:hover > span:first-child') &&
     !/\.tv-cover[^\n]*span\s*\{/.test(css.slice(css.indexOf('.tv-cover:hover'), css.indexOf('@media (prefers-reduced-motion'))));
 const coverSpan = document.querySelectorAll('[data-tv-cover]')[1]?.querySelector('span');
+check('the hub comes in and goes out with a move rather than a cut',
+  css.includes('@keyframes tv-in') &&
+    css.includes('@keyframes tv-out') &&
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,200}tv-root/.test(css));
 check('and the markup leaves the colour to that one rule',
   !/group-hover:border|border-accent|shadow-\[/.test(coverSpan?.className ?? ''),
   String(coverSpan?.className));
@@ -325,6 +343,31 @@ await act(async () => {
   stop.click();
 });
 check('and stopping it is one press away', stopped === 1);
+
+console.log('the bar along the top is a place you can walk to and leave from');
+
+await render(library, null, { showMusic: true });
+await key('ArrowUp');
+await key('ArrowUp');
+const inBar = () => document.activeElement?.closest('[data-tv-topbar]') !== null;
+check('up twice from the rail reaches the bar', inBar());
+const sound = document.activeElement;
+check('the bar holds the sound as well as the way out',
+  document.querySelectorAll('[data-tv-topbar] button').length >= 2);
+await key('ArrowRight');
+check('right moves along the bar rather than into the rail',
+  inBar() && document.activeElement !== sound && selected() === '0');
+check('and the way out is one of the stops on it',
+  document.activeElement?.getAttribute('aria-label') === 'Leave TV mode',
+  String(document.activeElement?.getAttribute('aria-label')));
+
+played.length = 0;
+const leftBeforeTopBar = left;
+await key('Enter');
+await act(async () => wait(320));
+check('enter there is a click, not a game starting behind it',
+  left === leftBeforeTopBar + 1 && played.length === 0,
+  `left ${left} / played ${played.length}`);
 
 console.log('leaving fullscreen gives the window back');
 
@@ -368,6 +411,13 @@ const press = (index) => {
   buttons[index] = true;
   padNow = { connected: true, buttons, axes: [0, 0, 0, 0] };
 };
+/** Letting go. The same button twice without this is one press, not two. */
+const release = async () => {
+  padNow = { connected: true, buttons: Array(16).fill(false), axes: [0, 0, 0, 0] };
+  await act(async () => {
+    await wait(120);
+  });
+};
 dom.window.__TAURI__ = { core: { invoke: async () => padNow } };
 // jsdom has no window manager, so the hook's "is this window in front" question
 // has to be answered for it: a couch player is looking at this window.
@@ -398,6 +448,7 @@ await act(async () => {
 });
 check('left walks it back', selected() === '0', String(selected()));
 
+await release();
 press(12);
 await act(async () => {
   await wait(140);
@@ -406,6 +457,7 @@ check('up reaches the game\'s own buttons',
   document.activeElement?.getAttribute('data-tv-action') === 'play',
   String(document.activeElement?.getAttribute('data-tv-action')));
 
+await release();
 press(15);
 await act(async () => {
   await wait(140);
@@ -414,6 +466,7 @@ check('and right moves between those buttons rather than off the rail',
   document.activeElement?.getAttribute('data-tv-action') === 'details',
   String(document.activeElement?.getAttribute('data-tv-action')));
 
+await release();
 press(12);
 await act(async () => {
   await wait(140);
@@ -421,29 +474,40 @@ await act(async () => {
 check('up again reaches the top bar, where the way out is',
   document.activeElement?.closest('[data-tv-topbar]') !== null);
 
+await release();
 press(13);
 await act(async () => {
   await wait(140);
 });
-check('down comes back to the rail from anywhere above it',
+await release();
+press(13);
+await act(async () => {
+  await wait(140);
+});
+check('down out of the bar walks back to the rail',
   document.activeElement?.getAttribute('data-tv-cover') === '0',
   String(document.activeElement?.getAttribute('data-tv-cover')));
 
 // A game's page is driven by the same presses: its two buttons, then Back.
+await release();
 press(12);
 await act(async () => {
   await wait(140);
 });
+await release();
 press(15);
 await act(async () => {
   await wait(140);
 });
+await release();
+await release();
 press(0);
 await act(async () => {
   await wait(140);
 });
 check('a confirm press on Details opens the game\'s page, still in TV mode',
   !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
+await release();
 press(1);
 await act(async () => {
   await wait(140);
