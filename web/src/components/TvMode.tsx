@@ -415,6 +415,13 @@ export function TvMode({
             <div className="relative shrink-0 pb-2">
               <ul
                 ref={rail}
+                // A mouse wheel over the rail is meant for the rail: the page
+                // behind it cannot scroll, so a vertical flick would otherwise
+                // do nothing at all in the one place the pointer already is.
+                onWheel={(event) => {
+                  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+                  if (rail.current) rail.current.scrollLeft += event.deltaY;
+                }}
                 className="tv-rail flex items-end gap-4 overflow-x-auto px-5 pb-4 pt-3 sm:px-9"
               >
                 {list.map((game, n) => {
