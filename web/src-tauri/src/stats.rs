@@ -648,7 +648,7 @@ enum LinuxPull {
 #[cfg(target_os = "linux")]
 impl LinuxFrames {
     fn open() -> Option<Self> {
-        use x11rb::connection::Connection;
+        use x11rb::connection::{Connection, RequestConnection};
         use x11rb::protocol::present::{ConnectionExt as _, EventMask, X11_EXTENSION_NAME};
         use x11rb::rust_connection::RustConnection;
 
