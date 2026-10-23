@@ -787,22 +787,33 @@ fn pick_media(map: &HashMap<String, String>) -> Option<String> {
 
 /// What a planning sheet needs, for one app id.
 ///
-/// Bonker answers first, the store page fills the gaps, and the reviews close
-/// the picture. Only a game neither has a page for is an error: a sheet that
-/// can say nothing is worse than a sheet missing a screenshot.
+/// The three questions - Bonker's page of the catalogue, the store page itself
+/// for the pictures that move, and how the store's players received it - are
+/// asked at the same time, so the sheet is only ever as slow as the slowest
+/// answer rather than the sum of all three. Only a game no source has a page
+/// for is an error: a sheet that can say nothing is worse than a sheet missing
+/// a screenshot.
 pub async fn facts(app_id: u64) -> Result<Facts, String> {
     let client = client()?;
-    let mut facts = match bonker_full(&client, app_id).await {
-        Ok(app) => Facts::from_bonker(app_id, app),
-        Err(_) => Facts { app_id, ..Facts::default() },
+    let full_client = client.clone();
+    let full_task = tokio::spawn(async move { bonker_full(&full_client, app_id).await });
+    let page_client = client.clone();
+    let page_task = tokio::spawn(async move { app_details(&page_client, app_id).await });
+    let reviews_task = tokio::spawn(async move { bonker_sentiment(&client, app_id).await });
+
+    let mut facts = match full_task.await {
+        Ok(Ok(app)) => Facts::from_bonker(app_id, app),
+        _ => Facts { app_id, ..Facts::default() },
     };
-    if let Ok(app) = app_details(&client, app_id).await {
+    if let Ok(Ok(app)) = page_task.await {
         facts.fill_from_steam(&app);
     }
     if facts.name.is_empty() {
         return Err(format!("the store has no page for app {app_id}"));
     }
-    facts.reviews = bonker_sentiment(&client, app_id).await;
+    // The only failure a join adds over the fetch is a panicked task, and
+    // there is nothing in a GET-and-parse to panic on.
+    facts.reviews = reviews_task.await.ok().flatten();
     Ok(facts)
 }
 
