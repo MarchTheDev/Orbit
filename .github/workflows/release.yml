@@ -65,6 +65,16 @@ on:
 permissions:
   contents: write
 
+# Every run feeds the same draft: its last step clears the draft's files and
+# uploads its own. Two runs at once - a quick one and one that hung for hours -
+# race that step, and the loser is whoever looks at the draft: a run cancelled
+# in the middle leaves it with half the files, which is how a complete draft
+# mysteriously empties. One release build at a time; the next push waits its
+# turn rather than killing an upload that is halfway through.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # ----------------------------------------------------------------- the number
   version:
@@ -617,14 +627,14 @@ jobs:
       ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       # Download only installable release bundles. Debug logs are separate
-      # artifacts and must never become public release files.
+      # artifacts and must never become public release files. The two core
+      # builds are not best-effort: a draft that silently misses them looks
+      # complete and is not, so their files missing fails here, loudly.
       - uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: windows
           path: files/windows
       - uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: linux
           path: files/linux
