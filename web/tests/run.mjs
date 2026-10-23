@@ -46,6 +46,8 @@ const checks = [
   'tests/capture-feedback.test.mjs',
   'tests/reorder.test.mjs',
   'tests/pad-nav.test.mjs',
+  'tests/plan-dialog.test.mjs',
+  'tests/plan-cache.test.mjs',
 ];
 
 try {
