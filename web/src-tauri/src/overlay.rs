@@ -1166,9 +1166,13 @@ fn toggle_on_main(app: &AppHandle) {
 /// the panel is see-through there again. A stack that still strands it gets
 /// the solid panel back with ORBIT_OVERLAY_TRANSPARENT=0; =1 forces the
 /// see-through window on any stack, so the question "does this desktop hold
-/// it" stays one launch away.
+/// it" stays one launch away. On the pairing that can never hold it - Wayland
+/// with the proprietary NVIDIA driver, whose compositor drops the RGBA
+/// surface a moment after it appears - startup has already moved the whole
+/// app onto X11 (see run() in lib.rs), and the panel this decides for is an
+/// X11 window, where see-through windows are unremarkable.
 #[cfg(target_os = "linux")]
-fn panel_see_through() -> bool {
+pub(crate) fn panel_see_through() -> bool {
     if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
         let forced = forced.to_string_lossy();
         return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
@@ -1188,10 +1192,11 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
-    // See-through everywhere, with the startup workaround covering the one
-    // stack that used to drop an RGBA window. A desktop that still cannot
-    // hold it paints the same page on Orbit's own ground instead - the way
-    // out is ORBIT_OVERLAY_TRANSPARENT=0 - and the panel cannot silently vanish.
+    // See-through everywhere: on a Wayland + NVIDIA pairing the startup code
+    // runs Orbit through X11 precisely so this window's alpha composites. A
+    // desktop that still cannot hold it paints the same page on Orbit's own
+    // ground instead - the way out is ORBIT_OVERLAY_TRANSPARENT=0 - and the
+    // panel cannot silently vanish.
     let see_through = panel_see_through();
     let background = if see_through {
         tauri::window::Color(0, 0, 0, 0)
@@ -1234,8 +1239,17 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         note_panel("the panel was built solid, as ORBIT_OVERLAY_TRANSPARENT=0 asked");
     }
     #[cfg(target_os = "linux")]
-    if see_through && std::env::var_os("ORBIT_OVERLAY_TRANSPARENT").is_none() && crate::linux_window::wayland_backend() && crate::linux_window::nvidia_driver() {
-        note_panel("the panel is see-through with the NVIDIA Wayland workaround; if it ever flashes away here, ORBIT_OVERLAY_TRANSPARENT=0 brings the solid panel back");
+    if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_some() {
+        note_panel("the panel runs through X11 on this Wayland NVIDIA setup, so its see-through window can survive; ORBIT_X11=0 keeps Orbit on native Wayland instead");
+    }
+    #[cfg(target_os = "linux")]
+    if see_through
+        && std::env::var_os("ORBIT_X11_SWITCHED").is_none()
+        && std::env::var_os("ORBIT_OVERLAY_TRANSPARENT").is_none()
+        && crate::linux_window::wayland_backend()
+        && crate::linux_window::nvidia_driver()
+    {
+        note_panel("the panel is see-through on native Wayland as ORBIT_X11=0 asked; if it ever flashes away here, ORBIT_OVERLAY_TRANSPARENT=0 brings the solid panel back");
     }
     cover_screen(&window);
     let app_for_close = app.clone();
