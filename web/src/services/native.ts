@@ -569,7 +569,13 @@ export function gameFacts(appId: number): Promise<GameFacts> {
       screenshots: [],
       movies: [],
       reviews: null,
-      pcMinimum: null,
+      // A plausible set of requirements, so the browser preview can show how
+      // they read once they are put in rows and the room it takes is lifted
+      // out of them.
+      pcMinimum:
+        'Minimum: OS: Windows 10 64-bit Processor: Intel Core i5-8400 Memory: 12 GB RAM ' +
+        'Graphics: NVIDIA GeForce GTX 1060 DirectX: Version 12 Storage: 60 GB available space ' +
+        'Additional Notes: an SSD is recommended',
     };
   });
 }

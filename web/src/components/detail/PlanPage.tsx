@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Clock,
   Globe,
+  HardDrive,
   Images,
   Info,
   LoaderCircle,
@@ -15,13 +16,14 @@ import {
   Star,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { GameFacts, GameSuggestion, HltbData } from '../../types';
 import { fetchFacts } from '../../services/metadata';
 import { fetchHltb } from '../../services/hltb';
 import { openExternal } from '../../services/desktop';
 import { cn } from '../../utils/cn';
+import { parseRequirements, storageOf, withoutStorage } from '../../utils/requirements';
 
 /**
  * What a game is, before it is anyone's to play.
@@ -178,6 +180,13 @@ export function PlanPage({
   const description = facts?.description ?? '';
   const longEnough = description.length > 700;
 
+  // What runs it, read as rows rather than as the wall of text the store
+  // sends. The room it takes is lifted out of those rows and shown on its own,
+  // because it is the one number a plan is checked against a full disk with.
+  const requirements = useMemo(() => parseRequirements(facts?.pcMinimum ?? ''), [facts?.pcMinimum]);
+  const storage = storageOf(requirements);
+  const specs = withoutStorage(requirements);
+
   const lightbox =
     shot !== null && facts && facts.screenshots[shot]
       ? createPortal(
@@ -260,11 +269,6 @@ export function PlanPage({
               <ArrowLeft className="size-3.5" />
               Search
             </button>
-          )}
-          {facts && (
-            <span className="rounded-xl border border-white/15 bg-black/45 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur">
-              {facts.comingSoon ? 'Coming soon' : facts.isFree ? 'Free to play' : (facts.priceText ?? 'Not for sale')}
-            </span>
           )}
           {reviews && (
             <span
@@ -371,6 +375,26 @@ export function PlanPage({
             )}
           </section>
 
+          {/* The other half of what a plan costs. The store's figure is what it
+              asks for before updates and DLC, which is why it is the store's
+              own words underneath rather than a number presented as certain. */}
+          {storage && (
+            <section>
+              <SheetLabel icon={HardDrive}>Space it needs</SheetLabel>
+              <div className="mx-auto flex max-w-xl items-center gap-3.5 rounded-2xl border border-line bg-panel2/40 px-4 py-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/40 bg-accent/10 text-accent">
+                  <HardDrive className="size-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-mono text-xl font-bold leading-none text-fg">{storage.size}</p>
+                  <p className="mt-1.5 text-[11px] leading-tight text-muted">
+                    {storage.note || 'before updates and extras'}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
+
           {loadingFacts && !facts && (
             <div className="space-y-3">
               <div className="flex items-center gap-3 text-sm text-muted">
@@ -467,9 +491,30 @@ export function PlanPage({
               {facts.pcMinimum && (
                 <section>
                   <SheetLabel icon={MonitorCog}>What runs it</SheetLabel>
-                  <pre className="whitespace-pre-wrap rounded-2xl border border-line bg-panel2/40 p-4 font-sans text-xs leading-relaxed text-muted">
-                    {facts.pcMinimum}
-                  </pre>
+                  {specs.length > 0 ? (
+                    <dl className="mx-auto max-w-xl overflow-hidden rounded-2xl border border-line bg-panel2/40">
+                      {specs.map((spec, index) => (
+                        <div
+                          key={spec.label}
+                          className={cn(
+                            'flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:items-baseline sm:gap-4',
+                            index > 0 && 'border-t border-line/70',
+                          )}
+                        >
+                          <dt className="w-32 shrink-0 text-[11px] uppercase tracking-[0.06em] text-muted">
+                            {spec.label}
+                          </dt>
+                          <dd className="min-w-0 flex-1 text-[13px] leading-relaxed text-fg">{spec.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    // A shop that writes its requirements as prose still gets to
+                    // say them; it just does not get read as if it had columns.
+                    <p className="mx-auto max-w-xl rounded-2xl border border-line bg-panel2/40 px-4 py-3 text-center text-[13px] leading-relaxed text-muted">
+                      {facts.pcMinimum}
+                    </p>
+                  )}
                 </section>
               )}
             </>

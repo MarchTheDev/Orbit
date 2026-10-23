@@ -48,6 +48,7 @@ const checks = [
   'tests/pad-nav.test.mjs',
   'tests/plan-dialog.test.mjs',
   'tests/plan-cache.test.mjs',
+  'tests/requirements.test.mjs',
 ];
 
 try {
