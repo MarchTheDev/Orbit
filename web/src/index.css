@@ -824,68 +824,58 @@ html.orbit-tv body {
   display: none;
 }
 
-/* Focus is drawn by the cover's own ring, so the browser's outline would be a
-   second, thinner one around the same box. The ring is thick on purpose: it is
-   read from across a room, not from in front of the screen. */
+/* The mark around a cover is drawn on the artwork and nowhere else: the name
+   underneath is not part of the thing you pick, and a box around it made the
+   rail look like a table of buttons. One accent - the theme's, whatever it is
+   set to - means hovering, the selection and the controller ring are the same
+   colour, so the rail never shows two highlights that disagree.
+
+   The border and the glow live here rather than in the markup so the three
+   states are written once, in one place, against `--c-accent`. */
+.tv-cover > span:first-child {
+  border: 1px solid color-mix(in srgb, #fff 10%, transparent);
+  opacity: 0.55;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+.tv-cover:hover > span:first-child,
+.tv-cover:focus > span:first-child {
+  border-color: var(--c-accent);
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px var(--c-accent),
+    0 18px 45px rgba(0, 0, 0, 0.6);
+}
+.tv-cover[aria-current='true'] > span:first-child {
+  border-color: var(--c-accent);
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px var(--c-accent),
+    0 0 30px -6px color-mix(in srgb, var(--c-accent) 70%, transparent),
+    0 18px 45px rgba(0, 0, 0, 0.6);
+}
+/* The browser's own outline would be a second, thinner box around the button -
+   which includes the title. Focus is the artwork's ring instead. */
 .tv-cover:focus,
 .tv-cover:focus-visible {
   outline: none;
 }
-/* The controller's ring lands through the same class the rest of the app uses,
-   so a pad highlights a cover exactly as an arrow key does. The selector is the
-   heavier one on purpose: the app's shared ring rule also matches here, and a
-   two-pixel line is not a mark you can see from a sofa. */
-html.orbit-pad .tv-root .tv-cover.orbit-pad-focus span,
-html.orbit-pad .tv-root .tv-cover:focus span {
-  border-radius: 0.75rem;
+html.orbit-pad .tv-root .tv-cover.orbit-pad-focus > span:first-child,
+html.orbit-pad .tv-root .tv-cover:focus > span:first-child {
   outline: 3px solid color-mix(in srgb, var(--c-accent) 85%, transparent);
   outline-offset: 3px;
 }
+/* A direction from a pad is sent as the arrow key the keyboard would send, so
+   both arrive at the same `focus()` call - which means the ring has to be drawn
+   from `:focus` too, not only from the class the generic nav adds. Covers are
+   left out: their ring belongs to the artwork, never to the name under it. */
+html.orbit-pad .tv-root button:not(.tv-cover):focus,
 html.orbit-pad .tv-root [data-tv-action].orbit-pad-focus {
-  outline: 3px solid color-mix(in srgb, #ffffff 70%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 85%, transparent);
   outline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tv-rail { scroll-behavior: auto; }
-  .tv-cover span { transition: none; }
-}
-
-/* The way into TV mode, in the top bar.
- *
- * It is not a page and it is not a setting: it changes what the whole window
- * is, which is why it gets the accent and a little depth rather than the flat
- * grey outline of the buttons around it. The icon sits in its own disc so the
- * button reads as one shape at a glance from across a room, and the glow only
- * arrives on hover - a permanent halo next to the volume would pull the eye
- * away from the library, which is what the bar is for. */
-.orbit-tv-button {
-  border: 1px solid color-mix(in srgb, var(--c-accent) 35%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 16%, transparent), color-mix(in srgb, var(--c-accent) 8%, transparent));
-  color: color-mix(in srgb, var(--c-accent) 62%, var(--c-text));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
-  transition: border-color .15s ease, box-shadow .2s ease, color .15s ease, transform .12s ease;
-}
-.orbit-tv-button .grid {
-  background: color-mix(in srgb, var(--c-accent) 22%, transparent);
-  color: color-mix(in srgb, var(--c-accent) 80%, var(--c-text));
-  transition: background-color .15s ease;
-}
-.orbit-tv-button:hover {
-  border-color: var(--c-accent);
-  color: var(--c-text);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--c-accent) 16%, transparent),
-    0 6px 18px color-mix(in srgb, var(--c-accent) 28%, transparent);
-}
-.orbit-tv-button:hover .grid {
-  background: color-mix(in srgb, var(--c-accent) 40%, transparent);
-  color: #fff;
-}
-.orbit-tv-button:active { transform: translateY(1px); }
-.orbit-tv-button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--c-accent) 65%, transparent);
-  outline-offset: 2px;
+  .tv-cover > span:first-child { transition: none; }
 }

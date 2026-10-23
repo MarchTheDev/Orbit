@@ -155,7 +155,33 @@ function focusFromPad(el: HTMLElement) {
   if (document.activeElement !== el) el.focus();
 }
 
+const ARROW = {
+  up: 'ArrowUp',
+  down: 'ArrowDown',
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+} as const;
+
+/**
+ * In TV mode a direction is a key press.
+ *
+ * The hub already knows what left, right, up and down mean there - walk the
+ * rail, reach the buttons, climb to the bar, and on a game's page move between
+ * its buttons and scroll the text - and it draws its own ring. Searching the
+ * window for the nearest box in that direction gets it wrong in a rail that is
+ * scrolled and masked: the covers off the end of the screen are still boxes, so
+ * the ring could land on one nobody can see. Sending the same key the keyboard
+ * sends keeps the pad and the keyboard on exactly one path.
+ */
+function tvMove(direction: 'up' | 'down' | 'left' | 'right') {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: ARROW[direction], bubbles: true }));
+}
+
 function move(direction: 'up' | 'down' | 'left' | 'right') {
+  if (document.querySelector('[data-orbit-tv]') !== null) {
+    tvMove(direction);
+    return;
+  }
   const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const list = focusables();
   if (list.length === 0) return;
@@ -243,6 +269,9 @@ function ensureFocus() {
     markPadFocus(current);
     return;
   }
+  // In the hub the rail decides where the ring starts; picking the first
+  // control in document order would drop it on the clock's neighbours instead.
+  if (document.querySelector('[data-orbit-tv]')) return;
   const first = focusables()[0];
   if (first) focusFromPad(first);
 }

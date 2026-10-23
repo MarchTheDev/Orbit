@@ -162,18 +162,15 @@ export function TopNav({
         <div className="flex-1" />
         {/* Beside the sound, because both are about the room rather than the
             library: one is what you hear and the other is what you sit back
-            for. It sits a step from the corner so it is not mistaken for
-            Settings. */}
+            for. A plain television, drawn like the icons around it: the full
+            screen it opens is the loud thing, not the button. */}
         <button
           onClick={onTv}
           aria-label="TV mode"
-          title="TV mode: the library fullscreen, for a controller and a couch"
-          className="orbit-tv-button group flex items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-xs font-semibold"
+          title="TV mode"
+          className="rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg"
         >
-          <span className="grid size-7 place-items-center rounded-full">
-            <Tv className="size-4" strokeWidth={1.9} />
-          </span>
-          <span className="hidden pr-0.5 sm:inline">TV</span>
+          <Tv className="size-5" strokeWidth={1.8} />
         </button>
         {showMusic && (
           <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />

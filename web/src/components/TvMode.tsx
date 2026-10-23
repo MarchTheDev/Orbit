@@ -304,6 +304,17 @@ export function TvMode({
       // them outright.
       if (detailed || document.querySelector('[role="dialog"]')) return;
       const inActions = onAction(document.activeElement);
+      // Nothing is focused yet - the first press of a controller lands here.
+      // Without this, a direction from nowhere would do nothing at all.
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowDown') &&
+        (!(document.activeElement instanceof HTMLElement) ||
+          document.activeElement === document.body)
+      ) {
+        event.preventDefault();
+        select(at + (event.key === 'ArrowRight' ? 1 : 0) - (event.key === 'ArrowLeft' ? 1 : 0));
+        return;
+      }
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
@@ -650,14 +661,10 @@ export function TvMode({
                         title={game.title}
                         className="tv-cover group block w-[clamp(5.8rem,15vh,9.4rem)] rounded-xl outline-none"
                       >
-                        <span
-                          className={cn(
-                            'relative block aspect-[2/3] w-full overflow-hidden rounded-xl border transition duration-200',
-                            chosen
-                              ? 'border-accent/70 opacity-100 shadow-[0_0_0_2px_rgba(139,92,246,.85),0_18px_45px_rgba(0,0,0,.65)]'
-                              : 'border-white/10 opacity-55 shadow-lg group-hover:border-accent/50 group-hover:opacity-100',
-                          )}
-                        >
+                        {/* The ring around the artwork, and only the artwork:
+                            `index.css` draws it against the theme's accent for
+                            hover, selection and the pad alike. */}
+                        <span className="relative block aspect-[2/3] w-full overflow-hidden rounded-xl">
                           <Cover game={game} className="size-full [&_span]:text-xl" />
                           {game.id === runningId && (
                             <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">

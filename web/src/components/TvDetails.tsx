@@ -115,7 +115,7 @@ export function TvDetails({
             ref={back}
             data-tv-action="back"
             onClick={onBack}
-            className="flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] py-2 pl-3 pr-4 text-[13px] font-semibold text-white/85 backdrop-blur-md transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40"
+            className="flex items-center gap-2 rounded-full border border-white/15 bg-[#0d0b18]/85 py-2 pl-3 pr-4 text-[13px] font-semibold text-white/90 backdrop-blur-md transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40"
           >
             <ArrowLeft className="size-4" />
             Back to the rail
@@ -183,14 +183,14 @@ export function TvDetails({
                 {times.length > 0 ? (
                   <div className="space-y-2">
                     {times.map((row) => (
-                      <div key={row.label} className="rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-2.5">
+                      <div key={row.label} className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-2.5">
                         <div className="flex items-baseline justify-between gap-3">
                           <span className="text-[12.5px] text-white/60">{row.label}</span>
                           <span className="font-mono text-base font-bold" style={{ color: row.colour }}>
                             {row.hours}h
                           </span>
                         </div>
-                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/40">
                           <div
                             className="h-full rounded-full"
                             style={{
@@ -208,7 +208,7 @@ export function TvDetails({
                     )}
                   </div>
                 ) : (
-                  <p className="rounded-xl border border-dashed border-white/15 px-3.5 py-3 text-[12.5px] text-white/45">
+                  <p className="rounded-xl border border-dashed border-white/15 bg-[#0d0b18]/75 px-3.5 py-3 text-[12.5px] text-white/45">
                     Nobody has written down how long this one takes yet.
                   </p>
                 )}
@@ -239,12 +239,12 @@ export function TvDetails({
                     {achievements > 0 ? 'Achievements' : 'Notes'}
                   </Heading>
                   {achievements > 0 ? (
-                    <div className="rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-3">
+                    <div className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-3">
                       <p className="font-mono text-lg font-bold text-white">
                         {unlocked}
                         <span className="text-white/35"> / {achievements}</span>
                       </p>
-                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/40">
                         <div
                           className="h-full rounded-full bg-amber-400"
                           style={{ width: `${Math.round((unlocked / achievements) * 100)}%` }}
@@ -252,7 +252,7 @@ export function TvDetails({
                       </div>
                     </div>
                   ) : (
-                    <p className="whitespace-pre-wrap rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-3 text-[12.5px] leading-relaxed text-white/65">
+                    <p className="whitespace-pre-wrap rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-3 text-[12.5px] leading-relaxed text-white/65">
                       {game.notes}
                     </p>
                   )}
@@ -279,7 +279,7 @@ export function TvDetails({
 /** A small per-row fact, the counterpart of the hub's pills. */
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.07] pb-1.5">
+    <div className="flex items-baseline justify-between gap-3 border-b border-white/10 pb-1.5">
       <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{label}</span>
       <span className="text-right text-[12.5px] font-medium text-white/80">{children}</span>
     </div>
@@ -288,7 +288,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 
 function Tile({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-2.5">
+    <div className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-2.5">
       <p className="truncate text-[15px] font-bold text-white">{value}</p>
       <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-white/35">{label}</p>
     </div>

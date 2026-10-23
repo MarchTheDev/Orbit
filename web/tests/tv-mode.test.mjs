@@ -12,12 +12,16 @@ import { JSDOM } from 'jsdom';
 import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
-const globalNames = ['window', 'document', 'navigator', 'HTMLElement', 'IS_REACT_ACT_ENVIRONMENT'];
+const globalNames = ['window', 'document', 'navigator', 'HTMLElement', 'KeyboardEvent', 'CustomEvent', 'IS_REACT_ACT_ENVIRONMENT'];
 const previousGlobals = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
 Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window });
 Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: dom.window.HTMLElement });
+// The pad sends the arrow keys a keyboard would, and that code runs outside the
+// jsdom window, so the constructors it needs are placed on the bundle's global.
+Object.defineProperty(globalThis, 'KeyboardEvent', { configurable: true, value: dom.window.KeyboardEvent });
+Object.defineProperty(globalThis, 'CustomEvent', { configurable: true, value: dom.window.CustomEvent });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 dom.window.Node.prototype.attachEvent = () => {};
 dom.window.Node.prototype.detachEvent = () => {};
@@ -217,6 +221,14 @@ check('it says what has been played of it',
 check('and how long the main story takes', page.textContent.toLowerCase().includes('main story'));
 check('a pad or a keyboard lands on Back first', document.activeElement?.getAttribute('data-tv-action') === 'back');
 
+// The page sits over the game's artwork, so its cards have to hold their own
+// against whatever the picture is doing behind them.
+const detailsSource = await import('node:fs').then((fs) =>
+  fs.readFileSync(new URL('../src/components/TvDetails.tsx', import.meta.url), 'utf8'),
+);
+check('the cards on a game\'s page are solid enough to read over artwork',
+  !detailsSource.includes('bg-white/[0.0') && detailsSource.includes('bg-[#0d0b18]/85'));
+
 await key('ArrowRight');
 check('right moves between the page\'s own buttons', document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowLeft');
@@ -281,10 +293,28 @@ check('switching order does not lose the rail', covers().length === 4);
 // than an ellipsis on the first.
 check('rail titles are allowed to wrap instead of being cut',
   !!document.querySelector('[data-tv-cover] span.line-clamp-2'));
-const other = document.querySelectorAll('[data-tv-cover]')[1]?.querySelector('span');
-check('hovering a cover speaks the same accent as selecting one',
-  other?.className.includes('group-hover:border-accent') === true,
-  String(other?.className));
+// The ring is drawn on the artwork, in the theme's own accent, for hover and
+// selection alike - and never around the name underneath.
+const css = await import('node:fs').then((fs) =>
+  fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8'),
+);
+const rule = (selector) => {
+  const at = css.indexOf(selector);
+  return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+};
+const hoverRule = rule('.tv-cover:hover > span:first-child');
+const selectedRule = rule(".tv-cover[aria-current='true'] > span:first-child");
+check('hovering a cover speaks the theme accent', hoverRule.includes('var(--c-accent)'), hoverRule);
+check('and selecting one speaks the same accent', selectedRule.includes('var(--c-accent)'), selectedRule);
+check('the accent is the theme variable, not a colour of its own',
+  !rule('.tv-cover').includes('139,92,246'));
+check('the ring goes around the artwork, not the name under it',
+  css.includes('.tv-cover:hover > span:first-child') &&
+    !/\.tv-cover[^\n]*span\s*\{/.test(css.slice(css.indexOf('.tv-cover:hover'), css.indexOf('@media (prefers-reduced-motion'))));
+const coverSpan = document.querySelectorAll('[data-tv-cover]')[1]?.querySelector('span');
+check('and the markup leaves the colour to that one rule',
+  !/group-hover:border|border-accent|shadow-\[/.test(coverSpan?.className ?? ''),
+  String(coverSpan?.className));
 
 console.log('a running game says so, and can be stopped from the hub');
 
@@ -318,6 +348,117 @@ const before = gaveBack;
 await leaveFullscreen();
 check('leaving something that was never entered is not an error', gaveBack === before);
 
+console.log('a d-pad walks the rail, not the page behind it');
+
+const { useGamepad } = await import('../src/hooks/useGamepad.ts');
+const Pad = () => {
+  useGamepad();
+  return null;
+};
+await render(library);
+const padHost = document.body.appendChild(document.createElement('div'));
+const padRoot = createRoot(padHost);
+
+// jsdom reports itself as Linux, which is the desktop path: the page asks the
+// window for the pad's state instead of reading the browser's gamepad API. That
+// is the path this checks - the one a controller on this machine actually uses.
+let padNow = { connected: false, buttons: Array(16).fill(false), axes: [0, 0, 0, 0] };
+const press = (index) => {
+  const buttons = Array(16).fill(false);
+  buttons[index] = true;
+  padNow = { connected: true, buttons, axes: [0, 0, 0, 0] };
+};
+dom.window.__TAURI__ = { core: { invoke: async () => padNow } };
+// jsdom has no window manager, so the hook's "is this window in front" question
+// has to be answered for it: a couch player is looking at this window.
+const hadFocus = dom.window.document.hasFocus;
+dom.window.document.hasFocus = () => true;
+
+// The pad arrives connected and still: that reading is the baseline, not a push.
+padNow = { connected: true, buttons: Array(16).fill(false), axes: [0, 0, 0, 0] };
+await act(async () => {
+  padRoot.render(createElement(Pad));
+});
+await act(async () => {
+  await wait(140);
+});
+check('a pad that is connected and sitting still leaves the rail where it is',
+  selected() === '0', String(selected()));
+
+press(15);
+await act(async () => {
+  await wait(140);
+});
+check('right on the d-pad moves the rail on', selected() === '1', String(selected()));
+check('and the page follows it', title() === 'Also Half Done', title());
+
+press(14);
+await act(async () => {
+  await wait(140);
+});
+check('left walks it back', selected() === '0', String(selected()));
+
+press(12);
+await act(async () => {
+  await wait(140);
+});
+check('up reaches the game\'s own buttons',
+  document.activeElement?.getAttribute('data-tv-action') === 'play',
+  String(document.activeElement?.getAttribute('data-tv-action')));
+
+press(15);
+await act(async () => {
+  await wait(140);
+});
+check('and right moves between those buttons rather than off the rail',
+  document.activeElement?.getAttribute('data-tv-action') === 'details',
+  String(document.activeElement?.getAttribute('data-tv-action')));
+
+press(12);
+await act(async () => {
+  await wait(140);
+});
+check('up again reaches the top bar, where the way out is',
+  document.activeElement?.closest('[data-tv-topbar]') !== null);
+
+press(13);
+await act(async () => {
+  await wait(140);
+});
+check('down comes back to the rail from anywhere above it',
+  document.activeElement?.getAttribute('data-tv-cover') === '0',
+  String(document.activeElement?.getAttribute('data-tv-cover')));
+
+// A game's page is driven by the same presses: its two buttons, then Back.
+press(12);
+await act(async () => {
+  await wait(140);
+});
+press(15);
+await act(async () => {
+  await wait(140);
+});
+press(0);
+await act(async () => {
+  await wait(140);
+});
+check('a confirm press on Details opens the game\'s page, still in TV mode',
+  !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
+press(1);
+await act(async () => {
+  await wait(140);
+});
+check('and Back returns to the rail rather than leaving the mode',
+  !!document.querySelector('[data-tv-cover]'), String(left));
+
+await act(async () => {
+  padRoot.unmount();
+  await wait(20);
+});
+padHost.remove();
+delete dom.window.__TAURI__;
+dom.window.document.hasFocus = hadFocus;
+
 console.log('the button is in the top bar, beside the sound');
 
 const nav = await import('../src/components/TopNav.tsx');
@@ -327,6 +468,10 @@ const source = await import('node:fs').then((fs) =>
 check('the bar has a TV control that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
 check('it sits beside the music control rather than at the far corner',
   source.indexOf('onClick={onTv}') < source.indexOf('<MusicButton'));
+check('the TV button is a plain television, drawn like the icons beside it',
+  /aria-label="TV mode"/.test(source) &&
+    !/orbit-tv-button|box-shadow|gradient/.test(source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400)),
+  source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400));
 
 await act(async () => {
   await wait(20);

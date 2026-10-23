@@ -1,4 +1,4 @@
-import { directionsHeld, heldDirection, journalMove, mayHandleGamepadInput, padDistance, padEdges, padEdgesWhenOwned, padNearest, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
+import { directionsHeld, hatDirection, heldDirection, journalMove, mayHandleGamepadInput, padDistance, padEdges, padEdgesWhenOwned, padNearest, releaseRest, withoutRest } from '../src/utils/gamepad.ts';
 
 let failures = 0;
 const check = (name, pass) => {
@@ -48,6 +48,23 @@ check('another direction still counts while up is only the opening hold', heldDi
 const cleared = releaseRest(rest, directionsHeld({ buttons: Array(16).fill(false), axes: [0, 0, 0, 0] }));
 check('letting the stick go clears the hold', !cleared.up);
 check('a later push up still counts', heldDirection({ buttons: Array(16).fill(false), axes: [0, -0.8, 0, 0] }, cleared) === 'up');
+
+console.log('a d-pad that reports as a hat still walks the rail');
+
+const flat = Array(16).fill(false);
+const withHat = (x, y, buttons = flat) => ({ buttons, axes: [0, 0, 0, 0, 0, 0, x, y] });
+check('a hat at rest points nowhere', hatDirection(withHat(0, 0).axes) === null);
+check('and a pushed one points the way it is pushed',
+  hatDirection(withHat(-1, 0).axes) === 'left' &&
+    hatDirection(withHat(1, 0).axes) === 'right' &&
+    hatDirection(withHat(0, -1).axes) === 'up' &&
+    hatDirection(withHat(0, 1).axes) === 'down');
+check('a hat press is a move', padEdges(withHat(0, 0), withHat(1, 0)).includes('right'));
+check('holding it keeps stepping', heldDirection(withHat(0, 1)) === 'down');
+check('and letting it go stops', heldDirection(withHat(0, 0)) === null);
+check('the same direction from a hat and its button moves once',
+  padEdges(withHat(0, 0), { buttons: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0].map(Boolean), axes: [0, 0, 0, 0, 0, 0, 0, 1] })
+    .filter((action) => action === 'down').length === 1);
 
 console.log('the library only acts on a controller while its window owns focus');
 const startButtons = Array(16).fill(false);
