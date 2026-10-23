@@ -1095,6 +1095,7 @@ mod tests {
             library_capsule: Some("https://api.bonker.dev/api/image-cache/app_4731620_library_capsule.jpg".into()),
             library_capsule_2x: Some("https://api.bonker.dev/api/image-cache/app_4731620_library_capsule_2x.jpg".into()),
             header: Some("https://api.bonker.dev/api/image-cache/app_4731620_header.jpg".into()),
+            ..BonkerImages::default()
         };
         let picks = portraits_of(&images);
         assert_eq!(picks.len(), 2);
