@@ -1,13 +1,12 @@
 /**
- * TV mode: the library as something to sit in front of.
+ * TV mode: one rail of playable games, the way a console shows a library.
  *
- * Two things are checked here. The shelves, because their order *is* the page -
- * what am I in the middle of, what did I put down, what did I mean to play - and
- * because a shelf that quietly drops a hidden game or repeats one is a shelf
- * nobody can trust. And the hub itself, because every control on it has to work
- * with one hand on a controller: an arrow key moves the highlight, Enter plays
- * what it is on, Escape leaves, and the game the page is about follows the
- * highlight without anything being clicked.
+ * Three things are checked here. What the rail is allowed to hold, because the
+ * whole point of the rework is that a plan is not something you can sit down
+ * and play. The order it is in, because the first game on it is the one the
+ * page opens on. And the hub itself, because every control has to work with one
+ * hand on a controller: an arrow key walks the rail and the page follows it,
+ * Enter plays what it is on, Escape gives the screen back.
  */
 import { JSDOM } from 'jsdom';
 import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
@@ -22,15 +21,16 @@ Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: do
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 dom.window.Node.prototype.attachEvent = () => {};
 dom.window.Node.prototype.detachEvent = () => {};
-// jsdom lays nothing out, so the two calls a browser makes while bringing a
-// tile into view do not exist there. They are the only part of the hub that
-// cannot be tested this way - what is tested is which tile ends up focused.
+// jsdom lays nothing out and does not scroll, so the calls a browser makes
+// while centring a cover are stubbed. Which cover ends up selected is what is
+// being checked here, not where it was drawn.
 dom.window.Element.prototype.scrollIntoView = () => {};
+dom.window.Element.prototype.scrollTo = () => {};
 dom.window.Element.prototype.scrollBy = () => {};
 
 const { act, createElement } = await import('react');
 const { createRoot } = await import('react-dom/client');
-const { TvMode, tvShelves } = await import('../src/components/TvMode.tsx');
+const { TvMode, orderedForTv, playableGames } = await import('../src/components/TvMode.tsx');
 const { enterFullscreen, leaveFullscreen, fullscreenError } = await import('../src/services/tv.ts');
 
 let failures = 0;
@@ -49,48 +49,58 @@ const key = async (name) => {
   });
   await wait(10);
 };
-const tiles = () => [...document.querySelectorAll('[data-tv-tile]')];
-const focused = () => document.activeElement?.getAttribute('data-tv-tile') ?? null;
-const heroTitle = () => document.querySelector('[data-orbit-tv] h1')?.textContent ?? '';
+const covers = () => [...document.querySelectorAll('[data-tv-cover]')];
+const selected = () => document.querySelector('[data-orbit-tv] [aria-current="true"]')?.getAttribute('data-tv-cover') ?? null;
+const title = () => document.querySelector('[data-orbit-tv] h1')?.textContent ?? '';
+const buttonWith = (text) => [...document.querySelectorAll('[data-orbit-tv] button')].find((b) => b.textContent?.trim() === text);
 
-console.log('the shelves answer one question each');
+console.log('only what can be played is on the rail');
 
-const sample = (at) => SAMPLE_GAMES[at];
 const library = [
-  { ...sample(1), id: 'p1', title: 'Middle Of It', status: 'playing', favorite: false, lastPlayed: '2026-10-20T10:00:00.000Z' },
-  { ...sample(2), id: 'p2', title: 'Also Half Done', status: 'playing', favorite: false, lastPlayed: '2026-10-18T10:00:00.000Z' },
-  { ...sample(3), id: 'b', title: 'Put Down', status: 'backlog', favorite: false, lastPlayed: null, planned: false },
-  { ...sample(0), id: 'w', title: 'Not Owned', status: 'backlog', favorite: false, planned: true, lastPlayed: null },
-  { ...sample(4), id: 'f', title: 'Loved', status: 'completed', favorite: true, lastPlayed: null },
-  { ...sample(5), id: 'h', title: 'Hidden One', hidden: true, favorite: false },
+  { ...SAMPLE_GAMES[1], id: 'p1', title: 'Middle Of It', status: 'playing', lastPlayed: '2026-10-20T10:00:00.000Z' },
+  { ...SAMPLE_GAMES[2], id: 'p2', title: 'Also Half Done', status: 'playing', lastPlayed: '2026-10-18T10:00:00.000Z' },
+  { ...SAMPLE_GAMES[3], id: 'b', title: 'Put Down', status: 'backlog', lastPlayed: null, planned: false },
+  // A plan: written down, owned or not, with nothing here to start.
+  { ...SAMPLE_GAMES[0], id: 'w', title: 'Not Owned', status: 'backlog', planned: true, lastPlayed: null },
+  // Owned but never installed, and never played: still a plan in Orbit's terms.
+  { ...SAMPLE_GAMES[4], id: 'owned', title: 'Owned Elsewhere', status: 'backlog', planned: false, inLibrary: false, installDir: null, exePath: null, launch: { kind: 'none' }, sessionCount: 0, manualPlaySecs: 0, sizeBytes: 0, lastPlayed: null },
+  { ...SAMPLE_GAMES[5], id: 'h', title: 'Hidden One', hidden: true, planned: false },
+  // Added by hand by title: in the library, so it can be timed and played.
+  { ...SAMPLE_GAMES[2], id: 'hand', title: 'Timed By Hand', inLibrary: true, planned: false, lastPlayed: null },
 ];
-const shelves = tvShelves(library);
-const ids = (name) => shelves.find((shelf) => shelf.id === name)?.games.map((game) => game.id) ?? [];
-check('what is being played comes first', shelves[0]?.id === 'playing' && ids('playing').join() === 'p1,p2');
-check('then what was played most recently',
-  ids('recent').join() === 'p1,p2', ids('recent').join());
-check('then what is waiting', ids('backlog').join() === 'b');
-check('what is only planned is its own shelf, not mixed in with owned games',
-  ids('wanted').join() === 'w' && !ids('backlog').includes('w'));
-check('favourites are gathered', ids('favourites').join() === 'f', ids('favourites').join());
-check('everything is there, by name, so a shelf can be scanned rather than read',
-  ids('all').join() === 'p2,f,p1,w,b', ids('all').join());
-check('a hidden game is in the library but not on the hub', ids('all').includes('h') === false);
-check('an empty shelf is not drawn', tvShelves([library[2]]).every((shelf) => shelf.games.length > 0));
+const shown = playableGames(library).map((game) => game.id);
+check('a plan is not on the rail', !shown.includes('w'));
+check('a game with nothing on the machine is not on the rail either', !shown.includes('owned'));
+check('a hidden game stays hidden', !shown.includes('h'));
+check('everything that can be started is', shown.join() === 'p1,p2,b,hand', shown.join());
 
-console.log('the hub: a shelf of pictures, and one game held out');
+console.log('the first game on the rail is the one you played last');
+
+check('recently played leads, and the rest follow it',
+  orderedForTv(library, 'recent').map((game) => game.id).join() === 'p1,p2,b,hand',
+  orderedForTv(library, 'recent').map((game) => game.id).join());
+check('A–Z is there for finding one particular game',
+  orderedForTv(library, 'az').map((game) => game.title).join() ===
+    'Also Half Done,Middle Of It,Put Down,Timed By Hand',
+  orderedForTv(library, 'az').map((game) => game.title).join());
+check('an empty library has an empty rail', orderedForTv([], 'recent').length === 0);
+
+console.log('the hub: one rail, and the selected game all over the screen');
 
 const played = [];
 let stopped = 0;
 let details = null;
 let left = 0;
 const root = createRoot(document.getElementById('root'));
-const render = async (games) => {
+/** A new mount each time, so one section's selection does not leak into the next. */
+let mounts = 0;
+const render = async (games, runningId = null) => {
   await act(async () => {
     root.render(
       createElement(TvMode, {
+        key: ++mounts,
         games,
-        runningId: null,
+        runningId,
         sound: undefined,
         setSound: () => {},
         showMusic: false,
@@ -113,43 +123,71 @@ const render = async (games) => {
 };
 
 await render(library);
-check('it fills the window rather than sitting in the page', !!document.querySelector('[data-orbit-tv]'));
-check('the shelves are drawn', document.querySelectorAll('[data-tv-shelf]').length === shelves.length);
-check('the first tile is where a couch starts', focused() === '0:0', String(focused()));
-check('the page is about that game', heroTitle() === 'Middle Of It', heroTitle());
+check('the hub fills the window rather than sitting in the page', !!document.querySelector('[data-orbit-tv]'));
+check('every playable game is on one rail, and nothing else is',
+  covers().length === 4, String(covers().length));
+check('there are no shelves or category tabs to choose between first',
+  !document.querySelector('[data-tv-shelf]') &&
+    !['Up next', 'Favourites', 'Jump back in'].some((label) => document.body.textContent.includes(label)));
+check('the page opens on the game you played last', title() === 'Middle Of It' && selected() === '0', `${title()} / ${selected()}`);
+check('and that game has the rail’s focus', document.activeElement?.getAttribute('data-tv-cover') === '0');
 
 await key('ArrowRight');
-check('right moves along the shelf, and takes the page with it',
-  focused() === '0:1' && heroTitle() === 'Also Half Done', `${focused()} / ${heroTitle()}`);
-await key('ArrowDown');
-check('down moves to the next shelf', focused()?.startsWith('1:') === true, String(focused()));
-await key('ArrowUp');
-check('up goes back', focused()?.startsWith('0:') === true, String(focused()));
+check('right walks the rail, and the page follows it',
+  selected() === '1' && title() === 'Also Half Done', `${selected()} / ${title()}`);
+await key('ArrowRight');
+await key('ArrowRight');
+await key('ArrowRight');
+check('the rail wraps rather than stopping dead at the end', selected() === '0', String(selected()));
+await key('ArrowLeft');
+check('and wraps the other way', selected() === '3', String(selected()));
 
-// Play is the console's one button: Enter on the highlighted game.
 await key('Enter');
-check('enter plays the game the hub is about', played.length === 1, JSON.stringify(played));
+check('enter plays the game the hub is about', played.join() === 'hand', JSON.stringify(played));
+
+await key('ArrowUp');
+check('up reaches the buttons', document.activeElement?.tagName === 'BUTTON' && document.activeElement.textContent.includes('Play'));
+await key('ArrowDown');
+check('down comes back to the rail', document.activeElement?.getAttribute('data-tv-cover') === '3');
+
+await act(async () => {
+  document.querySelector('[data-tv-cover="1"]').click();
+});
+check('clicking a cover selects it without playing it',
+  title() === 'Also Half Done' && played.length === 1, `${title()} / ${played.length}`);
+
+await act(async () => {
+  buttonWith('Details').click();
+});
+check('details hands the game back to the app', details === 'p2', String(details));
+
 await key('Escape');
 check('escape leaves TV mode', left === 1);
 
-await act(async () => {
-  document.querySelector('[data-tv-tile="0:1"]').click();
-});
-check('clicking a tile shows it without playing it', played.length === 1 && heroTitle() === 'Also Half Done', heroTitle());
+console.log('the rail can be read by name instead of by memory');
 
-const detailButton = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Details'));
+await render(library);
+const sortButton = buttonWith('Recent');
+check('the order the rail is in is on the page, and can be changed', !!sortButton);
 await act(async () => {
-  detailButton.click();
+  sortButton.click();
 });
-check('details hands the game back to the app', details !== null);
+check('A–Z puts the rail in name order',
+  covers().map((cover) => cover.getAttribute('title')).join() ===
+    'Also Half Done,Middle Of It,Put Down,Timed By Hand',
+  covers().map((cover) => cover.getAttribute('title')).join());
+check('and says which order it is in', !!buttonWith('A–Z'));
+check('switching order does not lose the rail', covers().length === 4);
 
-// A game nobody owns has nothing to start, so the hub does not offer to.
-const plannedOnly = [library[3]];
-await render(plannedOnly);
-const playButton = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Play');
-check('a planned game is shown, with Play clearly not on offer',
-  !!playButton && playButton.disabled === true);
-check('and it says why', !!document.querySelector('[data-orbit-tv]')?.textContent?.includes('not owned yet'));
+console.log('a running game says so, and can be stopped from the hub');
+
+await render(library, 'b');
+const stop = document.querySelector('[data-orbit-tv] button[aria-label="Stop the session"]');
+check('the game that is running is named at the top of the screen', !!stop);
+await act(async () => {
+  stop.click();
+});
+check('and stopping it is one press away', stopped === 1);
 
 console.log('leaving fullscreen gives the window back');
 
@@ -169,12 +207,24 @@ dom.window.document.documentElement.requestFullscreen = async () => {
 };
 check('a browser that refuses leaves nothing broken',
   (await enterFullscreen()) === false && fullscreenError() === 'denied');
-// Nothing was entered, so nothing should be exited.
 const before = gaveBack;
 await leaveFullscreen();
 check('leaving something that was never entered is not an error', gaveBack === before);
 
-root.unmount();
+console.log('the button is in the top bar, beside the sound');
+
+const nav = await import('../src/components/TopNav.tsx');
+const source = await import('node:fs').then((fs) =>
+  fs.readFileSync(new URL('../src/components/TopNav.tsx', import.meta.url), 'utf8'),
+);
+check('the bar has a TV control that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
+check('it sits beside the music control rather than at the far corner',
+  source.indexOf('onClick={onTv}') < source.indexOf('<MusicButton'));
+
+await act(async () => {
+  await wait(20);
+  root.unmount();
+});
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;
 for (const [name, descriptor] of previousGlobals) {

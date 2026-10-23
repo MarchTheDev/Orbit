@@ -796,57 +796,62 @@ input[type='number']::-webkit-outer-spin-button {
 /* ------------------------------------------------------------------ TV mode */
 
 /* The hub is the window, so the page has nothing behind it to show through.
-   The room is lit from the top corners, the way a console's own dashboard is,
-   and it is darker than the app: a couch is further from the screen than a
-   chair, and the artwork on the shelves does the lighting. */
+   The room is lit from the top, the way a console's own dashboard is, and it is
+   darker than the app: a couch is further from the screen than a chair, and the
+   selected game's artwork does the lighting. */
 html.orbit-tv,
 html.orbit-tv body {
   background: #05040d;
 }
 .tv-root {
   background:
-    radial-gradient(ellipse 55% 45% at 50% -12%, color-mix(in srgb, var(--c-accent) 16%, transparent), transparent),
-    radial-gradient(ellipse 45% 35% at 8% 105%, color-mix(in srgb, var(--c-accent2) 10%, transparent), transparent),
+    radial-gradient(ellipse 60% 50% at 50% -10%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent),
     #05040d;
 }
 
-/* A shelf scrolls sideways, and a scrollbar under a row of covers is a line the
-   eye keeps landing on. It is hidden; the half-revealed tile at the edge is
-   what says there is more of the shelf. */
-.tv-shelf {
+/* The selected game's artwork arrives rather than appearing: the picture is
+   the biggest thing on the screen, and swapping it between two games is the
+   one moment the page would otherwise feel like a repaint. */
+.tv-art {
+  animation: tv-art-in 0.45s ease both;
+}
+@keyframes tv-art-in {
+  from { opacity: 0; transform: scale(1.06); }
+  to { opacity: 1; transform: scale(1.03); }
+}
+
+/* The rail scrolls sideways, and a scrollbar under a row of covers is a line
+   the eye keeps landing on. It is hidden: the covers trailing off at both
+   edges are what says there is more of the list. */
+.tv-rail {
   scroll-behavior: smooth;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  scroll-snap-type: x proximity;
 }
-.tv-shelf::-webkit-scrollbar {
+.tv-rail::-webkit-scrollbar {
   display: none;
 }
-.tv-shelf > li {
-  scroll-snap-align: start;
-}
 
-/* Focus is drawn by the tile's own ring, so the browser's outline would be a
-   second, thinner one around the same box. The ring is thick on purpose: it is
-   read from across a room, not from in front of the screen. */
-.tv-tile:focus,
-.tv-tile:focus-visible {
+/* The selection is drawn by the cover's own ring, so the browser's outline
+   would be a second, thinner one around the same box. The ring is thick on
+   purpose: it is read from across a room, not from in front of the screen. */
+.tv-cover:focus,
+.tv-cover:focus-visible {
   outline: none;
 }
 /* The controller's ring lands through the same class the rest of the app uses,
-   so a pad highlights a tile exactly as an arrow key does. The selector is the
+   so a pad highlights a cover exactly as an arrow key does. The selector is the
    heavier one on purpose: the app's shared ring rule also matches here, and a
    two-pixel line is not a mark you can see from a sofa. */
-html.orbit-pad .tv-root .tv-tile.orbit-pad-focus,
-html.orbit-pad .tv-root .tv-tile:focus {
-  border-radius: 1rem;
-  outline: 4px solid color-mix(in srgb, var(--c-accent) 80%, transparent);
+html.orbit-pad .tv-root .tv-cover.orbit-pad-focus,
+html.orbit-pad .tv-root .tv-cover:focus {
+  border-radius: 0.75rem;
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 85%, transparent);
   outline-offset: 3px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, .5);
-  transform: translateY(-2px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tv-shelf { scroll-behavior: auto; }
-  .tv-tile { transition: none; }
+  .tv-rail { scroll-behavior: auto; }
+  .tv-cover { transition: none; }
+  .tv-art { animation: none; }
 }
