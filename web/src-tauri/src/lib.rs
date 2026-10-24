@@ -1705,6 +1705,12 @@ fn data_dir(orbit: State<'_, Orbit>) -> String {
     orbit.store.root().to_string_lossy().to_string()
 }
 
+/// Whether this copy carries its own files, beside the program.
+#[tauri::command]
+fn data_portable(app: tauri::AppHandle) -> bool {
+    storage::portable(&app)
+}
+
 /// Play the background pad through the system. False means the web view should try.
 #[tauri::command]
 fn ambient_set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
@@ -2282,10 +2288,9 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let root = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("Orbit"));
+            // Portable copies keep everything beside the program; an install
+            // keeps it where the desktop puts an application's data.
+            let root = storage::root(app.handle());
             // Read the note the last run may have left behind: it says whether
             // the panel went away while it was reading live stats.
             stats::install(&root);
@@ -2598,6 +2603,7 @@ pub fn run() {
             save_settings,
             cloud_quit,
             data_dir,
+            data_portable,
             data_dir_size,
             ambient_set,
             ambient_stop,

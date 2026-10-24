@@ -747,6 +747,11 @@ export function dataDir(): Promise<string | null> {
   return t ? t.core.invoke<string>('data_dir') : Promise.resolve(null);
 }
 
+/** Whether this copy keeps everything beside the program, like a portable one. */
+export function dataPortable(): Promise<boolean> {
+  return call('data_portable', {}, async () => false);
+}
+
 /** How much space Orbit's own files take. */
 export function dataDirSize(): Promise<number> {
   return call('data_dir_size', {}, async () => 0);

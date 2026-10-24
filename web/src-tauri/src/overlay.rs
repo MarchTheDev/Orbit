@@ -19,6 +19,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::capture;
 use crate::notice::{Card, Icon, Palette};
@@ -85,6 +86,125 @@ const PAGE_SILENT: Duration = Duration::from_secs(3);
 const REVIVALS: usize = 3;
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
 
+/// How many buttons a pad reports. The same sixteen the page reads.
+const PAD_COUNT: usize = 16;
+
+/// One capture shortcut as the pad sees it.
+///
+/// `hold` is a button held first and `button` the one that completes the chord.
+/// A chord with no hold is a single button on its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Chord {
+    pub hold: Option<usize>,
+    pub button: usize,
+}
+
+impl Chord {
+    const fn new(hold: Option<usize>, button: usize) -> Self {
+        Self { hold, button }
+    }
+
+    /// Whether every button of the chord is down in this report.
+    fn all_down(&self, buttons: &[bool]) -> bool {
+        pressed(buttons, self.button) && self.hold.map(|hold| pressed(buttons, hold)).unwrap_or(true)
+    }
+
+    /// Whether the whole chord is down now and was not on the previous report.
+    /// Holding it therefore fires once, not once per poll.
+    fn fired(&self, buttons: &[bool], prev: &[bool]) -> bool {
+        self.all_down(buttons) && !self.all_down(prev)
+    }
+}
+
+/// The three capture shortcuts, for the pad and for the keyboard.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shortcuts {
+    /// Screenshot, recording, replay, in that order.
+    pub pad: [Chord; 3],
+    /// The keyboard combinations, in the same order. An empty one is a shortcut
+    /// the player turned off, and is never registered.
+    pub keys: [String; 3],
+}
+
+/// The shortcuts Orbit ships with: LB with RB, left, and right on a pad.
+pub const SHIPPED_PAD: [Chord; 3] = [
+    Chord::new(Some(4), 5),
+    Chord::new(Some(4), 14),
+    Chord::new(Some(4), 15),
+];
+
+/// And on a keyboard: the picture key, and the two beside it with Ctrl.
+///
+/// Deliberately not bare F11: a great many games use it for fullscreen, and a
+/// shortcut Orbit took from them would be worse than one nobody presses.
+pub const SHIPPED_KEYS: [&str; 3] = ["F12", "Ctrl+F11", "Ctrl+F10"];
+
+impl Shortcuts {
+    /// The shipped ones, in the shape a `const` static can hold.
+    pub const fn shipped() -> Self {
+        Self {
+            pad: SHIPPED_PAD,
+            keys: [String::new(), String::new(), String::new()],
+        }
+    }
+
+    /// The keyboard combinations, as written. Empty means nothing is chosen,
+    /// which is a combination the player turned off rather than a mistake.
+    pub fn keys(&self) -> [&str; 3] {
+        [self.keys[0].trim(), self.keys[1].trim(), self.keys[2].trim()]
+    }
+
+    /// Read the page's settings, keeping a default wherever a value is missing
+    /// or cannot be a real button. A hand-edited file cannot leave a shortcut
+    /// pointing at a button this pad does not have.
+    fn from_value(value: Option<&Value>) -> Self {
+        let pad = value.and_then(|item| item.get("pad"));
+        let chord = |name: &str, fallback: Chord| -> Chord {
+            let Some(item) = pad.and_then(|pad| pad.get(name)) else { return fallback };
+            let button = item
+                .get("button")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize)
+                .filter(|index| *index < PAD_COUNT);
+            let Some(button) = button else { return fallback };
+            let hold = match item.get("hold") {
+                Some(Value::Null) => None,
+                Some(Value::Number(number)) => number
+                    .as_u64()
+                    .map(|index| index as usize)
+                    .filter(|index| *index < PAD_COUNT && *index != button),
+                _ => fallback.hold,
+            };
+            Chord { hold, button }
+        };
+        // No `keys` at all is a file written before shortcuts existed, so the
+        // shipped ones stand. A combination written as an empty string is a
+        // choice: that action has no keyboard shortcut.
+        let keys = value.and_then(|item| item.get("keys"));
+        let key = |name: &str, shipped: &str| -> String {
+            keys.and_then(|keys| keys.get(name))
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_string())
+                .unwrap_or_else(|| shipped.to_string())
+        };
+        Self {
+            pad: [
+                chord("shot", SHIPPED_PAD[0]),
+                chord("record", SHIPPED_PAD[1]),
+                chord("replay", SHIPPED_PAD[2]),
+            ],
+            keys: [
+                key("shot", SHIPPED_KEYS[0]),
+                key("record", SHIPPED_KEYS[1]),
+                key("replay", SHIPPED_KEYS[2]),
+            ],
+        }
+    }
+}
+
+/// The three actions, in the order the shortcuts are held.
+const ACTIONS: [&str; 3] = ["screenshot", "recording", "replay"];
+
 struct Live {
     enabled: bool,
     replay: bool,
@@ -118,6 +238,8 @@ struct Live {
     recording_name: String,
     recording_path: PathBuf,
     note: String,
+    /// The capture shortcuts, as the settings page last wrote them.
+    shortcuts: Shortcuts,
     /// The colours of the player's theme, for the native card.
     palette: Palette,
     /// The chime, for a capture that finishes after the panel is gone. The
@@ -131,11 +253,12 @@ struct Live {
 
 struct Watch {
     both: bool,
-    /// LB is the modifier for the capture shortcuts; RB only completes LB+RB.
-    left_shoulder: bool,
+    /// RB alone is the pad's right click, so its last state is kept for the edge.
     right_shoulder: bool,
-    dpad_left: bool,
-    dpad_right: bool,
+    /// Every button as it was on the last report. A capture chord fires on the
+    /// edge of the whole chord, so what matters is which buttons were already
+    /// down - not which shortcut is being watched for.
+    prev: [bool; PAD_COUNT],
     a: bool,
     b: bool,
     held: Option<&'static str>,
@@ -143,6 +266,21 @@ struct Watch {
     /// Whether the right stick was out of its dead zone on the last poll, so
     /// the one report that puts it back to rest is sent as well.
     stick_moving: bool,
+}
+
+impl Watch {
+    const fn new() -> Self {
+        Self {
+            both: false,
+            right_shoulder: false,
+            prev: [false; PAD_COUNT],
+            a: false,
+            b: false,
+            held: None,
+            ticks: 0,
+            stick_moving: false,
+        }
+    }
 }
 
 /// A capture asked for from the pad, with the panel open.
@@ -162,6 +300,7 @@ struct Step {
 }
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
+    shortcuts: Shortcuts::shipped(),
     enabled: true,
     replay: true,
     seconds: 30,
@@ -198,18 +337,7 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     cover_note: false,
 });
 static GATE: Mutex<()> = Mutex::new(());
-static PAD: Mutex<Watch> = Mutex::new(Watch {
-    both: false,
-    left_shoulder: false,
-    right_shoulder: false,
-    dpad_left: false,
-    dpad_right: false,
-    a: false,
-    b: false,
-    held: None,
-    ticks: 0,
-    stick_moving: false,
-});
+static PAD: Mutex<Watch> = Mutex::new(Watch::new());
 
 /// The three folders captures land in, as the page shows them.
 #[derive(Clone, Serialize)]
@@ -494,6 +622,15 @@ pub fn request_toggle(why: &'static str) {
 
 pub fn apply_settings(value: &Value) {
     let overlay = value.get("overlay");
+    let shortcuts = Shortcuts::from_value(overlay.and_then(|item| item.get("shortcuts")));
+    lock().shortcuts = shortcuts;
+    // A saved shortcut is a shortcut in use. This is the call the settings
+    // page's save makes, and it has no app handle of its own, so the one kept
+    // from startup is used - and nothing happens on the first run, before the
+    // overlay is installed.
+    if let Some(app) = APP.lock().ok().and_then(|slot| slot.clone()) {
+        install_keys(&app);
+    }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
         .and_then(Value::as_bool)
@@ -593,6 +730,12 @@ pub fn configure(
         let restart = must_restart && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
     };
+    // A new combination is registered here, where the app handle is. The page
+    // sends this after every settings change, and `install_keys` does nothing
+    // when the combinations are the ones already in place.
+    if let Some(app) = app {
+        install_keys(app);
+    }
     if !changed && app.is_none() {
         return;
     }
@@ -755,11 +898,14 @@ pub fn close_panel(app: &AppHandle, why: &str) {
 pub fn install(app: &AppHandle) -> Result<(), String> {
     // The app's own data folder still holds the replay's working file, which is
     // thrown away and never meant to be found.
-    if let Ok(dir) = app.path().app_data_dir() {
-        capture::sweep_replay_files(&dir);
+    let root = crate::storage::root(app);
+    capture::sweep_replay_files(&root);
+    {
         let mut live = lock();
-        live.root = dir;
+        live.root = root;
     }
+    // A portable copy keeps its captures beside the program: pictures and
+    // videos taken at a friend's house leave with the stick.
     let (screenshots, recordings, replays) = capture_defaults(app);
     {
         let mut live = lock();
@@ -773,6 +919,12 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             live.replay_root = replays;
         }
     }
+    // Kept so a pad chord or a keyboard shortcut pressed much later can still
+    // ask the library window to take the capture.
+    if let Ok(mut slot) = APP.lock() {
+        *slot = Some(app.clone());
+    }
+    install_keys(app);
     // The panel is built on the first Alt+X, not during startup. A second
     // webview here would compete with the boot animation.
     if WATCHING.swap(true, Ordering::SeqCst) {
@@ -786,12 +938,19 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Start+Select, LB+RB and the LB shortcuts, from the pad thread. Everything
-/// but Start+Select is only sent while the panel is open.
+/// Start+Select and the capture shortcuts, from the pad thread.
+///
+/// The panel's own buttons - A, B, the ring, the menu - are only sent while the
+/// panel is open. A capture shortcut is not one of those: it is the same three
+/// things a keyboard shortcut does, and it works with the panel closed, which is
+/// how a player takes a picture of the game they are playing.
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
+    // Read before the pad's own lock is taken: the settings page writes them
+    // while the pad is being polled.
+    let shortcuts = lock().shortcuts.clone();
     let step = {
         let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let step = take_step(&mut watch, buttons, axes);
+        let step = take_step(&mut watch, buttons, axes, &shortcuts);
         // A stick already held must not start stepping the moment the panel opens.
         if !is_open() {
             watch.ticks = 0;
@@ -802,12 +961,13 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         request_toggle("the pad's Start+Select");
         return;
     }
-    // Every shortcut but Start+Select belongs to the opened panel. LB and RB
-    // are ordinary game buttons: a shooter uses them every few seconds, and a
-    // chord that also fired with the panel closed took a screenshot or stopped
-    // a replay buffer in the middle of a match. Reading the pad is passive, so
-    // a closed panel now costs the game nothing.
+    // With the panel closed a capture is taken the same way a keyboard shortcut
+    // takes one: the library window runs it, so it captures, chimes, and says
+    // so in a card even though the panel was never up.
     if !is_open() {
+        if let Some(capture) = step.capture {
+            request_capture(capture);
+        }
         return;
     }
     if let Some(capture) = step.capture {
@@ -842,6 +1002,109 @@ fn capture_action(capture: Capture) -> &'static str {
         Capture::Shot => "capture-shot",
         Capture::Record => "capture-record",
         Capture::Replay => "capture-replay",
+    }
+}
+
+/// The event the library window listens for: a capture asked for while a game
+/// was in front, with no panel to ask.
+pub const HOTKEY_EVENT: &str = "overlay-hotkey";
+
+/// Where a capture shortcut lands.
+///
+/// The library window runs it, not this thread: it already knows how to take a
+/// picture, start a recording, and save a replay with the same calls the panel
+/// makes, and it stamps the file with the local time the way the panel does.
+/// The panel is not built for this - it does not exist until Alt+X is pressed.
+fn request_capture(capture: Capture) {
+    let action = match capture {
+        Capture::Shot => ACTIONS[0],
+        Capture::Record => ACTIONS[1],
+        Capture::Replay => ACTIONS[2],
+    };
+    ask_library(action);
+}
+
+/// The app, kept for the presses that arrive long after startup.
+static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
+
+fn ask_library(action: &'static str) {
+    let app = APP.lock().ok().and_then(|slot| slot.clone());
+    let Some(app) = app else {
+        log::warn!("overlay: {action} was asked for before Orbit was ready");
+        return;
+    };
+    // The window is looked up when the press happens: it may be hidden behind a
+    // game, and it is still there.
+    let outcome = match app.get_webview_window("main") {
+        Some(window) => window.emit(HOTKEY_EVENT, action),
+        None => app.emit(HOTKEY_EVENT, action),
+    };
+    if let Err(error) = outcome {
+        log::warn!("overlay: the library window could not be asked for a {action}: {error}");
+    }
+}
+
+/// What was registered last time, so a change can be undone without removing
+/// the overlay's own Alt+X, which is registered by the app rather than here.
+static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Put the keyboard capture shortcuts in place, and take the old ones out.
+///
+/// Called at startup and after the settings page writes a new combination. A
+/// shortcut the system refuses - another program already owns it - is logged
+/// and skipped: one refused combination must not lose the other two.
+fn install_keys(app: &AppHandle) {
+    let wanted: Vec<(&'static str, String)> = {
+        let live = lock();
+        let keys = live.shortcuts.keys();
+        ACTIONS
+            .iter()
+            .zip(keys.iter())
+            .map(|(action, key)| (*action, key.to_string()))
+            .filter(|(_, key)| !key.is_empty())
+            .collect()
+    };
+    let names: Vec<String> = wanted.iter().map(|(_, key)| key.clone()).collect();
+    {
+        let registered = REGISTERED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *registered == names {
+            return;
+        }
+    }
+    {
+        let mut registered = REGISTERED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        for old in registered.drain(..) {
+            if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                log::debug!("overlay: {old} was not registered to begin with: {error}");
+            }
+        }
+    }
+    for (action, key) in wanted {
+        // The closure is written in the call rather than made first: the
+        // handler has to work for any lifetime the plugin calls it with, and a
+        // separately-typed binding pins it to one.
+        let outcome = app.global_shortcut().on_shortcut(key.as_str(), move |_app, _shortcut, event| {
+            // A held key repeats; one press is one capture.
+            if !matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
+                return;
+            }
+            let capture = match action {
+                "screenshot" => Capture::Shot,
+                "recording" => Capture::Record,
+                _ => Capture::Replay,
+            };
+            request_capture(capture);
+        });
+        match outcome {
+            Ok(()) => {
+                if let Ok(mut registered) = REGISTERED_KEYS.lock() {
+                    registered.push(key.clone());
+                }
+            }
+            Err(error) => {
+                log::warn!("overlay: {key} could not be registered as a capture shortcut: {error}");
+            }
+        }
     }
 }
 
@@ -2570,6 +2833,15 @@ fn configured_capture_dir(current: &Path, root: &Path, selected: &str, kind: &st
 /// file manager, the phone sync, or the photo app. Each game gets its own folder
 /// inside, which is added when the file is written.
 fn capture_defaults(app: &AppHandle) -> (PathBuf, PathBuf, PathBuf) {
+    // A portable copy carries its captures with it, in its own folder, next to
+    // the library it belongs to.
+    if let Some(root) = crate::storage::portable_capture_root(app) {
+        return (
+            root.join("Screenshots"),
+            root.join("Recordings"),
+            root.join("Replays"),
+        );
+    }
     let pictures = app
         .path()
         .picture_dir()
@@ -3010,10 +3282,12 @@ fn seed_pad(buttons: &[bool], axes: &[f32]) {
     watch.both = pressed(buttons, 9) && pressed(buttons, 8);
     watch.a = pressed(buttons, 0);
     watch.b = pressed(buttons, 1);
-    watch.left_shoulder = pressed(buttons, 4);
     watch.right_shoulder = pressed(buttons, 5);
-    watch.dpad_left = pressed(buttons, 14);
-    watch.dpad_right = pressed(buttons, 15);
+    // Whatever is already held is the state it arrived in, so no capture
+    // fires on the first report after the pad is picked up.
+    for index in 0..PAD_COUNT {
+        watch.prev[index] = pressed(buttons, index);
+    }
     watch.held = direction(
         pressed(buttons, 12) || axes.get(1).copied().unwrap_or(0.0) < -0.45,
         pressed(buttons, 13) || axes.get(1).copied().unwrap_or(0.0) > 0.45,
@@ -3033,7 +3307,7 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 /// LB+RB is a screenshot, LB+Left and LB+Right are record and replay. With LB
 /// down the stick and A/B keep quiet, so a shortcut cannot also move the ring.
 /// RB alone is the pad's right click, the way a mouse opens a capture's menu.
-fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
+fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32], shortcuts: &Shortcuts) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
     watch.both = both;
@@ -3043,29 +3317,25 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let down = pressed(buttons, 13) || y > 0.45;
     let left = pressed(buttons, 14) || x < -0.45;
     let right = pressed(buttons, 15) || x > 0.45;
-    let shoulder = pressed(buttons, 4);
     let trigger = pressed(buttons, 5);
     // R on its own is the pad's right click: the gallery menu on the tile the
     // ring is on. It has to be read before `right_shoulder` is updated below.
     let menu = trigger && !watch.right_shoulder;
-    let dpad_left = pressed(buttons, 14);
-    let dpad_right = pressed(buttons, 15);
-    // An edge on the second button of a chord, so holding it does not fire
-    // again every poll.
-    let shot = shoulder && trigger && !(watch.left_shoulder && watch.right_shoulder);
-    let record = shoulder && dpad_left && !(watch.left_shoulder && watch.dpad_left);
-    let replay = shoulder && dpad_right && !(watch.left_shoulder && watch.dpad_right);
-    watch.left_shoulder = shoulder;
-    watch.right_shoulder = trigger;
-    watch.dpad_left = dpad_left;
-    watch.dpad_right = dpad_right;
+    // The capture chords, as the player set them. Any button that is the first
+    // half of one is a modifier: while it is down a direction is half a
+    // shortcut, not a move, so the ring does not walk off under the press.
+    let modifier = shortcuts
+        .pad
+        .iter()
+        .filter_map(|chord| chord.hold)
+        .any(|hold| pressed(buttons, hold));
     let capture = if toggle {
         None
-    } else if shot {
+    } else if shortcuts.pad[0].fired(buttons, &watch.prev) {
         Some(Capture::Shot)
-    } else if record {
+    } else if shortcuts.pad[1].fired(buttons, &watch.prev) {
         Some(Capture::Record)
-    } else if replay {
+    } else if shortcuts.pad[2].fired(buttons, &watch.prev) {
         Some(Capture::Replay)
     } else {
         None
@@ -3073,7 +3343,7 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let dir = direction(up, down, left, right);
     // A stick already over is not a press. Record it before the panel opens,
     // or the next poll would move the first button. Holding it repeats.
-    let repeated = if shoulder {
+    let repeated = if modifier {
         // The direction is treated as already dealt with, so letting LB go while
         // still holding it does not step the ring.
         watch.held = dir;
@@ -3088,17 +3358,21 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
         None
     } else if let Some(dir) = repeated {
         Some(dir)
-    } else if !shoulder && a && !watch.a {
+    } else if !modifier && a && !watch.a {
         Some("activate")
-    } else if !shoulder && b && !watch.b {
+    } else if !modifier && b && !watch.b {
         Some("back")
-    } else if !shoulder && menu {
+    } else if !modifier && menu {
         Some("menu")
     } else {
         None
     };
     watch.a = a;
     watch.b = b;
+    watch.right_shoulder = trigger;
+    for index in 0..PAD_COUNT {
+        watch.prev[index] = pressed(buttons, index);
+    }
     // The right stick is streamed, not stepped: the page turns it into a
     // scroll. One idle report is sent too, or the scroll would keep its last
     // speed after the stick is let go.
@@ -3414,31 +3688,32 @@ mod tests {
         assert_eq!(clamp_seconds(900), 300);
     }
 
+    /// The shortcuts a fresh install has.
+    fn shipped() -> Shortcuts {
+        Shortcuts {
+            pad: SHIPPED_PAD,
+            keys: [
+                SHIPPED_KEYS[0].to_string(),
+                SHIPPED_KEYS[1].to_string(),
+                SHIPPED_KEYS[2].to_string(),
+            ],
+        }
+    }
+
     #[test]
     fn start_and_select_open_once_until_they_are_released() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         buttons[8] = true;
         buttons[9] = true;
-        let first = take_step(&mut watch, &buttons, &[0.0, 0.0]);
-        let held = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let first = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
+        let held = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         buttons[8] = false;
         buttons[9] = false;
-        let released = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let released = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         buttons[8] = true;
         buttons[9] = true;
-        let again = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let again = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         assert!(first.toggle);
         assert!(!held.toggle);
         assert!(!released.toggle);
@@ -3450,71 +3725,49 @@ mod tests {
     /// The shortcuts, and only once per press.
     #[test]
     fn the_shoulder_shortcuts_fire_on_the_second_button() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         let axes = [0.0, 0.0];
         buttons[4] = true;
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         buttons[5] = true;
-        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Shot));
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert_eq!(take_step(&mut watch, &buttons, &axes, &shipped()).capture, Some(Capture::Shot));
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         buttons[5] = false;
         buttons[4] = false;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[4] = true;
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         // LB plus the left d-pad is a recording, and it must not also move the ring.
         buttons[14] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.capture, Some(Capture::Record));
         assert!(step.action.is_none());
         buttons[14] = false;
         buttons[15] = true;
-        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Replay));
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert_eq!(take_step(&mut watch, &buttons, &axes, &shipped()).capture, Some(Capture::Replay));
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
     }
 
     /// R on its own is the pad's right click, and it is still one press.
     #[test]
     fn the_right_shoulder_alone_is_the_menu() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         let axes = [0.0, 0.0];
         buttons[5] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.action, Some("menu"));
         assert!(step.capture.is_none());
         // Held, it does not keep opening menus.
-        assert!(take_step(&mut watch, &buttons, &axes).action.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).action.is_none());
         // With LB down the same button is the screenshot, never the menu.
         buttons[5] = false;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[4] = true;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[5] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.capture, Some(Capture::Shot));
         assert!(step.action.is_none());
     }
@@ -3529,25 +3782,14 @@ mod tests {
 
     #[test]
     fn a_held_direction_waits_and_then_repeats() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let axes = [1.0, 0.0];
-        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
-        assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action, Some("right"));
+        assert!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action.is_none());
         for _ in 0..6 {
-            assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+            assert!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action.is_none());
         }
-        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action, Some("right"));
     }
 
     #[test]

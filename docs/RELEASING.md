@@ -48,7 +48,7 @@ because Cargo, npm and Tauri refuse a version without one.
 
 | Platform | Files |
 | --- | --- |
-| Windows | `Orbit-<version>-windows-setup.exe` (installer), `Orbit.exe` (standalone program), `Orbit-<version>-windows.msi`, `Orbit-<version>-windows-portable.zip` (program and readme) |
+| Windows | `Orbit-<version>-windows-setup.exe` (installer), `Orbit.exe` (standalone program), `Orbit-<version>-windows.msi`, `Orbit-<version>-windows-portable.zip` (program, readme and the `orbit.portable` marker) |
 | Linux | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-<version>-linux-portable.tar.gz` |
 | Debian | `orbit_<version>_debian_amd64.deb`, built in a Debian container against Debian's own libraries |
 | Fedora | `orbit-<version>-1.fc.x86_64.rpm`, built in a Fedora container |
@@ -100,8 +100,18 @@ That leaves three things behind:
 
 The workflow renames that standalone file `Orbit.exe` and also includes it in the
 portable zip with a short readme. The interface is inlined into it, so it works
-without an installer. Nothing is written next to it; the library and settings
-live in `%APPDATA%\Orbit`.
+without an installer.
+
+The standalone `Orbit.exe` on its own is not portable: a copy is portable when
+`orbit.portable` (or a `data` folder) sits beside the program, which is what the
+portable zip carries. An installed copy, an `Orbit.exe` saved on its own, and an
+AppImage all read the marker as absent and keep their files in
+`%APPDATA%\com.orbit.launcher` on Windows and `~/.local/share/com.orbit.launcher`
+elsewhere. A portable copy writes those same files - the database, the saves, the
+stats, the overlay's working files, the recording tools, the installed runners,
+the music and the captures - into `data` beside itself instead, so the folder can
+be moved and everything moves with it. A folder it cannot write to falls back to
+the usual location rather than losing a save.
 
 **Linux.** What is needed once, on Debian or Ubuntu:
 

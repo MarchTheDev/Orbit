@@ -177,12 +177,22 @@ jobs:
           $portable = "artifacts/portable"
           New-Item -ItemType Directory -Force -Path $portable | Out-Null
           Copy-Item $exe.FullName "$portable/Orbit.exe"
+          # The marker is what makes it portable: Orbit keeps everything in a
+          # `data` folder beside the program when this file is there, and in
+          # %APPDATA% when it is not. An ordinary install has nothing to say.
+          Set-Content -Path "$portable/orbit.portable" -NoNewline -Encoding ascii -Value "This file tells Orbit to keep its library, settings, backups and captures in the data folder beside the program."
           $readme = @(
             "Orbit $version, portable",
             "",
-            "Run Orbit.exe. Nothing is installed and nothing is written next to",
-            "it: your library and settings live in %APPDATA%\Orbit, and removing",
-            "this folder removes the program.",
+            "Run Orbit.exe. Nothing is installed. Everything Orbit keeps - the",
+            "library, the settings, the backups, the screenshots, the recordings",
+            "and the replays - goes in the 'data' folder beside the program, so",
+            "the whole folder can be moved or carried on a stick and it takes the",
+            "library with it.",
+            "",
+            "Delete the folder and Orbit is gone. The orbit.portable file is what",
+            "tells it to keep its files here; remove it and Orbit uses %APPDATA%",
+            "like an installed copy.",
             "",
             "Windows 10 and 11 already have the WebView2 runtime that Orbit draws",
             "its interface with. On an older or stripped-down Windows, install it",
@@ -270,6 +280,11 @@ jobs:
           # A tarball cannot declare dependencies, so it says what it needs
           # instead. The packaged builds ask for the same things themselves.
           cp packaging/linux/portable-readme.txt "$portable/README.txt"
+          # The marker that says this copy carries its own files. Orbit keeps
+          # the library, the settings, the backups and the captures in a `data`
+          # folder beside the program when it is there.
+          printf '%s\n' "This file tells Orbit to keep its library, settings, backups and captures in the data folder beside the program." \
+            > "$portable/orbit.portable"
           tar -czf "artifacts/$portable.tar.gz" "$portable"
 
           # The AppImage is assembled here rather than left to linuxdeploy.

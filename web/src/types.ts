@@ -1,3 +1,28 @@
+/**
+ * One capture shortcut as a controller sees it.
+ *
+ * `hold` is a button held down first - LB in the shipped shortcuts - and
+ * `button` is the one that completes the chord. A chord with no `hold` is the
+ * single button on its own. Both are the standard gamepad indices the rest of
+ * Orbit uses: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Select, 9 Start,
+ * 12 up, 13 down, 14 left, 15 right.
+ */
+export interface PadChord {
+  hold: number | null;
+  button: number;
+}
+
+/** The three things a shortcut can do from inside a game. */
+export interface OverlayShortcuts {
+  pad: { shot: PadChord; record: PadChord; replay: PadChord };
+  /**
+   * Keyboard combinations as the system parses them - 'F12', 'Ctrl+KeyS' - which
+   * the settings page draws as 'F12' and 'Ctrl + S'. An empty string is a
+   * shortcut that was turned off, not one that should fall back.
+   */
+  keys: { shot: string; record: string; replay: string };
+}
+
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
 /** The Library has an Unplayed filter; Backlog is its own page. */
 export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
@@ -644,6 +669,12 @@ export interface Settings {
     replayDirectory?: string;
     /** Empty means the built-in recorder. A path is only a fallback. */
     ffmpeg?: string;
+    /**
+     * The capture shortcuts, for the pad and for the keyboard. Missing means
+     * the ones Orbit ships with: LB+RB, LB+Left and LB+Right on a controller,
+     * F12, Ctrl+F11 and Ctrl+F10 on a keyboard.
+     */
+    shortcuts?: OverlayShortcuts;
   };
   /**
    * Which games back themselves up, and a folder to copy when Orbit cannot

@@ -35,6 +35,7 @@ import {
   cloudAutoOn,
   dataDir,
   dataDirSize,
+  dataPortable,
   isNative,
   savesWithClouds,
   listDrives,
@@ -55,6 +56,7 @@ import {
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { playShutter } from '../services/shutter';
 import { CopySettings } from './CopySettings';
+import { ShortcutEditor } from './ShortcutEditor';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
@@ -628,6 +630,10 @@ function OverlaySettings({
             : 'The FPS box reads the picture the desktop presents. Turn this off if the overlay closes by itself over a game.'
         }
       />
+      <ShortcutEditor
+        value={overlay?.shortcuts}
+        onChange={(shortcuts) => setOverlay({ shortcuts })}
+      />
       <div className="rounded-2xl border border-line bg-panel2/30 p-3">
         <p className="text-sm font-medium">Capture folders</p>
         <p className="mt-1 text-xs leading-relaxed text-muted">
@@ -752,6 +758,8 @@ export function SettingsView({
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [folder, setFolder] = useState('');
   const [where, setWhere] = useState<{ path: string; size: number } | null>(null);
+  /** True when this copy keeps everything beside the program. */
+  const [portable, setPortable] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [installStep, setInstallStep] = useState<InstallStep | null>(null);
@@ -854,6 +862,7 @@ export function SettingsView({
       if (!path) return;
       setWhere({ path, size: await dataDirSize() });
     });
+    void dataPortable().then(setPortable).catch(() => undefined);
   }, []);
 
   const addFolder = (path: string) => {
@@ -1571,6 +1580,11 @@ export function SettingsView({
             </button>
           </div>
         )}
+        <p className="text-xs leading-relaxed text-muted">
+          {portable
+            ? 'This is the portable copy: the library, the settings, the backups, the screenshots, the recordings and the replays all live in that folder, beside the program. Move the folder and they move with it.'
+            : 'The library, the settings, the backups and the captures live in that folder. A portable copy keeps them beside the program instead.'}
+        </p>
         <SubHead>Starting over</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Neither of these touches the games themselves: only what Orbit knows about them.

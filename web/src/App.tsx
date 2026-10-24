@@ -88,6 +88,7 @@ import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
 import { openExternal } from './services/desktop';
 import { listen } from '@tauri-apps/api/event';
+import { isCaptureHotkey, runCaptureHotkey } from './services/captureHotkeys';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast extends ToastMessage {
@@ -1172,6 +1173,37 @@ export default function App() {
     }).catch(() => undefined);
     return () => stop();
   }, [openSettings]);
+
+  /**
+   * A capture shortcut, pressed while a game was in front.
+   *
+   * The desktop side cannot take a picture with the local time in the file name
+   * and the game's own name beside it - the page already does both - so it asks
+   * the library window instead. The file is saved here, and the note about it
+   * is drawn over the game by the same code that draws it when the panel is
+   * gone. A failure is the one thing worth saying in this window as well.
+   */
+  const replaySeconds = settings?.overlay?.seconds ?? 30;
+  useEffect(() => {
+    if (!isNative()) return;
+    let stop = () => {};
+    void listen<string>('overlay-hotkey', (event) => {
+      const action = event.payload;
+      if (!isCaptureHotkey(action)) return;
+      void runCaptureHotkey(action, { seconds: replaySeconds }).catch((reason) => {
+        toast({
+          text: 'The capture could not be taken',
+          detail: reason instanceof Error ? reason.message : String(reason),
+          tone: 'error',
+        });
+      });
+    })
+      .then((unlisten) => {
+        stop = unlisten;
+      })
+      .catch(() => undefined);
+    return () => stop();
+  }, [replaySeconds, toast]);
 
   const showHome = page === 'library' && !query;
 

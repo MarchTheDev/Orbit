@@ -188,10 +188,11 @@ check(
     /let icon = match kind \{[\s\S]*?"recording" => Icon::Record[\s\S]*?"replay" => Icon::Replay/.test(overlay),
 );
 check(
-  'LB is the capture modifier: LB+RB shoots, LB+d-pad records and replays',
-  overlay.includes('let shot = shoulder && trigger') &&
-    overlay.includes('let record = shoulder && dpad_left') &&
-    overlay.includes('let replay = shoulder && dpad_right') &&
+  'the capture chords are the ones the settings page draws, not a hardcoded trio',
+  overlay.includes('pub const SHIPPED_PAD: [Chord; 3]') &&
+    overlay.includes('Chord::new(Some(4), 5)') &&
+    overlay.includes('Chord::new(Some(4), 14)') &&
+    overlay.includes('Chord::new(Some(4), 15)') &&
     overlay.includes('Some(Capture::Shot)') &&
     overlay.includes('Some(Capture::Record)') &&
     overlay.includes('Some(Capture::Replay)') &&
@@ -200,11 +201,12 @@ check(
     overlay.includes('"capture-replay"'),
 );
 check(
-  'the pad capture shortcuts do nothing unless the panel is open',
-  // LB and RB are ordinary game buttons. A chord that also fired with the
-  // panel closed took a screenshot or stopped a replay in the middle of a
-  // match, so the whole handler sits behind `is_open()`.
-  /fn on_pad[\s\S]*?if !is_open\(\) \{\s*return;\s*\}[\s\S]*?if let Some\(capture\) = step\.capture/.test(overlay) &&
+  'a capture chord works with the panel closed, by asking the library window',
+  // The panel is not built until Alt+X is pressed, and a screenshot of the
+  // game is taken while the game is in front - so the chord cannot wait for a
+  // panel that will never open. It asks the library window, which takes the
+  // capture the same way a keyboard shortcut does.
+  /if !is_open\(\) \{[\s\S]{0,200}request_capture\(capture\);/.test(overlay) &&
     !overlay.includes('fn spawn_capture(') &&
     !overlay.includes('orbit-pad-capture') &&
     // Start+Select still opens and closes the panel with it closed; the toggle

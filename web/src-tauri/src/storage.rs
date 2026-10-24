@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use tauri::{AppHandle, Manager};
+
 /// Total and free bytes on the drive holding `path`.
 ///
 /// Walks up to the nearest existing parent, so a folder that does not exist
@@ -693,5 +695,82 @@ mod tests {
         assert_eq!(cache.get(&format!("{path}\\")), Some(4096));
         assert_eq!(cache.get(&path.to_uppercase()), Some(4096));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// ---------------------------------------------------------- Orbit's own files
+//
+// An installed Orbit keeps its files where the desktop puts an application's
+// data: `%APPDATA%\com.orbit.launcher` on Windows, `~/.local/share/com.orbit.launcher`
+// on Linux. A portable copy keeps them next to itself instead - the whole point
+// of carrying the folder on a stick is that it carries the library with it, and
+// a copy that leaves its games, settings, backups and captures on the machine it
+// happened to be plugged into is not portable.
+//
+// Nothing is guessed from the file name. A copy is portable when it says so: the
+// archive ships an `orbit.portable` file beside the program, or the player has
+// made a `data` folder there. That keeps an ordinary install from quietly
+// starting to write into Program Files, which is a folder it usually cannot
+// write to at all.
+
+/// Files that mark a copy as portable, in order of preference.
+const PORTABLE_MARKERS: [&str; 2] = ["orbit.portable", "portable.txt"];
+
+/// The folder the program was started from.
+fn exe_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.parent().map(|dir| dir.to_path_buf())
+}
+
+/// Whether this copy carries its own data next to the program.
+pub fn portable(_app: &AppHandle) -> bool {
+    let Some(dir) = exe_dir() else { return false };
+    if PORTABLE_MARKERS.iter().any(|marker| dir.join(marker).is_file()) {
+        return true;
+    }
+    // A `data` folder beside the program is the same statement, made by hand. It
+    // is created by the first portable run, so a second run finds it.
+    dir.join("data").is_dir()
+}
+
+/// The folder a portable copy keeps everything in.
+fn portable_root() -> Option<PathBuf> {
+    let dir = exe_dir()?;
+    let root = dir.join("data");
+    // Somewhere that cannot be written to - a read-only mount, an archive opened
+    // in place - is not somewhere to put a library. `root` falls back to the
+    // usual folder instead, which is better than losing the save.
+    if root.is_dir() {
+        return Some(root);
+    }
+    std::fs::create_dir_all(&root).ok()?;
+    Some(root)
+}
+
+/// Orbit's own data folder, portable or not.
+///
+/// One folder feeds the database, the stats, the overlay's replay workspace, the
+/// recording tools, the music, and the backups - so a portable copy has one
+/// folder to move, not six.
+pub fn root(app: &AppHandle) -> PathBuf {
+    if portable(app) {
+        if let Some(root) = portable_root() {
+            return root;
+        }
+    }
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("Orbit"))
+}
+
+/// Whether the captures belong beside the program too.
+///
+/// On a portable copy they do: pictures and videos taken at a friend's house
+/// should leave with the stick, not stay in that machine's Pictures folder.
+pub fn portable_capture_root(app: &AppHandle) -> Option<PathBuf> {
+    if portable(app) {
+        Some(root(app))
+    } else {
+        None
     }
 }

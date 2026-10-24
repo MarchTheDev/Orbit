@@ -1,8 +1,13 @@
 Orbit, portable
 ===============
 
-Nothing is installed and nothing is written next to this folder. The library
-and settings live in ~/.local/share/com.orbit.launcher.
+Nothing is installed. Everything Orbit keeps lives in the data folder beside
+this file - the library, the settings, the save backups, the screenshots, the
+recordings and the replays - so the whole folder can be moved, copied, or
+carried on a stick and it takes the library with it.
+
+The orbit.portable file is what says so. Remove it and Orbit uses the usual
+~/.local/share/com.orbit.launcher instead, like an installed copy.
 
 To run it:
 

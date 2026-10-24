@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::launch::parse_args;
 
@@ -303,10 +303,9 @@ fn lutris_wine() -> Option<PathBuf> {
 
 /// A copy Orbit already fetched, under its own data directory.
 fn orbit_wine() -> Option<PathBuf> {
-    let root = crate::app_handle()?
-        .path()
-        .app_data_dir()
-        .ok()?
+    // The runner comes off the same shelf as everything else Orbit keeps: with
+    // the program on a portable copy, in the desktop's data folder otherwise.
+    let root = crate::storage::root(&crate::app_handle()?)
         .join("runners")
         .join("wine");
     find_wine_bin(&root)
@@ -376,12 +375,7 @@ fn fetch_wine() -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn wine_root() -> Result<PathBuf, String> {
     let app = crate::app_handle().ok_or_else(|| "Orbit is still starting.".to_string())?;
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("runners")
-        .join("wine"))
+    Ok(crate::storage::root(&app).join("runners").join("wine"))
 }
 
 #[cfg(target_os = "linux")]
