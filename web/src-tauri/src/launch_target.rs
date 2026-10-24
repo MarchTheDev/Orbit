@@ -344,7 +344,7 @@ fn wine_command(
     if let Some(prefix) = bottle_of(prefix, path) {
         cmd.env("WINEPREFIX", &prefix);
     }
-    wrap(cmd, tweaks)
+    Ok(wrap(cmd, tweaks))
 }
 
 /// A Windows program through a Proton build.
