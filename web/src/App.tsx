@@ -45,6 +45,7 @@ import {
   overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
+  setClockOffset,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -88,7 +89,6 @@ import { APP_VERSION } from './version';
 import { checkForUpdate, type ReleaseInfo } from './services/updates';
 import { openExternal } from './services/desktop';
 import { listen } from '@tauri-apps/api/event';
-import { isCaptureHotkey, runCaptureHotkey } from './services/captureHotkeys';
 
 /** A short message in the corner: what just happened, and whether it worked. */
 interface Toast extends ToastMessage {
@@ -1175,35 +1175,21 @@ export default function App() {
   }, [openSettings]);
 
   /**
-   * A capture shortcut, pressed while a game was in front.
+   * Tell the desktop side what time it is here.
    *
-   * The desktop side cannot take a picture with the local time in the file name
-   * and the game's own name beside it - the page already does both - so it asks
-   * the library window instead. The file is saved here, and the note about it
-   * is drawn over the game by the same code that draws it when the panel is
-   * gone. A failure is the one thing worth saying in this window as well.
+   * A capture taken by a keyboard shortcut is named there, not here: with a
+   * game in front this window is minimised, and a minimised web view is exactly
+   * the thing that does not run. Rust has no time zone of its own, so it is
+   * given this one, once - and again whenever the window comes back, because a
+   * laptop can be carried across one.
    */
-  const replaySeconds = settings?.overlay?.seconds ?? 30;
   useEffect(() => {
     if (!isNative()) return;
-    let stop = () => {};
-    void listen<string>('overlay-hotkey', (event) => {
-      const action = event.payload;
-      if (!isCaptureHotkey(action)) return;
-      void runCaptureHotkey(action, { seconds: replaySeconds }).catch((reason) => {
-        toast({
-          text: 'The capture could not be taken',
-          detail: reason instanceof Error ? reason.message : String(reason),
-          tone: 'error',
-        });
-      });
-    })
-      .then((unlisten) => {
-        stop = unlisten;
-      })
-      .catch(() => undefined);
-    return () => stop();
-  }, [replaySeconds, toast]);
+    const report = () => void setClockOffset(new Date().getTimezoneOffset()).catch(() => undefined);
+    report();
+    document.addEventListener('visibilitychange', report);
+    return () => document.removeEventListener('visibilitychange', report);
+  }, []);
 
   const showHome = page === 'library' && !query;
 

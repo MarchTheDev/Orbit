@@ -1711,6 +1711,17 @@ fn data_portable(app: tauri::AppHandle) -> bool {
     storage::portable(&app)
 }
 
+/// How far this machine's clock is from UTC, in minutes, as the page reads it.
+///
+/// The page says once at startup. A capture taken by a shortcut is named on the
+/// desktop side - a game in front means the library window is minimised, and a
+/// minimised web view must not be what a screenshot waits for - so the local
+/// time has to reach this side some other way.
+#[tauri::command]
+fn clock_offset(minutes: i32) {
+    overlay::set_clock_offset(minutes);
+}
+
 /// Play the background pad through the system. False means the web view should try.
 #[tauri::command]
 fn ambient_set(enabled: bool, volume: f32, audible: bool) -> Result<bool, String> {
@@ -2604,6 +2615,7 @@ pub fn run() {
             cloud_quit,
             data_dir,
             data_portable,
+            clock_offset,
             data_dir_size,
             ambient_set,
             ambient_stop,

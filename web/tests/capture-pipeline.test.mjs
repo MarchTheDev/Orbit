@@ -201,12 +201,14 @@ check(
     overlay.includes('"capture-replay"'),
 );
 check(
-  'a capture chord works with the panel closed, by asking the library window',
+  'a capture chord works with the panel closed, and is taken on the desktop side',
   // The panel is not built until Alt+X is pressed, and a screenshot of the
   // game is taken while the game is in front - so the chord cannot wait for a
-  // panel that will never open. It asks the library window, which takes the
-  // capture the same way a keyboard shortcut does.
-  /if !is_open\(\) \{[\s\S]{0,200}request_capture\(capture\);/.test(overlay) &&
+  // panel that will never open. Nor can it be handed to the library window:
+  // with a game in front that window is minimised, and a minimised web view
+  // does not run. The capture happens here.
+  /if !is_open\(\) \{[\s\S]{0,200}capture_from_shortcut\(app, capture\);/.test(overlay) &&
+    overlay.includes('fn capture_from_shortcut(') &&
     !overlay.includes('fn spawn_capture(') &&
     !overlay.includes('orbit-pad-capture') &&
     // Start+Select still opens and closes the panel with it closed; the toggle

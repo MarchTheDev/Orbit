@@ -747,6 +747,17 @@ export function dataDir(): Promise<string | null> {
   return t ? t.core.invoke<string>('data_dir') : Promise.resolve(null);
 }
 
+/**
+ * How far this machine's clock is from UTC, in minutes.
+ *
+ * A capture taken from a keyboard shortcut is named by the desktop side, which
+ * cannot read a time zone without another dependency: the page has a `Date`, so
+ * it says once and the file names come out in the player's own time.
+ */
+export function setClockOffset(minutes: number): Promise<void> {
+  return call('clock_offset', { minutes }, () => undefined);
+}
+
 /** Whether this copy keeps everything beside the program, like a portable one. */
 export function dataPortable(): Promise<boolean> {
   return call('data_portable', {}, async () => false);

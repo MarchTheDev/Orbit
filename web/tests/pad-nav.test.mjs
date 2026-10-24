@@ -77,22 +77,29 @@ check('the main window leaves input to the overlay when it is open', padEdgesWhe
 check('a held Start button does not become a new press on refocus', padEdgesWhenOwned(mayHandleGamepadInput(false, true, true), startPress, startPress).length === 0);
 
 console.log('the overlay chooses boxes by where they are on screen');
-// The overlay's default layout, roughly: two small boxes on the left, the
-// performance reading with the notes under it, the capture bar at the bottom.
+// The overlay's default layout, roughly: what the machine is doing down the
+// left - the frame rate, the clock, the mixer, and the performance numbers
+// under it - and what the player is holding down the right: the gallery, what
+// is playing, and the notes under that.
 const overlayBoxes = {
   fps: { left: 24, top: 24, right: 200, bottom: 136 },
   clock: { left: 24, top: 152, right: 200, bottom: 264 },
-  audio: { left: 24, top: 280, right: 324, bottom: 600 },
-  performance: { left: 340, top: 24, right: 580, bottom: 220 },
-  notes: { left: 340, top: 236, right: 640, bottom: 446 },
-  capture: { left: 360, top: 600, right: 920, bottom: 820 },
+  audio: { left: 24, top: 280, right: 324, bottom: 720 },
+  performance: { left: 24, top: 736, right: 264, bottom: 932 },
+  gallery: { left: 1576, top: 24, right: 1896, bottom: 384 },
+  player: { left: 1576, top: 400, right: 1896, bottom: 668 },
+  notes: { left: 1576, top: 684, right: 1896, bottom: 894 },
+  capture: { left: 680, top: 836, right: 1240, bottom: 1056 },
 };
 const list = Object.values(overlayBoxes);
 const choose = (from, direction) => padNearest(overlayBoxes[from], list, direction);
-check('right from the clock lands on the performance box', choose('clock', 'right') === 3);
-check('down from the notes lands on the capture bar', choose('notes', 'down') === 5);
-check('the box beside the audio box is the notes card, not a walk through the list', choose('audio', 'right') === 4);
-check('down from the audio box reaches the capture bar', choose('audio', 'down') === 5);
+check('down from the FPS box lands on the clock', choose('fps', 'down') === 1);
+check('down from the clock lands on the mixer', choose('clock', 'down') === 2);
+check('the performance box hangs under the mixer', choose('audio', 'down') === 3);
+check('and up from it returns to the mixer', choose('performance', 'up') === 2);
+check('the notes hang under what is playing', choose('player', 'down') === 6);
+check('and up from them returns to the player', choose('notes', 'up') === 5);
+check('the gallery heads that column', choose('gallery', 'down') === 5);
 check('nothing above the FPS box', choose('fps', 'up') === null);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

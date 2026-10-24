@@ -139,13 +139,22 @@ check('a combination turned off is not registered at all',
   /filter\(\|\(_, key\)\| !key\.is_empty\(\)\)/.test(rust));
 check('and re-registered when the settings change',
   /if let Some\(app\) = app \{\s*install_keys\(app\);/.test(rust));
-check('a shortcut pressed with no panel asks the library window to take it',
-  rust.includes('pub const HOTKEY_EVENT: &str = "overlay-hotkey"') &&
-    rust.includes('fn request_capture('));
+check('a shortcut pressed with a game in front is taken on the desktop side',
+  // The library window is minimised while a game runs, and a minimised web
+  // view is exactly the thing that does not run - so the capture must not be
+  // handed to it.
+  rust.includes('fn capture_from_shortcut(') &&
+    /Capture::Shot => \("screenshot", shot\(app, &stamp\)\)/.test(rust) &&
+    !rust.includes('overlay-hotkey'));
 check('the pad can take a capture with the panel closed',
-  /if !is_open\(\) \{[\s\S]{0,160}request_capture\(capture\)/.test(rust));
-check('the page listens for that, and runs the same captures the panel does',
-  readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').includes("listen<string>('overlay-hotkey'"));
+  /if !is_open\(\) \{[\s\S]{0,160}capture_from_shortcut\(app, capture\)/.test(rust));
+check('the file is named in the player\'s own time, told once by the page',
+  rust.includes('pub fn set_clock_offset(') &&
+    rust.includes('fn stamp_now()') &&
+    readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').includes('setClockOffset(new Date().getTimezoneOffset())'));
+check('a panel on screen draws that toast itself, and refreshes its gallery',
+  rust.includes('pub const CAPTURED_EVENT: &str = "overlay-captured"') &&
+    readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes("'overlay-captured'"));
 check('the settings page shows both a controller and a keyboard column',
   settingsUi.includes('Controller') && settingsUi.includes('Keyboard'));
 check('what is saved is the shape the page and the desktop side share',

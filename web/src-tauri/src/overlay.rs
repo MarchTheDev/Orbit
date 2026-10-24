@@ -962,11 +962,11 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         return;
     }
     // With the panel closed a capture is taken the same way a keyboard shortcut
-    // takes one: the library window runs it, so it captures, chimes, and says
-    // so in a card even though the panel was never up.
+    // takes one: here, so it captures, chimes, and says so in a card even
+    // though the panel was never up.
     if !is_open() {
         if let Some(capture) = step.capture {
-            request_capture(capture);
+            capture_from_shortcut(app, capture);
         }
         return;
     }
@@ -1005,43 +1005,98 @@ fn capture_action(capture: Capture) -> &'static str {
     }
 }
 
-/// The event the library window listens for: a capture asked for while a game
-/// was in front, with no panel to ask.
-pub const HOTKEY_EVENT: &str = "overlay-hotkey";
-
-/// Where a capture shortcut lands.
-///
-/// The library window runs it, not this thread: it already knows how to take a
-/// picture, start a recording, and save a replay with the same calls the panel
-/// makes, and it stamps the file with the local time the way the panel does.
-/// The panel is not built for this - it does not exist until Alt+X is pressed.
-fn request_capture(capture: Capture) {
-    let action = match capture {
-        Capture::Shot => ACTIONS[0],
-        Capture::Record => ACTIONS[1],
-        Capture::Replay => ACTIONS[2],
-    };
-    ask_library(action);
-}
-
 /// The app, kept for the presses that arrive long after startup.
 static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
 
-fn ask_library(action: &'static str) {
-    let app = APP.lock().ok().and_then(|slot| slot.clone());
-    let Some(app) = app else {
-        log::warn!("overlay: {action} was asked for before Orbit was ready");
-        return;
+/// The event a panel that is on screen listens for: a capture a shortcut took
+/// while it was up. The panel draws the toast and refreshes the gallery; the
+/// card is for the case where there is no panel to say it.
+pub const CAPTURED_EVENT: &str = "overlay-captured";
+
+/// What a shortcut capture did, for a panel that is on screen to repeat.
+#[derive(Clone, Serialize)]
+struct ShortcutCapture {
+    /// `screenshot`, `recording` or `replay`.
+    kind: &'static str,
+    ok: bool,
+    /// The desktop side's own words: the panel shows them unchanged.
+    message: String,
+}
+
+/// Take the capture a shortcut asked for - here, not in the page.
+///
+/// A game in front means Orbit's own window is minimised or hidden, and a
+/// hidden web view is the thing Windows throttles: a job handed to it arrives
+/// late, or not until the game is closed. A screenshot needs no browser, so the
+/// whole capture happens on this side. Off the calling thread, because a
+/// picture of the screen takes a moment and a pressed key must not wait for it.
+fn capture_from_shortcut(app: &AppHandle, capture: Capture) {
+    let handle = app.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-shortcut-capture".to_string())
+        .spawn(move || run_shortcut_capture(&handle, capture));
+}
+
+fn run_shortcut_capture(app: &AppHandle, capture: Capture) {
+    let stamp = stamp_now();
+    let seconds = lock().seconds;
+    let (kind, result) = match capture {
+        Capture::Shot => ("screenshot", shot(app, &stamp)),
+        Capture::Record => ("recording", record(app, &stamp)),
+        Capture::Replay => ("replay", save_replay(app, seconds, &stamp)),
     };
-    // The window is looked up when the press happens: it may be hidden behind a
-    // game, and it is still there.
-    let outcome = match app.get_webview_window("main") {
-        Some(window) => window.emit(HOTKEY_EVENT, action),
-        None => app.emit(HOTKEY_EVENT, action),
-    };
-    if let Err(error) = outcome {
-        log::warn!("overlay: the library window could not be asked for a {action}: {error}");
+    // A card when there is no panel; the panel's own toast when there is, which
+    // is why it is told either way.
+    announce_capture(app, kind, &result);
+    if panel_visible(app) {
+        if let Some(window) = app.get_webview_window(WINDOW) {
+            let done = ShortcutCapture {
+                kind,
+                ok: result.is_ok(),
+                message: result.clone().unwrap_or_else(|error| error),
+            };
+            let _ = window.emit(CAPTURED_EVENT, done);
+        }
     }
+}
+
+/// How far this machine's clock is from UTC, in minutes, as the page reads it.
+///
+/// A capture taken by a shortcut is named here, not in the page, and the one
+/// thing this side cannot ask the operating system for without another
+/// dependency is the local time zone. The page has a `Date`, so it says once at
+/// startup; until it has, a name is written in UTC rather than not at all.
+static CLOCK_OFFSET: Mutex<Option<i32>> = Mutex::new(None);
+
+pub fn set_clock_offset(minutes: i32) {
+    *CLOCK_OFFSET.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(minutes);
+}
+
+/// The date and time a capture is filed under, in the player's own time.
+///
+/// The file name is the one thing the player reads outside Orbit, and a picture
+/// named in UTC is filed under yesterday for anyone playing after midnight east
+/// of Greenwich.
+fn stamp_now() -> String {
+    let unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0);
+    let offset = *CLOCK_OFFSET.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    stamp_at(unix - i64::from(offset.unwrap_or(0)) * 60)
+}
+
+/// Seconds since the epoch, written the way the file names are.
+///
+/// `db::iso8601` is the crate's one civil-date conversion - 2024 is a leap year
+/// and every desktop agrees on it - so the date comes from there and only the
+/// separators change.
+fn stamp_at(unix: i64) -> String {
+    let iso = crate::db::iso8601(unix);
+    if iso.len() < 19 {
+        return unix.to_string();
+    }
+    format!("{} {}", &iso[..10], iso[11..19].replace(':', "-"))
 }
 
 /// What was registered last time, so a change can be undone without removing
@@ -1083,7 +1138,7 @@ fn install_keys(app: &AppHandle) {
         // The closure is written in the call rather than made first: the
         // handler has to work for any lifetime the plugin calls it with, and a
         // separately-typed binding pins it to one.
-        let outcome = app.global_shortcut().on_shortcut(key.as_str(), move |_app, _shortcut, event| {
+        let outcome = app.global_shortcut().on_shortcut(key.as_str(), move |app, _shortcut, event| {
             // A held key repeats; one press is one capture.
             if !matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
                 return;
@@ -1093,7 +1148,7 @@ fn install_keys(app: &AppHandle) {
                 "recording" => Capture::Record,
                 _ => Capture::Replay,
             };
-            request_capture(capture);
+            capture_from_shortcut(app, capture);
         });
         match outcome {
             Ok(()) => {
@@ -1600,7 +1655,11 @@ fn show_window(app: &AppHandle) {
     FRONT_WARNED.store(false, Ordering::SeqCst);
     FRONT_TRIES_CELL.store(0, Ordering::SeqCst);
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
-    heartbeat();
+    // Nothing has been heard from this page yet, and pretending otherwise is
+    // what made the guard give a freshly opened panel the three seconds a
+    // running page gets. `guard_panel` reads `None` as "still loading" and
+    // waits out `PAGE_START`.
+    *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     OPEN.store(true, Ordering::SeqCst);
     REPEAT_NOTED.store(false, Ordering::SeqCst);
     note_panel("the panel opened");
@@ -1837,7 +1896,12 @@ fn guard_panel(app: &AppHandle) {
         return;
     }
     // The page has to have spoken. A slow first load is given longer than a
-    // page that has already answered once and then went quiet.
+    // page that has already answered once and then went quiet - and a panel
+    // that has just opened is loading, not dead, however long the one before it
+    // had been up. Three seconds is enough for a warm page on a fast disk and
+    // not for the first open of a copy running from a stick, which used to be
+    // rebuilt before it had drawn anything: what the player saw was an overlay
+    // that opened and then closed.
     let quiet = HEARD
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1847,8 +1911,9 @@ fn guard_panel(app: &AppHandle) {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .map(|at| at.elapsed())
         .unwrap_or_default();
+    let allowed = if since < PAGE_START { PAGE_START } else { PAGE_SILENT };
     let stale = match quiet {
-        Some(silent) => silent >= PAGE_SILENT,
+        Some(silent) => silent >= allowed,
         None => since >= PAGE_START,
     };
     if stale {
@@ -3686,6 +3751,15 @@ mod tests {
         assert_eq!(keep_seconds(&[90, 120], 30), 120);
         assert_eq!(clamp_seconds(1), 5);
         assert_eq!(clamp_seconds(900), 300);
+    }
+
+    /// A capture is named the way the panel names one, so a picture taken with
+    /// F12 and one taken with the panel's button sort together in the gallery.
+    #[test]
+    fn a_capture_is_named_the_way_the_panel_names_it() {
+        assert_eq!(stamp_at(1_792_860_125), "2026-10-24 16-42-05");
+        // The leap day is the day a hand-written date goes wrong.
+        assert_eq!(stamp_at(1_709_164_800), "2024-02-29 00-00-00");
     }
 
     /// The shortcuts a fresh install has.

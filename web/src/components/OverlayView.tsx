@@ -60,7 +60,7 @@ const READY_TITLE = 'Overlay deployed in Orbit';
 const FPS_ARM_MS = 3000;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
-const LAYOUT_REVISION = 4;
+const LAYOUT_REVISION = 5;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
   fps: { w: 176, h: 112, minW: 120, minH: 88 },
   clock: { w: 176, h: 112, minW: 120, minH: 88 },
@@ -203,6 +203,14 @@ function mixId(node: Element | null): string | null {
   return node?.closest('[data-mix]')?.getAttribute('data-mix') ?? null;
 }
 
+/**
+ * Where the boxes start out.
+ *
+ * Two stacks: what the machine is doing down the left - the frame rate, the
+ * clock, the mixer, and what the game costs - and what the player is holding
+ * down the right: the gallery, what is playing, and the notes on it. Every one
+ * of them can be dragged anywhere; this is only the first arrangement.
+ */
 function defaults(width: number, height: number): Record<BoxId, Place> {
   const edge = 24;
   const gap = 16;
@@ -213,11 +221,16 @@ function defaults(width: number, height: number): Record<BoxId, Place> {
     x: edge,
     y: audioY,
     w: BOX.audio.w,
-    h: Math.max(BOX.audio.minH, Math.min(BOX.audio.h, height - audioY - edge)),
+    // The performance numbers sit under the mixer, so the mixer cannot grow
+    // until it fills the screen and push them off it.
+    h: Math.max(
+      BOX.audio.minH,
+      Math.min(BOX.audio.h, height - audioY - BOX.performance.h - gap - edge),
+    ),
   };
   const performance = {
-    x: edge + BOX.audio.w + gap,
-    y: edge,
+    x: edge,
+    y: audio.y + audio.h + gap,
     w: BOX.performance.w,
     h: BOX.performance.h,
   };
@@ -233,12 +246,13 @@ function defaults(width: number, height: number): Record<BoxId, Place> {
     w: BOX.player.w,
     h: BOX.player.h,
   };
-  const notes = {
-    x: performance.x,
-    y: performance.y + BOX.performance.h + gap,
-    w: BOX.notes.w,
-    h: BOX.notes.h,
-  };
+  // The notes belong under what is playing. A screen too short to hold all
+  // three boxes down that side gets them beside the gallery instead of half
+  // off the bottom of the display.
+  const underPlayer = player.y + BOX.player.h + gap + BOX.notes.minH + edge <= height;
+  const notes = underPlayer
+    ? { x: player.x, y: player.y + BOX.player.h + gap, w: BOX.player.w, h: BOX.notes.h }
+    : { x: edge + BOX.audio.w + gap, y: edge, w: BOX.notes.w, h: BOX.notes.h };
   const capture = {
     x: Math.max(edge, Math.round((width - BOX.capture.w) / 2)),
     y: Math.max(edge, height - BOX.capture.h - edge),
@@ -860,6 +874,43 @@ export function OverlayView() {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [ready, awake]);
+
+  // A capture a shortcut took while this panel was up. The desktop side does
+  // the work - that is what makes a shortcut work with a game in front - so it
+  // is the one that says what happened, and this is where the toast goes,
+  // because a card behind the panel would be a second confirmation the player
+  // cannot see through.
+  useEffect(() => {
+    let stop = () => {};
+    void listen<{ kind: string; ok: boolean; message: string }>('overlay-captured', (event) => {
+      const { kind, ok, message } = event.payload;
+      if (!ok) {
+        flash('Capture failed', message, 'error');
+        refresh();
+        return;
+      }
+      const current = settingsRef.current;
+      const on = current ? current.overlay?.shutter !== false : shutterOn;
+      const volume = current?.overlay?.shutterVolume ?? shutterVolume;
+      if (on) void playShutter(volume);
+      const stoppedRecording = kind === 'recording' && /^Saved the recording/i.test(message);
+      if (kind === 'recording' && !stoppedRecording) {
+        flash('Recording started', 'Your recording is underway', 'recording');
+      } else {
+        const title = kind === 'replay' ? 'Replay saved' : kind === 'recording' ? 'Recording saved' : 'Screenshot saved';
+        flash(title, 'Saved to Gallery · copied to clipboard', kind === 'replay' ? 'replay' : kind === 'recording' ? 'recording' : 'screenshot');
+      }
+      refresh();
+    })
+      .then((unlisten) => {
+        stop = unlisten;
+      })
+      .catch(() => undefined);
+    return () => stop();
+    // The toast helpers read settings through a ref, so the listener is made
+    // once rather than rebuilt whenever one of them changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A page that is still drawn says so once a second. The native side uses
   // this to tell "the overlay closed" from "the window is there but empty",
