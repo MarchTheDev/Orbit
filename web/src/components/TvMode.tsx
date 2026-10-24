@@ -58,6 +58,11 @@ export function orderedForTv(games: Game[], order: TvOrder): Game[] {
   });
 }
 
+/** Whether the machine has asked for things to stay still. */
+function prefersCalm(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 /** The store's id for a game, whether it is in the details or in the launch target. */
 function steamIdOf(game: Game): number | null {
   const fromMeta = game.meta?.steamAppId ?? null;
@@ -208,7 +213,9 @@ export function TvMode({
   onOpenSettings: () => void;
 }) {
   const [order, setOrder] = useState<TvOrder>('recent');
-  /** True for the moment the screen takes to fade out before the app returns. */
+  /** The moment the hub spends arriving, before the rail is handed the room. */
+  const [booting, setBooting] = useState(() => !prefersCalm());
+  /** True for the moment the screen takes to go dark before the app returns. */
   const [leaving, setLeaving] = useState(false);
   const list = useMemo(() => orderedForTv(games, order), [games, order]);
 
@@ -226,6 +233,15 @@ export function TvMode({
 
   const rail = useRef<HTMLUListElement>(null);
   const exitTimer = useRef(0);
+
+  // The boot mark is a welcome, not a wait: it is over in about a second and
+  // nothing is disabled while it plays. Anyone who asked for less motion gets
+  // the hub straight away.
+  useEffect(() => {
+    if (!booting) return;
+    const timer = window.setTimeout(() => setBooting(false), 1300);
+    return () => window.clearTimeout(timer);
+  }, [booting]);
   const coverOf = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
 
   /**
@@ -240,10 +256,8 @@ export function TvMode({
   const exit = useCallback(() => {
     if (leaving) return;
     setLeaving(true);
-    const calm =
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    exitTimer.current = window.setTimeout(() => onExit(), calm ? 0 : 220);
+    const calm = prefersCalm();
+    exitTimer.current = window.setTimeout(() => onExit(), calm ? 0 : 320);
   }, [leaving, onExit]);
 
   useEffect(() => () => window.clearTimeout(exitTimer.current), []);
@@ -482,6 +496,26 @@ export function TvMode({
       )}
     >
       {active && <Backdrop game={active} />}
+
+      {/* The way a console arrives: the mark, its name, one line of light, and
+          then the room. Drawn over the hub rather than instead of it, so the
+          rail is already in place and in focus when the screen clears. */}
+      {booting && (
+        <div className="tv-boot" aria-hidden>
+          <Logo className="tv-boot-mark" animated />
+          <p className="tv-boot-word">Orbit</p>
+          <span className="tv-boot-rule" />
+        </div>
+      )}
+
+      {/* And the way it goes: the picture sinks into the dark and the mark is
+          left for a moment, the way a screen that is switching off holds its
+          last bright thing. */}
+      {leaving && (
+        <div className="tv-shutdown" aria-hidden>
+          <Logo className="tv-shutdown-mark" animated={false} />
+        </div>
+      )}
       {/* A wash under the top bar, so its few words stay readable over a game
           whose artwork happens to be bright exactly there. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />

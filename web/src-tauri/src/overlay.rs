@@ -211,6 +211,15 @@ static PAD: Mutex<Watch> = Mutex::new(Watch {
     stick_moving: false,
 });
 
+/// The three folders captures land in, as the page shows them.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureDirs {
+    pub screenshots: String,
+    pub recordings: String,
+    pub replays: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverlayStatus {
@@ -556,9 +565,15 @@ pub fn configure(
             None => live.lengths.clone(),
         };
         let keep = keep_seconds(&lengths, seconds);
-        let screenshot_root = configured_capture_dir(&live.root, screenshot_directory, "screenshots");
-        let recording_root = configured_capture_dir(&live.root, recording_directory, "recordings");
-        let replay_root = configured_capture_dir(&live.root, replay_directory, "replays");
+        // A chosen folder wins. With none chosen, the folder already resolved
+        // stays: `install` put the user's Pictures and Videos there, and asking
+        // again with an empty string must not quietly move the captures back
+        // into the app's own data directory.
+        let root = live.root.clone();
+        let current = (live.screenshot_root.clone(), live.recording_root.clone(), live.replay_root.clone());
+        let screenshot_root = configured_capture_dir(&current.0, &root, screenshot_directory, "screenshots");
+        let recording_root = configured_capture_dir(&current.1, &root, recording_directory, "recordings");
+        let replay_root = configured_capture_dir(&current.2, &root, replay_directory, "replays");
         let capture_changed = live.screenshot_root != screenshot_root || live.recording_root != recording_root || live.replay_root != replay_root;
         live.screenshot_root = screenshot_root;
         live.recording_root = recording_root;
@@ -738,18 +753,24 @@ pub fn close_panel(app: &AppHandle, why: &str) {
 }
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
+    // The app's own data folder still holds the replay's working file, which is
+    // thrown away and never meant to be found.
     if let Ok(dir) = app.path().app_data_dir() {
         capture::sweep_replay_files(&dir);
         let mut live = lock();
-        live.root = dir.clone();
+        live.root = dir;
+    }
+    let (screenshots, recordings, replays) = capture_defaults(app);
+    {
+        let mut live = lock();
         if live.screenshot_root.as_os_str().is_empty() {
-            live.screenshot_root = dir.join("screenshots");
+            live.screenshot_root = screenshots;
         }
         if live.recording_root.as_os_str().is_empty() {
-            live.recording_root = dir.join("recordings");
+            live.recording_root = recordings;
         }
         if live.replay_root.as_os_str().is_empty() {
-            live.replay_root = dir.join("replays");
+            live.replay_root = replays;
         }
     }
     // The panel is built on the first Alt+X, not during startup. A second
@@ -2529,12 +2550,51 @@ pub(crate) fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn configured_capture_dir(root: &Path, selected: &str, kind: &str) -> PathBuf {
-    if selected.trim().is_empty() {
-        if root.as_os_str().is_empty() { PathBuf::new() } else { root.join(kind) }
-    } else {
+fn configured_capture_dir(current: &Path, root: &Path, selected: &str, kind: &str) -> PathBuf {
+    if !selected.trim().is_empty() {
         PathBuf::from(selected.trim())
+    } else if !current.as_os_str().is_empty() {
+        current.to_path_buf()
+    } else if root.as_os_str().is_empty() {
+        PathBuf::new()
+    } else {
+        root.join(kind)
     }
+}
+
+/// Where captures go when nobody has chosen a folder.
+///
+/// A screenshot is a picture and a recording is a video, so they belong where
+/// the rest of the machine's pictures and videos are, not in the folder the app
+/// keeps its own data in: the point of taking one is to find it later, from the
+/// file manager, the phone sync, or the photo app. Each game gets its own folder
+/// inside, which is added when the file is written.
+fn capture_defaults(app: &AppHandle) -> (PathBuf, PathBuf, PathBuf) {
+    let pictures = app
+        .path()
+        .picture_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Pictures")))
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_default();
+    let videos = app
+        .path()
+        .video_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Videos")))
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_default();
+    let orbit_pictures = pictures.join("Orbit");
+    (
+        orbit_pictures,
+        videos.join("Orbit").join("Recordings"),
+        videos.join("Orbit").join("Replays"),
+    )
+}
+
+/// The three folders as they stand, for the page that shows them.
+pub fn capture_dirs() -> (String, String, String) {
+    let live = lock();
+    let text = |path: &Path| path.to_string_lossy().to_string();
+    (text(&live.screenshot_root), text(&live.recording_root), text(&live.replay_root))
 }
 
 fn kind_name(kind: &str) -> &'static str {

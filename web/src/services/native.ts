@@ -1521,6 +1521,17 @@ export function overlayCopy(path: string): Promise<void> {
   });
 }
 
+export interface CaptureDirs {
+  screenshots: string;
+  recordings: string;
+  replays: string;
+}
+
+/** Where the captures are being written, as the desktop side resolves it. */
+export function overlayCaptureDirs(): Promise<CaptureDirs | null> {
+  return call('overlay_capture_dirs', {}, async () => null);
+}
+
 export function overlayOpenKind(kind: string): Promise<string> {
   return call('overlay_open_kind', { kind }, async () => {
     throw new Error('Opening a capture folder needs the desktop app.');

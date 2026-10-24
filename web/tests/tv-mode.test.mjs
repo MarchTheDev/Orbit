@@ -247,12 +247,14 @@ check('escape on a game\'s page goes back to the rail rather than out of TV mode
 check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
 
 await key('Escape');
-check('the screen fades before it gives the window back',
+check('the screen goes dark before it gives the window back',
   document
     .querySelector('[data-orbit-tv]')
     ?.className.includes('tv-root-leaving') === true && left === 0,
   `leaving ${document.querySelector('[data-orbit-tv]')?.className} / left ${left}`);
-await act(async () => wait(300));
+check('and the mark is left on the screen as it goes',
+  !!document.querySelector('.tv-shutdown .tv-shutdown-mark'));
+await act(async () => wait(420));
 check('and then escape on the rail leaves TV mode', left === 1);
 
 console.log('a controller drives the same hub');
@@ -283,6 +285,18 @@ await act(async () => {
 pad('orbit-pad-back');
 await act(async () => wait(20));
 check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 2);
+
+console.log('the hub arrives the way a console does');
+
+await render(library);
+check('it opens on the mark rather than on a finished page', !!document.querySelector('.tv-boot'));
+check('with the name under it and one line of light',
+  document.querySelector('.tv-boot-word')?.textContent === 'Orbit' &&
+    !!document.querySelector('.tv-boot-rule'));
+check('and the rail is already built behind it, so nothing has to wait',
+  covers().length === 4 && document.activeElement?.getAttribute('data-tv-cover') === '0');
+await act(async () => wait(1400));
+check('then the boot clears and the room is what is left', !document.querySelector('.tv-boot'));
 
 console.log('the rail can be read by name instead of by memory');
 
@@ -322,6 +336,14 @@ check('hovering a cover speaks the theme accent', hoverRule.includes('var(--c-ac
 check('and selecting one speaks the same accent', selectedRule.includes('var(--c-accent)'), selectedRule);
 check('the accent is the theme variable, not a colour of its own',
   !rule('.tv-cover').includes('139,92,246'));
+const coverFocusRule = /html\.orbit-pad \.tv-root \.tv-cover\.orbit-pad-focus,\s*\nhtml\.orbit-pad \.tv-root \.tv-cover:focus \{([^}]*)\}/.exec(css);
+check('a controller rings the cover and not the button around its name',
+  !!coverFocusRule &&
+    coverFocusRule[1].includes('box-shadow: none') &&
+    coverFocusRule[1].includes('outline: none'),
+  coverFocusRule?.[1]);
+check('while the artwork inside it keeps the pad mark',
+  css.includes('html.orbit-pad .tv-root .tv-cover.orbit-pad-focus > span:first-child'));
 check('the ring goes around the artwork, not the name under it',
   css.includes('.tv-cover:hover > span:first-child') &&
     !/\.tv-cover[^\n]*span\s*\{/.test(css.slice(css.indexOf('.tv-cover:hover'), css.indexOf('@media (prefers-reduced-motion'))));

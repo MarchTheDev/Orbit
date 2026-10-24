@@ -897,6 +897,16 @@ fn overlay_folder() -> Result<String, String> {
     overlay::open_folder()
 }
 
+/// Where screenshots, recordings and replays are being written.
+///
+/// The page cannot guess these: the defaults are the machine's own Pictures and
+/// Videos folders, which only the desktop side knows how to find.
+#[tauri::command]
+fn overlay_capture_dirs() -> overlay::CaptureDirs {
+    let (screenshots, recordings, replays) = overlay::capture_dirs();
+    overlay::CaptureDirs { screenshots, recordings, replays }
+}
+
 #[tauri::command]
 fn overlay_open_kind(kind: String) -> Result<String, String> {
     overlay::open_kind(&kind)
@@ -2646,6 +2656,7 @@ pub fn run() {
             overlay_replay,
             overlay_hide,
             overlay_folder,
+            overlay_capture_dirs,
             overlay_open_kind,
             overlay_open,
             overlay_delete,

@@ -39,6 +39,7 @@ import {
   savesWithClouds,
   listDrives,
   rememberMusic,
+  overlayCaptureDirs,
   overlayOpenKind,
   overlayFps,
   overlayQuality,
@@ -48,6 +49,7 @@ import {
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
+  type CaptureDirs,
   type DriveInfo,
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
@@ -440,13 +442,28 @@ function OverlaySettings({
   const captureRoot = trimmedRoot || (where.startsWith('/') ? '/' : '');
   const capturePath = (name: string) =>
     captureRoot ? `${captureRoot}${captureRoot.endsWith(sep) ? '' : sep}${name}` : '';
+  // The defaults are the machine's own Pictures and Videos folders, which only
+  // the desktop side can name - so they are asked for rather than assumed.
+  const [defaults, setDefaults] = useState<CaptureDirs | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void overlayCaptureDirs()
+      .then((dirs) => {
+        if (alive) setDefaults(dirs);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const captureFolders = ([
     { kind: 'screenshots', label: 'Screenshots', setting: 'screenshotDirectory' },
     { kind: 'recordings', label: 'Recordings', setting: 'recordingDirectory' },
     { kind: 'replays', label: 'Replays', setting: 'replayDirectory' },
   ] as const).map((folder) => {
     const custom = overlay?.[folder.setting]?.trim() ?? '';
-    return { ...folder, custom, path: custom || capturePath(folder.kind) };
+    const fallback = defaults?.[folder.kind] || capturePath(folder.kind);
+    return { ...folder, custom, path: custom || fallback };
   });
 
   return (
@@ -613,7 +630,11 @@ function OverlaySettings({
       />
       <div className="rounded-2xl border border-line bg-panel2/30 p-3">
         <p className="text-sm font-medium">Capture folders</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted">Choose a separate location for screenshots, recordings, and replays. Each one gets a subfolder for the game.</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
+          Screenshots go to your Pictures folder, recordings and replays to your Videos folder, each
+          in an Orbit folder with a subfolder for the game. Choose a folder here to put one somewhere
+          else.
+        </p>
       </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Overlay boxes</p>
@@ -653,7 +674,7 @@ function OverlaySettings({
             {isNative() && (
               <button
                 type="button"
-                onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
+                onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || folder.path || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
                 className={btnBrowse}
               >
                 <FolderOpen className="mr-1.5 inline size-3.5" />

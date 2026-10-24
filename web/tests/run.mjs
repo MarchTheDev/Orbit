@@ -50,6 +50,7 @@ const checks = [
   'tests/plan-cache.test.mjs',
   'tests/requirements.test.mjs',
   'tests/tv-mode.test.mjs',
+  'tests/capture-paths.test.mjs',
 ];
 
 try {
