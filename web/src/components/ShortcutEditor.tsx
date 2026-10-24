@@ -11,6 +11,7 @@ import {
   shortcutFromEvent,
 } from '../utils/shortcuts';
 import { cn } from '../utils/cn';
+import { overlayRefusedShortcuts } from '../services/native';
 import { Select } from './ui/Select';
 import { btnBrowse } from './ui/Modal';
 
@@ -43,6 +44,19 @@ export function ShortcutEditor({
   const [open, setOpen] = useState<string | null>(null);
   /** The action whose keyboard shortcut is being recorded. */
   const [listening, setListening] = useState<string | null>(null);
+  /**
+   * The combinations the system would not give Orbit.
+   *
+   * Registration happens on the desktop side when the settings are written, so
+   * the answer is asked for again a moment after a change - asking straight
+   * away would read the answer to the last one.
+   */
+  const [refused, setRefused] = useState<string[]>([]);
+  useEffect(() => {
+    const check = () => void overlayRefusedShortcuts().then(setRefused).catch(() => undefined);
+    const timer = window.setTimeout(check, 400);
+    return () => window.clearTimeout(timer);
+  }, [value]);
 
   const setChord = (action: keyof OverlayShortcuts['pad'], next: PadChord) =>
     onChange({ ...shortcuts, pad: { ...shortcuts.pad, [action]: next } });
@@ -208,6 +222,13 @@ export function ShortcutEditor({
           );
         })}
       </div>
+
+      {refused.length > 0 && (
+        <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[11px] leading-relaxed text-amber-300">
+          {refused.join(' ')} Orbit could not take it, so that shortcut will not work until it is
+          changed or the other program is closed.
+        </p>
+      )}
 
       <p className="text-[11px] leading-relaxed text-muted">
         The overlay itself is always Alt+X, or Start and Select together. Backspace while recording

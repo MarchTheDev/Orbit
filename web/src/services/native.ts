@@ -758,6 +758,17 @@ export function setClockOffset(minutes: number): Promise<void> {
   return call('clock_offset', { minutes }, () => undefined);
 }
 
+/**
+ * The keyboard capture shortcuts the system would not give Orbit.
+ *
+ * A combination another program already owns is refused rather than fatal - the
+ * other two still work - but a shortcut that silently does nothing looks
+ * exactly like a shortcut nobody pressed, so the settings page says which.
+ */
+export function overlayRefusedShortcuts(): Promise<string[]> {
+  return call('overlay_refused_shortcuts', {}, async () => []);
+}
+
 /** Whether this copy keeps everything beside the program, like a portable one. */
 export function dataPortable(): Promise<boolean> {
   return call('data_portable', {}, async () => false);

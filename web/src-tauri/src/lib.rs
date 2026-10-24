@@ -1711,6 +1711,12 @@ fn data_portable(app: tauri::AppHandle) -> bool {
     storage::portable(&app)
 }
 
+/// The capture shortcuts the system refused, so Settings can say which.
+#[tauri::command]
+fn overlay_refused_shortcuts() -> Vec<String> {
+    overlay::refused_keys()
+}
+
 /// How far this machine's clock is from UTC, in minutes, as the page reads it.
 ///
 /// The page says once at startup. A capture taken by a shortcut is named on the
@@ -2616,6 +2622,7 @@ pub fn run() {
             data_dir,
             data_portable,
             clock_offset,
+            overlay_refused_shortcuts,
             data_dir_size,
             ambient_set,
             ambient_stop,

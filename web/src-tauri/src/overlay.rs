@@ -1039,6 +1039,14 @@ fn capture_from_shortcut(app: &AppHandle, capture: Capture) {
 
 fn run_shortcut_capture(app: &AppHandle, capture: Capture) {
     let stamp = stamp_now();
+    note_panel(&format!(
+        "a {} shortcut asked for a capture",
+        match capture {
+            Capture::Shot => "screenshot",
+            Capture::Record => "recording",
+            Capture::Replay => "replay",
+        }
+    ));
     let seconds = lock().seconds;
     let (kind, result) = match capture {
         Capture::Shot => ("screenshot", shot(app, &stamp)),
@@ -1103,6 +1111,16 @@ fn stamp_at(unix: i64) -> String {
 /// the overlay's own Alt+X, which is registered by the app rather than here.
 static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// The combinations the system refused last time, in words the settings page
+/// can show. A shortcut that silently did nothing looked exactly like a
+/// shortcut that was never pressed.
+static REFUSED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The capture shortcuts another program would not let go of.
+pub fn refused_keys() -> Vec<String> {
+    REFUSED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+}
+
 /// Put the keyboard capture shortcuts in place, and take the old ones out.
 ///
 /// Called at startup and after the settings page writes a new combination. A
@@ -1134,6 +1152,7 @@ fn install_keys(app: &AppHandle) {
             }
         }
     }
+    let mut refused: Vec<String> = Vec::new();
     for (action, key) in wanted {
         // The closure is written in the call rather than made first: the
         // handler has to work for any lifetime the plugin calls it with, and a
@@ -1158,8 +1177,12 @@ fn install_keys(app: &AppHandle) {
             }
             Err(error) => {
                 log::warn!("overlay: {key} could not be registered as a capture shortcut: {error}");
+                refused.push(format!("{key} is already taken by another program."));
             }
         }
+    }
+    if let Ok(mut slot) = REFUSED_KEYS.lock() {
+        *slot = refused;
     }
 }
 
