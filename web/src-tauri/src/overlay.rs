@@ -624,13 +624,6 @@ pub fn apply_settings(value: &Value) {
     let overlay = value.get("overlay");
     let shortcuts = Shortcuts::from_value(overlay.and_then(|item| item.get("shortcuts")));
     lock().shortcuts = shortcuts;
-    // A saved shortcut is a shortcut in use. This is the call the settings
-    // page's save makes, and it has no app handle of its own, so the one kept
-    // from startup is used - and nothing happens on the first run, before the
-    // overlay is installed.
-    if let Some(app) = APP.lock().ok().and_then(|slot| slot.clone()) {
-        install_keys(&app);
-    }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
         .and_then(Value::as_bool)
@@ -672,6 +665,13 @@ pub fn apply_settings(value: &Value) {
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
     configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
+    // A saved shortcut is one in use. `configure` had no handle to register
+    // with, so it is done here, where the one kept from startup is - and after
+    // `configure`, because whether the overlay is on decides whether a key
+    // answers at all. Nothing happens on the first run, before `install`.
+    if let Some(app) = APP.lock().ok().and_then(|slot| slot.clone()) {
+        install_keys(&app);
+    }
 }
 
 pub fn configure(
@@ -1038,6 +1038,11 @@ fn capture_from_shortcut(app: &AppHandle, capture: Capture) {
 }
 
 fn run_shortcut_capture(app: &AppHandle, capture: Capture) {
+    if !lock().enabled {
+        // Turned off in Settings: a key that still took a picture would be the
+        // overlay doing something the settings page said it does not.
+        return;
+    }
     let stamp = stamp_now();
     note_panel(&format!(
         "a {} shortcut asked for a capture",
@@ -1129,7 +1134,9 @@ pub fn refused_keys() -> Vec<String> {
 fn install_keys(app: &AppHandle) {
     let wanted: Vec<(&'static str, String)> = {
         let live = lock();
-        let keys = live.shortcuts.keys();
+        // The overlay is off: nothing of it should answer a key. The old
+        // combinations are taken out below, because the list is empty.
+        let keys = if live.enabled { live.shortcuts.keys() } else { ["", "", ""] };
         ACTIONS
             .iter()
             .zip(keys.iter())
