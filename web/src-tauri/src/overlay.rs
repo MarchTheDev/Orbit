@@ -19,6 +19,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
+// Only the registered path uses it; Windows reads the keyboard itself.
+#[cfg(not(windows))]
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::capture;
@@ -925,6 +927,18 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         *slot = Some(app.clone());
     }
     install_keys(app);
+    // The keyboard is watched from here on, for as long as Orbit runs: a
+    // capture shortcut has to work with a game in front, which is exactly when
+    // Orbit's own window cannot be typed into.
+    #[cfg(windows)]
+    {
+        if !KEYS_WATCHED.swap(true, Ordering::SeqCst) {
+            let keys_app = app.clone();
+            let _ = thread::Builder::new()
+                .name("orbit-shortcut-keys".to_string())
+                .spawn(move || watch_keys(keys_app));
+        }
+    }
     // The panel is built on the first Alt+X, not during startup. A second
     // webview here would compete with the boot animation.
     if WATCHING.swap(true, Ordering::SeqCst) {
@@ -1114,6 +1128,7 @@ fn stamp_at(unix: i64) -> String {
 
 /// What was registered last time, so a change can be undone without removing
 /// the overlay's own Alt+X, which is registered by the app rather than here.
+#[cfg_attr(windows, allow(dead_code))]
 static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// The combinations the system refused last time, in words the settings page
@@ -1121,17 +1136,48 @@ static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// shortcut that was never pressed.
 static REFUSED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// Whether the keyboard is already being watched.
+#[cfg(windows)]
+static KEYS_WATCHED: AtomicBool = AtomicBool::new(false);
+
 /// The capture shortcuts another program would not let go of.
 pub fn refused_keys() -> Vec<String> {
     REFUSED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
-/// Put the keyboard capture shortcuts in place, and take the old ones out.
+/// Put the keyboard capture shortcuts in place.
 ///
-/// Called at startup and after the settings page writes a new combination. A
-/// shortcut the system refuses - another program already owns it - is logged
-/// and skipped: one refused combination must not lose the other two.
+/// Called at startup, after the settings page writes a new combination, and
+/// whenever the overlay is turned on or off. Off Windows the combination is
+/// registered with the system, where another program may already own it: that
+/// one is logged and skipped so it cannot cost the other two. On Windows there
+/// is nothing to register - the keyboard is watched instead.
 fn install_keys(app: &AppHandle) {
+    // On Windows the keyboard is read directly instead - see `watch_keys`.
+    // A registered hotkey belongs to one program, and the combinations a
+    // capture shortcut wants are the ones every launcher, chat app and overlay
+    // on a gaming machine already holds: `RegisterHotKey` refuses, and the key
+    // then does nothing at all, which is exactly the silence a player reports
+    // as "the shortcut does not work". Reading the key state asks nobody's
+    // permission.
+    #[cfg(windows)]
+    {
+        let _ = app;
+        if let Ok(mut slot) = REFUSED_KEYS.lock() {
+            slot.clear();
+        }
+        return;
+    }
+    #[cfg(not(windows))]
+    {
+        install_registered_keys(app);
+    }
+}
+
+/// The other desktops' way: the shortcut is registered with the system, which
+/// hands it to Orbit and to nobody else.
+#[cfg(not(windows))]
+fn install_registered_keys(app: &AppHandle) {
     let wanted: Vec<(&'static str, String)> = {
         let live = lock();
         // The overlay is off: nothing of it should answer a key. The old
@@ -1190,6 +1236,188 @@ fn install_keys(app: &AppHandle) {
     }
     if let Ok(mut slot) = REFUSED_KEYS.lock() {
         *slot = refused;
+    }
+}
+
+/// A keyboard chord, as the keys it is made of.
+///
+/// Every key has to be down for the chord to be down. The last one is the key
+/// that completes it; the rest are the modifiers held first. Modifier keys are
+/// matched by their generic code, so either Ctrl answers, which is what a
+/// player means by "Ctrl".
+#[cfg(windows)]
+struct KeyChord {
+    keys: Vec<i32>,
+}
+
+/// The virtual-key code a name stands for.
+///
+/// Two spellings are understood: the name the settings page stores for a
+/// combination the player recorded - `KeyS`, `F12`, `ArrowUp` - and the short
+/// one a hand-edited file is likely to contain - `Ctrl+S`, `Up`.
+#[cfg(windows)]
+fn virtual_key(token: &str) -> Option<i32> {
+    const NAMED: [(&str, i32); 28] = [
+        ("Space", 0x20),
+        ("Enter", 0x0D),
+        ("Escape", 0x1B),
+        ("Tab", 0x09),
+        ("Backspace", 0x08),
+        ("Delete", 0x2E),
+        ("Insert", 0x2D),
+        ("Home", 0x24),
+        ("End", 0x23),
+        ("PageUp", 0x21),
+        ("PageDown", 0x22),
+        ("ArrowUp", 0x26),
+        ("ArrowDown", 0x28),
+        ("ArrowLeft", 0x25),
+        ("ArrowRight", 0x27),
+        ("PrintScreen", 0x2C),
+        ("Minus", 0xBD),
+        ("Equal", 0xBB),
+        ("Comma", 0xBC),
+        ("Period", 0xBE),
+        ("Slash", 0xBF),
+        ("Backslash", 0xDC),
+        ("Semicolon", 0xBA),
+        ("Quote", 0xDE),
+        ("Backquote", 0xC0),
+        ("BracketLeft", 0xDB),
+        ("BracketRight", 0xDD),
+        ("NumLock", 0x90),
+    ];
+    const SHORT: [(&str, i32); 12] = [
+        ("UP", 0x26),
+        ("DOWN", 0x28),
+        ("LEFT", 0x25),
+        ("RIGHT", 0x27),
+        ("ESC", 0x1B),
+        ("RETURN", 0x0D),
+        ("DEL", 0x2E),
+        ("INS", 0x2D),
+        ("PGUP", 0x21),
+        ("PGDN", 0x22),
+        ("SPACEBAR", 0x20),
+        ("PRTSC", 0x2C),
+    ];
+    if let Some((_, code)) = NAMED.iter().find(|(name, _)| name.eq_ignore_ascii_case(token)) {
+        return Some(*code);
+    }
+    let upper = token.trim().to_ascii_uppercase();
+    if let Some((_, code)) = SHORT.iter().find(|(name, _)| *name == upper) {
+        return Some(*code);
+    }
+    if let Some(rest) = upper.strip_prefix('F') {
+        if let Ok(number) = rest.parse::<i32>() {
+            if (1..=24).contains(&number) {
+                return Some(0x70 + number - 1);
+            }
+        }
+    }
+    if let Some(letter) = upper.strip_prefix("KEY").filter(|rest| rest.len() == 1) {
+        return Some(letter.as_bytes()[0] as i32);
+    }
+    if let Some(digit) = upper.strip_prefix("DIGIT").filter(|rest| rest.len() == 1) {
+        return digit.parse::<i32>().ok().map(|digit| 0x30 + digit);
+    }
+    if let Some(digit) = upper.strip_prefix("NUMPAD").filter(|rest| rest.len() == 1) {
+        return digit.parse::<i32>().ok().map(|digit| 0x60 + digit);
+    }
+    // A single letter or digit, as a hand-written combination would have it.
+    let mut chars = upper.chars();
+    if let (Some(only), None) = (chars.next(), chars.next()) {
+        if only.is_ascii_uppercase() || only.is_ascii_digit() {
+            return Some(only as i32);
+        }
+    }
+    None
+}
+
+/// A combination, as the keys that have to be down together.
+#[cfg(windows)]
+fn parse_key_chord(text: &str) -> Option<KeyChord> {
+    let mut keys = Vec::new();
+    for token in text.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+        let code = match token.to_ascii_lowercase().as_str() {
+            // The generic modifier codes: either Ctrl, either Shift, either Alt.
+            "ctrl" | "control" => 0x11,
+            "shift" => 0x10,
+            "alt" => 0x12,
+            "super" | "meta" | "cmd" | "command" | "win" => 0x5B,
+            _ => virtual_key(token)?,
+        };
+        keys.push(code);
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    Some(KeyChord { keys })
+}
+
+#[cfg(windows)]
+fn key_down(code: i32) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    unsafe { GetAsyncKeyState(code) as u16 & 0x8000 != 0 }
+}
+
+#[cfg(windows)]
+fn chord_down(chord: &KeyChord) -> bool {
+    chord.keys.iter().all(|code| key_down(*code))
+}
+
+/// Watch the keyboard for the capture chords.
+///
+/// The pad has its own reader and the panel has its own shortcuts; this is the
+/// keyboard's, and it exists because registering a hotkey is a request another
+/// program can have got in first for. Polling costs one call per key every few
+/// milliseconds and cannot be refused.
+#[cfg(windows)]
+fn watch_keys(app: AppHandle) {
+    let mut last: [String; 3] = Default::default();
+    let mut chords: [Option<KeyChord>; 3] = [None, None, None];
+    let mut down = [false; 3];
+    loop {
+        if STOP.load(Ordering::SeqCst) || crate::quitting() {
+            break;
+        }
+        let wanted: [String; 3] = {
+            let live = lock();
+            if live.enabled {
+                let keys = live.shortcuts.keys();
+                [keys[0].to_string(), keys[1].to_string(), keys[2].to_string()]
+            } else {
+                ["", "", ""].map(str::to_string)
+            }
+        };
+        for (index, capture) in [Capture::Shot, Capture::Record, Capture::Replay].into_iter().enumerate() {
+            if wanted[index] != last[index] {
+                // A changed combination is re-read here rather than in the
+                // settings call, so a combination typed into the file by hand
+                // works on the next press too.
+                last[index].clone_from(&wanted[index]);
+                chords[index] = parse_key_chord(&wanted[index]);
+                if chords[index].is_none() && !wanted[index].is_empty() {
+                    // Said once, not sixteen times a second: a combination
+                    // Orbit cannot read is otherwise indistinguishable from one
+                    // nobody pressed.
+                    log::warn!("overlay: {:?} is not a combination Orbit can watch for", wanted[index]);
+                } else {
+                    log::info!("overlay: watching {:?} for the {:?} shortcut", wanted[index], capture);
+                }
+                // Whatever is already held is the state it arrived in, so a
+                // combination changed while it is being pressed does not fire.
+                down[index] = chords[index].as_ref().is_some_and(chord_down);
+                continue;
+            }
+            let now = chords[index].as_ref().is_some_and(chord_down);
+            // A held chord is one capture: the press is the edge.
+            if now && !down[index] {
+                capture_from_shortcut(&app, capture);
+            }
+            down[index] = now;
+        }
+        thread::sleep(Duration::from_millis(16));
     }
 }
 
@@ -3623,11 +3851,16 @@ fn sync_click_through(app: &AppHandle) {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else { return };
-    // A press that began in the panel keeps the pointer until it is let go:
-    // a box follows the cursor while it is dragged, and half a drag would be
-    // worse than no drag at all.
-    let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);
-    let ignore = !over;
+    // An open panel takes the pointer everywhere. A click that lands on
+    // nothing is one of the ways to put it away, and a click that reached the
+    // game through the overlay would be the overlay interfering with what is
+    // behind it - the thing the player is trying to see. A resting panel is
+    // the opposite: it has let go of the screen, and only its pins answer.
+    //
+    // A press that began in the panel keeps the pointer until it is let go
+    // either way: a box follows the cursor while it is dragged, and half a
+    // drag would be worse than no drag at all.
+    let ignore = !open && !HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window);
     if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
         return;
     }

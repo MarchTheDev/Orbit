@@ -133,8 +133,20 @@ check('and the shipped ones are the same three the page draws',
     rust.includes('Chord::new(Some(4), 15)'));
 check('a chord fires on the edge of the whole chord, not once per poll',
   /fn fired\(&self, buttons: &\[bool\], prev: &\[bool\]\) -> bool \{[\s\S]{0,120}all_down\(buttons\) && !self\.all_down\(prev\)/.test(rust));
-check('the keyboard combinations are registered with the system',
-  rust.includes('global_shortcut().on_shortcut(') && rust.includes('fn install_keys'));
+check('the keyboard is read on Windows, where a registered hotkey can be refused',
+  // RegisterHotKey gives a combination to one program. The ones a screenshot
+  // shortcut wants are the ones every launcher and chat app already holds, so
+  // the registration failed or was refused and the key did nothing at all.
+  rust.includes('fn watch_keys(') &&
+    rust.includes('GetAsyncKeyState') &&
+    rust.includes('fn parse_key_chord(') &&
+    /#\[cfg\(windows\)\]\s*\{?[\s\S]{0,400}install_registered_keys/.test(rust));
+check('and the other desktops still register it with the system',
+  rust.includes('global_shortcut().on_shortcut(') &&
+    rust.includes('fn install_keys') &&
+    rust.includes('#[cfg(not(windows))]\nfn install_registered_keys'));
+check('a key name is read the way the settings page writes one',
+  rust.includes('0x70 + number - 1') && rust.includes('strip_prefix("KEY")'));
 check('a combination turned off is not registered at all',
   /filter\(\|\(_, key\)\| !key\.is_empty\(\)\)/.test(rust));
 check('and re-registered when the settings change',
@@ -155,6 +167,13 @@ check('the file is named in the player\'s own time, told once by the page',
 check('a panel on screen draws that toast itself, and refreshes its gallery',
   rust.includes('pub const CAPTURED_EVENT: &str = "overlay-captured"') &&
     readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes("'overlay-captured'"));
+check('a press on an empty part of the panel puts it away',
+  readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes(
+    "overlayHide('a click on an empty spot')",
+  ) &&
+    // The panel takes the pointer everywhere while it is open, or the press
+    // would reach the game behind it instead of the page.
+    /let ignore = !open && /.test(rust));
 check('the settings page shows both a controller and a keyboard column',
   settingsUi.includes('Controller') && settingsUi.includes('Keyboard'));
 check('what is saved is the shape the page and the desktop side share',

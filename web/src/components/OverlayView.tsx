@@ -1103,6 +1103,30 @@ export function OverlayView() {
     void rememberLayout(next);
   };
 
+  /**
+   * A press on an empty part of the panel puts it away.
+   *
+   * The panel covers the whole screen, so a click that lands on nothing used to
+   * mean nothing at all - and while it was open the game underneath was the one
+   * that got clicked. A press that begins on a box, a button or an open menu
+   * belongs to that thing - a box is dragged by its header, and its buttons are
+   * its own - so only the empty space answers this.
+   */
+  const onBackdrop = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resting || event.button !== 0) return;
+    const node = event.target as HTMLElement;
+    if (
+      node.closest(
+        '[data-overlay-hit="1"], [data-overlay], button, input, select, textarea, a, [role="dialog"], [role="menu"]',
+      )
+    ) {
+      return;
+    }
+    // Something is open over the panel: the press belongs to it, not to the bar.
+    if (deleteTarget || galleryMenu) return;
+    void overlayHide('a click on an empty spot');
+  };
+
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
@@ -1216,13 +1240,11 @@ export function OverlayView() {
   })[toast.kind] : null;
 
   return (
-    <div className="relative h-full text-white">
-      {/* The dim only dims. It used to close the panel on any click, which
-          meant a click meant for the game quietly shut the overlay the player
-          had just opened. The whole screen outside the boxes is the game's now
-          - the native side lets those clicks through - so the dim answers
-          nothing at all. Escape, the pad's B, or a box's own close button end
-          the panel. */}
+    <div className="relative h-full text-white" onPointerDown={onBackdrop}>
+      {/* The dim only dims. What is behind it is the game, and a press there -
+          on the panel itself, outside every box - is the player asking for it
+          back, so it puts the panel away. Escape, the pad's B, and a box's own
+          close button still work. */}
       {!resting && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
       {toast && ToastIcon && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">

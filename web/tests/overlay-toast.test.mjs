@@ -326,9 +326,15 @@ check(
     overlay.split("overlayHide('the close button')").length - 1 === 2,
 );
 check(
-  'the open panel lets the screen through where it has nothing to click',
-  // Without this the overlay is a wall: the player opens it and can no longer
-  // click anywhere else on the desk until it is closed again.
+  'a press on an empty part of the open panel puts it away',
+  // The panel covers the screen, so the press has to reach the page rather than
+  // the game behind it - and the page answers it by closing.
+  overlay.includes('onPointerDown={onBackdrop}') &&
+    overlay.includes("overlayHide('a click on an empty spot')") &&
+    /let ignore = !open && !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(overlaySource),
+);
+check(
+  'a resting panel only answers over its pins',
   overlay.includes('function openHits()') &&
     /function openHits\(\)[\s\S]{0,600}querySelectorAll<HTMLElement>\('\[data-overlay-hit="1"\]'\)/.test(overlay) &&
     // Every surface with something to click says so: the boxes, the boxes
@@ -343,10 +349,10 @@ check(
     overlaySource.includes('pub fn set_hold(on: bool)') &&
     libSource.includes('fn overlay_hold(on: bool)') &&
     // The press keeps the pointer: half a drag is worse than none.
-    overlaySource.includes('let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);') &&
+    overlaySource.includes('!HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window)') &&
     // Driven in both states, not only while the panel rests against its pins.
     /if \(OPEN\.load\(Ordering::SeqCst\) \|\| RESTING\.load\(Ordering::SeqCst\)\)/.test(overlaySource) &&
-    /fn sync_click_through[\s\S]{0,900}let _ = window\.set_ignore_cursor_events\(ignore\);/.test(overlaySource),
+    /fn sync_click_through[\s\S]{0,1600}let _ = window\.set_ignore_cursor_events\(ignore\);/.test(overlaySource),
 );
 check(
   'the panel history keeps the reason instead of being overwritten by the close',

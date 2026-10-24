@@ -100,9 +100,9 @@ export function ShortcutEditor({
         <div>
           <p className="text-sm font-medium">Capture shortcuts</p>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            For a screenshot, a recording, and a replay while a game is in front. The controller
-            side is read by Orbit itself; the keyboard side is registered with the system, so it
-            works over the game.
+            For a screenshot, a recording, and a replay while a game is in front. Both sides are
+            read by Orbit itself - the pad and the keyboard - so they work over a game, and no
+            other program has to give the combination up.
           </p>
         </div>
         <button type="button" onClick={reset} className={btnBrowse}>
