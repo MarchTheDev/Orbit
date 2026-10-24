@@ -14,6 +14,8 @@ import type {
   Playthrough,
   LaunchInfo,
   LaunchTarget,
+  ProtonBuild,
+  ProtonRelease,
   Session,
   Settings,
   Stats,
@@ -767,6 +769,61 @@ export function setClockOffset(minutes: number): Promise<void> {
  */
 export function overlayRefusedShortcuts(): Promise<string[]> {
   return call('overlay_refused_shortcuts', {}, async () => []);
+}
+
+/**
+ * Every Proton build on this machine.
+ *
+ * Steam's own, the ones in its `compatibilitytools.d`, the ones other launchers
+ * fetched, and the ones Orbit downloaded - a game can be pointed at any of them,
+ * which is the point: the build that runs a game is often not the newest.
+ */
+export function protonBuilds(): Promise<ProtonBuild[]> {
+  return call('proton_builds', {}, async () => []);
+}
+
+/** The newest Proton-GE releases, for the picker. */
+export function protonReleases(): Promise<ProtonRelease[]> {
+  return call('proton_ge_releases', {}, async () => []);
+}
+
+/**
+ * Watch the desktop's notes about work it is doing on its own, such as a fetch.
+ *
+ * `orbit-launch-status` is one line at a time - "Downloading GE-Proton9-20" -
+ * and a Proton build takes long enough that a dialog wants to show them.
+ */
+export function watchLaunchStatus(fn: (text: string) => void): () => void {
+  const api = tauri()?.event;
+  if (!api) return () => {};
+  let alive = true;
+  let stop: (() => void) | undefined;
+  void api
+    .listen('orbit-launch-status', (e) => {
+      const payload = e.payload as { message?: string } | string;
+      const text = typeof payload === 'string' ? payload : payload?.message;
+      if (text) fn(text);
+    })
+    .then((un) => {
+      if (alive) stop = un;
+      else un();
+    });
+  return () => {
+    alive = false;
+    stop?.();
+  };
+}
+
+/** Fetch one Proton-GE release into Orbit's own runners folder. */
+export function protonInstall(tag: string, url: string): Promise<string> {
+  return call('proton_install', { tag, url }, () => {
+    throw new Error('Proton-GE can only be fetched by the desktop app.');
+  });
+}
+
+/** Take back a build Orbit downloaded. */
+export function protonRemove(path: string): Promise<void> {
+  return call('proton_remove', { path }, () => undefined);
 }
 
 /** Whether this copy keeps everything beside the program, like a portable one. */

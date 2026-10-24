@@ -28,6 +28,7 @@ mod cloud;
 mod metadata;
 mod notice;
 mod process;
+mod proton;
 mod saves;
 mod session;
 mod sgdb;
@@ -1711,6 +1712,30 @@ fn data_portable(app: tauri::AppHandle) -> bool {
     storage::portable(&app)
 }
 
+/// The Proton builds already on this machine, plus the ones Orbit fetched.
+#[tauri::command]
+fn proton_builds(app: tauri::AppHandle) -> Vec<proton::ProtonBuild> {
+    proton::installed(&app)
+}
+
+/// The newest Proton-GE releases GitHub has, for the picker.
+#[tauri::command]
+async fn proton_ge_releases(app: tauri::AppHandle) -> Result<Vec<proton::GeRelease>, String> {
+    proton::ge_releases(&app).await
+}
+
+/// Fetch one Proton-GE release into Orbit's own runners folder.
+#[tauri::command]
+async fn proton_install(app: tauri::AppHandle, tag: String, url: String) -> Result<String, String> {
+    proton::install_ge(&app, tag, url).await
+}
+
+/// Take back a build Orbit downloaded. A Steam build is not Orbit's to remove.
+#[tauri::command]
+fn proton_remove(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    proton::remove_build(&app, &path)
+}
+
 /// The capture shortcuts the system refused, so Settings can say which.
 #[tauri::command]
 fn overlay_refused_shortcuts() -> Vec<String> {
@@ -2623,6 +2648,10 @@ pub fn run() {
             data_portable,
             clock_offset,
             overlay_refused_shortcuts,
+            proton_builds,
+            proton_ge_releases,
+            proton_install,
+            proton_remove,
             data_dir_size,
             ambient_set,
             ambient_stop,

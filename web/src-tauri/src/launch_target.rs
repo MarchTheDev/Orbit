@@ -51,6 +51,13 @@ pub enum LaunchTarget {
         /// The wine binary. Empty means `wine` on PATH, or the one in Settings.
         #[serde(default)]
         wine: Option<String>,
+        /// A Proton build to run it through instead, as the folder it lives in.
+        /// Empty means plain Wine, which is what this always was.
+        #[serde(default)]
+        proton: Option<String>,
+        /// The switches the details page sets for this game.
+        #[serde(default)]
+        tweaks: WineTweaks,
     },
     /// A game imported from Lutris. An exe and a prefix are started through
     /// Wine and watched. A slug on its own is handed to Lutris.
@@ -64,6 +71,53 @@ pub enum LaunchTarget {
         #[serde(default)]
         prefix: Option<String>,
     },
+}
+
+/// One line of a game's own environment.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EnvVar {
+    pub key: String,
+    pub value: String,
+}
+
+/// The switches that make one Windows game behave better than the next on Linux.
+///
+/// These are Faugus's set, which is the set Lutris and every guide use, because
+/// they are what the pieces underneath actually read: GameMode for the CPU and
+/// GPU governors, MangoHud for the overlay, Proton's own environment for the
+/// rest. A switch that is off is not written into the environment at all, so
+/// the game sees what the player's machine normally gives it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WineTweaks {
+    /// Run the game under `gamemoderun`, which asks the system for its
+    /// performance profile while a game is running.
+    pub gamemode: bool,
+    /// Run it under `mangohud`.
+    pub mangohud: bool,
+    /// `PROTON_PREFER_SDL=1`: Proton talks to the controller through SDL, which
+    /// fixes the pads some games otherwise refuse to see.
+    pub sdl: bool,
+    /// `PROTON_ENABLE_WAYLAND=1`: the Wine Wayland driver, for a game that is
+    /// smoother natively than through XWayland.
+    pub wayland: bool,
+    /// `PROTON_USE_WOW64=1`: 32-bit games through the 64-bit driver.
+    pub wow64: bool,
+    /// `WINEFSYNC`: `Some(true)` forces it on, `Some(false)` off, `None` leaves
+    /// whatever the machine already says.
+    pub fsync: Option<bool>,
+    /// `WINEESYNC`, the same three ways.
+    pub esync: Option<bool>,
+    /// `DXVK_HUD`, for the frame counter: `fps`, `frametimes`, `gpuload`.
+    pub hud: String,
+    /// `GAMEID`, umu's name for the game. It is what makes umu apply the fixes
+    /// collected for that game, so it is the one switch with a real payoff.
+    pub gameid: String,
+    /// `WINEDLLOVERRIDES`, such as `d3d11=n,b` for a game that ships its own.
+    pub dll_overrides: String,
+    /// Anything else the player wants in the environment.
+    pub env: Vec<EnvVar>,
 }
 
 /// The wine binary from Settings, used when a game does not name one.
@@ -105,7 +159,16 @@ impl LaunchTarget {
             LaunchTarget::None => "Time only".to_string(),
             LaunchTarget::Executable { path, .. } => file_name(path),
             LaunchTarget::Steam { app_id } => format!("Steam · {app_id}"),
-            LaunchTarget::Wine { path, .. } => format!("Wine · {}", file_name(path)),
+            LaunchTarget::Wine { path, proton, .. } => match proton {
+                Some(build) if !build.trim().is_empty() => {
+                    let name = Path::new(build.trim())
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Proton");
+                    format!("Proton · {name} · {}", file_name(path))
+                }
+                _ => format!("Wine · {}", file_name(path)),
+            },
             LaunchTarget::Lutris { slug, exe, .. } => {
                 if !slug.is_empty() {
                     format!("Lutris · {slug}")
@@ -185,7 +248,9 @@ pub fn spawn(target: &LaunchTarget) -> Result<Option<Child>, String> {
             args,
             prefix,
             wine,
-        } => spawn_wine(path, args, prefix.as_deref(), wine.as_deref()),
+            proton,
+            tweaks,
+        } => spawn_wine(path, args, prefix.as_deref(), wine.as_deref(), proton.as_deref(), tweaks),
         LaunchTarget::Lutris {
             slug,
             game_id,
@@ -205,7 +270,14 @@ pub fn spawn(target: &LaunchTarget) -> Result<Option<Child>, String> {
                     joined.filter(|path| path.is_file())
                 };
                 if let Some(exe_path) = exe_path {
-                    return spawn_wine(&exe_path, "", prefix.as_deref(), None);
+                    return spawn_wine(
+                        &exe_path,
+                        "",
+                        prefix.as_deref(),
+                        None,
+                        None,
+                        &WineTweaks::default(),
+                    );
                 }
             }
             hand_to_lutris(slug, *game_id)?;
@@ -219,18 +291,26 @@ fn spawn_wine(
     args: &str,
     prefix: Option<&str>,
     wine: Option<&str>,
+    proton: Option<&str>,
+    tweaks: &WineTweaks,
 ) -> Result<Option<Child>, String> {
     if !path.is_file() {
         return Err(format!("{} is not there any more.", path.display()));
     }
-    let bin = ensure_wine(wine)?;
-    let mut cmd = crate::process::command(&bin);
-    // Lutris starts the game's own bottle, not a prefix invented for the launch.
-    // A folder that is not a bottle is ignored, and one that contains drive_c
-    // is the bottle even when the field names the game folder inside it.
-    if let Some(prefix) = bottle_of(prefix, path) {
-        cmd.env("WINEPREFIX", &prefix);
-    }
+    // A build that has been deleted since the game was set up is said out loud
+    // rather than quietly falling back to Wine: the game was put on that build
+    // for a reason, and running it somewhere else is a different game.
+    let named = proton.map(str::trim).filter(|value| !value.is_empty());
+    let mut cmd = match (named, crate::proton::chosen(named)) {
+        (Some(build), None) => {
+            return Err(format!(
+                "{} is not a Proton build any more. Pick another one, or choose Wine.",
+                Path::new(build).display()
+            ))
+        }
+        (_, Some(build)) => proton_command(&build, path, prefix, tweaks)?,
+        (None, None) => wine_command(path, prefix, wine, tweaks)?,
+    };
     cmd.arg(path);
     let args = args.trim();
     if !args.is_empty() {
@@ -239,13 +319,191 @@ fn spawn_wine(
     if let Some(dir) = path.parent() {
         cmd.current_dir(dir);
     }
+    // The game's own switches go on the whole chain, so `gamemoderun` and
+    // `mangohud` read them too.
+    for (key, value) in tweak_env(tweaks) {
+        cmd.env(key, value);
+    }
     quiet(&mut cmd).map(Some).map_err(|e| {
-        format!(
-            "Could not start {} through {}: {e}",
-            path.display(),
-            bin.display()
-        )
+        format!("Could not start {} through Wine: {e}", path.display())
     })
+}
+
+/// Plain Wine, with the tweaks that make sense outside Proton.
+fn wine_command(
+    path: &Path,
+    prefix: Option<&str>,
+    wine: Option<&str>,
+    tweaks: &WineTweaks,
+) -> Result<Command, String> {
+    let bin = ensure_wine(wine)?;
+    let mut cmd = crate::process::command(&bin);
+    // Lutris starts the game's own bottle, not a prefix invented for the launch.
+    // A folder that is not a bottle is ignored, and one that contains drive_c
+    // is the bottle even when the field names the game folder inside it.
+    if let Some(prefix) = bottle_of(prefix, path) {
+        cmd.env("WINEPREFIX", &prefix);
+    }
+    wrap(cmd, tweaks)
+}
+
+/// A Windows program through a Proton build.
+///
+/// Two ways, and which one is available decides:
+///
+/// - `umu-run`, the launcher outside Steam that carries Valve's runtime. It is
+///   what Lutris and Faugus use, and it is the only way a Proton build gets the
+///   container and the Steam Linux Runtime it expects.
+/// - Proton's own script, run directly. It works for most builds and needs
+///   nothing installed, but it does not bring the runtime with it.
+///
+/// The prefix is the game's compat data folder: Proton creates `pfx` inside it.
+/// An empty one is a bottle of this game's own, named after the program, which
+/// is what Steam and Faugus both do and what keeps two games out of each
+/// other's registry.
+fn proton_command(
+    build: &Path,
+    program: &Path,
+    prefix: Option<&str>,
+    tweaks: &WineTweaks,
+) -> Result<Command, String> {
+    let prefix = prefix
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate::app_handle().map(|app| crate::proton::default_prefix(&app, program))
+        })
+        .ok_or_else(|| "Orbit is still starting.".to_string())?;
+    let _ = std::fs::create_dir_all(&prefix);
+    let name = build
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Proton");
+    if let Some(umu) = which("umu-run") {
+        let mut cmd = crate::process::command(umu);
+        cmd.env("PROTONPATH", build);
+        cmd.env("WINEPREFIX", &prefix);
+        // umu applies the fixes collected for this game. Its own default is an
+        // id nobody has a fix for, which is the honest answer when the player
+        // has not named one.
+        let gameid = tweaks.gameid.trim();
+        cmd.env("GAMEID", if gameid.is_empty() { "umu-default" } else { gameid });
+        return Ok(wrap(cmd, tweaks));
+    }
+    let script = build.join("proton");
+    if !script.is_file() {
+        return Err(format!(
+            "{name} cannot be started: it has no proton script, and umu-run is not installed."
+        ));
+    }
+    let mut cmd = crate::process::command(&script);
+    // Proton's script reads the compat data folder the way Steam gives it, and
+    // creates `pfx` inside. It is told where Steam would be so a build that
+    // looks for the runtime next to it has an answer.
+    cmd.env("STEAM_COMPAT_DATA_PATH", &prefix);
+    cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_home());
+    cmd.arg("waitforexitandrun");
+    Ok(wrap(cmd, tweaks))
+}
+
+/// Where Steam would be, for a Proton build that asks.
+fn steam_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".steam/steam"))
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Put `gamemoderun` and `mangohud` in front of the command, when they are
+/// installed and asked for.
+///
+/// They are programs that start another program, so they go first: the game is
+/// the last thing in the chain and everything else is a wrapper around it. A
+/// tool that is not installed is skipped rather than failing the launch - the
+/// switch is a preference, not a dependency.
+fn wrap(cmd: Command, tweaks: &WineTweaks) -> Command {
+    let mut cmd = cmd;
+    if tweaks.mangohud && which("mangohud").is_some() {
+        cmd = wrap_in(cmd, "mangohud");
+    }
+    let gamemode = which("gamemoderun").is_some()
+        || Path::new("/usr/games/gamemoderun").is_file()
+        || Path::new("/usr/local/bin/gamemoderun").is_file();
+    if tweaks.gamemode && gamemode {
+        cmd = wrap_in(cmd, "gamemoderun");
+    }
+    cmd
+}
+
+/// Start `tool` with the whole of `cmd` as its arguments.
+///
+/// `Command` cannot hand itself over, so what it holds is read back and passed
+/// on: the tool becomes the program, and the original program and arguments
+/// become its arguments. No shell is involved, so a path with a space in it
+/// needs no quoting.
+fn wrap_in(cmd: Command, tool: &str) -> Command {
+    let program = cmd.get_program().to_os_string();
+    let args: Vec<std::ffi::OsString> = cmd.get_args().map(|arg| arg.to_os_string()).collect();
+    let mut wrapped = crate::process::command(tool);
+    wrapped.arg(program).args(args);
+    // A new command starts with an empty environment, so what the original was
+    // told is put back.
+    for (key, value) in cmd.get_envs() {
+        if let Some(value) = value {
+            wrapped.env(key, value);
+        }
+    }
+    if let Some(dir) = cmd.get_current_dir() {
+        wrapped.current_dir(dir);
+    }
+    wrapped
+}
+
+/// The environment the switches ask for.
+fn tweak_env(tweaks: &WineTweaks) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = Vec::new();
+    if tweaks.sdl {
+        env.push(("PROTON_PREFER_SDL".to_string(), "1".into()));
+    }
+    if tweaks.wayland {
+        env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".into()));
+    }
+    if tweaks.wow64 {
+        env.push(("PROTON_USE_WOW64".to_string(), "1".into()));
+    }
+    if let Some(on) = tweaks.fsync {
+        env.push(("WINEFSYNC".to_string(), if on { "1" } else { "0" }.into()));
+    }
+    if let Some(on) = tweaks.esync {
+        env.push(("WINEESYNC".to_string(), if on { "1" } else { "0" }.into()));
+    }
+    if tweaks.mangohud {
+        env.push(("MANGOHUD".to_string(), "1".into()));
+    }
+    let hud = tweaks.hud.trim();
+    if !hud.is_empty() {
+        env.push(("DXVK_HUD".to_string(), hud.to_string()));
+    }
+    let gameid = tweaks.gameid.trim();
+    if !gameid.is_empty() && gameid.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+        env.push(("GAMEID".to_string(), gameid.to_string()));
+    }
+    let overrides = tweaks.dll_overrides.trim();
+    if !overrides.is_empty() {
+        env.push(("WINEDLLOVERRIDES".to_string(), overrides.to_string()));
+    }
+    for row in &tweaks.env {
+        let key = row.key.trim();
+        // A key is a name, which is letters, digits and underscores. Anything
+        // else - a space, a leading `=`, a path - is a typo rather than an
+        // environment variable, and the launch should not fail over it.
+        if key.is_empty() || !key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            continue;
+        }
+        env.push((key.to_string(), row.value.clone()));
+    }
+    env
 }
 
 /// The wine binary to run, in the order Lutris itself searches.

@@ -6,6 +6,8 @@ import { pickFile } from '../../services/desktop';
 import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
 import { SaveButton } from '../ui/SaveButton';
+import { WineSettings } from './WineSettings';
+import { buildName } from '../../utils/proton';
 import { say } from '../../utils/toast';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
@@ -17,7 +19,7 @@ const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: ty
   {
     kind: 'wine',
     label: 'Wine',
-    hint: 'A Windows .exe, started through Wine. Name a prefix if the game has one.',
+    hint: 'A Windows .exe, through Wine or a Proton build. Name a prefix if the game has one.',
     icon: Wine,
   },
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
@@ -43,8 +45,12 @@ function summarise(t: LaunchTarget, companions: Companion[]): string {
       // Chosen but not yet pointed at anything: say so rather than show a
       // blank line where the program should be.
       return t.path.trim() ? `${t.path}${extra}` : `No program chosen yet${extra}`;
-    case 'wine':
-      return t.path.trim() ? `Wine · ${t.path}${extra}` : `Wine, no program chosen yet${extra}`;
+    case 'wine': {
+      // Which build it runs on matters as much as which program it is.
+      const build = buildName(t.proton);
+      const through = build ? `Proton ${build}` : 'Wine';
+      return t.path.trim() ? `${through} · ${t.path}${extra}` : `${through}, no program chosen yet${extra}`;
+    }
     case 'steam':
       return `Steam app ${t.appId}${extra}`;
     case 'lutris':
@@ -259,7 +265,7 @@ export function LaunchEditor({
                 className={inputCls}
                 value={target.prefix ?? ''}
                 onChange={(e) => setTarget({ ...target, prefix: e.target.value || null })}
-                placeholder="Leave empty for Wine's default prefix"
+                placeholder="Leave empty for Wine's default prefix, or this game's own Proton bottle"
                 spellCheck={false}
               />
             </label>
@@ -277,6 +283,12 @@ export function LaunchEditor({
               <span className={labelCls}>Arguments</span>
               <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
             </label>
+            <WineSettings
+              proton={target.proton ?? null}
+              tweaks={target.tweaks}
+              onProton={(path) => setTarget({ ...target, proton: path })}
+              onTweaks={(next) => setTarget({ ...target, tweaks: next })}
+            />
           </div>
         )}
 

@@ -91,6 +91,50 @@ export interface MetaData {
  * not something the launch editor offers: it is set on games brought in from a
  * Steam library, which have to go through Steam to start at all.
  */
+/**
+ * One line of a game's own environment, written as a name and a value.
+ *
+ * The name is checked on the desktop side before it reaches the process: a
+ * name that is not letters, digits and underscores is a typo, not a variable.
+ */
+export interface EnvVar {
+  key: string;
+  value: string;
+}
+
+/**
+ * The switches that make one Windows game behave better on Linux.
+ *
+ * The set Faugus and Lutris both offer, because they are what the pieces
+ * underneath read: GameMode for the system's performance profile, MangoHud for
+ * the overlay, and Proton's own environment for the rest. A switch that is off
+ * is not written at all, so the game sees what the machine normally gives it.
+ */
+export interface WineTweaks {
+  /** Run the game under `gamemoderun`. */
+  gamemode: boolean;
+  /** Run it under `mangohud`. */
+  mangohud: boolean;
+  /** `PROTON_PREFER_SDL=1`: the controller through SDL, for pads some games miss. */
+  sdl: boolean;
+  /** `PROTON_ENABLE_WAYLAND=1`: Wine's own Wayland driver. */
+  wayland: boolean;
+  /** `PROTON_USE_WOW64=1`: 32-bit games through the 64-bit driver. */
+  wow64: boolean;
+  /** `WINEFSYNC`: true forces it on, false off, null leaves the machine's own. */
+  fsync: boolean | null;
+  /** `WINEESYNC`, the same three ways. */
+  esync: boolean | null;
+  /** `DXVK_HUD`, such as `fps,frametimes`. Empty means none. */
+  hud: string;
+  /** `GAMEID`, umu's name for the game: it is what applies its collected fixes. */
+  gameid: string;
+  /** `WINEDLLOVERRIDES`, such as `d3d11=n,b`. */
+  dllOverrides: string;
+  /** Anything else the player wants in the environment. */
+  env: EnvVar[];
+}
+
 export type LaunchTarget =
   | { kind: 'none' }
   | { kind: 'executable'; path: string; args: string; workingDir: string | null }
@@ -99,10 +143,14 @@ export type LaunchTarget =
       kind: 'wine';
       path: string;
       args: string;
-      /** The Wine prefix. Empty means Wine's default. */
+      /** The Wine prefix. Empty means Wine's default, or Proton's shared one. */
       prefix: string | null;
       /** The wine binary. Empty means `wine` on PATH, or the one in Settings. */
       wine: string | null;
+      /** A Proton build to run it through, as the folder it lives in. */
+      proton?: string | null;
+      /** The switches for this game. Missing means all of them off. */
+      tweaks?: WineTweaks;
     }
   | {
       kind: 'lutris';
@@ -111,6 +159,30 @@ export type LaunchTarget =
       exe: string | null;
       prefix: string | null;
     };
+
+/** One Proton build on this machine. */
+export interface ProtonBuild {
+  /** The folder, which is also what a game stores. */
+  id: string;
+  name: string;
+  path: string;
+  /** Orbit, Steam, or the launcher that fetched it. */
+  source: string;
+  /** What its own `version` file says, when it has one. */
+  version: string;
+  /** True for a build Orbit downloaded, so only those can be removed here. */
+  orbit: boolean;
+}
+
+/** One downloadable Proton-GE release. */
+export interface ProtonRelease {
+  tag: string;
+  url: string;
+  /** Bytes, as GitHub states them. Zero when it does not say. */
+  size: number;
+  published: string;
+  installed: boolean;
+}
 
 /** A program Orbit starts at the same time as the game. */
 export interface Companion {

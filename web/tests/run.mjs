@@ -52,6 +52,7 @@ const checks = [
   'tests/tv-mode.test.mjs',
   'tests/capture-paths.test.mjs',
   'tests/shortcuts.test.mjs',
+  'tests/proton.test.mjs',
 ];
 
 try {
