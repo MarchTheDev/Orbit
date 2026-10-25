@@ -327,10 +327,11 @@ pub async fn install_ge(app: &AppHandle, tag: String, url: String) -> Result<Str
         let _ = std::fs::remove_file(&archive);
     }
     say(app, &format!("Downloading {tag}. It is about half a gigabyte."));
-    download(&url, &archive).await.inspect_err(|_| {
+    download(app, &tag, &url, &archive).await.inspect_err(|_| {
         let _ = std::fs::remove_file(&archive);
     })?;
     say(app, &format!("Unpacking {tag}."));
+    progress(app, &tag, "extract", 0, 0);
     if let Err(reason) = extract(&archive, &root) {
         let _ = std::fs::remove_file(&archive);
         let _ = std::fs::remove_dir_all(&dest);
@@ -343,6 +344,7 @@ pub async fn install_ge(app: &AppHandle, tag: String, url: String) -> Result<Str
     }
     make_runnable(&dest);
     say(app, &format!("{tag} is ready."));
+    progress(app, &tag, "done", 0, 0);
     Ok(dest.to_string_lossy().to_string())
 }
 
@@ -386,7 +388,7 @@ fn allowed_url(url: &str) -> bool {
         || host.ends_with(".githubusercontent.com")
 }
 
-async fn download(url: &str, dest: &Path) -> Result<(), String> {
+async fn download(app: &AppHandle, tag: &str, url: &str, dest: &Path) -> Result<(), String> {
     let client = client(1800)?;
     let mut response = client
         .get(url)
@@ -396,15 +398,15 @@ async fn download(url: &str, dest: &Path) -> Result<(), String> {
     if !response.status().is_success() {
         return Err(format!("The download failed ({})", response.status()));
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > 3 * 1024 * 1024 * 1024)
-    {
+    let total = response.content_length().unwrap_or(0);
+    if total > 3 * 1024 * 1024 * 1024 {
         return Err("That download was larger than a Proton build should be.".into());
     }
     let mut file = std::fs::File::create(dest).map_err(|e| format!("Could not write the download ({e})"))?;
     use std::io::Write;
     let mut written = 0u64;
+    let mut told = 0u64;
+    progress(app, tag, "download", 0, total);
     while let Some(chunk) = response
         .chunk()
         .await
@@ -416,8 +418,24 @@ async fn download(url: &str, dest: &Path) -> Result<(), String> {
         }
         file.write_all(&chunk)
             .map_err(|e| format!("Could not write the download ({e})"))?;
+        // A bar can only redraw so fast anyway; two megabytes is the grain at
+        // which one can actually be seen moving.
+        if written.saturating_sub(told) >= 2 * 1024 * 1024 {
+            told = written;
+            progress(app, tag, "download", written, total);
+        }
     }
+    progress(app, tag, "download", written, if total > 0 { total } else { written });
     Ok(())
+}
+
+/// Tell the window how far a fetch has got, so the manager can draw a bar
+/// rather than ask the player to believe a spinning word.
+fn progress(app: &AppHandle, tag: &str, phase: &str, loaded: u64, total: u64) {
+    let _ = app.emit(
+        "orbit-proton-progress",
+        serde_json::json!({ "tag": tag, "phase": phase, "loaded": loaded, "total": total }),
+    );
 }
 
 /// Unpack with tar, which every desktop has. A `.tar.gz` and a `.tar.xz` are

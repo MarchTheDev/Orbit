@@ -21,6 +21,9 @@ import { Logo } from './ui/Logo';
 import { TvDetails } from './TvDetails';
 import { MusicButton } from './MusicButton';
 import { padJustActivated } from '../hooks/useGamepad';
+import { tvLite } from '../services/tv';
+
+const lite = tvLite;
 
 /** How the one list on the page is ordered. */
 export type TvOrder = 'recent' | 'az';
@@ -127,7 +130,10 @@ function Backdrop({ game }: { game: Game }) {
           src={soft}
           alt=""
           aria-hidden
-          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-70 blur-2xl"
+          className={cn(
+          'absolute inset-0 h-full w-full object-cover',
+          lite ? 'scale-105 opacity-75 blur-lg' : 'scale-110 opacity-70 blur-2xl',
+        )}
         />
       )}
       {src ? (
@@ -162,7 +168,10 @@ function Backdrop({ game }: { game: Game }) {
 /** A small fact about the game, in the row under its name. */
 function Fact({ icon: Icon, children }: { icon: typeof Clock; children: React.ReactNode }) {
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12.5px] font-medium text-white/80 backdrop-blur-sm">
+    <span className={cn(
+        'flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[12.5px] font-medium text-white/80',
+        lite ? 'bg-white/[0.12]' : 'bg-white/[0.06] backdrop-blur-sm',
+      )}>
       <Icon className="size-3.5 text-white/50" />
       {children}
     </span>
@@ -529,7 +538,10 @@ export function TvMode({
         </span>
 
         {playingNow && (
-          <span className="ml-1 flex min-w-0 items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300 backdrop-blur-sm">
+          <span className={cn(
+              'ml-1 flex min-w-0 items-center gap-2 rounded-full border border-emerald-400/30 px-3 py-1 text-xs font-semibold text-emerald-300',
+              lite ? 'bg-emerald-400/15' : 'bg-emerald-400/10 backdrop-blur-sm',
+            )}>
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
             <span className="truncate">{playingNow.title}</span>
             <button
@@ -672,7 +684,10 @@ export function TvMode({
                         setDetailId(active.id);
                         onDetails(active);
                       }}
-                      className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/[0.07] px-6 py-3.5 text-[15px] font-semibold text-white/90 backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.12] focus-visible:ring-4 focus-visible:ring-accent/40"
+                      className={cn(
+              'flex items-center gap-2.5 rounded-full border border-white/15 px-6 py-3.5 text-[15px] font-semibold text-white/90 transition hover:border-white/35 focus-visible:ring-4 focus-visible:ring-accent/40',
+              lite ? 'bg-white/[0.12] hover:bg-white/[0.18]' : 'bg-white/[0.07] backdrop-blur-md hover:bg-white/[0.12]',
+            )}
                     >
                       <Info className="size-4" />
                       Details
@@ -693,7 +708,10 @@ export function TvMode({
                   {at + 1} / {list.length}
                 </span>
                 <span className="flex-1" />
-                <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.06] p-0.5 backdrop-blur-sm">
+                <div className={cn(
+                'flex items-center gap-0.5 rounded-full border border-white/10 p-0.5',
+                lite ? 'bg-white/[0.12]' : 'bg-white/[0.06] backdrop-blur-sm',
+              )}>
                   {(
                     [
                       ['recent', 'Recent', Clock],

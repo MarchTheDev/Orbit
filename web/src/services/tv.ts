@@ -15,6 +15,14 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { isNative } from './native';
 
+/**
+ * Frosted glass on the TV: WebKit on Linux repaints the blur under every
+ * element every frame, which is the hub crawling on the couch machine. The
+ * shapes stay; the frost outside Linux turns into steadier colour there. One
+ * check for the session, so nothing measures the platform mid-render.
+ */
+export const tvLite = navigator.userAgent.includes('Linux');
+
 /** Whether the document itself is the thing that was made fullscreen. */
 let askedTheDocument = false;
 

@@ -821,6 +821,44 @@ export function protonInstall(tag: string, url: string): Promise<string> {
   });
 }
 
+/** How far a Proton-GE fetch has got, in bytes. */
+export interface ProtonProgress {
+  tag: string;
+  phase: 'download' | 'extract' | 'done';
+  loaded: number;
+  total: number;
+}
+
+/**
+ * Watch a fetch move: `orbit-proton-progress` carries loaded/total bytes, so
+ * the manager can draw a real bar instead of asking a spinner to be believed.
+ */
+export function watchProtonProgress(fn: (progress: ProtonProgress) => void): () => void {
+  const api = tauri()?.event;
+  if (!api) return () => {};
+  let alive = true;
+  let stop: (() => void) | undefined;
+  void api
+    .listen('orbit-proton-progress', (e) => {
+      const p = e.payload as Partial<ProtonProgress>;
+      if (!p?.tag || !p.phase) return;
+      fn({
+        tag: p.tag,
+        phase: p.phase as ProtonProgress['phase'],
+        loaded: p.loaded ?? 0,
+        total: p.total ?? 0,
+      });
+    })
+    .then((un) => {
+      if (alive) stop = un;
+      else un();
+    });
+  return () => {
+    alive = false;
+    stop?.();
+  };
+}
+
 /** Take back a build Orbit downloaded. */
 export function protonRemove(path: string): Promise<void> {
   return call('proton_remove', { path }, () => undefined);

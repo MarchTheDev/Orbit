@@ -295,6 +295,8 @@ export function OverlayView() {
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
   /** Whether this page has been told the panel is up. */
   const shownSeen = useRef(false);
+  /** When it was last told, so the gesture that opened it cannot end it. */
+  const shownAt = useRef(0);
   /** The arrangement the player made, if any: preferred whenever it fits. */
   const savedPlaces = useRef<Record<BoxId, Place> | null>(null);
   const [hidden, setHidden] = useState<BoxId[]>([]);
@@ -599,6 +601,7 @@ export function OverlayView() {
     let stopPad = () => {};
     void listen('overlay-shown', () => {
       shownSeen.current = true;
+      shownAt.current = Date.now();
       setAwake(true);
       setResting(false);
       refresh();
@@ -1110,6 +1113,11 @@ export function OverlayView() {
    */
   const onBackdrop = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (resting || event.button !== 0) return;
+    // The press that opened the panel is not over yet. On X11 the window is
+    // still settling under the hand when the first events arrive, and the
+    // tail of the opening gesture landing inside the first moment is the
+    // panel appearing and vanishing in one breath.
+    if (Date.now() - shownAt.current < 600) return;
     const node = event.target as HTMLElement;
     if (
       node.closest(

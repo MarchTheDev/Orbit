@@ -16,6 +16,8 @@ import {
   protonReleases,
   protonRemove,
   watchLaunchStatus,
+  watchProtonProgress,
+  type ProtonProgress,
 } from '../../services/native';
 import { fmtBytes } from '../../utils/format';
 import { sortReleases } from '../../utils/proton';
@@ -38,6 +40,8 @@ export function ProtonManager({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<string>('');
+  /** How far the fetch under way has got, in bytes. */
+  const [fetching, setFetching] = useState<ProtonProgress | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -57,14 +61,21 @@ export function ProtonManager({
     if (open) void refresh();
   }, [open, refresh]);
 
-  // The desktop says what it is doing while it fetches, one line at a time.
+  // The desktop says what it is doing while it fetches, one line at a time,
+  // and the bar behind it is counted in bytes as they land.
   useEffect(() => {
     if (!open) return;
-    return watchLaunchStatus((text) => setProgress(text));
+    const unwatchText = watchLaunchStatus((text) => setProgress(text));
+    const unwatchBytes = watchProtonProgress((p) => setFetching(p.phase === 'done' ? null : p));
+    return () => {
+      unwatchText();
+      unwatchBytes();
+    };
   }, [open]);
 
   async function install(release: ProtonRelease) {
     setBusy(release.tag);
+    setFetching(null);
     setProgress(`Fetching ${release.tag}`);
     try {
       const where = await protonInstall(release.tag, release.url);
@@ -77,6 +88,7 @@ export function ProtonManager({
       setProgress('');
     } finally {
       setBusy(null);
+      setFetching(null);
     }
   }
 
@@ -155,6 +167,31 @@ export function ProtonManager({
                 </div>
                 {release.installed ? (
                   <span className="shrink-0 text-xs text-fg-dim">Installed</span>
+                ) : busy === release.tag ? (
+                  /* Half a gigabyte is long enough to grow tired of believing a
+                     word: the same counting the move of a game to another disk
+                     gets, as a bar and two numbers. */
+                  <div className="flex w-44 shrink-0 flex-col gap-1">
+                    {fetching?.tag === release.tag && fetching.phase === 'download' && fetching.total > 0 ? (
+                      <>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-panel2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((fetching.loaded / fetching.total) * 100)}>
+                          <div
+                            className="h-full rounded-full bg-accent transition-[width] duration-200"
+                            style={{ width: `${Math.min(100, (fetching.loaded / fetching.total) * 100)}%` }}
+                          />
+                        </div>
+                        <p className="text-right text-[10px] leading-none text-fg-dim">
+                          {Math.round((fetching.loaded / fetching.total) * 100)}% · {fmtBytes(fetching.loaded)} of {fmtBytes(fetching.total)}
+                        </p>
+                      </>
+                    ) : fetching?.tag === release.tag && fetching.phase === 'download' ? (
+                      <p className="text-right text-[10px] leading-none text-fg-dim">{fmtBytes(fetching.loaded)} fetched…</p>
+                    ) : fetching?.tag === release.tag && fetching.phase === 'extract' ? (
+                      <p className="text-right text-[10px] leading-none text-fg-dim">Unpacking…</p>
+                    ) : (
+                      <p className="text-right text-[10px] leading-none text-fg-dim">Starting the fetch…</p>
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -162,7 +199,7 @@ export function ProtonManager({
                     disabled={busy !== null}
                     onClick={() => void install(release)}
                   >
-                    {busy === release.tag ? 'Fetching…' : 'Download'}
+                    Download
                   </button>
                 )}
               </li>

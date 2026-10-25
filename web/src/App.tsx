@@ -1168,10 +1168,22 @@ export default function App() {
   useEffect(() => {
     if (!isNative()) return;
     let stop = () => {};
+    let stopToast = () => {};
+    // The panel speaks through these when it cannot speak for itself - it is
+    // the very window that is going away, so the words have to land here.
+    void listen('overlay-toast', (event) => {
+      const text = typeof event.payload === 'string' ? event.payload : '';
+      if (text) say(text, 'error');
+    }).then((unlisten) => {
+      stopToast = unlisten;
+    }).catch(() => undefined);
     void listen('overlay-open-settings', () => openSettings('orbit-overlay')).then((unlisten) => {
       stop = unlisten;
     }).catch(() => undefined);
-    return () => stop();
+    return () => {
+      stop();
+      stopToast();
+    };
   }, [openSettings]);
 
   /**
@@ -1450,8 +1462,10 @@ export default function App() {
       )}
 
       {/* Bottom left, the way the app talks to the player: out of the way of the
-          player bar in the middle and the Stop button at the top right. */}
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
+          player bar in the middle and the Stop button at the top right. It also
+          sits above any dialog, because a "download is ready" that lands behind
+          the dialog it came from is a secret. */} 
+      <div className="pointer-events-none fixed bottom-4 left-4 z-[80] flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
         {toasts.map((t) => (
           <div
             key={t.id}

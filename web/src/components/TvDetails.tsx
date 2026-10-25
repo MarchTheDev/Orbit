@@ -14,6 +14,7 @@ import type { Game } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
+import { tvLite } from '../services/tv';
 
 /**
  * A game, read at the size a television is read at.
@@ -115,7 +116,7 @@ export function TvDetails({
             ref={back}
             data-tv-action="back"
             onClick={onBack}
-            className="flex items-center gap-2 rounded-full border border-white/15 bg-[#0d0b18]/85 py-2 pl-3 pr-4 text-[13px] font-semibold text-white/90 backdrop-blur-md transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40"
+            className={cn("flex items-center gap-2 rounded-full border border-white/15 bg-[#0d0b18]/85 py-2 pl-3 pr-4 text-[13px] font-semibold text-white/90 transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40", !tvLite && 'backdrop-blur-md')}
           >
             <ArrowLeft className="size-4" />
             Back to the rail
@@ -183,7 +184,7 @@ export function TvDetails({
                 {times.length > 0 ? (
                   <div className="space-y-2">
                     {times.map((row) => (
-                      <div key={row.label} className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-2.5">
+                      <div key={row.label} className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-2.5", !tvLite && 'backdrop-blur-md')}>
                         <div className="flex items-baseline justify-between gap-3">
                           <span className="text-[12.5px] text-white/60">{row.label}</span>
                           <span className="font-mono text-base font-bold" style={{ color: row.colour }}>
@@ -239,7 +240,7 @@ export function TvDetails({
                     {achievements > 0 ? 'Achievements' : 'Notes'}
                   </Heading>
                   {achievements > 0 ? (
-                    <div className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-3">
+                    <div className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-3", !tvLite && 'backdrop-blur-md')}>
                       <p className="font-mono text-lg font-bold text-white">
                         {unlocked}
                         <span className="text-white/35"> / {achievements}</span>
@@ -252,7 +253,7 @@ export function TvDetails({
                       </div>
                     </div>
                   ) : (
-                    <p className="whitespace-pre-wrap rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-3 text-[12.5px] leading-relaxed text-white/65">
+                    <p className={cn("whitespace-pre-wrap rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-3 text-[12.5px] leading-relaxed text-white/65", !tvLite && 'backdrop-blur-md')}>
                       {game.notes}
                     </p>
                   )}
@@ -288,7 +289,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 
 function Tile({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-xl border border-white/15 bg-[#0d0b18]/85 backdrop-blur-md px-3.5 py-2.5">
+    <div className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-2.5", !tvLite && 'backdrop-blur-md')}>
       <p className="truncate text-[15px] font-bold text-white">{value}</p>
       <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-white/35">{label}</p>
     </div>
