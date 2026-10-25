@@ -332,17 +332,34 @@ pub async fn install_ge(app: &AppHandle, tag: String, url: String) -> Result<Str
     })?;
     say(app, &format!("Unpacking {tag}."));
     progress(app, &tag, "extract", 0, 0);
-    if let Err(reason) = extract(&archive, &root) {
-        let _ = std::fs::remove_file(&archive);
+    // A tarball's root folder is the packer's name for the build, not GitHub's
+    // tag for the release: unpack beside the destination and move the folder
+    // that actually holds the `proton` script, whatever it is called. Naming
+    // first and hoping is what left a good build under one name, an empty
+    // shell under the tag's, and an error holding the bag.
+    let staging = root.join(format!(".{tag}.unpack"));
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    let outcome = extract(&archive, &staging)
+        .map_err(|reason| reason)
+        .and_then(|()| settle(&staging, &dest));
+    let _ = std::fs::remove_file(&archive);
+    let _ = std::fs::remove_dir_all(&staging);
+    if let Err(reason) = outcome {
+        // Half of a build is worth less than none: nothing it leaves behind
+        // should ever look installed.
         let _ = std::fs::remove_dir_all(&dest);
         return Err(reason);
     }
-    let _ = std::fs::remove_file(&archive);
+    // The `proton` script has to be executable, and everything beside it:
+    // an error path that never reaches here leaves a build that lists fine
+    // and cannot start a game.
+    make_runnable(&dest);
     if !is_proton(&dest) {
         let _ = std::fs::remove_dir_all(&dest);
         return Err(format!("The {tag} download did not contain a Proton build."));
     }
-    make_runnable(&dest);
     say(app, &format!("{tag} is ready."));
     progress(app, &tag, "done", 0, 0);
     Ok(dest.to_string_lossy().to_string())
@@ -461,6 +478,46 @@ fn extract(archive: &Path, dest: &Path) -> Result<(), String> {
     }
 }
 
+/// The build inside an unpacked tarball, moved into place.
+///
+/// The folder that holds the `proton` script wins, whatever it is called - a
+/// tarball may carry its own name, or no folder at all. Up to three levels of
+/// nesting are looked through, which covers how these builds are actually
+/// packed without walking an archive's whole tree.
+fn settle(staging: &Path, dest: &Path) -> Result<(), String> {
+    if is_proton(staging) {
+        return place(staging, dest);
+    }
+    let mut frontier = vec![staging.to_path_buf()];
+    for _ in 0..3 {
+        let mut deeper = Vec::new();
+        for dir in frontier {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                if is_proton(&path) {
+                    return place(&path, dest);
+                }
+                deeper.push(path);
+            }
+        }
+        frontier = deeper;
+    }
+    Err("The download unpacked, but no Proton build was inside it.".into())
+}
+
+fn place(found: &Path, dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        // Replacing a build must not leave the old one's files inside the new.
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("Could not clear the build that was already here ({e})"))?;
+    }
+    std::fs::rename(found, dest).map_err(|e| format!("Could not put the build in place ({e})"))
+}
+
 /// The `proton` script has to be executable, and so does everything beside it.
 fn make_runnable(dir: &Path) {
     #[cfg(unix)]
@@ -502,6 +559,10 @@ pub fn chosen(build: Option<&str>) -> Option<PathBuf> {
     let build = build.map(str::trim).filter(|value| !value.is_empty())?;
     let path = std::path::PathBuf::from(build);
     if is_proton(&path) {
+        // A build that once landed through an error path can list fine and yet
+        // not start a game: its scripts were never made runnable. That is set
+        // straight here, at the door, rather than in every game's launcher.
+        make_runnable(&path);
         Some(path)
     } else {
         None

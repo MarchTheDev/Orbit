@@ -106,10 +106,18 @@ export function ProtonManager({
     }
   }
 
+  // A fetch that stumbled can still have put files on disk, and a fetch that
+  // went through must refill the picker's list either way: closing hands the
+  // truth of the shelf back to the page under this one, whatever the outcome.
+  const close = () => {
+    onChanged();
+    onClose();
+  };
+
   if (!open) return null;
 
   return (
-    <Modal onClose={onClose} title="Proton-GE" size="lg">
+    <Modal onClose={close} title="Proton-GE" size="lg">
       <div className="flex flex-col gap-5">
         <p className="text-sm text-fg-dim">
           Proton-GE is the community build of Proton. It carries newer DXVK and the
@@ -242,7 +250,7 @@ export function ProtonManager({
         </section>
 
         <div className="flex justify-end">
-          <button type="button" className={btnGhost} onClick={onClose}>
+          <button type="button" className={btnGhost} onClick={close}>
             Close
           </button>
         </div>

@@ -132,7 +132,7 @@ function Backdrop({ game }: { game: Game }) {
           aria-hidden
           className={cn(
           'absolute inset-0 h-full w-full object-cover',
-          lite ? 'scale-105 opacity-75 blur-lg' : 'scale-110 opacity-70 blur-2xl',
+          lite ? 'scale-105 opacity-45' : 'scale-110 opacity-70 blur-2xl',
         )}
         />
       )}

@@ -5,7 +5,6 @@ import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
 import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
-import { SaveButton } from '../ui/SaveButton';
 import { WineSettings } from './WineSettings';
 import { buildName } from '../../utils/proton';
 import { say } from '../../utils/toast';
@@ -171,6 +170,14 @@ export function LaunchEditor({
   dirtyRef.current = dirty;
   const saveRef = useRef(save);
   saveRef.current = save;
+  // Typing saves itself: a change that settles for a blink is written, with no
+  // button to remember and no toast to shout over every pause. A switch of
+  // kind or a picked file is written on the spot, above.
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = window.setTimeout(() => saveRef.current(false), 400);
+    return () => window.clearTimeout(timer);
+  }, [dirty, target, args, companions]);
   useEffect(() => {
     if (!saveOnClose) return;
     return () => {
@@ -389,15 +396,7 @@ export function LaunchEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
-        {!saveOnClose && (
-          <SaveButton
-            onSave={() => save()}
-            label="Save launch settings"
-            savedLabel="Launch settings saved"
-            className="!px-3 !py-1.5 !text-xs"
-          />
-        )}
-        {!saveOnClose && !dirty && <span className="text-[11px] text-muted">Nothing to change</span>}
+        <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
         <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>
     </section>
