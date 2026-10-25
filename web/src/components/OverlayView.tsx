@@ -37,7 +37,7 @@ import {
 } from '../services/native';
 import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
 import { padNearest } from '../utils/gamepad';
-import { fitSpot } from '../utils/overlayLayout';
+import { defaultSpots, fitsWindow } from '../utils/overlayLayout';
 import { cn } from '../utils/cn';
 import { Logo } from './ui/Logo';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
@@ -61,7 +61,10 @@ const READY_TITLE = 'Overlay deployed in Orbit';
 const FPS_ARM_MS = 3000;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
-const LAYOUT_REVISION = 5;
+// 6: the arrangement is scaled to the window, so a layout saved by 5 was
+// measured against sizes this screen does not have. It is refitted once, and
+// the player's own arrangement takes over again from there.
+const LAYOUT_REVISION = 6;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
   fps: { w: 176, h: 112, minW: 120, minH: 88 },
   clock: { w: 176, h: 112, minW: 120, minH: 88 },
@@ -72,39 +75,6 @@ const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> =
   notes: { w: 300, h: 210, minW: 220, minH: 140 },
   capture: { w: 560, h: 220, minW: 320, minH: 160 },
 };
-
-/**
- * Every box pulled back inside the window it is being drawn in.
- *
- * A saved arrangement is in pixels, and pixels only mean what they meant on
- * the screen they were measured on. Opened on a smaller one - a laptop, or a
- * virtual machine at 1280 by 800 - the boxes down the right and the notes
- * under them sit past the edge, which looks like a layout that broke rather
- * than one that was made somewhere bigger. Nothing is saved back: the
- * arrangement is still the player's, and the bigger screen gets it as it was.
- */
-function onScreen(
-  places: Record<BoxId, Place>,
-  width: number,
-  height: number,
-): Record<BoxId, Place> {
-  if (!(width > 0) || !(height > 0)) return places;
-  let changed = false;
-  const next = { ...places };
-  for (const id of Object.keys(places) as BoxId[]) {
-    const place = places[id];
-    if (!place) continue;
-    const box = BOX[id];
-    const w = place.w ?? box.w;
-    const h = place.h ?? box.h;
-    const fitted = fitSpot({ x: place.x, y: place.y, w, h }, box, width, height);
-    if (fitted.x !== place.x || fitted.y !== place.y || fitted.w !== w || fitted.h !== h) {
-      next[id] = { ...place, x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h };
-      changed = true;
-    }
-  }
-  return changed ? next : places;
-}
 
 function stamp(): string {
   const now = new Date();
@@ -246,54 +216,7 @@ function mixId(node: Element | null): string | null {
  * of them can be dragged anywhere; this is only the first arrangement.
  */
 function defaults(width: number, height: number): Record<BoxId, Place> {
-  const edge = 24;
-  const gap = 16;
-  const fps = { x: edge, y: edge, w: BOX.fps.w, h: BOX.fps.h };
-  const clock = { x: edge, y: fps.y + BOX.fps.h + gap, w: BOX.clock.w, h: BOX.clock.h };
-  const audioY = clock.y + BOX.clock.h + gap;
-  const audio = {
-    x: edge,
-    y: audioY,
-    w: BOX.audio.w,
-    // The performance numbers sit under the mixer, so the mixer cannot grow
-    // until it fills the screen and push them off it.
-    h: Math.max(
-      BOX.audio.minH,
-      Math.min(BOX.audio.h, height - audioY - BOX.performance.h - gap - edge),
-    ),
-  };
-  const performance = {
-    x: edge,
-    y: audio.y + audio.h + gap,
-    w: BOX.performance.w,
-    h: BOX.performance.h,
-  };
-  const gallery = {
-    x: Math.max(edge, width - BOX.gallery.w - edge),
-    y: edge,
-    w: BOX.gallery.w,
-    h: BOX.gallery.h,
-  };
-  const player = {
-    x: Math.max(edge, width - BOX.player.w - edge),
-    y: Math.max(edge, Math.min(height - BOX.player.h - edge, gallery.y + BOX.gallery.h + gap)),
-    w: BOX.player.w,
-    h: BOX.player.h,
-  };
-  // The notes belong under what is playing. A screen too short to hold all
-  // three boxes down that side gets them beside the gallery instead of half
-  // off the bottom of the display.
-  const underPlayer = player.y + BOX.player.h + gap + BOX.notes.minH + edge <= height;
-  const notes = underPlayer
-    ? { x: player.x, y: player.y + BOX.player.h + gap, w: BOX.player.w, h: BOX.notes.h }
-    : { x: edge + BOX.audio.w + gap, y: edge, w: BOX.notes.w, h: BOX.notes.h };
-  const capture = {
-    x: Math.max(edge, Math.round((width - BOX.capture.w) / 2)),
-    y: Math.max(edge, height - BOX.capture.h - edge),
-    w: BOX.capture.w,
-    h: BOX.capture.h,
-  };
-  return { fps, clock, audio, performance, gallery, player, notes, capture };
+  return defaultSpots(BOX, width, height);
 }
 
 function placeOf(layout: NonNullable<Settings['overlay']>['layout'], id: BoxId, fallback: Place): Place {
@@ -372,6 +295,8 @@ export function OverlayView() {
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
   /** Whether this page has been told the panel is up. */
   const shownSeen = useRef(false);
+  /** The arrangement the player made, if any: preferred whenever it fits. */
+  const savedPlaces = useRef<Record<BoxId, Place> | null>(null);
   const [hidden, setHidden] = useState<BoxId[]>([]);
   const [shutterOn, setShutterOn] = useState(true);
   const [shutterVolume, setShutterVolume] = useState(40);
@@ -445,6 +370,7 @@ export function OverlayView() {
   };
 
   const rememberLayout = async (next: Record<BoxId, Place>) => {
+    savedPlaces.current = next;
     setPlaces(next);
     patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
     await overlayPins(anyPinned(next, hiddenRef.current));
@@ -622,7 +548,15 @@ export function OverlayView() {
         patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
       }
       const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
-      setPlaces(onScreen(next, window.innerWidth, window.innerHeight));
+      // The saved arrangement is used when it is the current one and this
+      // window can hold it. A layout made on a bigger screen is not clamped
+      // into a smaller one - clamping three columns into a narrower window is
+      // exactly the heap of overlapping boxes - it waits until there is room
+      // for it again, and the arrangement designed for this window is used
+      // meanwhile.
+      if (revision >= LAYOUT_REVISION) savedPlaces.current = next;
+      const usable = savedPlaces.current && fitsWindow(savedPlaces.current, window.innerWidth, window.innerHeight);
+      setPlaces(usable ? savedPlaces.current! : base);
       setHidden(hiddenBoxes);
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
@@ -965,11 +899,21 @@ export function OverlayView() {
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 
-  // A screen that changes size, or a panel opened on a different one, gets the
-  // boxes moved back inside it. The saved arrangement is not rewritten.
+  // A screen that changes size, or a panel opened on a different one, gets an
+  // arrangement that fits it: the player's own if it has come back into room,
+  // the designed one otherwise. Nothing is written back, so going back to the
+  // bigger screen gives the player their arrangement again.
   useEffect(() => {
     if (!ready) return;
-    const fit = () => setPlaces((current) => onScreen(current, window.innerWidth, window.innerHeight));
+    const fit = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      setPlaces((current) => {
+        const saved = savedPlaces.current;
+        if (saved && fitsWindow(saved, width, height)) return saved;
+        return fitsWindow(current, width, height) ? current : defaults(width, height);
+      });
+    };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);

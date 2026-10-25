@@ -10,7 +10,13 @@
  * out of the source and the pure parts are run.
  */
 import { readFileSync } from 'node:fs';
-import { fitSpot, fitSpots } from '../src/utils/overlayLayout.ts';
+import {
+  defaultSpots,
+  fitScale,
+  fitSpot,
+  fitSpots,
+  fitsWindow,
+} from '../src/utils/overlayLayout.ts';
 
 let failures = 0;
 function check(name, ok, detail = '') {
@@ -123,15 +129,104 @@ check('a layout that already fits is returned untouched',
     return fitSpots(spots, { a: gallery }, 1280, 800) === spots;
   })());
 check(
-  'the panel keeps pinned state when it fits a box',
-  fitSpot({ x: 1700, y: 24, w: 320, h: 360 }, gallery, 1280, 800) !== undefined &&
-    overlayTs.includes('next[id] = { ...place, x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h }'),
+  'pinned state survives a box being fitted',
+  (() => {
+    const fitted = fitSpots(
+      { a: { x: 1700, y: 24, w: 320, h: 360, pinned: true } },
+      { a: gallery },
+      1280,
+      800,
+    ).a;
+    return fitted.x === 1280 - 320 - 24 && fitted.pinned === true;
+  })(),
 );
 check(
-  'and it is fitted again whenever the window changes size',
-  /window\.addEventListener\('resize', fit\)/.test(overlayTs) &&
-    overlayTs.includes('setPlaces(onScreen(next, window.innerWidth, window.innerHeight))'),
+  'the arrangement designed for this window is used while the saved one cannot fit',
+  overlayTs.includes('fitsWindow(savedPlaces.current, window.innerWidth, window.innerHeight)') &&
+    overlayTs.includes('setPlaces(usable ? savedPlaces.current! : base);'),
 );
+check(
+  'and it is revisited whenever the window changes size',
+  /window\.addEventListener\('resize', fit\)/.test(overlayTs) &&
+    /setPlaces\(\(current\) => \{[\s\S]{0,400}fitsWindow\(current, width, height\) \? current : defaults\(width, height\)/.test(
+      overlayTs,
+    ),
+);
+
+console.log('the arrangement itself has to fit the screen it is drawn on');
+
+/** Two boxes that overlap, by the numbers the panel draws with. */
+function overlaps(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+const BOX = {
+  fps: { w: 176, h: 112, minW: 120, minH: 88 },
+  clock: { w: 176, h: 112, minW: 120, minH: 88 },
+  audio: { w: 300, h: 440, minW: 220, minH: 160 },
+  performance: { w: 240, h: 196, minW: 200, minH: 140 },
+  gallery: { w: 320, h: 360, minW: 240, minH: 180 },
+  player: { w: 320, h: 268, minW: 240, minH: 180 },
+  notes: { w: 300, h: 210, minW: 220, minH: 140 },
+  capture: { w: 560, h: 220, minW: 320, minH: 160 },
+};
+
+function trouble(width, height) {
+  const spots = defaultSpots(BOX, width, height);
+  const ids = Object.keys(spots);
+  const bad = [];
+  for (const id of ids) {
+    const spot = spots[id];
+    if (spot.x < 0 || spot.y < 0 || spot.x + spot.w > width || spot.y + spot.h > height) {
+      bad.push(`${id} off screen`);
+    }
+    for (const other of ids) {
+      if (other <= id) continue;
+      if (overlaps(spot, spots[other])) bad.push(`${id} on ${other}`);
+    }
+  }
+  return bad;
+}
+
+for (const [width, height] of [
+  [1280, 720],
+  [1280, 800],
+  [1366, 768],
+  [1920, 1080],
+  [1024, 640],
+  [960, 540],
+  [1280, 1024],
+]) {
+  const bad = trouble(width, height);
+  check(`nothing overlaps and nothing hangs off at ${width} by ${height}`, bad.length === 0, bad.join(', '));
+}
+check('a big screen keeps the boxes at their own size and puts them at its edges',
+  (() => {
+    const spots = defaultSpots(BOX, 1920, 1080);
+    return (
+      spots.gallery.w === BOX.gallery.w &&
+      spots.gallery.x === 1920 - BOX.gallery.w - 24 &&
+      spots.fps.x === 24
+    );
+  })());
+check('a small one shrinks them with the space between them, instead of stacking them',
+  (() => {
+    const big = defaultSpots(BOX, 1280, 720);
+    const small = defaultSpots(BOX, 1024, 640);
+    return small.gallery.w < big.gallery.w && small.audio.w < big.audio.w;
+  })());
+check('the scale never grows the arrangement past its design',
+  fitScale(3840, 2160) === 1 && fitScale(1280, 720) === 1);
+check('and shrinks it for a smaller window',
+  Math.abs(fitScale(1024, 640) - 0.8) < 0.001 && Math.abs(fitScale(1280, 576) - 0.8) < 0.001);
+check('a window that has not been measured yet is not shrunk',
+  fitScale(0, 0) === 1);
+check('a layout that is wholly inside the window fits it',
+  fitsWindow({ a: { x: 24, y: 24, w: 100, h: 100 } }, 1280, 720) &&
+    !fitsWindow({ a: { x: 1200, y: 24, w: 100, h: 100 } }, 1280, 720) &&
+    !fitsWindow({ a: { x: 24, y: 700, w: 100, h: 100 } }, 1280, 720));
+check('a box exactly against the edge still counts as fitting',
+  fitsWindow({ a: { x: 0, y: 0, w: 1280, h: 720 } }, 1280, 720));
 
 console.log('the tweak fields cannot push their own panel open');
 
