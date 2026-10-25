@@ -212,7 +212,7 @@ check(
     // Only a window that really is above the panel is fought over.
     overlaySource.includes('fn covered_by_game(window: &tauri::WebviewWindow) -> bool') &&
     overlaySource.includes('fills_monitor(monitor, (rect.left, rect.top, rect.right, rect.bottom))') &&
-    /fn guard_panel[\s\S]{0,2600}if !covered_by_game\(&window\) \{\n        return;/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,4200}if !covered_by_game\(&window\) \{\n        return;/.test(overlaySource) &&
     // The part that cannot be refused: the top of the always-on-top group.
     overlaySource.includes('fn topmost(window: &tauri::WebviewWindow)') &&
     overlaySource.includes('SetWindowPos') &&
@@ -228,6 +228,10 @@ check(
     overlaySource.includes('fn revive(app: &AppHandle)') &&
     overlaySource.includes('const PAGE_START: Duration = Duration::from_secs(7)') &&
     overlaySource.includes('const PAGE_SILENT: Duration = Duration::from_secs(3)') &&
+    // A page that has never answered is loading, not dead: rebuilding it threw
+    // away the load it was waiting for, which is the panel that flashed.
+    overlaySource.includes('const PAGE_COLD: Duration = Duration::from_secs(45)') &&
+    /fn guard_panel[\s\S]{0,2400}if quiet\.is_none\(\) \{[\s\S]{0,260}nudge\(&window, since\)/.test(overlaySource) &&
     overlaySource.includes('const REVIVALS: usize = 3') &&
     /fn guard_panel[\s\S]{0,900}let Some\(window\) = app\.get_webview_window\(WINDOW\) else \{[\s\S]{0,200}revive\(app\)/.test(overlaySource) &&
     /fn guard_panel[\s\S]{0,1600}if !window\.is_visible\(\)[\s\S]{0,400}window\.show\(\)/.test(overlaySource) &&
@@ -366,7 +370,7 @@ check(
     // Orbit's own destroy is expected; it must not be written down as a reason.
     overlaySource.includes('static CLOSING: AtomicBool') &&
     /fn mark_hidden[\s\S]{0,260}if CLOSING\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
-    /fn close_panel[\s\S]{0,1200}CLOSING\.store\(true, Ordering::SeqCst\);/.test(overlaySource),
+    /fn close_panel[\s\S]{0,2200}CLOSING\.store\(true, Ordering::SeqCst\);/.test(overlaySource),
 );
 check(
   'the game counts as covering the panel only when it is really above it',
@@ -431,7 +435,7 @@ check(
 );
 check(
   'the panel is told it is open even when its page loads after the first event',
-  /fn show_window[\s\S]{0,2200}let again = window\.clone\(\)/.test(overlaySource) &&
+  /fn show_window[\s\S]{0,3000}let again = window\.clone\(\)/.test(overlaySource) &&
     overlaySource.includes('if is_open() && again.is_visible().unwrap_or(false)') &&
     overlaySource.includes('thread::sleep(Duration::from_millis(400))'),
 );

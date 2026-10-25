@@ -202,8 +202,8 @@ export function LaunchEditor({
 
         {target.kind === 'executable' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <label className="block flex-1">
+            <div className="flex min-w-0 gap-2">
+              <label className="block min-w-0 flex-1">
                 <span className={labelCls}>Program</span>
                 <input
                   className={inputCls}
@@ -235,8 +235,8 @@ export function LaunchEditor({
 
         {target.kind === 'wine' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <label className="block flex-1">
+            <div className="flex min-w-0 gap-2">
+              <label className="block min-w-0 flex-1">
                 <span className={labelCls}>Windows program</span>
                 <input
                   className={inputCls}
@@ -339,8 +339,8 @@ export function LaunchEditor({
           <div className="space-y-2">
             {companions.map((c, i) => (
               <div key={i} className="rounded-lg border border-line bg-panel p-2.5">
-                <div className="flex gap-2">
-                  <label className="block flex-1">
+                <div className="flex min-w-0 gap-2">
+                  <label className="block min-w-0 flex-1">
                     <span className={labelCls}>Program</span>
                     <input
                       className={inputCls}

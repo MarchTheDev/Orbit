@@ -90,7 +90,7 @@ export function WineSettings({
   return (
     <div className="space-y-3 border-t border-line pt-3">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="block min-w-[14rem] flex-1">
+        <label className="block min-w-[12rem] flex-1 basis-56">
           <span className={labelCls}>Proton</span>
           <Select
             value={proton ?? ''}
@@ -127,7 +127,7 @@ export function WineSettings({
           game sees what your machine normally gives it.
         </p>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 [&>*]:min-w-0 sm:grid-cols-2">
           <Checkbox
             checked={t.mangohud}
             onChange={(v) => change({ mangohud: v })}
@@ -160,8 +160,8 @@ export function WineSettings({
           />
         </div>
 
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="block">
+        <div className="mt-2 grid grid-cols-1 gap-2 [&>*]:min-w-0 sm:grid-cols-2">
+          <label className="block min-w-0">
             <span className={labelCls}>fsync</span>
             <Select
               value={triTo(t.fsync)}
@@ -174,7 +174,7 @@ export function WineSettings({
               ariaLabel="fsync"
             />
           </label>
-          <label className="block">
+          <label className="block min-w-0">
             <span className={labelCls}>esync</span>
             <Select
               value={triTo(t.esync)}
@@ -187,7 +187,7 @@ export function WineSettings({
               ariaLabel="esync"
             />
           </label>
-          <label className="block">
+          <label className="block min-w-0">
             <span className={labelCls}>HUD contents</span>
             <input
               className={inputCls}
@@ -197,7 +197,7 @@ export function WineSettings({
               spellCheck={false}
             />
           </label>
-          <label className="block">
+          <label className="block min-w-0">
             <span className={labelCls}>Game ID for umu</span>
             <input
               className={inputCls}
@@ -207,7 +207,7 @@ export function WineSettings({
               spellCheck={false}
             />
           </label>
-          <label className="block sm:col-span-2">
+          <label className="block min-w-0 sm:col-span-2">
             <span className={labelCls}>DLL overrides</span>
             <input
               className={inputCls}
@@ -241,9 +241,9 @@ export function WineSettings({
           ) : (
             <div className="space-y-1.5">
               {env.map((row, i) => (
-                <div key={i} className="flex items-center gap-1.5">
+                <div key={i} className="flex min-w-0 items-center gap-1.5">
                   <input
-                    className={inputCls}
+                    className={`${inputCls} min-w-0 flex-1`}
                     value={row.key}
                     onChange={(e) =>
                       setEnv(env.map((r, n) => (n === i ? { ...r, key: e.target.value } : r)))
@@ -252,9 +252,9 @@ export function WineSettings({
                     spellCheck={false}
                     aria-label="Variable name"
                   />
-                  <span className="text-xs text-muted">=</span>
+                  <span className="shrink-0 text-xs text-muted">=</span>
                   <input
-                    className={inputCls}
+                    className={`${inputCls} min-w-0 flex-1`}
                     value={row.value}
                     onChange={(e) =>
                       setEnv(env.map((r, n) => (n === i ? { ...r, value: e.target.value } : r)))
@@ -265,7 +265,7 @@ export function WineSettings({
                   />
                   <button
                     type="button"
-                    className={btnGhost + ' px-2 py-1.5'}
+                    className={`${btnGhost} shrink-0 px-2 py-1.5`}
                     aria-label="Remove this variable"
                     onClick={() => setEnv(env.filter((_, n) => n !== i))}
                   >

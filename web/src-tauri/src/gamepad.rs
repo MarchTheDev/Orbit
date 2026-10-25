@@ -390,6 +390,10 @@ fn adopt_pads(open: &mut Vec<OpenPad>) {
                 }
                 saw_translated = true;
                 log::info!("reading a controller from {}", path.display());
+                crate::overlay::note_device(&format!(
+                    "the pad reads {} (an event node)",
+                    path.display()
+                ));
                 open.push(OpenPad {
                     key,
                     file,
@@ -404,6 +408,10 @@ fn adopt_pads(open: &mut Vec<OpenPad>) {
             DeviceKind::Joystick => {
                 saw_translated = true;
                 log::info!("reading a controller from {}", path.display());
+                crate::overlay::note_device(&format!(
+                    "the pad reads {} (a joystick node)",
+                    path.display()
+                ));
                 open.push(OpenPad {
                     key,
                     file,
@@ -669,6 +677,12 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind, bool)> {
         if score <= 0 {
             return;
         }
+        // Every route into a `js*` node goes through the same question - a
+        // truncated name in `by-id`, a `/proc` line, or the last scan - because
+        // a joystick node carries no button capabilities of its own to check.
+        if matches!(kind, DeviceKind::Joystick) && !path_is_pad_joystick(&path) {
+            return;
+        }
         let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         match best.get(&key) {
             Some(slot) if slot.2 >= score => {}
@@ -715,9 +729,13 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind, bool)> {
     for (path, score) in pads_in_sys() {
         consider(path, DeviceKind::Evdev, score);
     }
+    // The last way in, and the one a virtual machine slips through: joydev
+    // makes a `js*` node for any device with an absolute axis, and its pointer
+    // is one. A node is therefore only taken when the device behind it says it
+    // is a pad.
     for index in 0..8 {
         let path = PathBuf::from(format!("/dev/input/js{index}"));
-        if path.exists() {
+        if path.exists() && joystick_is_pad(index) {
             consider(path, DeviceKind::Joystick, 5);
         }
     }
@@ -753,6 +771,42 @@ fn find_devices() -> Vec<(PathBuf, DeviceKind, bool)> {
         .into_iter()
         .map(|(path, kind, score)| (path, kind, score >= 5))
         .collect()
+}
+
+/// Whether the input device behind `/dev/input/jsN` is a pad.
+///
+/// joydev hands out a node for anything with an absolute axis, a pointer
+/// included, and the node itself says nothing about what it is. The device
+/// directory behind it does: the same name and key bitmap an event node is
+/// judged by. A device that cannot be described is refused, since a missed pad
+/// can still be found through its event node and a pointer read as a pad
+/// cannot be un-moved on screen.
+#[cfg(target_os = "linux")]
+fn joystick_is_pad(index: u32) -> bool {
+    let device = PathBuf::from(format!("/sys/class/input/js{index}/device"));
+    let name = fs::read_to_string(device.join("name")).unwrap_or_default();
+    let keys = fs::read_to_string(device.join("capabilities/key")).unwrap_or_default();
+    if name.trim().is_empty() && keys.trim().is_empty() {
+        return false;
+    }
+    // No credit for having a joystick node: that is the thing being checked.
+    // A pad has to be described by its own buttons or its own name.
+    pad_score(name.trim(), &keys, false) > 0
+}
+
+/// The same question, from a path that may be a symlink in `by-id` or
+/// `by-path` rather than the node itself.
+#[cfg(target_os = "linux")]
+fn path_is_pad_joystick(path: &Path) -> bool {
+    let node = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let name = node.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+    let Some(index) = name.strip_prefix("js") else {
+        return false;
+    };
+    let Ok(index) = index.parse::<u32>() else {
+        return false;
+    };
+    joystick_is_pad(index)
 }
 
 #[cfg(target_os = "linux")]
@@ -1063,21 +1117,55 @@ fn pads_in_sys() -> Vec<(PathBuf, i32)> {
     found
 }
 
-/// Higher is a more likely pad. Zero is not a pad: keyboards and touchpads stay
-/// closed so a keypress is not also a navigation.
-fn pad_score(name: &str, key_bits: &str, has_js: bool) -> i32 {
-    let lower = name.to_ascii_lowercase();
+/// Whether a name belongs to something that points at the screen.
+///
+/// A virtual machine is the case that made this necessary: its pointer is an
+/// absolute device, so joydev gives it a `js*` node, and a node read on its
+/// name alone turns the cursor into a d-pad - moving the mouse to a corner of
+/// the screen walks the page that way. A tablet, a touchscreen and a pen are
+/// the same shape of device as the mouse, so they are refused the same way.
+fn pointer_name(lower: &str) -> bool {
     if lower.contains("touchpad")
         || lower.contains("mouse")
         || lower.contains("keyboard")
         || lower.contains("trackpoint")
+        || lower.contains("tablet")
+        || lower.contains("touchscreen")
+        || lower.contains("touch screen")
+        || lower.contains("touch pad")
+        || lower.contains("stylus")
+        || lower.contains("digitizer")
+        || lower.contains("power button")
+        || lower.contains("sleep button")
+        || lower.contains("video bus")
+        || lower.contains("lid switch")
     {
+        return true;
+    }
+    // `pen` only as a word: "open" and "pencil" are not a pen, and a pad called
+    // "OpenPandora" is still a pad.
+    lower
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|word| word == "pen")
+}
+
+/// Higher is a more likely pad. Zero is not a pad: keyboards and touchpads stay
+/// closed so a keypress is not also a navigation.
+fn pad_score(name: &str, key_bits: &str, has_js: bool) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    if pointer_name(&lower) {
         return 0;
     }
     let gamepad_bits = bitmap_has_bit(key_bits, 0x130)
         || bitmap_has_bit(key_bits, 0x131)
         || bitmap_has_bit(key_bits, 0x120)
         || bitmap_has_bit(key_bits, 0x220);
+    // A left click is a pointer, and no pad has ever sent one. Only a device
+    // with no gamepad button at all is refused, so a pad that reports an odd
+    // extra button still counts.
+    if !gamepad_bits && (bitmap_has_bit(key_bits, 0x110) || bitmap_has_bit(key_bits, 0x145)) {
+        return 0;
+    }
     let named = lower.contains("controller")
         || lower.contains("gamepad")
         || lower.contains("joystick")
@@ -1719,6 +1807,27 @@ H: Handlers=event5 js0
         assert_eq!(pads[1].0, "/dev/input/js0");
         assert!(!pads[1].1);
         assert!(pads[0].2 > pads[1].2);
+    }
+
+    #[test]
+    fn a_pointer_is_never_a_controller() {
+        // A virtual machine's pointer is an absolute device, so joydev gives it
+        // a joystick node. Read as a pad, it turns the cursor into a d-pad: the
+        // screen becomes four directions and moving the mouse walks the page.
+        assert_eq!(pad_score("QEMU USB Tablet", "", true), 0);
+        assert_eq!(pad_score("ImExPS/2 Generic Explorer Mouse", "", false), 0);
+        assert_eq!(pad_score("Virtual Touchscreen", "", false), 0);
+        assert_eq!(pad_score("Wacom Pen", "", false), 0);
+        // A left click is the same evidence as the name. The bitmap is
+        // written most significant word first, so the low bits are the last
+        // word: bit 0x110 is bit 16 of it.
+        assert_eq!(pad_score("Wireless Controller", "10000 0 0 0 0", false), 0);
+        // A pad that has a gamepad button is a pad whatever it is called,
+        // because the buttons decide.
+        assert!(pad_score("Wireless Controller", "7cdb000000000000 0 0 0 0", false) > 0);
+        assert!(pad_score("Some USB thing", "7cdb000000000000 0 0 0 0", false) > 0);
+        // A pad that reports a mouse button as well is not a pointer.
+        assert!(pad_score("Xbox Wireless Controller", "1000000010000 0 0 0 0", false) > 0);
     }
 
     #[test]

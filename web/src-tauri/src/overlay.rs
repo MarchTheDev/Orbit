@@ -74,6 +74,9 @@ static CLOSING: AtomicBool = AtomicBool::new(false);
 /// What the panel's page said to on its last heartbeat, and when it opened.
 static HEARD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// The last time a page that had not answered was asked to draw again, so the
+/// asking stays a few seconds apart rather than once per guard tick.
+static NUDGE_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 /// When the panel was last rebuilt, so a page that keeps dying cannot loop.
 static REVIVED: Mutex<Vec<std::time::Instant>> = Mutex::new(Vec::new());
 const TOGGLE_GAP: Duration = Duration::from_millis(320);
@@ -84,6 +87,19 @@ const FRONT_TRIES: u8 = 4;
 /// A page that has never spoken gets longer than one that has gone quiet.
 const PAGE_START: Duration = Duration::from_secs(7);
 const PAGE_SILENT: Duration = Duration::from_secs(3);
+/// How long a page that has never answered is given before its window is
+/// rebuilt.
+///
+/// On Linux the panel is a WebKitGTK web view that loads the whole bundle
+/// again whenever the window is thrown away, and a virtual machine can take
+/// most of a minute about it. Rebuilding it at seven seconds destroyed the
+/// load that was still coming, and the panel that appeared and went straight
+/// back out was that loop. Windows has a warm WebView2 behind every open, so
+/// it keeps the shorter patience it has always had.
+#[cfg(target_os = "linux")]
+const PAGE_COLD: Duration = Duration::from_secs(45);
+#[cfg(not(target_os = "linux"))]
+const PAGE_COLD: Duration = PAGE_START;
 /// Rebuilds allowed in a minute. Past this the panel is not coming back.
 const REVIVALS: usize = 3;
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
@@ -887,12 +903,30 @@ pub fn close_panel(app: &AppHandle, why: &str) {
     tell(app, "overlay-visible", "false");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
-        // Orbit is taking its own window down. The `Destroyed` event that
-        // follows is expected, and must not be written down as the reason the
-        // panel went away.
-        CLOSING.store(true, Ordering::SeqCst);
-        if window.destroy().is_err() {
-            let _ = window.close();
+        // Windows lets the window go: WebView2 keeps a warm process behind it,
+        // so the next open costs a show rather than a load, and a topmost
+        // window that is only hidden can hold the screen.
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Orbit is taking its own window down. The `Destroyed` event that
+            // follows is expected, and must not be written down as the reason
+            // the panel went away.
+            CLOSING.store(true, Ordering::SeqCst);
+            if window.destroy().is_err() {
+                let _ = window.close();
+            }
+        }
+        // Linux is the other way round. Its page is the whole bundle read by
+        // WebKitGTK, and throwing the window away means reading it again for
+        // every press - seconds of a translucent rectangle on a virtual
+        // machine, which reads as an overlay that never arrives. So the window
+        // stays, hidden: the page it already has is the panel the next press
+        // gets, at once. It is still told the panel is gone, so its readings
+        // stop and the next open starts clean.
+        #[cfg(target_os = "linux")]
+        {
+            let _ = window.emit("overlay-hidden", ());
+            let _ = window.set_ignore_cursor_events(true);
         }
     }
 }
@@ -1901,6 +1935,12 @@ fn show_window(app: &AppHandle) {
     let _ = window.set_focusable(true);
     cover_screen(&window);
     let _ = window.show();
+    // Once more after the window is on screen. A monitor list read from an
+    // unmapped window can come back empty - the GTK backend only fills it in
+    // from the display once the window exists - and the cover would then be
+    // skipped, leaving the panel as its 1280 by 720 creation size in the
+    // corner of a bigger screen. Sizing it again is free when it was right.
+    cover_screen(&window);
     let _ = window.unminimize();
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
@@ -1913,6 +1953,7 @@ fn show_window(app: &AppHandle) {
     FRONT_WARNED.store(false, Ordering::SeqCst);
     FRONT_TRIES_CELL.store(0, Ordering::SeqCst);
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
+    *NUDGE_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     // Nothing has been heard from this page yet, and pretending otherwise is
     // what made the guard give a freshly opened panel the three seconds a
     // running page gets. `guard_panel` reads `None` as "still loading" and
@@ -2070,6 +2111,17 @@ fn shown_for() -> String {
     }
 }
 
+/// Say what a device was, in the one place a panel that cannot explain itself
+/// is read afterwards.
+///
+/// A controller is chosen by a guess about a device node, and on Linux that
+/// guess can be wrong in a way nobody can see from the screen: a pointer read
+/// as a pad moves the panel around with the cursor. The line names the node so
+/// the guess can be checked from Settings instead of from the log folder.
+pub(crate) fn note_device(text: &str) {
+    note_panel(text);
+}
+
 /// Write down what the panel is doing.
 ///
 /// The same words go to the log and to one line in Settings, because the
@@ -2169,11 +2221,20 @@ fn guard_panel(app: &AppHandle) {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .map(|at| at.elapsed())
         .unwrap_or_default();
+    // A page that has said nothing at all is still loading. Its window is not
+    // evidence of anything yet, and taking it away is what made the panel
+    // flash: the whole bundle had to be read again from the start.
+    if quiet.is_none() {
+        if since < PAGE_COLD {
+            nudge(&window, since);
+            return;
+        }
+        note_panel("its page never answered; it was rebuilt");
+        revive(app);
+        return;
+    }
     let allowed = if since < PAGE_START { PAGE_START } else { PAGE_SILENT };
-    let stale = match quiet {
-        Some(silent) => silent >= allowed,
-        None => since >= PAGE_START,
-    };
+    let stale = quiet.map(|silent| silent >= allowed).unwrap_or(false);
     if stale {
         log::warn!(
             "overlay: the page stopped answering after {} ms; rebuilding",
@@ -2214,6 +2275,33 @@ fn guard_panel(app: &AppHandle) {
     lock().cover_note = true;
     tell(app, "overlay-covered", &shown_for());
     note_panel("the game is drawn over the panel and will not let go of the screen");
+}
+
+/// Ask a page that has not answered yet to draw.
+///
+/// `overlay-shown` is what puts the boxes on screen, and it is sent at the
+/// moment the window is shown - which, for a window built for this press, is
+/// before the page has a listener to hear it. Sending it again costs a read of
+/// the settings and one render, and it is sent at most every few seconds so a
+/// page that is genuinely stuck is not handed events it cannot use.
+fn nudge(window: &tauri::WebviewWindow, since: Duration) {
+    let allowed = {
+        let mut last = NUDGE_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *last {
+            Some(at) if at.elapsed() < Duration::from_secs(3) => false,
+            _ => {
+                *last = Some(std::time::Instant::now());
+                true
+            }
+        }
+    };
+    if !allowed {
+        return;
+    }
+    if since >= PAGE_START {
+        note_panel("its page has not answered yet; it was asked to draw again");
+    }
+    let _ = window.emit("overlay-shown", ());
 }
 
 /// The monitor the panel was put on: where it starts, and how big it is.

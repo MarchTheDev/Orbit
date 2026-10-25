@@ -37,6 +37,7 @@ import {
 } from '../services/native';
 import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
 import { padNearest } from '../utils/gamepad';
+import { fitSpot } from '../utils/overlayLayout';
 import { cn } from '../utils/cn';
 import { Logo } from './ui/Logo';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
@@ -71,6 +72,39 @@ const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> =
   notes: { w: 300, h: 210, minW: 220, minH: 140 },
   capture: { w: 560, h: 220, minW: 320, minH: 160 },
 };
+
+/**
+ * Every box pulled back inside the window it is being drawn in.
+ *
+ * A saved arrangement is in pixels, and pixels only mean what they meant on
+ * the screen they were measured on. Opened on a smaller one - a laptop, or a
+ * virtual machine at 1280 by 800 - the boxes down the right and the notes
+ * under them sit past the edge, which looks like a layout that broke rather
+ * than one that was made somewhere bigger. Nothing is saved back: the
+ * arrangement is still the player's, and the bigger screen gets it as it was.
+ */
+function onScreen(
+  places: Record<BoxId, Place>,
+  width: number,
+  height: number,
+): Record<BoxId, Place> {
+  if (!(width > 0) || !(height > 0)) return places;
+  let changed = false;
+  const next = { ...places };
+  for (const id of Object.keys(places) as BoxId[]) {
+    const place = places[id];
+    if (!place) continue;
+    const box = BOX[id];
+    const w = place.w ?? box.w;
+    const h = place.h ?? box.h;
+    const fitted = fitSpot({ x: place.x, y: place.y, w, h }, box, width, height);
+    if (fitted.x !== place.x || fitted.y !== place.y || fitted.w !== w || fitted.h !== h) {
+      next[id] = { ...place, x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h };
+      changed = true;
+    }
+  }
+  return changed ? next : places;
+}
 
 function stamp(): string {
   const now = new Date();
@@ -336,6 +370,8 @@ export function OverlayView() {
   const [resting, setResting] = useState(false);
   const [awake, setAwake] = useState(true);
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
+  /** Whether this page has been told the panel is up. */
+  const shownSeen = useRef(false);
   const [hidden, setHidden] = useState<BoxId[]>([]);
   const [shutterOn, setShutterOn] = useState(true);
   const [shutterVolume, setShutterVolume] = useState(40);
@@ -586,13 +622,18 @@ export function OverlayView() {
         patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
       }
       const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
-      setPlaces(next);
+      setPlaces(onScreen(next, window.innerWidth, window.innerHeight));
       setHidden(hiddenBoxes);
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
       setLiveStats(settings.overlay?.liveStats !== false);
-      setResting(mode.resting && !mode.open);
-      setAwake(mode.open || mode.resting);
+      // `overlay-shown` is the panel's own word, and it can arrive before this
+      // read comes back. A page that has already been told it is up must not
+      // be told again by a slower answer that it is not: on a slow machine
+      // that is a panel which draws for one frame and then hides itself.
+      const open = shownSeen.current || mode.open;
+      setResting(!shownSeen.current && mode.resting && !mode.open);
+      setAwake(open || mode.resting);
       void overlayPins(anyPinned(next, hiddenBoxes));
       setReady(true);
     }).catch(() => setReady(true));
@@ -623,6 +664,7 @@ export function OverlayView() {
     let stopRest = () => {};
     let stopPad = () => {};
     void listen('overlay-shown', () => {
+      shownSeen.current = true;
       setAwake(true);
       setResting(false);
       refresh();
@@ -922,6 +964,16 @@ export function OverlayView() {
     const timer = window.setInterval(beat, 1000);
     return () => window.clearInterval(timer);
   }, [ready, awake]);
+
+  // A screen that changes size, or a panel opened on a different one, gets the
+  // boxes moved back inside it. The saved arrangement is not rewritten.
+  useEffect(() => {
+    if (!ready) return;
+    const fit = () => setPlaces((current) => onScreen(current, window.innerWidth, window.innerHeight));
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [ready]);
 
   // Where the panel has something to click, told to the native side.
   //
