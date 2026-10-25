@@ -274,7 +274,7 @@ pub async fn ge_releases(app: &AppHandle) -> Result<Vec<GeRelease>, String> {
             .and_then(|assets| {
                 assets.iter().find(|asset| {
                     let name = asset.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    name.ends_with(".tar.gz") || name.ends_with(".tar.xz")
+                    (name.ends_with(".tar.gz") || name.ends_with(".tar.xz")) && arch_matches(name)
                 })
             })
         else {
@@ -393,8 +393,7 @@ fn client(seconds: u64) -> Result<reqwest::Client, String> {
 
 /// Only GitHub, because that is where the list came from and a redirect back
 /// out of it would be a download from somewhere nobody chose.
-fn allowed_url(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else {
+fn allowed_url(url: &str) -> bool {    let Some(rest) = url.strip_prefix("https://") else {
         return false;
     };
     let host = rest.split('/').next().unwrap_or("");
@@ -403,6 +402,26 @@ fn allowed_url(url: &str) -> bool {
     host == "github.com"
         || host.ends_with(".github.com")
         || host.ends_with(".githubusercontent.com")
+}
+
+/// Whether a release's tarball is for the machine asking.
+///
+/// GE names its builds by architecture now that ARM ones join each release,
+/// and the aarch64 tarball sorts ahead of the x86_64 one in the asset list -
+/// a picker that takes the first tarball it sees hands an ARM build to every
+/// x86_64 machine, which then cannot start a single game. Builds old enough
+/// to carry no architecture in the name are x86_64, the only one GE shipped.
+fn arch_matches(name: &str) -> bool {
+    let arm = name.contains("aarch64") || name.contains("arm64");
+    let intel = name.contains("x86_64") || name.contains("amd64");
+    if cfg!(target_arch = "aarch64") {
+        return arm && !intel;
+    }
+    if cfg!(target_arch = "x86_64") {
+        // An unmarked tarball predates the ARM builds; it is the x86_64 one.
+        return intel || (!arm && !intel);
+    }
+    !arm && !intel
 }
 
 async fn download(app: &AppHandle, tag: &str, url: &str, dest: &Path) -> Result<(), String> {
@@ -596,6 +615,22 @@ mod tests {
         let b = short_hash("/games/two/game.exe");
         assert_ne!(a, b, "two programs with the same name are different games");
         assert_eq!(a, short_hash("/games/one/game.exe"), "the same game keeps its bottle");
+    }
+
+    #[test]
+    fn the_tarball_matches_the_machine_asking() {
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert!(arch_matches("GE-Proton11-11-x86_64.tar.gz"));
+            assert!(arch_matches("GE-Proton10-10.tar.gz"), "builds before ARM carried no arch");
+            assert!(!arch_matches("GE-Proton11-11-aarch64.tar.gz"), "the ARM build is not for this machine");
+            assert!(!arch_matches("GE-Proton11-11-aarch64.sha512sum"));
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            assert!(arch_matches("GE-Proton11-11-aarch64.tar.gz"));
+            assert!(!arch_matches("GE-Proton11-11-x86_64.tar.gz"));
+        }
     }
 
     #[test]
