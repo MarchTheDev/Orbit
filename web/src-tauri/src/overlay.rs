@@ -904,6 +904,7 @@ pub fn close_panel(app: &AppHandle, why: &str) {
                     "overlay-toast",
                     &format!("The overlay closed after {:.1} s: {why}", elapsed.as_secs_f32()),
                 );
+                notify_close(elapsed, why);
             }
         }
     }
@@ -1998,6 +1999,14 @@ fn show_window(app: &AppHandle) {
             }
             thread::sleep(Duration::from_millis(150));
             nudge_repaint(&again);
+            #[cfg(target_os = "linux")]
+            {
+                // KWin settles a fullscreen game back on top once the panel is
+                // mapped; claiming the top again after a beat keeps the panel
+                // from living underneath the very thing it is meant to cover.
+                let _ = again.set_always_on_top(false);
+                let _ = again.set_always_on_top(true);
+            }
         });
 }
 
@@ -2184,6 +2193,21 @@ fn note_panel(text: &str) {
         lines.drain(0..extra);
     }
 }
+
+/// A desktop notification naming what took the panel away, for the closes that
+/// happen mid-game: the main window's toast is behind a minimised window
+/// there, and a notification from the desktop shell is not.
+#[cfg(target_os = "linux")]
+fn notify_close(elapsed: Duration, why: &str) {
+    let _ = crate::process::command("notify-send")
+        .arg("--app-name=Orbit")
+        .arg(format!("Overlay closed after {:.1} s", elapsed.as_secs_f32()))
+        .arg(why)
+        .spawn();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify_close(_: Duration, _: &str) {}
 
 /// Rebuild the panel's window and open it again.
 fn revive(app: &AppHandle) {
