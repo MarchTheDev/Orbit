@@ -1979,8 +1979,37 @@ fn show_window(app: &AppHandle) {
                 raise(&again);
                 let _ = again.emit("overlay-shown", ());
             }
+            thread::sleep(Duration::from_millis(150));
+            nudge_repaint(&again);
         });
 }
+
+/// Force one full repaint of the panel's surface.
+///
+/// WebKitGTK 2.54 on Linux decides which parts of a transparent window are
+/// worth painting, and a freshly shown one is treated as having none: boxes
+/// land on the screen half-drawn, in the wrong place, or not at all, while the
+/// window itself is very much still there. The one-pixel dance marks the whole
+/// surface damaged once, which is the difference between a panel that opened
+/// and a panel that only seems to have vanished.
+#[cfg(target_os = "linux")]
+fn nudge_repaint(window: &tauri::WebviewWindow) {
+    if !is_open() || !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
+        size.width.saturating_add(1),
+        size.height,
+    )));
+    thread::sleep(Duration::from_millis(80));
+    let _ = window.set_size(tauri::Size::Physical(size));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn nudge_repaint(_window: &tauri::WebviewWindow) {}
 
 /// Cover the monitor the game is on.
 ///
