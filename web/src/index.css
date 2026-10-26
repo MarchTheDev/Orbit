@@ -961,6 +961,13 @@ html.orbit-tv body {
 .tv-rail::-webkit-scrollbar {
   display: none;
 }
+/* Off-screen covers cost nothing to see and something to paint: engines new
+   enough to know content-visibility skip drawing them until the rail moves;
+   ones too old simply ignore this and paint as they always did. */
+.tv-rail > li {
+  content-visibility: auto;
+  contain-intrinsic-size: 150px 280px;
+}
 
 /* The mark around a cover is drawn on the artwork and nowhere else: the name
    underneath is not part of the thing you pick, and a box around it made the

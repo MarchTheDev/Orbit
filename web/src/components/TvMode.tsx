@@ -310,7 +310,10 @@ export function TvMode({
     const button = coverOf(at);
     if (!scroller || !button) return;
     const left = button.offsetLeft - (scroller.clientWidth - button.clientWidth) / 2;
-    scroller.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    // A smooth scroll is dozens of full-window repaints; on a runtime that
+    // paints slowly the rail answers late instead of early, so the jump is
+    // instant there.
+    scroller.scrollTo({ left: Math.max(0, left), behavior: tvLite ? 'auto' : 'smooth' });
   }, [at, list.length]);
 
   // Nothing has focus when the hub opens, and a controller with nowhere to go

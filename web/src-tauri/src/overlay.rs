@@ -886,9 +886,26 @@ pub fn shutdown() {
 /// Hide and destroy the overlay window. Hiding is not enough: a hidden window
 /// is still a window, and that is what left the panel up after Orbit closed.
 pub fn close_panel(app: &AppHandle, why: &str) {
+    let open_for = SHOWN_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .map(|at| at.elapsed());
     if (OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst)) && !why.is_empty() {
         // A close with no reason written down is a mystery by construction.
         note_panel(&format!("the panel was closed ({why})"));
+        // A panel put away within a blink of arriving did not leave by the
+        // player's choice, and the player is the only one who can say which of
+        // the ways away it took. It announces itself rather than waiting to be
+        // found in a Settings page nobody knew to open.
+        if let Some(elapsed) = open_for {
+            if elapsed < Duration::from_millis(2500) && !why.starts_with("Orbit") {
+                tell(
+                    app,
+                    "overlay-toast",
+                    &format!("The overlay closed after {:.1} s: {why}", elapsed.as_secs_f32()),
+                );
+            }
+        }
     }
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
