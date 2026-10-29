@@ -2370,7 +2370,6 @@ pub fn run() {
             // first launch opts in by default as the UI does.
             #[cfg(any(windows, target_os = "linux"))]
             {
-                le          {
                 let enabled = saved_settings
                     .as_ref()
                     .and_then(|settings| settings.get("openExeInOrbit"))
