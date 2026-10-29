@@ -941,10 +941,22 @@ pub fn close_panel(app: &AppHandle, why: &str) {
         // stays, hidden: the page it already has is the panel the next press
         // gets, at once. It is still told the panel is gone, so its readings
         // stop and the next open starts clean.
+        //
+        // That bargain broke on WebKitGTK 2.54's transparent windows, which
+        // only repaint what they count as damaged: a long-lived see-through
+        // window accumulates paint bookkeeping that never matches the screen,
+        // and the panel that "stays, hidden" wakes as the overlay that opened
+        // for one frame and then stopped working - still there, never drawn
+        // again, click-through on top of it. A window that is never reused
+        // cannot be stale: the bundle reload of a fresh build is the price of
+        // a panel that is really there, and here it is paid.
         #[cfg(target_os = "linux")]
         {
             let _ = window.emit("overlay-hidden", ());
-            let _ = window.set_ignore_cursor_events(true);
+            CLOSING.store(true, Ordering::SeqCst);
+            if window.destroy().is_err() {
+                let _ = window.close();
+            }
         }
     }
 }

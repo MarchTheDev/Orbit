@@ -88,8 +88,10 @@ check('it is asked to draw again instead, a few seconds apart',
     overlayRs.includes('Duration::from_secs(3)') &&
     overlayRs.includes('window.emit("overlay-shown", ())'));
 check(
-  'on Linux the page is kept between opens, so the bundle is read once',
-  /#\[cfg\(target_os = "linux"\)\]\s*\{\s*let _ = window\.emit\("overlay-hidden", \(\)\);/.test(
+  'a panel closed on Linux is rebuilt next open, never woken painted-over',
+  // WebKitGTK 2.54 repaints only what it counts as damaged in a transparent
+  // window; a reused one goes stale, so a close takes the window with it.
+  /#\[cfg\(target_os = "linux"\)\][\s\S]{0,400}window\.emit\("overlay-hidden", \(\)\);[\s\S]{0,200}window\.destroy\(\)\.is_err\(\)/.test(
     overlayRs,
   ) &&
     /#\[cfg\(not\(target_os = "linux"\)\)\][\s\S]{0,400}window\.destroy\(\)\.is_err\(\)/.test(overlayRs),
