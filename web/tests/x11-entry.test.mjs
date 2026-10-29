@@ -119,6 +119,8 @@ console.log('the one move the program may make itself');
 check('it only moves on the pairing that drops see-through windows',
   /linux_window::wayland_backend\(\)[\s\S]*?linux_window::nvidia_driver\(\)[\s\S]*?overlay::panel_see_through\(\)/.test(lib));
 check('a solid panel stays on native Wayland', /overlay::panel_see_through\(\)/.test(lib));
+const overlaySource = read('web', 'src-tauri', 'src', 'overlay.rs');
+check('glass is the Linux default and =0 opts out to a solid panel', /pub\(crate\) fn panel_see_through\(\) -> bool[\s\S]*?return !matches!\(forced\.trim\(\)\.to_ascii_lowercase\(\)\.as_str\(\), \"0\" \| \"no\" \| \"false\" \| \"off\"\)[\s\S]*?true\s*}\s*#\[cfg\(not\(target_os = \"linux\"\)\)\]/.test(overlaySource));
 // The variable shows up exactly once, and only to move to x11: a check that
 // counts stops a second, differing backend from sneaking into a refactor.
 const moves = lib.match(/\.env\("GDK_BACKEND", "[a-z0-9]+"\)/g) ?? [];

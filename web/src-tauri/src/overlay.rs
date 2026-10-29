@@ -1614,22 +1614,11 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // On Windows the panel is excluded from every capture path by its display
-    // affinity, so a picture taken from it is a picture of the game. Other
-    // desktops have no such flag, so the panel steps aside for the one frame.
-    #[cfg(not(windows))]
-    let was_open = is_open();
-    #[cfg(not(windows))]
-    if was_open {
-        conceal(app);
-        thread::sleep(Duration::from_millis(180));
-    }
-    let result = take_shot(stamp);
-    #[cfg(not(windows))]
-    if was_open {
-        show_window(app);
-    }
+    // Never withdraw and remap the Linux overlay to take one picture. That
+    // could make WebKit lose the window's damaged regions and leave the panel
+    // looking frozen after the shutter. Keep its native window alive instead.
     let _ = app;
+    let result = take_shot(stamp);
     remember(&result);
     result
 }
@@ -1819,29 +1808,17 @@ fn toggle_on_main(app: &AppHandle) {
     }
 }
 
-/// Whether the panel asks for a see-through window.
-///
-/// A see-through window is where every strand of this story ends up broken on
-/// Linux: the compositor's dropped RGBA surface under proprietary NVIDIA on
-/// Wayland, WebKitGTK 2.54 repainting only the regions it counts as damaged,
-/// all of it inside an XWayland window. Each fence in turn - the sync
-/// workaround, the backend switch, the repaint nudge, the rebuilt window -
-/// left the same report standing: a flash, then nothing. Solid ground is what
-/// none of this can strand, so it is the ground the panel stands on, with the
-/// page drawn on Orbit's own background over the game's pixels. The day the
-/// desktop's glass earns trust back, ORBIT_OVERLAY_TRANSPARENT=1 asks for it;
-/// =0 keeps the solid panel where an odd stack would rather have it. The
-/// Wayland + proprietary-NVIDIA pairing likewise no longer moves the app to
-/// X11: nothing see-through is planned, and a solid window paints anywhere.
+/// The transparent surface is the requested default so the game remains
+/// visible between overlay boxes. Set ORBIT_OVERLAY_TRANSPARENT=0 to use a
+/// solid panel on a compositor that cannot keep the glass alive.
 #[cfg(target_os = "linux")]
 pub(crate) fn panel_see_through() -> bool {
     if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
         let forced = forced.to_string_lossy();
-        return matches!(forced.trim().to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on");
+        return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
     }
-    false
+    true
 }
-
 #[cfg(not(target_os = "linux"))]
 fn panel_see_through() -> bool {
     true
@@ -1864,8 +1841,8 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     } else {
         tauri::window::Color(0x0b, 0x0a, 0x16, 255)
     };
-    // Leave capture protection off so Windows screenshot tools can include the
-    // overlay. Orbit's own screen captures can include it as well.
+    // Exclude the panel from screenshots and recordings where the platform
+    // supports capture protection, so captures contain the game behind it.
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
         .title("Orbit overlay")
         .inner_size(1280.0, 720.0)
@@ -1897,15 +1874,15 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     // which face of the panel this desktop asked for - and what to change when
     // the choice is wrong for the very machine reading it.
     if !see_through {
-        note_panel("the panel is drawn on solid ground on Linux; ORBIT_OVERLAY_TRANSPARENT=1 asks for glass");
+        note_panel("the panel is drawn on solid ground; ORBIT_OVERLAY_TRANSPARENT=1 restores glass");
     }
     #[cfg(target_os = "linux")]
     if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_some() {
-        note_panel("the panel runs see-through through X11 on this Wayland NVIDIA setup, as asked; ORBIT_X11=0 keeps Orbit on native Wayland instead");
+        note_panel("the transparent panel uses X11 on this Wayland NVIDIA setup; ORBIT_X11=0 keeps Orbit on native Wayland instead");
     }
     #[cfg(target_os = "linux")]
     if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_none() {
-        note_panel("the panel runs see-through as ORBIT_OVERLAY_TRANSPARENT=1 asked; the glass is why the flash was fought before, and the way back is leaving the variable out");
+        note_panel("the panel runs transparent; ORBIT_OVERLAY_TRANSPARENT=0 switches to solid ground if this desktop drops the glass");
     }
     cover_screen(&window);
     let app_for_close = app.clone();
@@ -2577,14 +2554,6 @@ fn raise(window: &tauri::WebviewWindow) {
 #[cfg(not(windows))]
 fn raise(_window: &tauri::WebviewWindow) {}
 
-/// Hide even a pinned panel, for the one moment a picture is taken.
-#[cfg(not(windows))]
-fn conceal(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.hide();
-    }
-}
-
 fn hide_window(app: &AppHandle, why: &str) {
     if HAS_PINS.load(Ordering::SeqCst) {
         rest_window(app);
@@ -2794,7 +2763,8 @@ fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
     let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, Some(quality_fps(lock().fps)))?;
+    let fps = if cfg!(target_os = "linux") { "30" } else { quality_fps(lock().fps) };
+    push_grab(&mut command, Some(fps))?;
     #[cfg(target_os = "linux")]
     {
         let source = system_audio_monitor().ok_or_else(|| {
@@ -2869,7 +2839,7 @@ fn replay_workspace() -> PathBuf {
 fn start_native_buffer() -> Result<(), String> {
     lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
-    let hold = capture::start_buffer(keep, current_spec(), replay_workspace())?;
+    let hold = capture::start_buffer(keep, replay_spec(), replay_workspace())?;
     #[cfg(target_os = "linux")]
     let audio = {
         let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) else {
@@ -2908,19 +2878,23 @@ fn start_pipe_buffer() -> Result<(), String> {
         None => return Ok(()),
     };
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
-    let fps = lock().fps.max(1);
+    let fps = replay_spec().fps.max(1);
+    let fps_arg = fps.to_string();
     let buffer = capture::Buffer::new(&replay_workspace(), fps, keep)?;
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, Some(quality_fps(fps)))?;
+    push_grab(&mut command, Some(&fps_arg))?;
     // This worker pipes JPEG frames only; system audio is captured into the same
     // replay file by the companion PCM worker below.
     command.arg("-an");
+    #[cfg(target_os = "linux")]
+    let scale = "scale=1280:-2";
+    #[cfg(not(target_os = "linux"))]
     let scale = quality_scale(&lock().quality).unwrap_or("");
     let filter = if scale.is_empty() {
-        format!("fps={}", quality_fps(fps))
+        format!("fps={fps}")
     } else {
-        format!("fps={},{}", quality_fps(fps), scale)
+        format!("fps={fps},{scale}")
     };
     command.args(["-vf", &filter]);
     command.args(["-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]);
@@ -3064,6 +3038,10 @@ fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result
         "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v",
         "libx264",
+        "-preset",
+        "ultrafast",
+        "-threads",
+        "2",
         "-pix_fmt",
         "yuv420p",
         "-c:a",
@@ -3223,6 +3201,21 @@ fn current_spec() -> capture::Spec {
     }
 }
 
+/// The Linux rolling buffer is a background convenience, not a broadcast
+/// master. Full-size 30/60 fps X11 readback monopolised the CPU the overlay
+/// and game need; keep it to a light 720p/15 fps regardless of other settings.
+fn replay_spec() -> capture::Spec {
+    let mut spec = current_spec();
+    #[cfg(target_os = "linux")]
+    {
+        spec.max_width = spec.max_width.min(1280);
+        spec.max_height = spec.max_height.min(720);
+        spec.fps = spec.fps.min(15);
+        spec.jpeg_quality = spec.jpeg_quality.min(68);
+    }
+    spec
+}
+
 fn capture_missing() -> String {
     #[cfg(target_os = "linux")]
     if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
@@ -3267,7 +3260,12 @@ fn push_encode(command: &mut std::process::Command, quality: &str) {
         command.args(["-vf", scale]);
     }
     let (preset, crf) = quality_encode(quality);
+    #[cfg(target_os = "linux")]
+    command.args(["-threads", "2", "-c:v", "libx264", "-preset", "ultrafast", "-crf", crf, "-pix_fmt", "yuv420p"]);
+    #[cfg(not(target_os = "linux"))]
     command.args(["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]);
+    #[cfg(target_os = "linux")]
+    let _ = preset;
 }
 
 fn stop_child(mut child: Child) {

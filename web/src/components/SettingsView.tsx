@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { emit } from '@tauri-apps/api/event';
 import {
   Database,
   Download,
@@ -409,6 +410,7 @@ function OverlaySettings({
   const shutterVolume = overlay?.shutterVolume ?? 40;
   const [draft, setDraft] = useState('90');
   const [folderNote, setFolderNote] = useState<string | null>(null);
+  const [layoutNote, setLayoutNote] = useState<string | null>(null);
 
   const setOverlay = (patch: Partial<NonNullable<Settings['overlay']>>) => {
     setSettings({
@@ -646,6 +648,19 @@ function OverlaySettings({
         <p className="text-sm font-medium">Overlay boxes</p>
         <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              // Version zero tells an unmounted panel to generate fresh,
+              // screen-sized defaults the next time it opens.
+              setOverlay({ layout: {}, layoutRevision: 0 });
+              setLayoutNote('Default positions will be restored now, or the next time you open the overlay.');
+              void emit('overlay-layout-reset');
+            }}
+            className={btnBrowse}
+          >
+            Restore default positions
+          </button>
           {OVERLAY_BOXES.map((box) => {
             const shown = !(overlay?.hidden ?? []).includes(box.id);
             return (
@@ -669,6 +684,7 @@ function OverlaySettings({
             );
           })}
         </div>
+        {layoutNote && <p role="status" className="text-xs text-muted">{layoutNote}</p>}
       </div>
       {captureFolders.map((folder) => (
         <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">

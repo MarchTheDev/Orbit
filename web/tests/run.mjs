@@ -42,6 +42,7 @@ const checks = [
   'tests/idle-animations.test.mjs',
   'tests/tab-order.test.mjs',
   'tests/overlay-toast.test.mjs',
+  'tests/overlay-layout-reset.test.mjs',
   'tests/capture-pipeline.test.mjs',
   'tests/capture-feedback.test.mjs',
   'tests/reorder.test.mjs',

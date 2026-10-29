@@ -808,142 +808,15 @@ html.orbit-tv body {
     #05040d;
 }
 
-/* Arriving, and leaving.
- *
- * The hub takes the whole window, so handing it over has to be a move rather
- * than a cut. It comes up the way a console does - the mark on a dark screen,
- * its name, one line of light, and then the room - and it goes the way a
- * screen switches off: the picture sinks and dims, the mark is left for a
- * moment, and the library is underneath when it clears.
- *
- * Everything is drawn over the hub rather than instead of it, so the rail is
- * already built, already in focus and already scrolled when the boot clears.
- * None of it is ever a wait: the boot is about a second, and the keys work the
- * whole time.
- */
-@keyframes tv-in {
-  from { opacity: 0; transform: scale(1.03); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes tv-out {
-  from { opacity: 1; transform: none; filter: none; }
-  to { opacity: 0; transform: scale(0.985); filter: brightness(0.6) blur(2px); }
-}
-@keyframes tv-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes tv-boot-out {
-  0%, 62% { opacity: 1; }
-  100% { opacity: 0; visibility: hidden; }
-}
-@keyframes tv-boot-mark {
-  from { opacity: 0; transform: scale(0.78); }
-  60% { opacity: 1; }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes tv-boot-word {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes tv-boot-rule {
-  from { transform: scaleX(0); opacity: 0; }
-  to { transform: scaleX(1); opacity: 1; }
-}
-@keyframes tv-shutdown {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes tv-shutdown-mark {
-  from { opacity: 0; transform: scale(0.94); }
-  to { opacity: 0.55; transform: scale(1); }
-}
-
-.tv-root {
-  animation: tv-in 420ms cubic-bezier(.22, 1, .36, 1) both;
-  transform-origin: center;
-}
-/* The page itself arrives after the mark, so the boot reads as a handover and
-   not as a curtain pulled off something that was already there. */
-.tv-root > header,
-.tv-root > main {
-  animation: tv-rise 520ms cubic-bezier(.22, 1, .36, 1) 760ms both;
-}
-.tv-root.tv-root-leaving {
-  animation: tv-out 320ms cubic-bezier(.4, 0, 1, 1) both;
-}
-
-.tv-boot {
-  position: absolute;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.1rem;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 46% 40% at 50% 46%, color-mix(in srgb, var(--c-accent) 22%, transparent), transparent 70%),
-    #05040d;
-  animation: tv-boot-out 1300ms ease both;
-}
-.tv-boot-mark {
-  width: 5.5rem;
-  height: 5.5rem;
-  color: color-mix(in srgb, var(--c-accent) 55%, #ffffff);
-  animation: tv-boot-mark 900ms cubic-bezier(.22, 1, .36, 1) both;
-  filter: drop-shadow(0 0 32px color-mix(in srgb, var(--c-accent) 70%, transparent));
-}
-.tv-boot-word {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.55em;
-  text-transform: uppercase;
-  text-indent: 0.55em;
-  color: color-mix(in srgb, var(--c-text) 75%, transparent);
-  animation: tv-boot-word 700ms ease 260ms both;
-}
-.tv-boot-rule {
-  display: block;
-  width: min(12rem, 40vw);
-  height: 1px;
-  transform-origin: center;
-  background: linear-gradient(to right, transparent, var(--c-accent), transparent);
-  animation: tv-boot-rule 900ms cubic-bezier(.4, 0, .2, 1) 340ms both;
-}
-
-.tv-shutdown {
-  position: absolute;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(5, 4, 13, 0.55), #05040d 72%);
-  animation: tv-shutdown 320ms ease both;
-}
-.tv-shutdown-mark {
-  width: 4.5rem;
-  height: 4.5rem;
-  color: color-mix(in srgb, var(--c-accent) 45%, #ffffff);
-  filter: drop-shadow(0 0 26px color-mix(in srgb, var(--c-accent) 60%, transparent));
-  animation: tv-shutdown-mark 320ms ease both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tv-root,
-  .tv-root.tv-root-leaving,
-  .tv-root > header,
-  .tv-root > main,
-  .tv-boot,
-  .tv-boot-mark,
-  .tv-boot-word,
-  .tv-boot-rule,
-  .tv-shutdown,
-  .tv-shutdown-mark { animation: none; }
-  .tv-boot { display: none; }
+/* TV mode is an instant cut in and out. Keep every child still too: the
+   changing game artwork is swapped at a fixed size, never zoomed or faded. */
+.tv-root,
+.tv-root *,
+.tv-root *::before,
+.tv-root *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
 }
 
 /* The rail scrolls sideways, and a scrollbar under a row of covers is a line
@@ -979,11 +852,11 @@ html.orbit-tv body {
 .tv-lite *,
 .tv-lite *::before,
 .tv-lite *::after {
-  animation-duration: 0.01ms !important;
+  animation-duration: 0s !important;
   animation-iteration-count: 1 !important;
-  animation-delay: 0ms !important;
-  transition-duration: 0.01ms !important;
-  transition-delay: 0ms !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
   scroll-behavior: auto !important;
 }
 

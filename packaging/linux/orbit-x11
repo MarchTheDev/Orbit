@@ -23,7 +23,7 @@
 #     RGBA window alive where the native Wayland surface is dropped), unless
 #     ORBIT_X11=0 said not to. For a solid panel instead of that dance,
 #     ORBIT_OVERLAY_TRANSPARENT=0 orbit gives the window a ground it cannot
-#     vanish from (and =1 forces the see-through one anywhere).
+#     vanish from (the transparent surface is the default).
 #
 # Arguments are passed through, so `orbit-x11 --whatever` behaves as `orbit
 # --whatever` would.

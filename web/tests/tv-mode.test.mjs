@@ -10,6 +10,10 @@
  */
 import { JSDOM } from 'jsdom';
 import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
+import { readFileSync } from 'node:fs';
+
+const tvSource = readFileSync(new URL('../src/components/TvMode.tsx', import.meta.url), 'utf8');
+const tvCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
 const globalNames = ['window', 'document', 'navigator', 'HTMLElement', 'KeyboardEvent', 'CustomEvent', 'IS_REACT_ACT_ENVIRONMENT'];
@@ -247,15 +251,9 @@ check('escape on a game\'s page goes back to the rail rather than out of TV mode
 check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
 
 await key('Escape');
-check('the screen goes dark before it gives the window back',
-  document
-    .querySelector('[data-orbit-tv]')
-    ?.className.includes('tv-root-leaving') === true && left === 0,
-  `leaving ${document.querySelector('[data-orbit-tv]')?.className} / left ${left}`);
-check('and the mark is left on the screen as it goes',
-  !!document.querySelector('.tv-shutdown .tv-shutdown-mark'));
-await act(async () => wait(420));
-check('and then escape on the rail leaves TV mode', left === 1);
+check('escape leaves TV mode immediately without a closing animation',
+  left === 1 && !document.querySelector('.tv-shutdown'),
+  `left ${left} / shutdown ${!!document.querySelector('.tv-shutdown')}`);
 
 console.log('a controller drives the same hub');
 
@@ -286,17 +284,19 @@ pad('orbit-pad-back');
 await act(async () => wait(20));
 check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 2);
 
-console.log('the hub arrives the way a console does');
+console.log('TV mode opens without entrance choreography');
 
 await render(library);
-check('it opens on the mark rather than on a finished page', !!document.querySelector('.tv-boot'));
-check('with the name under it and one line of light',
-  document.querySelector('.tv-boot-word')?.textContent === 'Orbit' &&
-    !!document.querySelector('.tv-boot-rule'));
-check('and the rail is already built behind it, so nothing has to wait',
-  covers().length === 4 && document.activeElement?.getAttribute('data-tv-cover') === '0');
-await act(async () => wait(1400));
-check('then the boot clears and the room is what is left', !document.querySelector('.tv-boot'));
+check('it opens directly on the library without a boot veil',
+  !document.querySelector('.tv-boot') && covers().length === 4 &&
+    document.activeElement?.getAttribute('data-tv-cover') === '0');
+check('the backdrop does not scale or transition when the selected game changes',
+  !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
+    !tvSource.includes('duration-700'));
+check('TV mode has no entrance, exit, or child transitions',
+  !tvCss.includes('@keyframes tv-in') && !tvCss.includes('@keyframes tv-out') &&
+    /\.tv-root,\s*\n\.tv-root \*/.test(tvCss) &&
+    /animation: none !important;[\s\S]*?transition: none !important;/.test(tvCss));
 
 console.log('the rail can be read by name instead of by memory');
 
@@ -348,10 +348,10 @@ check('the ring goes around the artwork, not the name under it',
   css.includes('.tv-cover:hover > span:first-child') &&
     !/\.tv-cover[^\n]*span\s*\{/.test(css.slice(css.indexOf('.tv-cover:hover'), css.indexOf('@media (prefers-reduced-motion'))));
 const coverSpan = document.querySelectorAll('[data-tv-cover]')[1]?.querySelector('span');
-check('the hub comes in and goes out with a move rather than a cut',
-  css.includes('@keyframes tv-in') &&
-    css.includes('@keyframes tv-out') &&
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,200}tv-root/.test(css));
+check('the hub enters and exits without animation',
+  !css.includes('@keyframes tv-in') && !css.includes('@keyframes tv-out') &&
+    /\.tv-root,\s*\n\.tv-root \*/.test(css) &&
+    /animation: none !important;[\s\S]*?transition: none !important;/.test(css));
 check('and the markup leaves the colour to that one rule',
   !/group-hover:border|border-accent|shadow-\[/.test(coverSpan?.className ?? ''),
   String(coverSpan?.className));

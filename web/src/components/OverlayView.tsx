@@ -379,6 +379,26 @@ export function OverlayView() {
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
   };
 
+  // Settings can discard a damaged saved arrangement without resetting any
+  // other overlay preferences. If this window is alive, apply the new layout
+  // immediately; otherwise the version-zero setting makes startup regenerate it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen('overlay-layout-reset', () => {
+      const next = defaults(window.innerWidth || 1280, window.innerHeight || 720);
+      savedPlaces.current = next;
+      setPlaces(next);
+      const current = settingsRef.current;
+      if (current) {
+        settingsRef.current = { ...current, overlay: { ...current.overlay, layout: next, layoutRevision: LAYOUT_REVISION } };
+      }
+      void emit('overlay-settings', { layout: next, layoutRevision: LAYOUT_REVISION });
+      void overlayPins(false);
+      window.setTimeout(() => void overlayHits(physicalHits()), 40);
+    }).then((stop) => { unlisten = stop; }).catch(() => undefined);
+    return () => unlisten?.();
+  }, []);
+
   const flash = (title: string, detail: string, kind: OverlayToastKind = 'screenshot') => {
     // A save the player only learns about from a passing note is bad enough;
     // a failure must not be silenced by turning confirmations off.

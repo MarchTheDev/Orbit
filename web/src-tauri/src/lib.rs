@@ -2260,8 +2260,8 @@ pub fn run() {
     // read it on first touch. exec replaces rather than forks, so terminal,
     // arguments and any single-instance handshake carry over untouched, and
     // the marker plus the backend check both rule out a second round. A solid
-    // ask (ORBIT_OVERLAY_TRANSPARENT=0) stays on native Wayland where solid
-    // renders fine, and ORBIT_X11=0 keeps the native backend no matter what.
+    // ask (ORBIT_OVERLAY_TRANSPARENT=0) stays on native Wayland, and
+    // ORBIT_X11=0 keeps the native backend no matter what.
     #[cfg(target_os = "linux")]
     if linux_window::wayland_backend()
         && linux_window::nvidia_driver()
@@ -2370,6 +2370,7 @@ pub fn run() {
             // first launch opts in by default as the UI does.
             #[cfg(any(windows, target_os = "linux"))]
             {
+                le          {
                 let enabled = saved_settings
                     .as_ref()
                     .and_then(|settings| settings.get("openExeInOrbit"))
