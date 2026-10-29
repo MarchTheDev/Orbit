@@ -902,6 +902,30 @@ export function OverlayView() {
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 
+  // The pile check. If every box is standing in the same corner, whatever got
+  // them there was not a screen they were ever arranged on: stand them out the
+  // way this window was designed to start instead.
+  useEffect(() => {
+    if (!ready || !awake) return;
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => {
+        const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-box]'))
+          .map((node) => node.getBoundingClientRect())
+          .filter((rect) => rect.width > 4 && rect.height > 4);
+        if (rects.length < 2) return;
+        const piled = rects.every(
+          (rect) => Math.abs(rect.left - rects[0].left) < 4 && Math.abs(rect.top - rects[0].top) < 4,
+        );
+        if (piled) setPlaces(defaults(window.innerWidth, window.innerHeight));
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      if (second) window.cancelAnimationFrame(second);
+    };
+  }, [ready, awake, places]);
+
   // A screen that changes size, or a panel opened on a different one, gets an
   // arrangement that fits it: the player's own if it has come back into room,
   // the designed one otherwise. Nothing is written back, so going back to the
@@ -1607,17 +1631,24 @@ function Box({
   scroll?: boolean;
   children: ReactNode;
 }) {
+  // A place that comes to the screen with a hole in it (a damaged save, a
+  // paint race, a number that was never one) must not drag the whole grid into
+  // the corner it defaults to: the answer designed for this window stands in.
+  const p =
+    Number.isFinite(place.x) && Number.isFinite(place.y)
+      ? place
+      : defaults(window.innerWidth || 1280, window.innerHeight || 720)[id];
   return (
     <aside
       data-overlay-section={section}
       data-overlay-box={id}
       data-overlay-hit="1"
-      data-pin={place.pinned ? '1' : '0'}
+      data-pin={p.pinned ? '1' : '0'}
       className={cn(
         'pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
         padSelected && 'orbit-box-focus',
       )}
-      style={{ left: place.x, top: place.y, width: place.w ?? BOX[id].w, height: place.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
+      style={{ left: p.x, top: p.y, width: p.w ?? BOX[id].w, height: p.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
         className="flex cursor-grab items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"

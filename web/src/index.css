@@ -973,6 +973,20 @@ html.orbit-tv body {
   contain-intrinsic-size: 150px 280px;
 }
 
+/* The lite hub: every animation and transition becomes its first and last
+   frame. On a runtime that repaints slowly, motion is the whole payroll; the
+   room stands still instead, and answers at once. */
+.tv-lite *,
+.tv-lite *::before,
+.tv-lite *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* The mark around a cover is drawn on the artwork and nowhere else: the name
    underneath is not part of the thing you pick, and a box around it made the
    rail look like a table of buttons. One accent - the theme's, whatever it is

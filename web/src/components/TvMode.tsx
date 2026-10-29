@@ -509,6 +509,7 @@ export function TvMode({
       className={cn(
         'tv-root fixed inset-0 z-50 flex flex-col overflow-hidden bg-bg text-fg',
         leaving && 'tv-root-leaving pointer-events-none',
+        tvLite && 'tv-lite',
       )}
     >
       {active && <Backdrop game={active} />}
