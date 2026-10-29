@@ -65,6 +65,8 @@ static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("Alt+X");
 static HOTKEY_UP: AtomicBool = AtomicBool::new(true);
 /// Whether this open has already been told about a held key.
 static REPEAT_NOTED: AtomicBool = AtomicBool::new(false);
+/// The hidden-window rescue speaks once per open, not every guard beat.
+static HIDDEN_NOTED: AtomicBool = AtomicBool::new(false);
 /// A close that arrives this soon after the open is not someone's decision.
 const OPEN_GRACE: Duration = Duration::from_millis(700);
 const PANEL_DIAG_LINES: usize = 8;
@@ -1819,26 +1821,25 @@ fn toggle_on_main(app: &AppHandle) {
 
 /// Whether the panel asks for a see-through window.
 ///
-/// Linux with the proprietary NVIDIA driver on Wayland used to drop
-/// WebKitGTK's RGBA toplevel within its first frames - mapped, heartbeating,
-/// painting nothing, the flash that read as the overlay closing itself. The
-/// explicit-sync workaround now goes into the environment before the first
-/// web view exists, which is what that stack needed to hold such a window, so
-/// the panel is see-through there again. A stack that still strands it gets
-/// the solid panel back with ORBIT_OVERLAY_TRANSPARENT=0; =1 forces the
-/// see-through window on any stack, so the question "does this desktop hold
-/// it" stays one launch away. On the pairing that can never hold it - Wayland
-/// with the proprietary NVIDIA driver, whose compositor drops the RGBA
-/// surface a moment after it appears - startup has already moved the whole
-/// app onto X11 (see run() in lib.rs), and the panel this decides for is an
-/// X11 window, where see-through windows are unremarkable.
+/// A see-through window is where every strand of this story ends up broken on
+/// Linux: the compositor's dropped RGBA surface under proprietary NVIDIA on
+/// Wayland, WebKitGTK 2.54 repainting only the regions it counts as damaged,
+/// all of it inside an XWayland window. Each fence in turn - the sync
+/// workaround, the backend switch, the repaint nudge, the rebuilt window -
+/// left the same report standing: a flash, then nothing. Solid ground is what
+/// none of this can strand, so it is the ground the panel stands on, with the
+/// page drawn on Orbit's own background over the game's pixels. The day the
+/// desktop's glass earns trust back, ORBIT_OVERLAY_TRANSPARENT=1 asks for it;
+/// =0 keeps the solid panel where an odd stack would rather have it. The
+/// Wayland + proprietary-NVIDIA pairing likewise no longer moves the app to
+/// X11: nothing see-through is planned, and a solid window paints anywhere.
 #[cfg(target_os = "linux")]
 pub(crate) fn panel_see_through() -> bool {
     if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
         let forced = forced.to_string_lossy();
-        return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
+        return matches!(forced.trim().to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on");
     }
-    true
+    false
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1853,11 +1854,10 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
-    // See-through everywhere: on a Wayland + NVIDIA pairing the startup code
-    // runs Orbit through X11 precisely so this window's alpha composites. A
-    // desktop that still cannot hold it paints the same page on Orbit's own
-    // ground instead - the way out is ORBIT_OVERLAY_TRANSPARENT=0 - and the
-    // panel cannot silently vanish.
+    // Solid underneath on Linux, glass only when the desktop asks for it by
+    // name: the records of what a see-through window can lose to are long
+    // enough now. Either way the page is the same; what changes is whether the
+    // game's pixels or Orbit's own ground stand behind it.
     let see_through = panel_see_through();
     let background = if see_through {
         tauri::window::Color(0, 0, 0, 0)
@@ -1897,20 +1897,15 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     // which face of the panel this desktop asked for - and what to change when
     // the choice is wrong for the very machine reading it.
     if !see_through {
-        note_panel("the panel was built solid, as ORBIT_OVERLAY_TRANSPARENT=0 asked");
+        note_panel("the panel is drawn on solid ground on Linux; ORBIT_OVERLAY_TRANSPARENT=1 asks for glass");
     }
     #[cfg(target_os = "linux")]
     if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_some() {
-        note_panel("the panel runs through X11 on this Wayland NVIDIA setup, so its see-through window can survive; ORBIT_X11=0 keeps Orbit on native Wayland instead");
+        note_panel("the panel runs see-through through X11 on this Wayland NVIDIA setup, as asked; ORBIT_X11=0 keeps Orbit on native Wayland instead");
     }
     #[cfg(target_os = "linux")]
-    if see_through
-        && std::env::var_os("ORBIT_X11_SWITCHED").is_none()
-        && std::env::var_os("ORBIT_OVERLAY_TRANSPARENT").is_none()
-        && crate::linux_window::wayland_backend()
-        && crate::linux_window::nvidia_driver()
-    {
-        note_panel("the panel is see-through on native Wayland as ORBIT_X11=0 asked; if it ever flashes away here, ORBIT_OVERLAY_TRANSPARENT=0 brings the solid panel back");
+    if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_none() {
+        note_panel("the panel runs see-through as ORBIT_OVERLAY_TRANSPARENT=1 asked; the glass is why the flash was fought before, and the way back is leaving the variable out");
     }
     cover_screen(&window);
     let app_for_close = app.clone();
@@ -1991,6 +1986,7 @@ fn show_window(app: &AppHandle) {
     *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     OPEN.store(true, Ordering::SeqCst);
     REPEAT_NOTED.store(false, Ordering::SeqCst);
+    HIDDEN_NOTED.store(false, Ordering::SeqCst);
     note_panel("the panel opened");
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
@@ -2221,6 +2217,21 @@ fn notify_close(elapsed: Duration, why: &str) {
 #[cfg(not(target_os = "linux"))]
 fn notify_close(_: Duration, _: &str) {}
 
+/// A desktop note about what the panel did on its own behalf, for the same
+/// reason `notify_close` exists: while a game fills the screen, the main
+/// window's toasts are reading to an empty room.
+#[cfg(target_os = "linux")]
+fn notify_panel(text: &str) {
+    let _ = crate::process::command("notify-send")
+        .arg("--app-name=Orbit")
+        .arg("The overlay")
+        .arg(text)
+        .spawn();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify_panel(_: &str) {}
+
 /// Rebuild the panel's window and open it again.
 fn revive(app: &AppHandle) {
     let allowed = {
@@ -2239,9 +2250,11 @@ fn revive(app: &AppHandle) {
         OPEN.store(false, Ordering::SeqCst);
         note_panel("the page would not stay loaded; the panel was left closed");
         tell(app, "overlay-toast", "The overlay could not stay open. See Settings, then try again.");
+        notify_panel("its page kept dying, so the panel was left closed; Settings tells the whole story.");
         return;
     }
     note_panel("the panel went away; it was rebuilt");
+    notify_panel("its page or window vanished underneath it; it was rebuilt.");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
         CLOSING.store(true, Ordering::SeqCst);
@@ -2272,6 +2285,7 @@ fn guard_panel(app: &AppHandle) {
     };
     if !window.is_visible().unwrap_or(false) {
         note_panel("its window was hidden while the panel was open; it was shown again");
+        if !HIDDEN_NOTED.swap(true, Ordering::SeqCst) { notify_panel("taken away mid-show; put back"); }
         let _ = window.show();
         let _ = window.set_always_on_top(true);
         raise(&window);
@@ -2287,7 +2301,6 @@ fn guard_panel(app: &AppHandle) {
         revive(app);
         return;
     }
-    // While open, the keyboard is the panel's: unfocused frames get retired.
     if !RESTING.load(Ordering::SeqCst) && !window.is_focused().unwrap_or(true) { let _ = window.set_focus(); }
     // The page has to have spoken. A slow first load is given longer than a
     // page that has already answered once and then went quiet - and a panel
@@ -2305,9 +2318,8 @@ fn guard_panel(app: &AppHandle) {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .map(|at| at.elapsed())
         .unwrap_or_default();
-    // A page that has said nothing at all is still loading. Its window is not
-    // evidence of anything yet, and taking it away is what made the panel
-    // flash: the whole bundle had to be read again from the start.
+    // A page that has said nothing is still loading: taking its window away
+    // was what made the panel flash - the bundle had to be read from the start.
     if quiet.is_none() {
         if since < PAGE_COLD {
             nudge(&window, since);
