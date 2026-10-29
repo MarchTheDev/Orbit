@@ -2275,6 +2275,8 @@ fn guard_panel(app: &AppHandle) {
         revive(app);
         return;
     }
+    // While open, the keyboard is the panel's: unfocused frames get retired.
+    if !RESTING.load(Ordering::SeqCst) && !window.is_focused().unwrap_or(true) { let _ = window.set_focus(); }
     // The page has to have spoken. A slow first load is given longer than a
     // page that has already answered once and then went quiet - and a panel
     // that has just opened is loading, not dead, however long the one before it

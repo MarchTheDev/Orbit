@@ -955,6 +955,9 @@ html.orbit-tv body {
   scroll-behavior: smooth;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  /* The rail snaps to its covers; the compositor then owns the animation of
+     a move, and no frame of it is paid for out of the page's budget. */
+  scroll-snap-type: x proximity;
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
   mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
 }
@@ -965,6 +968,7 @@ html.orbit-tv body {
    enough to know content-visibility skip drawing them until the rail moves;
    ones too old simply ignore this and paint as they always did. */
 .tv-rail > li {
+  scroll-snap-align: center;
   content-visibility: auto;
   contain-intrinsic-size: 150px 280px;
 }
