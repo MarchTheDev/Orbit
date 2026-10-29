@@ -227,7 +227,8 @@ check(
     libSource.includes('fn overlay_alive()') &&
     overlaySource.includes('fn revive(app: &AppHandle)') &&
     overlaySource.includes('const PAGE_START: Duration = Duration::from_secs(7)') &&
-    overlaySource.includes('const PAGE_SILENT: Duration = Duration::from_secs(3)') &&
+    /cfg\(target_os = \"linux\"\)\]\nconst PAGE_SILENT: Duration = Duration::from_secs\(30\)/.test(overlaySource) &&
+    /cfg\(not\(target_os = \"linux\"\)\)\]\nconst PAGE_SILENT: Duration = Duration::from_secs\(3\)/.test(overlaySource) &&
     // A page that has never answered is loading, not dead: rebuilding it threw
     // away the load it was waiting for, which is the panel that flashed.
     overlaySource.includes('const PAGE_COLD: Duration = Duration::from_secs(45)') &&
@@ -247,7 +248,7 @@ check(
     overlay.includes('window.setInterval(beat, 1000)'),
 );
 check(
-  'the panel writes down what became of it, where Settings can read it',
+  'the panel logs what became of it without a diagnostic panel in Settings',
   overlaySource.includes('static PANEL_DIAG: Mutex<Vec<String>>') &&
     overlaySource.includes('fn note_panel(text: &str)') &&
     overlaySource.includes('fn shown_for() -> String') &&
@@ -260,9 +261,8 @@ check(
     overlaySource.includes('note_panel("its window was hidden while the panel was open; it was shown again")') &&
     overlaySource.includes('note_panel("its window had no web view in it; it was rebuilt")') &&
     nativeSource.includes('diag?: string[]') &&
-    settingsSource2.includes('function PanelDiag()') &&
-    settingsSource2.includes('void overlayStatus().then((status) => {') &&
-    settingsSource2.includes('<PanelDiag />'),
+    !settingsSource2.includes('function PanelDiag()') &&
+    !settingsSource2.includes('<PanelDiag />'),
 );
 check(
   'every native close says who closed the panel',
@@ -365,8 +365,6 @@ check(
     /fn note_panel[\s\S]{0,600}lines\.push\(line\)/.test(overlaySource) &&
     overlaySource.includes('pub diag: Vec<String>') &&
     nativeSource.includes('diag?: string[]') &&
-    settingsSource2.includes('const [lines, setLines] = useState<string[]>([])') &&
-    settingsSource2.includes('lines.map((line, i) =>') &&
     // Orbit's own destroy is expected; it must not be written down as a reason.
     overlaySource.includes('static CLOSING: AtomicBool') &&
     /fn mark_hidden[\s\S]{0,260}if CLOSING\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&

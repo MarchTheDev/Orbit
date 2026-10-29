@@ -26,4 +26,10 @@ check('the new layout is saved and stale pins are cleared',
   overlay.includes("emit('overlay-settings', { layout: next, layoutRevision: LAYOUT_REVISION })") &&
     overlay.includes('overlayPins(false)'));
 
+const settingsOrder = settings.indexOf('Capture folders');
+const paths = settings.indexOf('{captureFolders.map((folder) => (');
+const boxes = settings.indexOf('Overlay boxes', paths);
+check('capture paths stay grouped under Capture folders before Overlay boxes', settingsOrder >= 0 && paths > settingsOrder && boxes > paths);
+check('the diagnostic card is removed from Overlay settings', !settings.includes('What the overlay did') && !settings.includes('function PanelDiag()'));
+
 if (failures) process.exitCode = 1;

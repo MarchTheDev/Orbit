@@ -1,8 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Game } from '../../types';
 import { fileSrc } from '../../services/desktop';
 import { cn } from '../../utils/cn';
+
+// Keep a few nearby TV images decoded across selection changes. Detached Image
+// objects preserve the decoded resource while the visible components reuse it.
+const warmImages = new Map<string, HTMLImageElement>();
+
+export function warmImage(src: string | null | undefined) {
+  if (!src || warmImages.has(src)) return;
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = src;
+  warmImages.set(src, image);
+  if (warmImages.size > 16) {
+    const oldest = warmImages.keys().next().value;
+    if (oldest) warmImages.delete(oldest);
+  }
+  void image.decode().catch(() => undefined);
+}
+
+export function warmCover(game: Game) {
+  warmImage(game.coverPath ? fileSrc(game.coverPath) : game.meta?.coverUrl ?? game.meta?.headerUrl ?? game.meta?.backgroundUrl);
+}
 
 /**
  * Cover art, best source first:
@@ -28,44 +49,50 @@ export function Cover({
   game,
   className,
   style,
+  fit: fitOverride,
+  loading = 'lazy',
 }: {
   game: Game;
   className?: string;
   /** For a size that comes from a slider rather than a class. */
   style?: CSSProperties;
+  /** An arrangement-specific fit, before the game's saved preference. */
+  fit?: 'cover' | 'contain';
+  loading?: 'eager' | 'lazy';
 }) {
-  const [localFailed, setLocalFailed] = useState(false);
-  const [remoteFailed, setRemoteFailed] = useState(false);
-  const [headerFailed, setHeaderFailed] = useState(false);
-  const [backdropFailed, setBackdropFailed] = useState(false);
+  const identity = JSON.stringify([game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl, game.meta?.backgroundUrl]);
+  const [failures, setFailures] = useState<{ identity: string; local: boolean; remote: boolean; header: boolean; backdrop: boolean }>({
+    identity: '', local: false, remote: false, header: false, backdrop: false,
+  });
+  // Read failures for the current artwork identity during render. Resetting
+  // them from an effect briefly showed initials or a fallback cover whenever
+  // focus moved to a different game.
+  const current = failures.identity === identity
+    ? failures
+    : { identity, local: false, remote: false, header: false, backdrop: false };
+  const fail = (which: 'local' | 'remote' | 'header' | 'backdrop') => {
+    setFailures((old) => ({ ...(old.identity === identity ? old : current), [which]: true }));
+  };
 
-  // A new game means a new cover to try, and a failed one must not stick.
-  useEffect(() => {
-    setLocalFailed(false);
-    setRemoteFailed(false);
-    setHeaderFailed(false);
-    setBackdropFailed(false);
-  }, [game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl, game.meta?.backgroundUrl]);
+  const fit = fitOverride ?? game.meta?.coverFit;
 
-  const fit = game.meta?.coverFit;
-
-  if (game.coverPath && !localFailed) {
-    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} fit={fit} onFail={() => setLocalFailed(true)} />;
+  if (game.coverPath && !current.local) {
+    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('local')} />;
   }
 
-  if (game.meta?.coverUrl && !remoteFailed) {
-    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setRemoteFailed(true)} />;
+  if (game.meta?.coverUrl && !current.remote) {
+    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('remote')} />;
   }
 
-  if (game.meta?.headerUrl && !headerFailed) {
-    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setHeaderFailed(true)} />;
+  if (game.meta?.headerUrl && !current.header) {
+    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('header')} />;
   }
 
   // The wide backdrop is the last picture worth trying before initials: it is
   // always there on a store page, and a letterboxed backdrop still reads as the
   // game rather than as a coloured square.
-  if (game.meta?.backgroundUrl && !backdropFailed) {
-    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} fit={fit} onFail={() => setBackdropFailed(true)} />;
+  if (game.meta?.backgroundUrl && !current.backdrop) {
+    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('backdrop')} />;
   }
 
   const initials = game.title
@@ -102,6 +129,7 @@ function Artwork({
   className,
   style,
   fit,
+  loading,
   onFail,
 }: {
   src: string;
@@ -110,6 +138,7 @@ function Artwork({
   style?: CSSProperties;
   /** The player's own answer, which beats the guess made from the shape. */
   fit?: 'cover' | 'contain';
+  loading: 'eager' | 'lazy';
   onFail: () => void;
 }) {
   const [wide, setWide] = useState(false);
@@ -127,7 +156,8 @@ function Artwork({
           src={src}
           alt=""
           aria-hidden
-          loading="lazy"
+          draggable={false}
+          loading={loading}
           decoding="async"
           className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-xl"
         />
@@ -135,8 +165,10 @@ function Artwork({
       <img
         src={src}
         alt={alt}
-        loading="lazy"
+        draggable={false}
+        loading={loading}
         onLoad={(e) => {
+          if (fit !== undefined) return;
           const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
           // Filling a tall frame with a picture that is barely taller than it is
           // wide cuts the sides off whatever the artwork actually shows, so

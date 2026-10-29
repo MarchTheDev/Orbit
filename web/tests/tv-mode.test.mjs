@@ -13,6 +13,7 @@ import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
 import { readFileSync } from 'node:fs';
 
 const tvSource = readFileSync(new URL('../src/components/TvMode.tsx', import.meta.url), 'utf8');
+const coverSource = readFileSync(new URL('../src/components/ui/Cover.tsx', import.meta.url), 'utf8');
 const tvCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
@@ -293,6 +294,15 @@ check('it opens directly on the library without a boot veil',
 check('the backdrop does not scale or transition when the selected game changes',
   !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
     !tvSource.includes('duration-700'));
+check('TV artwork keeps a stable fit and warms nearby images before selection changes',
+  !tvSource.includes('key={src}') && !tvSource.includes('key={`soft-${game.id}`}') &&
+    /fit="cover"[\s\S]{0,180}loading="eager"/.test(tvSource) &&
+    tvSource.includes('warmCover(game)') && tvSource.includes('warmImage(first)') &&
+    coverSource.includes('const current = failures.identity === identity'));
+check('TV covers cannot be dragged and keep one crop while images load',
+  tvSource.includes('draggable={false}') &&
+    tvSource.includes('onDragStart={(event) => event.preventDefault()}') &&
+    tvSource.includes('fit="cover"'));
 check('TV mode has no entrance, exit, or child transitions',
   !tvCss.includes('@keyframes tv-in') && !tvCss.includes('@keyframes tv-out') &&
     /\.tv-root,\s*\n\.tv-root \*/.test(tvCss) &&

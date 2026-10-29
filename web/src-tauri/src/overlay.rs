@@ -88,6 +88,9 @@ const PANEL_GUARD: Duration = Duration::from_millis(700);
 const FRONT_TRIES: u8 = 4;
 /// A page that has never spoken gets longer than one that has gone quiet.
 const PAGE_START: Duration = Duration::from_secs(7);
+#[cfg(target_os = "linux")]
+const PAGE_SILENT: Duration = Duration::from_secs(30);
+#[cfg(not(target_os = "linux"))]
 const PAGE_SILENT: Duration = Duration::from_secs(3);
 /// How long a page that has never answered is given before its window is
 /// rebuilt.
@@ -1852,11 +1855,10 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        // Leave the overlay out of the pictures and videos Orbit itself takes,
-        // and out of everyone else's too. On Windows this is
-        // WDA_EXCLUDEFROMCAPTURE, so the game behind the panel is what the
-        // capture sees.
-        .content_protected(true)
+        // Keep Windows capture APIs from including the overlay. On Linux this
+        // must stay false: KWin can black out the whole output for a protected
+        // transparent fullscreen surface, including the game behind it.
+        .content_protected(cfg!(windows))
         .visible(false)
         .focused(false)
         .center()
@@ -2278,7 +2280,6 @@ fn guard_panel(app: &AppHandle) {
         revive(app);
         return;
     }
-    if !RESTING.load(Ordering::SeqCst) && !window.is_focused().unwrap_or(true) { let _ = window.set_focus(); }
     // The page has to have spoken. A slow first load is given longer than a
     // page that has already answered once and then went quiet - and a panel
     // that has just opened is loading, not dead, however long the one before it
@@ -2608,6 +2609,25 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = game_dir("screenshots")?;
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        // Orbit may run on XWayland to keep its transparent window alive, but
+        // x11grab then sees only the empty XWayland root (often black with a
+        // cursor). Ask the compositor for the real desktop image instead.
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
+        return if linux_shot(&path).is_ok() {
+            saved_picture(&path)
+        } else {
+            Err("KDE Wayland did not provide a screenshot. Install Spectacle or grim and try again.".to_string())
+        };
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
+        if ffmpeg_shot(&ffmpeg, &path).is_ok() {
+            return saved_picture(&path);
+        }
+    }
     if capture::available() {
         let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
         if capture::save_picture(&path, current_spec()).is_ok() {
@@ -2668,11 +2688,17 @@ $g.Dispose(); $bmp.Dispose()\r\n",
 
 #[cfg(target_os = "linux")]
 fn linux_shot(path: &Path) -> Result<(), String> {
-    let attempts: &[(&str, &[&str])] = &[
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let wayland_attempts: &[(&str, &[&str])] = &[
+        ("spectacle", &["--background", "--nonotify", "--fullscreen", "--output"]),
+        ("grim", &[]),
+    ];
+    let x11_attempts: &[(&str, &[&str])] = &[
         ("grim", &[]),
         ("gnome-screenshot", &["-f"]),
         ("scrot", &[]),
     ];
+    let attempts = if wayland { wayland_attempts } else { x11_attempts };
     for (program, prefix) in attempts {
         let Some(bin) = which(program) else { continue };
         let mut command = process::command(bin);
@@ -2722,6 +2748,10 @@ fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
 }
 
 fn spawn_recording(stamp: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return spawn_wayland_recording(stamp);
+    }
     if capture::available() {
         match spawn_native_recording(stamp) {
             Ok(()) => return Ok(()),
@@ -2736,6 +2766,35 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
         return Err(capture_missing());
     }
     spawn_ffmpeg_recording(stamp)
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_wayland_recording(stamp: &str) -> Result<(), String> {
+    let recorder = which("gpu-screen-recorder").ok_or_else(|| {
+        "KDE Wayland screen recording needs PipeWire. Install gpu-screen-recorder; FFmpeg's X11 grab only sees a black XWayland screen.".to_string()
+    })?;
+    let dir = game_dir("recordings")?;
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
+    let fps = quality_fps(lock().fps);
+    let mut command = process::command(recorder);
+    command.args(["-w", "screen", "-f", fps, "-a", "default_output", "-o"]);
+    command.arg(&path);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let child = command.spawn().map_err(|error| format!("Could not start gpu-screen-recorder: {error}"))?;
+    thread::sleep(Duration::from_millis(350));
+    let mut child = child;
+    if let Ok(Some(_)) = child.try_wait() {
+        let _ = fs::remove_file(&path);
+        return Err("gpu-screen-recorder stopped before the Wayland recording started. Check that PipeWire screen capture is available.".to_string());
+    }
+    let mut live = lock();
+    live.recording_name = path
+        .file_name()
+        .map(|item| item.to_string_lossy().to_string())
+        .unwrap_or_else(|| "recording.mp4".to_string());
+    live.recording_path = path;
+    live.recording = Some(child);
+    Ok(())
 }
 
 fn spawn_native_recording(stamp: &str) -> Result<(), String> {
@@ -2806,22 +2865,32 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
             return Ok(());
         }
     }
-    if capture::available() {
-        match start_native_buffer() {
-            Ok(()) => return Ok(()),
-            #[cfg(windows)]
-            Err(error) => return Err(error),
-            #[cfg(not(windows))]
-            Err(error) => {
-                if find_ffmpeg(&lock().ffmpeg).is_none() {
-                    return Err(error);
+    #[cfg(target_os = "linux")]
+    {
+        if find_ffmpeg(&lock().ffmpeg).is_none() {
+            return Err(capture_missing());
+        }
+        return start_pipe_buffer();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if capture::available() {
+            match start_native_buffer() {
+                Ok(()) => return Ok(()),
+                #[cfg(windows)]
+                Err(error) => return Err(error),
+                #[cfg(not(windows))]
+                Err(error) => {
+                    if find_ffmpeg(&lock().ffmpeg).is_none() {
+                        return Err(error);
+                    }
                 }
             }
+        } else if find_ffmpeg(&lock().ffmpeg).is_none() {
+            return Err(capture_missing());
         }
-    } else if find_ffmpeg(&lock().ffmpeg).is_none() {
-        return Err(capture_missing());
+        start_pipe_buffer()
     }
-    start_pipe_buffer()
 }
 
 /// The rolling replay is a temporary file, not a memory ring. Keeping it in
@@ -2836,6 +2905,7 @@ fn replay_workspace() -> PathBuf {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn start_native_buffer() -> Result<(), String> {
     lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
@@ -3218,8 +3288,8 @@ fn replay_spec() -> capture::Spec {
 
 fn capture_missing() -> String {
     #[cfg(target_os = "linux")]
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        return "This Wayland desktop cannot be recorded without ffmpeg. An X11 session records on its own.".to_string();
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return "Instant replay on KDE Wayland needs PipeWire screen capture; Orbit will not save a black XWayland recording.".to_string();
     }
     "Orbit could not capture the screen, and ffmpeg is not installed.".to_string()
 }
@@ -3236,8 +3306,8 @@ fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(
     }
     #[cfg(target_os = "linux")]
     {
-        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            return Err("Recording on this Wayland desktop needs an X11 display, or ffmpeg could not grab the screen.".to_string());
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return Err("FFmpeg's X11 grab cannot capture the Wayland desktop. Use the PipeWire screen recorder.".to_string());
         }
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
         let source = if display.contains('.') { display } else { format!("{display}.0") };
@@ -3256,12 +3326,15 @@ fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(
 }
 
 fn push_encode(command: &mut std::process::Command, quality: &str) {
+    #[cfg(target_os = "linux")]
+    command.args(["-vf", "scale=1280:-2"]);
+    #[cfg(not(target_os = "linux"))]
     if let Some(scale) = quality_scale(quality) {
         command.args(["-vf", scale]);
     }
     let (preset, crf) = quality_encode(quality);
     #[cfg(target_os = "linux")]
-    command.args(["-threads", "2", "-c:v", "libx264", "-preset", "ultrafast", "-crf", crf, "-pix_fmt", "yuv420p"]);
+    command.args(["-threads", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", crf, "-pix_fmt", "yuv420p"]);
     #[cfg(not(target_os = "linux"))]
     command.args(["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]);
     #[cfg(target_os = "linux")]

@@ -47,7 +47,6 @@ import {
   overlayQuality,
   clampOverlaySeconds,
   overlayLengths,
-  overlayStatus,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
@@ -344,51 +343,6 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
 
-/**
- * What became of the panel last time.
- *
- * The overlay cannot say why it left the screen: there is nothing on screen
- * left to say it in. So the panel writes one line as it goes, and this is where
- * the line is read - next to the switches that decide what the panel does.
- */
-function PanelDiag() {
-  const [lines, setLines] = useState<string[]>([]);
-  useEffect(() => {
-    if (!isNative()) return;
-    let alive = true;
-    const read = () => {
-      void overlayStatus().then((status) => {
-        if (alive) setLines(status.diag ?? []);
-      }).catch(() => undefined);
-    };
-    read();
-    const timer = window.setInterval(read, 3000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, []);
-  if (lines.length === 0) return null;
-  return (
-    <div className="rounded-2xl border border-line bg-panel2/30 p-3">
-      <p className="text-sm font-medium">What the overlay did</p>
-      {/* Newest last, the way it happened. One line was not enough: the close
-          that followed a reason used to overwrite the reason. */}
-      <ol className="mt-1.5 space-y-1">
-        {lines.map((line, i) => (
-          <li key={i} className="text-xs leading-relaxed text-muted">
-            <span className="mr-1.5 tabular-nums opacity-60">{i + 1}.</span>
-            {line}
-          </li>
-        ))}
-      </ol>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-        The same lines are in Orbit's log folder under <span className="font-mono">com.orbit.launcher/logs</span>.
-      </p>
-    </div>
-  );
-}
-
 function OverlaySettings({
   settings,
   setSettings,
@@ -609,7 +563,6 @@ function OverlaySettings({
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
-      <PanelDiag />
       <Checkbox
         checked={overlay?.captureToast !== false}
         onChange={(on) => setOverlay({ captureToast: on })}
@@ -636,13 +589,53 @@ function OverlaySettings({
         value={overlay?.shortcuts}
         onChange={(shortcuts) => setOverlay({ shortcuts })}
       />
-      <div className="rounded-2xl border border-line bg-panel2/30 p-3">
-        <p className="text-sm font-medium">Capture folders</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted">
-          Screenshots go to your Pictures folder, recordings and replays to your Videos folder, each
-          in an Orbit folder with a subfolder for the game. Choose a folder here to put one somewhere
-          else.
-        </p>
+      <div className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3">
+        <div>
+          <p className="text-sm font-medium">Capture folders</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            Screenshots go to your Pictures folder, recordings and replays to your Videos folder, each
+            in an Orbit folder with a subfolder for the game. Choose a folder here to put one somewhere
+            else.
+          </p>
+        </div>
+        {captureFolders.map((folder) => (
+          <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+            <span className="min-w-0">
+              <span className="block text-xs text-fg">{folder.label}</span>
+              <span className="block break-all font-mono text-[11px] text-muted">{folder.path || 'Choose a folder to set this location'}</span>
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {isNative() && (
+                <button
+                  type="button"
+                  onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || folder.path || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
+                  className={btnBrowse}
+                >
+                  <FolderOpen className="mr-1.5 inline size-3.5" />
+                  Choose folder…
+                </button>
+              )}
+              {folder.custom && (
+                <button
+                  type="button"
+                  onClick={() => setOverlay({ [folder.setting]: undefined } as Partial<NonNullable<Settings['overlay']>>)}
+                  className={btnBrowse}
+                >
+                  Use default folder
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!folder.path}
+                onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
+                className={btnBrowse}
+              >
+                Open
+              </button>
+            </div>
+          </div>
+        ))}
+        {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
       </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Overlay boxes</p>
@@ -686,44 +679,6 @@ function OverlaySettings({
         </div>
         {layoutNote && <p role="status" className="text-xs text-muted">{layoutNote}</p>}
       </div>
-      {captureFolders.map((folder) => (
-        <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
-          <span className="min-w-0">
-            <span className="block text-xs text-fg">{folder.label}</span>
-            <span className="block break-all font-mono text-[11px] text-muted">{folder.path || 'Choose a folder to set this location'}</span>
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {isNative() && (
-              <button
-                type="button"
-                onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || folder.path || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
-                className={btnBrowse}
-              >
-                <FolderOpen className="mr-1.5 inline size-3.5" />
-                Choose folder…
-              </button>
-            )}
-            {folder.custom && (
-              <button
-                type="button"
-                onClick={() => setOverlay({ [folder.setting]: undefined } as Partial<NonNullable<Settings['overlay']>>)}
-                className={btnBrowse}
-              >
-                Use default folder
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={!folder.path}
-              onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
-              className={btnBrowse}
-            >
-              Open
-            </button>
-          </div>
-        </div>
-      ))}
-      {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
     </>
   );
 }

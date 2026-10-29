@@ -34,7 +34,7 @@ check('settings describe the chime for screenshots, recordings, and replays', /a
 
 console.log('library artwork avoids eager decoding for every game');
 const imageTags = [...cover.matchAll(/<img\b[\s\S]*?\/>/g)].map(([tag]) => tag);
-check('both the visible and blurred cover image use native lazy loading', imageTags.length === 2 && imageTags.every((tag) => /loading="lazy"/.test(tag)));
+check('cover images are lazy by default and can be eager for TV hero art', imageTags.length === 2 && cover.includes("loading = 'lazy'") && cover.includes('loading={loading}'));
 
 console.log('background controller input cannot relaunch a library game');
 check('the main gamepad window must be visible, focused, and not yield to the overlay', /mayHandleGamepadInput\([\s\S]*?document\.visibilityState === 'visible'[\s\S]*?document\.hasFocus\(\)/.test(gamepad));

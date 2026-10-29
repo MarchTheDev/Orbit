@@ -16,7 +16,7 @@ import type { Game, Settings } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { inLibraryShelf } from '../utils/library';
 import { cn } from '../utils/cn';
-import { Cover } from './ui/Cover';
+import { Cover, warmCover, warmImage } from './ui/Cover';
 import { Logo } from './ui/Logo';
 import { TvDetails } from './TvDetails';
 import { MusicButton } from './MusicButton';
@@ -121,20 +121,24 @@ function Backdrop({ game }: { game: Game }) {
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {soft && (
         <img
-          key={`soft-${game.id}`}
           src={soft}
           alt=""
           aria-hidden
+          loading="eager"
+          decoding="async"
+          draggable={false}
           className="absolute inset-0 h-full w-full object-cover opacity-45"
         />
       )}
       {src ? (
         <img
-          key={src}
           ref={shown}
           src={src}
           alt=""
           aria-hidden
+          loading="eager"
+          decoding="async"
+          draggable={false}
           onLoad={() => setLoaded(true)}
           onError={() => {
             setLoaded(false);
@@ -146,7 +150,7 @@ function Backdrop({ game }: { game: Game }) {
           )}
         />
       ) : (
-        <Cover game={game} className="absolute inset-0 size-full [&_span]:hidden" />
+        <Cover game={game} className="absolute inset-0 size-full [&_span]:hidden" fit="cover" loading="eager" />
       )}
       {/* The scrims. Everything over the picture is read against the darkest
           corner of it, and the picture fades into the rail rather than ending
@@ -227,6 +231,21 @@ export function TvMode({
   /** The game whose own page is open, when it is still one of the playable ones. */
   const detailed = detailId ? (list.find((game) => game.id === detailId) ?? null) : null;
   const playingNow = list.find((game) => game.id === runningId) ?? null;
+
+  // Decode the selected artwork and its neighbours before the rail reaches
+  // them. WebKitGTK otherwise threw away the old keyed image and decoded the
+  // new one on the same frame as the selection moved.
+  useEffect(() => {
+    if (list.length === 0) return;
+    for (const n of [at, (at + 1) % list.length, (at + list.length - 1) % list.length]) {
+      const game = list[n];
+      if (!game) continue;
+      warmCover(game);
+      const first = backdropsFor(game)[0];
+      warmImage(first);
+      warmImage(game.meta?.headerUrl ?? game.meta?.backgroundUrl);
+    }
+  }, [at, list]);
 
   const rail = useRef<HTMLUListElement>(null);
   const coverOf = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
@@ -571,6 +590,8 @@ export function TvMode({
                 <Cover
                   game={active}
                   className="orbit-hero-enter hidden h-[clamp(7.5rem,26vh,14rem)] w-[clamp(5.4rem,18vh,10.2rem)] shrink-0 rounded-2xl border border-white/15 shadow-[0_28px_70px_rgba(0,0,0,.7)] md:flex [&_span]:text-3xl"
+                  fit="cover"
+                  loading="eager"
                 />
                 <div className="min-w-0 max-w-3xl pb-1">
                   <p className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.32em] text-accent">
@@ -703,6 +724,8 @@ export function TvMode({
                     <li key={game.id} className="shrink-0">
                       <button
                         data-tv-cover={n}
+                        draggable={false}
+                        onDragStart={(event) => event.preventDefault()}
                         onFocus={() => setIndex(n)}
                         onClick={() => {
                           // The same button is the mouse's "look at this" and
@@ -731,7 +754,7 @@ export function TvMode({
                             `index.css` draws it against the theme's accent for
                             hover, selection and the pad alike. */}
                         <span className="relative block aspect-[2/3] w-full overflow-hidden rounded-xl">
-                          <Cover game={game} className="size-full [&_span]:text-xl" />
+                          <Cover game={game} className="size-full [&_span]:text-xl" fit="cover" />
                           {game.id === runningId && (
                             <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">
                               <span className="size-1 animate-pulse rounded-full bg-black/70" />
