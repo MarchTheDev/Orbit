@@ -32,6 +32,7 @@ import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, typ
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
+import { scrollSettingsSectionToTop } from '../utils/settingsNavigation';
 import {
   cloudAutoOn,
   dataDir,
@@ -587,7 +588,9 @@ function OverlaySettings({
       />
       <ShortcutEditor
         value={overlay?.shortcuts}
-        onChange={(shortcuts) => setOverlay({ shortcuts })}
+        onChange={(shortcuts, resetOpenShortcut) =>
+          setOverlay({ shortcuts, ...(resetOpenShortcut === undefined ? {} : { openShortcut: resetOpenShortcut }) })
+        }
         openShortcut={overlay?.openShortcut ?? 'Alt+X'}
         onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
       />
@@ -851,7 +854,7 @@ export function SettingsView({
   const jump = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    scrollSettingsSectionToTop(el);
     el.classList.add('settings-spot');
     window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
   };

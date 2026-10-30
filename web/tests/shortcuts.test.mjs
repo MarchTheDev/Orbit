@@ -168,15 +168,19 @@ check('the file is named in the player\'s own time, told once by the page',
 check('a panel on screen draws that toast itself, and refreshes its gallery',
   rust.includes('pub const CAPTURED_EVENT: &str = "overlay-captured"') &&
     readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes("'overlay-captured'"));
-check('a click on empty glass reaches the game without putting the panel away',
+check('an open overlay always restores native pointer delivery, while resting pins keep click-through',
   !readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes(
     "overlayHide('a click on an empty spot')",
   ) &&
-    // The same hit-test protects interactive boxes in the open and resting
-    // states; a press beginning in a box remains captured until release.
+    /if open \{[\s\S]{0,450}IGNORE\.store\(false, Ordering::SeqCst\);[\s\S]{0,120}set_ignore_cursor_events\(false\)/.test(rust) &&
     /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust) &&
     /fn cursor_over_hits[\s\S]{0,250}let x = cursor\.x;[\s\S]{0,60}let y = cursor\.y;/.test(rust) &&
     !/fn cursor_over_hits[\s\S]{0,350}outer_position\(\)/.test(rust));
+check('shortcut capture updates its local draft immediately and Reset all writes both settings together',
+  settingsUi.includes('setOpenShortcutDraft(combo)') &&
+    settingsUi.includes('setShortcuts(updated)') &&
+    /onChange\(defaults, 'Alt\+X'\)/.test(settingsUi) &&
+    /setOverlay\(\{ shortcuts, \...\(resetOpenShortcut === undefined \? \{\} : \{ openShortcut: resetOpenShortcut \}\) \}\)/.test(settingsView));
 check('the overlay-opening keyboard shortcut is configurable without changing Start + Select',
   settingsView.includes("openShortcut={overlay?.openShortcut ?? 'Alt+X'}") &&
     settingsView.includes('onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}') &&

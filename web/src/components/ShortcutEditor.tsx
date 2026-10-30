@@ -39,11 +39,14 @@ export function ShortcutEditor({
   onOpenShortcutChange,
 }: {
   value: OverlayShortcuts | undefined;
-  onChange: (next: OverlayShortcuts) => void;
+  onChange: (next: OverlayShortcuts, resetOpenShortcut?: string) => void;
   openShortcut?: string;
   onOpenShortcutChange?: (next: string) => void;
 }) {
-  const shortcuts = normalizeShortcuts(value);
+  const [shortcuts, setShortcuts] = useState(() => normalizeShortcuts(value));
+  const [openShortcutDraft, setOpenShortcutDraft] = useState(openShortcut);
+  useEffect(() => setShortcuts(normalizeShortcuts(value)), [value]);
+  useEffect(() => setOpenShortcutDraft(openShortcut), [openShortcut]);
   /** The action whose controller chord is open for choosing. */
   const [open, setOpen] = useState<string | null>(null);
   /** The action whose keyboard shortcut is being recorded. */
@@ -62,10 +65,16 @@ export function ShortcutEditor({
     return () => window.clearTimeout(timer);
   }, [value]);
 
-  const setChord = (action: keyof OverlayShortcuts['pad'], next: PadChord) =>
-    onChange({ ...shortcuts, pad: { ...shortcuts.pad, [action]: next } });
-  const setKey = (action: keyof OverlayShortcuts['keys'], next: string) =>
-    onChange({ ...shortcuts, keys: { ...shortcuts.keys, [action]: next } });
+  const setChord = (action: keyof OverlayShortcuts['pad'], next: PadChord) => {
+    const updated = { ...shortcuts, pad: { ...shortcuts.pad, [action]: next } };
+    setShortcuts(updated);
+    onChange(updated);
+  };
+  const setKey = (action: keyof OverlayShortcuts['keys'], next: string) => {
+    const updated = { ...shortcuts, keys: { ...shortcuts.keys, [action]: next } };
+    setShortcuts(updated);
+    onChange(updated);
+  };
 
   // The recorded combination. On the window rather than the button, because the
   // focus is wherever the player left it and the press is the thing being read.
@@ -83,15 +92,19 @@ export function ShortcutEditor({
       // Backspace clears rather than binding a key that deletes: a shortcut
       // that cannot be pressed on its own is not a shortcut.
       if (event.key === 'Backspace' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        if (listeningRef.current === 'toggle') onOpenShortcutChange?.('');
-        else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], '');
+        if (listeningRef.current === 'toggle') {
+          setOpenShortcutDraft('');
+          onOpenShortcutChange?.('');
+        } else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], '');
         setListening(null);
         return;
       }
       const combo = shortcutFromEvent(event);
       if (!combo) return;
-      if (listeningRef.current === 'toggle') onOpenShortcutChange?.(combo);
-      else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], combo);
+      if (listeningRef.current === 'toggle') {
+        setOpenShortcutDraft(combo);
+        onOpenShortcutChange?.(combo);
+      } else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], combo);
       setListening(null);
     };
     window.addEventListener('keydown', onKey, true);
@@ -99,8 +112,12 @@ export function ShortcutEditor({
   }, [listening, onOpenShortcutChange]);
 
   const reset = () => {
-    onChange(normalizeShortcuts(DEFAULT_SHORTCUTS));
-    onOpenShortcutChange?.('Alt+X');
+    const defaults = normalizeShortcuts(DEFAULT_SHORTCUTS);
+    setShortcuts(defaults);
+    setOpenShortcutDraft('Alt+X');
+    // Reset both shortcut groups in one settings write. Two queued patches built
+    // from the same old overlay object could otherwise overwrite one another.
+    onChange(defaults, 'Alt+X');
   };
 
   return (
@@ -127,7 +144,7 @@ export function ShortcutEditor({
         <button
           type="button"
           onClick={() => setListening(listening === 'toggle' ? null : 'toggle')}
-          aria-label={`Open overlay keyboard shortcut: ${keyLabel(openShortcut)}`}
+          aria-label={`Open overlay keyboard shortcut: ${keyLabel(openShortcutDraft)}`}
           className={cn(
             'flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
             listening === 'toggle'
@@ -137,7 +154,7 @@ export function ShortcutEditor({
         >
           <span className="flex min-w-0 items-center gap-1.5">
             <Keyboard className="size-3.5 shrink-0 opacity-70" />
-            <span className="truncate font-mono">{listening === 'toggle' ? 'Press a key…' : keyLabel(openShortcut)}</span>
+            <span className="truncate font-mono">{listening === 'toggle' ? 'Press a key…' : keyLabel(openShortcutDraft)}</span>
           </span>
           {listening === 'toggle' && <span aria-hidden className="text-[10px] uppercase tracking-wider opacity-60">esc</span>}
         </button>

@@ -50,6 +50,7 @@ import {
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { desktopOs } from './utils/platform';
+import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
@@ -1138,9 +1139,8 @@ export default function App() {
    * Scroll to a requested Settings card after the new page has committed.
    *
    * Two animation frames are more reliable than a fixed timeout: the first
-   * renders Settings, the next lets layout settle before the scroll position is
-   * calculated. The card's scroll margin leaves room below the sticky top bar
-   * and the quick-jump row.
+   * renders Settings, the next lets layout settle before the shared scroll
+   * helper measures the app scroller and the sticky category bar.
    */
   useEffect(() => {
     if (page !== 'settings' || !settingsJump) return;
@@ -1149,7 +1149,7 @@ export default function App() {
       secondFrame = window.requestAnimationFrame(() => {
         const card = document.getElementById(settingsJump.id);
         if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          scrollSettingsSectionToTop(card);
           card.classList.add('settings-spot');
           window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
         }

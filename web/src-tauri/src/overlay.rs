@@ -4117,27 +4117,36 @@ pub fn show_pins(app: &AppHandle) {
 /// `cursor_position()` returns.
 fn sync_click_through(app: &AppHandle) {
     let open = OPEN.load(Ordering::SeqCst);
-    if !open && !RESTING.load(Ordering::SeqCst) {
+    let resting = RESTING.load(Ordering::SeqCst);
+    if !open && !resting {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else { return };
-    // The glass between boxes is never a button. Let clicks there reach the
-    // game instead of treating them as a request to hide the panel; only the
-    // boxes and menus the page reported take the pointer. This is true while
-    // open as well as while resting against pins, so the two states have the
-    // same reliable hover and click behaviour.
-    //
-    // A press that began in the panel keeps the pointer until it is let go: a
-    // box follows the cursor while it is dragged, and half a drag would be
-    // worse than no drag at all.
+
+    // An opened overlay must always receive pointer input. The panel spans the
+    // monitor, and a hit-test-driven ignore-cursor toggle can leave WebKitGTK
+    // click-through even over buttons on transparent surfaces. Letting the
+    // full-screen window receive events while open is the reliable interactive
+    // state; only the resting, pinned panel uses regional click-through.
+    if open {
+        // Do not trust the cached flag here: platform state can outlive or fail
+        // to mirror it (notably when a transparent WebKit window has just been
+        // remapped). Explicitly restore native pointer delivery on every guard
+        // pass while the interactive panel is open.
+        IGNORE.store(false, Ordering::SeqCst);
+        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_focusable(true);
+        return;
+    }
+
+    // A resting panel has only its pins. Let everything else through to the
+    // desktop, while holding a drag that started on one of those pins.
     let ignore = !HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window);
     if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
         return;
     }
     let _ = window.set_ignore_cursor_events(ignore);
-    // A resting panel is not a thing to type into. The open one keeps its
-    // keyboard wherever the pointer is: Escape has to reach it.
-    let _ = window.set_focusable(!ignore || open);
+    let _ = window.set_focusable(!ignore);
 }
 
 fn cursor_over_hits(window: &tauri::WebviewWindow) -> bool {
