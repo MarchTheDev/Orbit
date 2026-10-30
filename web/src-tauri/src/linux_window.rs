@@ -230,14 +230,29 @@ fn publish_wayland_app_id(window: &gtk::Window) {
     }
 }
 
-/// Set the name KWin will look up, then make sure that lookup has a file.
+/// Whether WebKit needs its DMA-BUF renderer disabled for this session.
 ///
-/// Call this before GTK is initialised. `gtk_init` only fills the program
-/// name when it is still empty, so a later call is too late for the first
-/// window.
+/// The Arch package uses the host WebKitGTK just like the AppImage does. On
+/// Wayland with NVIDIA, the default DMA-BUF path can leave a live WebView blank;
+/// the AppImage launcher already avoids that path. Apply the same narrowly
+/// targeted default to installed builds, while keeping the user's explicit
+/// choice and every other graphics stack untouched.
+fn needs_webkit_dmabuf_fallback(wayland: bool, nvidia: bool, user_setting: bool) -> bool {
+    wayland && nvidia && !user_setting
+}
+
+/// Prepare platform details before GTK and WebKit are initialised.
 pub fn prepare() {
     glib::set_prgname(Some("com.orbit.launcher"));
     publish_session_icon();
+    if needs_webkit_dmabuf_fallback(
+        wayland_backend(),
+        nvidia_driver(),
+        std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some(),
+    ) {
+        eprintln!("Orbit: using WebKit's non-DMA-BUF renderer for Wayland with NVIDIA; set WEBKIT_DISABLE_DMABUF_RENDERER=0 to override");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
 }
 
 /// Drop a desktop entry the compositor can match to the application id.
@@ -483,7 +498,15 @@ fn park(window: &gtk::Window) {
 
 #[cfg(test)]
 mod tests {
-    use super::session_desktop_entry;
+    use super::{needs_webkit_dmabuf_fallback, session_desktop_entry};
+
+    #[test]
+    fn the_webkit_fallback_is_only_for_wayland_with_nvidia_and_respects_override() {
+        assert!(needs_webkit_dmabuf_fallback(true, true, false));
+        assert!(!needs_webkit_dmabuf_fallback(false, true, false));
+        assert!(!needs_webkit_dmabuf_fallback(true, false, false));
+        assert!(!needs_webkit_dmabuf_fallback(true, true, true));
+    }
 
     #[test]
     fn the_titlebar_icon_is_a_theme_name() {
