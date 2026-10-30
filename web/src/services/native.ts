@@ -1422,6 +1422,7 @@ export function overlayConfigure(options: {
   screenshotDirectory: string;
   recordingDirectory: string;
   replayDirectory: string;
+  gameOnly: boolean;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
 }

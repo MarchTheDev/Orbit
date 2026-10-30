@@ -124,6 +124,8 @@ console.log('the desktop side reads the same shape');
 const rust = readFileSync(new URL('../src-tauri/src/overlay.rs', import.meta.url), 'utf8');
 const settingsUi = readFileSync(new URL('../src/components/ShortcutEditor.tsx', import.meta.url), 'utf8');
 const settingsView = readFileSync(new URL('../src/components/SettingsView.tsx', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const nativeService = readFileSync(new URL('../src/services/native.ts', import.meta.url), 'utf8');
 const types = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
 check('the pad chords come from the settings, not from constants in the pad loop',
   rust.includes('let shortcuts = lock().shortcuts.clone();') &&
@@ -176,11 +178,22 @@ check('an open overlay always restores native pointer delivery, while resting pi
     /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust) &&
     /fn cursor_over_hits[\s\S]{0,250}let x = cursor\.x;[\s\S]{0,60}let y = cursor\.y;/.test(rust) &&
     !/fn cursor_over_hits[\s\S]{0,350}outer_position\(\)/.test(rust));
-check('shortcut capture updates its local draft immediately and Reset all writes both settings together',
+check('shortcut capture keeps its local draft instead of echoing a stale parent value',
   settingsUi.includes('setOpenShortcutDraft(combo)') &&
     settingsUi.includes('setShortcuts(updated)') &&
-    /onChange\(defaults, 'Alt\+X'\)/.test(settingsUi) &&
+    !settingsUi.includes('useEffect(() => setOpenShortcutDraft(openShortcut)'));
+check('Reset all writes capture and opening shortcuts together',
+  /onChange\(defaults, 'Alt\+X'\)/.test(settingsUi) &&
     /setOverlay\(\{ shortcuts, \...\(resetOpenShortcut === undefined \? \{\} : \{ openShortcut: resetOpenShortcut \}\) \}\)/.test(settingsView));
+check('game-only mode defaults off, blocks desktop opens, and still allows closing',
+  settingsView.includes('checked={overlay?.gameOnly === true}') &&
+    types.includes('gameOnly?: boolean') &&
+    appSource.includes('gameOnly: overlay?.gameOnly === true') &&
+    nativeService.includes('gameOnly: boolean') &&
+    rust.includes('game_only: false') &&
+    rust.includes('game_only_blocks_open(game_only, playing, is_open())') &&
+    rust.includes('game_only && !playing && !already_open') &&
+    /pub fn show_pins[\s\S]{0,450}game_only && !playing/.test(rust));
 check('the overlay-opening keyboard shortcut is configurable without changing Start + Select',
   settingsView.includes("openShortcut={overlay?.openShortcut ?? 'Alt+X'}") &&
     settingsView.includes('onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}') &&

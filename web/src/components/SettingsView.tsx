@@ -434,6 +434,12 @@ function OverlaySettings({
         hint="Off means your configured keyboard shortcut and Start + Select do nothing."
       />
       <Checkbox
+        checked={overlay?.gameOnly === true}
+        onChange={(on) => setOverlay({ gameOnly: on })}
+        label="Only open while a game session is active"
+        hint="Off by default. When on, the keyboard shortcut and Start + Select cannot open the overlay from the desktop. They can still close it. A game must be running in an Orbit session."
+      />
+      <Checkbox
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep the last few seconds while a game is playing"

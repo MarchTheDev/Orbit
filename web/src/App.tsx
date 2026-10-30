@@ -685,6 +685,7 @@ export default function App() {
       screenshotDirectory: overlay?.screenshotDirectory ?? '',
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
+      gameOnly: overlay?.gameOnly === true,
     });
   }, [settings]);
 

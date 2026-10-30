@@ -44,9 +44,11 @@ export function ShortcutEditor({
   onOpenShortcutChange?: (next: string) => void;
 }) {
   const [shortcuts, setShortcuts] = useState(() => normalizeShortcuts(value));
+  // This editor owns the optimistic draft for its whole mounted lifetime. The
+  // parent prop can lag behind a queued settings save; mirroring it in an effect
+  // made a second capture visibly revert until Settings was reopened.
   const [openShortcutDraft, setOpenShortcutDraft] = useState(openShortcut);
   useEffect(() => setShortcuts(normalizeShortcuts(value)), [value]);
-  useEffect(() => setOpenShortcutDraft(openShortcut), [openShortcut]);
   /** The action whose controller chord is open for choosing. */
   const [open, setOpen] = useState<string | null>(null);
   /** The action whose keyboard shortcut is being recorded. */

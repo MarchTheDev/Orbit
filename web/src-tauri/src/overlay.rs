@@ -259,6 +259,8 @@ struct Live {
     note: String,
     /// The keyboard combination that opens or closes the panel.
     open_shortcut: Option<String>,
+    /// Refuse to open unless an Orbit game session is active.
+    game_only: bool,
     /// The capture shortcuts, as the settings page last wrote them.
     shortcuts: Shortcuts,
     /// The colours of the player's theme, for the native card.
@@ -323,6 +325,7 @@ struct Step {
 static LIVE: Mutex<Live> = Mutex::new(Live {
     shortcuts: Shortcuts::shipped(),
     open_shortcut: None,
+    game_only: false,
     enabled: true,
     replay: true,
     seconds: 30,
@@ -634,10 +637,15 @@ pub fn apply_settings(value: &Value) {
         .map(str::trim)
         .unwrap_or("Alt+X")
         .to_string();
+    let game_only = overlay
+        .and_then(|item| item.get("gameOnly"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     {
         let mut live = lock();
         live.shortcuts = shortcuts;
         live.open_shortcut = Some(open_shortcut);
+        live.game_only = game_only;
     }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
@@ -679,7 +687,7 @@ pub fn apply_settings(value: &Value) {
     let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
-    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory, game_only);
     // `configure` had no app handle. The saved shortcuts are registered here,
     // after `configure` has set whether the overlay is enabled. At first run,
     // `install` registers them once the app handle exists.
@@ -701,6 +709,7 @@ pub fn configure(
     screenshot_directory: &str,
     recording_directory: &str,
     replay_directory: &str,
+    game_only: bool,
 ) {
     let seconds = clamp_seconds(seconds);
     let lengths = lengths.map(|items| {
@@ -741,6 +750,7 @@ pub fn configure(
         live.quality = quality;
         live.fps = fps;
         live.ffmpeg = ffmpeg.to_string();
+        live.game_only = game_only;
         let stop = live.playing && (!replay || !enabled);
         let restart = must_restart && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
@@ -1842,12 +1852,24 @@ fn watch(app: AppHandle) {
     }
 }
 
+fn game_only_blocks_open(game_only: bool, playing: bool, already_open: bool) -> bool {
+    game_only && !playing && !already_open
+}
+
 fn toggle_on_main(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) {
         return;
     }
-    if !lock().enabled {
+    let (enabled, game_only, playing) = {
+        let live = lock();
+        (live.enabled, live.game_only, live.playing)
+    };
+    if !enabled {
         tell(app, "overlay-toast", "The overlay is off. Turn it on in Settings.");
+        return;
+    }
+    if game_only_blocks_open(game_only, playing, is_open()) {
+        note_panel("the overlay shortcut was ignored because game-only mode is on and no game session is active");
         return;
     }
     let Some(window) = ensure_window(app) else {
@@ -2328,6 +2350,10 @@ fn guard_panel(app: &AppHandle) {
         let _ = window.emit("overlay-shown", ());
         return;
     }
+    // Reassert the topmost hint while open. Some compositors drop the hint
+    // after a click hands focus back to a fullscreen game; without this, the
+    // panel looks as if it closed even though its native open state is intact.
+    let _ = window.set_always_on_top(true);
     // A window whose web view has gone is an empty frame. There is nothing to
     // see in it and nothing answers inside it, which is why it is checked here
     // and not only by the page's own heartbeat.
@@ -4101,7 +4127,14 @@ pub fn set_hold(on: bool) {
 
 /// A pinned box should already be on screen when Orbit opens, without the opening shortcut.
 pub fn show_pins(app: &AppHandle) {
-    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) || !lock().enabled {
+    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+        return;
+    }
+    let (enabled, game_only, playing) = {
+        let live = lock();
+        (live.enabled, live.game_only, live.playing)
+    };
+    if !enabled || (game_only && !playing) {
         return;
     }
     HAS_PINS.store(true, Ordering::SeqCst);
@@ -4109,12 +4142,12 @@ pub fn show_pins(app: &AppHandle) {
 }
 
 
-/// Let the screen through wherever the panel has nothing to click.
+/// Keep an open panel interactive; let the screen through around resting pins.
 ///
-/// The panel covers the whole monitor, so clicks in its empty glass should
-/// reach the game or desktop behind it. Only page-reported boxes take the
-/// pointer; the hit rectangles are window-local physical pixels, just like
-/// `cursor_position()` returns.
+/// While open, the full-screen window must receive pointer input so clicking a
+/// box cannot pass through to a game and make the panel appear to disappear.
+/// A resting panel has only its pins: those page-reported hit rectangles are
+/// window-local physical pixels, just like `cursor_position()` returns.
 fn sync_click_through(app: &AppHandle) {
     let open = OPEN.load(Ordering::SeqCst);
     let resting = RESTING.load(Ordering::SeqCst);
@@ -4267,6 +4300,14 @@ fn read_xinput(slot: &mut u32) -> Option<(Vec<bool>, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_only_blocks_desktop_open_but_never_prevents_closing() {
+        assert!(game_only_blocks_open(true, false, false));
+        assert!(!game_only_blocks_open(true, true, false));
+        assert!(!game_only_blocks_open(true, false, true));
+        assert!(!game_only_blocks_open(false, false, false));
+    }
 
     #[test]
     fn a_desktop_capture_does_not_reuse_the_last_game_title() {

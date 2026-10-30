@@ -746,6 +746,8 @@ export interface Settings {
      * an empty string disables the keyboard shortcut while Start+Select remains.
      */
     openShortcut?: string;
+    /** Require an active Orbit game session before opening the overlay. */
+    gameOnly?: boolean;
     /** The capture shortcuts for the pad and keyboard. */
     shortcuts?: OverlayShortcuts;
   };

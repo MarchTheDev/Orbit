@@ -236,11 +236,11 @@ check(
     overlaySource.includes('const REVIVALS: usize = 3') &&
     /fn guard_panel[\s\S]{0,900}let Some\(window\) = app\.get_webview_window\(WINDOW\) else \{[\s\S]{0,200}revive\(app\)/.test(overlaySource) &&
     /fn guard_panel[\s\S]{0,1600}if !window\.is_visible\(\)[\s\S]{0,400}window\.show\(\)/.test(overlaySource) &&
-    /fn guard_panel[\s\S]{0,2600}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,3000}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
     // A window with no web view in it is an empty frame, not a closed panel.
     overlaySource.includes('fn webview_alive(window: &tauri::WebviewWindow) -> bool') &&
     overlaySource.includes('GetWindow(handle, GW_CHILD)') &&
-    /fn guard_panel[\s\S]{0,2200}if !webview_alive\(&window\) \{[\s\S]{0,160}revive\(app\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,3000}if !webview_alive\(&window\) \{[\s\S]{0,160}revive\(app\)/.test(overlaySource) &&
     /fn revive[\s\S]{0,1400}show_window\(app\)/.test(overlaySource) &&
     libSource.includes('fn overlay_alive() {') &&
     nativeSource.includes('export function overlayAlive()') &&
@@ -332,33 +332,27 @@ check(
     overlay.split("overlayHide('the close button')").length - 1 === 2,
 );
 check(
-  'clicking the glass does not close the overlay or steal a game click',
-  // Empty space has no pointer handler. The native side lets it through in both
-  // states, while holding the pointer only over the boxes and menus.
+  'clicking empty glass does not dismiss the panel',
   !overlay.includes('onPointerDown={onBackdrop}') &&
     !overlay.includes("overlayHide('a click on an empty spot')") &&
-    /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(overlaySource),
+    /if open \{[\s\S]{0,450}set_ignore_cursor_events\(false\)/.test(overlaySource),
 );
 check(
-  'an open or resting panel answers only over its interactive surfaces',
-  overlay.includes('function openHits()') &&
-    /function openHits\(\)[\s\S]{0,600}querySelectorAll<HTMLElement>\('\[data-overlay-hit="1"\]'\)/.test(overlay) &&
-    // Every surface with something to click says so: the boxes, the boxes
-    // menu and the two floating layers shared with the library.
+  'the open panel keeps pointer input; only resting pins use click-through hit regions',
+  !overlay.includes('function openHits()') &&
+    // The boxes and floating menus remain ordinary interactive HTML controls.
     /data-overlay-box=\{id\}\n      data-overlay-hit="1"/.test(overlay) &&
     overlay.includes('data-overlay-hit="1" className="pointer-events-auto absolute left-1/2') &&
     menuSource.includes('data-overlay-hit="1"') &&
     modalSource.includes('data-overlay-hit="1"') &&
-    // Both states report the same way, so the native side always knows.
-    overlay.includes('void overlayHits(resting ? physicalHits() : openHits())') &&
+    overlay.includes('overlayHits(resting ? physicalHits() : [])') &&
     nativeSource.includes('export function overlayHold(on: boolean): Promise<void> {') &&
     overlaySource.includes('pub fn set_hold(on: bool)') &&
     libSource.includes('fn overlay_hold(on: bool)') &&
-    // The press keeps the pointer: half a drag is worse than none.
+    // A drag that starts on a resting pin remains captured until release.
     overlaySource.includes('!HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window)') &&
-    // Driven in both states, not only while the panel rests against its pins.
     /if \(OPEN\.load\(Ordering::SeqCst\) \|\| RESTING\.load\(Ordering::SeqCst\)\)/.test(overlaySource) &&
-    /fn sync_click_through[\s\S]{0,1600}let _ = window\.set_ignore_cursor_events\(ignore\);/.test(overlaySource),
+    /guard_panel[\s\S]{0,1700}set_always_on_top\(true\)/.test(overlaySource),
 );
 check(
   'the panel history keeps the reason instead of being overwritten by the close',

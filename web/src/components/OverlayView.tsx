@@ -239,31 +239,6 @@ function gigabytes(bytes: number, roundTotal = false): string {
   return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
-/**
- * Where the open panel has something to click, in physical screen pixels.
- *
- * The panel covers the whole screen, so on Windows it also takes every click
- * on it. A player who opens the overlay over a game - or over the desktop -
- * then cannot click anything else until it is closed. Only the places with
- * something to click are handed to the native side, which lets the rest of
- * the screen through to whatever is behind the panel.
- */
-function openHits(): { x: number; y: number; w: number; h: number }[] {
-  const scale = window.devicePixelRatio || 1;
-  // A few pixels of slack, so the edge of a box does not flicker between
-  // taking the pointer and letting it go.
-  const slack = 6;
-  return Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-hit="1"]')).map((node) => {
-    const rect = node.getBoundingClientRect();
-    return {
-      x: rect.left * scale - slack,
-      y: rect.top * scale - slack,
-      w: rect.width * scale + slack * 2,
-      h: rect.height * scale + slack * 2,
-    };
-  });
-}
-
 function physicalHits(): { x: number; y: number; w: number; h: number }[] {
   const scale = window.devicePixelRatio || 1;
   return Array.from(document.querySelectorAll<HTMLElement>('[data-pin="1"]')).map((node) => {
@@ -990,16 +965,12 @@ export function OverlayView() {
     return () => window.removeEventListener('resize', fit);
   }, [ready, linux]);
 
-  // Where the panel has something to click, told to the native side.
-  //
-  // The panel covers the whole screen, so on Windows it also takes every click
-  // on it. Open, that is the wrong bargain: a player who opens the overlay
-  // cannot click anything else until it is closed. Only the boxes and the
-  // floating menus are reported, and the rest of the screen is let through to
-  // whatever is behind the panel. A resting panel reports its pins the same way.
+  // Resting pins are the only native hit regions. While open, the full window
+  // receives pointer input; sending stale box rectangles must never put it back
+  // into platform click-through mode after a click or a rerender.
   useEffect(() => {
     if (!ready || !awake) return;
-    const send = () => void overlayHits(resting ? physicalHits() : openHits());
+    const send = () => void overlayHits(resting ? physicalHits() : []);
     send();
     const timer = window.setInterval(send, 250);
     window.addEventListener('resize', send);
@@ -1083,6 +1054,7 @@ export function OverlayView() {
       screenshotDirectory: overlay?.screenshotDirectory ?? '',
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
+      gameOnly: overlay?.gameOnly === true,
     });
     setStatus((current) => (current ? { ...current, seconds } : current));
   };
@@ -1284,8 +1256,8 @@ export function OverlayView() {
 
   return (
     <div className="relative h-full text-white">
-      {/* The native window passes pointer input through the empty glass and
-          keeps it for the boxes. A click on the game never dismisses the panel;
+      {/* When open, the native window receives clicks across the screen so the
+          boxes remain interactive. Empty glass does not dismiss the panel;
           Escape, the pad's B, the close buttons, and the hotkey are deliberate
           ways out. */}
       {!resting && <div className="pointer-events-none absolute inset-0 bg-black/45" />}

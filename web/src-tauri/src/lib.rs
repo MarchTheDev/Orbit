@@ -669,6 +669,7 @@ fn overlay_configure(
     screenshot_directory: String,
     recording_directory: String,
     replay_directory: String,
+    game_only: bool,
 ) {
     overlay::configure(
         Some(&app),
@@ -682,6 +683,7 @@ fn overlay_configure(
         &screenshot_directory,
         &recording_directory,
         &replay_directory,
+        game_only,
     );
 }
 
