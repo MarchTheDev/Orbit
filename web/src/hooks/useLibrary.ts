@@ -37,6 +37,8 @@ export function useLibrary() {
   const [games, setGames] = useState<Game[]>([]);
   const [settings, setSettingsState] = useState<Settings | null>(null);
   const [ready, setReady] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
   /** The write queue, so two quick edits cannot race each other. */
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   /**
@@ -50,26 +52,37 @@ export function useLibrary() {
 
   useEffect(() => {
     let alive = true;
+    setStartupError(null);
     void (async () => {
-      const [loaded, savedSettings] = await Promise.all([listGames(), loadSettings()]);
-      if (!alive) return;
-      const loadedSettings = savedSettings.theme === 'aurora'
-        ? { ...savedSettings, theme: 'rubellite' }
-        : savedSettings;
-      if (loadedSettings !== savedSettings) void saveSettings(loadedSettings);
-      gamesRef.current = loaded;
-      setGames(loaded);
-      setSettingsState(loadedSettings);
-      applyTheme(loadedSettings.theme);
-      applyFont(loadedSettings.fontFamily ?? 'system');
-      // The native cards are drawn outside the page, so they get the same
-      // colours the theme just put on the page.
-      void overlayTheme(nativePalette(loadedSettings.theme));
-      setReady(true);
+      try {
+        const [loaded, savedSettings] = await Promise.all([listGames(), loadSettings()]);
+        if (!alive) return;
+        const loadedSettings = savedSettings.theme === 'aurora'
+          ? { ...savedSettings, theme: 'rubellite' }
+          : savedSettings;
+        if (loadedSettings !== savedSettings) void saveSettings(loadedSettings);
+        gamesRef.current = loaded;
+        setGames(loaded);
+        setSettingsState(loadedSettings);
+        applyTheme(loadedSettings.theme);
+        applyFont(loadedSettings.fontFamily ?? 'system');
+        // The native cards are drawn outside the page, so they get the same
+        // colours the theme just put on the page.
+        void overlayTheme(nativePalette(loadedSettings.theme));
+        setReady(true);
+      } catch (error) {
+        if (!alive) return;
+        setStartupError(error instanceof Error ? error.message : String(error));
+      }
     })();
     return () => {
       alive = false;
     };
+  }, [startupAttempt]);
+
+  const retryStartup = useCallback(() => {
+    setStartupError(null);
+    setStartupAttempt((attempt) => attempt + 1);
   }, []);
 
   const reload = useCallback(async () => {
@@ -211,7 +224,7 @@ export function useLibrary() {
       .catch(console.error);
   }, []);
 
-  return { games, settings, setSettings, updateGame, adoptNotes, addGame, addGames, removeGame, reload, flush, resetEverything, ready };
+  return { games, settings, setSettings, updateGame, adoptNotes, addGame, addGames, removeGame, reload, flush, resetEverything, ready, startupError, retryStartup };
 }
 
 export type Library = ReturnType<typeof useLibrary>;

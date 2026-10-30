@@ -26,6 +26,7 @@ const checks = [
   'tests/move-job.test.mjs',
   'tests/session-error.test.mjs',
   'tests/storage-open.test.mjs',
+  'tests/startup-diagnostic.test.mjs',
   'tests/reader.test.mjs',
   'tests/editor.test.mjs',
   'tests/gameTitle.test.mjs',

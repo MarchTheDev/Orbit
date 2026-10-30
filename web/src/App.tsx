@@ -113,6 +113,8 @@ export default function App() {
     flush,
     resetEverything,
     ready,
+    startupError,
+    retryStartup,
   } = useLibrary();
   const [page, setPage] = useState<Page>('library');
   /** TV mode: the library fullscreen, read from a couch. */
@@ -1205,6 +1207,36 @@ export default function App() {
 
   const showHome = page === 'library' && !query;
 
+  // A native startup command rejecting used to leave only the dark empty
+  // background on screen. Keep its real error visible and give the player a
+  // retry instead of making a broken launch indistinguishable from a blank app.
+  if (startupError) {
+    return (
+      <main className="grid h-full place-items-center overflow-auto bg-bg p-6 text-fg">
+        <section role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-panel p-7 shadow-2xl">
+          <div className="mb-5 flex items-center gap-3">
+            <Logo className="size-9 shrink-0" animated={false} />
+            <h1 className="text-2xl font-semibold">Orbit couldn’t finish starting</h1>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">
+            The library or settings request failed. The details below can help identify why this installation opened without its interface.
+          </p>
+          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-red-200">{startupError}</pre>
+          <button
+            type="button"
+            onClick={retryStartup}
+            className="mt-5 rounded-xl bg-accent px-5 py-2.5 font-semibold text-white hover:brightness-110"
+          >
+            Retry startup
+          </button>
+          <p className="mt-4 text-xs leading-relaxed text-muted">
+            If this repeats, launch <code>orbit</code> from a terminal and include its error output when reporting the problem.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   // Nothing can be drawn until the settings have loaded, which also decides the
   // theme. Every hook above has already run, so this is safe. While that
   // happens the opening is on screen, which is most of what it is for.
@@ -1464,7 +1496,7 @@ export default function App() {
       {/* Bottom left, the way the app talks to the player: out of the way of the
           player bar in the middle and the Stop button at the top right. It also
           sits above any dialog, because a "download is ready" that lands behind
-          the dialog it came from is a secret. */} 
+          the dialog it came from is a secret. */}
       <div className="pointer-events-none fixed bottom-4 left-4 z-[80] flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
         {toasts.map((t) => (
           <div

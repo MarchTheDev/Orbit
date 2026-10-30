@@ -1,11 +1,10 @@
 /**
- * The X11 entry point, and the four packages that have to carry it.
+ * The optional X11 entry point for packages that retain a manual fallback.
  *
  * `orbit-x11` is not a second build: it is the same binary with GDK_BACKEND set
- * before GDK starts. That makes the wiring the fragile part rather than the
- * code, because nothing fails loudly when a package quietly stops shipping the
- * wrapper — the menu entry just is not there. So every path that has to include
- * it is checked here: Arch, the deb, the rpm and the portable tarball.
+ * before GDK starts. Arch no longer ships a duplicate launcher: Orbit selects
+ * X11 itself on the Wayland/NVIDIA combination that needs it. The other Linux
+ * packages keep the manual fallback for desktops outside that automatic case.
  *
  * One sanctioned exception lives at the end of this file: on Wayland with the
  * proprietary NVIDIA driver the compositor quietly drops a see-through surface
@@ -51,6 +50,8 @@ check('it execs rather than waits', /^exec /m.test(wrapper));
 check('it passes arguments through', /\$\@/.test(wrapper));
 check('it is executable', (mode & 0o111) !== 0, `mode ${(mode & 0o777).toString(8)}`);
 check('it is a shell script, so no build step is needed', wrapper.startsWith('#!'));
+check('it does not recommend a blanket WebKit renderer toggle',
+  !wrapper.includes('WEBKIT_DISABLE_DMABUF_RENDERER=1') && !wrapper.includes('WEBKIT_DISABLE_COMPOSITING_MODE=1'));
 
 console.log('its menu entry');
 
@@ -65,9 +66,9 @@ check('it does not open a terminal', /^Terminal=false$/m.test(entry));
 console.log('every Linux package carries it');
 
 const pkgbuild = read('packaging', 'arch', 'PKGBUILD');
-check('Arch lists both in its sources', /source=\([^)]*'orbit-x11'[^)]*'orbit-x11\.desktop'[^)]*\)/.test(pkgbuild));
-check('Arch installs the wrapper executable', /install -Dm755 "\$srcdir\/orbit-x11" "\$pkgdir\/usr\/bin\/orbit-x11"/.test(pkgbuild));
-check('Arch installs the menu entry', /install -Dm644 "\$srcdir\/orbit-x11\.desktop" "\$pkgdir\/usr\/share\/applications\/orbit-x11\.desktop"/.test(pkgbuild));
+check('Arch ships only the regular Orbit launcher',
+  !pkgbuild.includes("'orbit-x11'") && !pkgbuild.includes("'orbit-x11.desktop'") &&
+    !pkgbuild.includes('/usr/bin/orbit-x11') && !pkgbuild.includes('/usr/share/applications/orbit-x11.desktop'));
 // makepkg refuses to build when these two arrays disagree, and it only finds
 // out in the release job.
 const list = (name) => (pkgbuild.match(new RegExp(`^${name}=\\((.*)\\)$`, 'm'))?.[1] ?? '')
@@ -96,9 +97,11 @@ for (const kind of ['deb', 'rpm']) {
 }
 
 const release = read('.github', 'workflows', 'release.yml');
-check('the Arch job copies both beside the PKGBUILD',
-  /cp packaging\/linux\/orbit-x11 "\$work\/orbit-x11"/.test(release) &&
-  /cp packaging\/linux\/orbit-x11\.desktop "\$work\/orbit-x11\.desktop"/.test(release));
+check('the Arch job checks and ships only the regular Orbit launcher',
+  /Check the single Orbit entry point reached the package/.test(release) &&
+    /usr\/bin\/orbit-x11\$\|applications\/orbit-x11/.test(release) &&
+    !/cp packaging\/linux\/orbit-x11 "\$work\/orbit-x11"/.test(release) &&
+    !/cp packaging\/linux\/orbit-x11\.desktop "\$work\/orbit-x11\.desktop"/.test(release));
 check('the portable tarball carries both',
   /cp packaging\/linux\/orbit-x11 "\$portable\/orbit-x11"/.test(release) &&
   /cp packaging\/linux\/orbit-x11\.desktop "\$portable\/orbit-x11\.desktop"/.test(release));
@@ -184,7 +187,7 @@ const unrunnable = run(write('unrunnable', listing('-rw-r--r--')));
 check('a wrapper that cannot be run fails', unrunnable.code === 1, unrunnable.out);
 check('it says why', /cannot be run/.test(unrunnable.out), unrunnable.out);
 
-for (const job of ['deb', 'rpm', 'Debian deb', 'Fedora rpm', 'Arch package']) {
+for (const job of ['deb', 'rpm', 'Debian deb', 'Fedora rpm']) {
   check(`the release workflow checks ${job}`, release.includes(`check-x11.sh "The ${job}"`));
 }
 check('it checks the portable tarball too', /orbit-x11\$' \| grep -q rwx/.test(release));

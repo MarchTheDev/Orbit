@@ -891,27 +891,9 @@ pub fn shutdown() {
 /// Hide and destroy the overlay window. Hiding is not enough: a hidden window
 /// is still a window, and that is what left the panel up after Orbit closed.
 pub fn close_panel(app: &AppHandle, why: &str) {
-    let open_for = SHOWN_AT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .map(|at| at.elapsed());
     if (OPEN.load(Ordering::SeqCst) || RESTING.load(Ordering::SeqCst)) && !why.is_empty() {
         // A close with no reason written down is a mystery by construction.
         note_panel(&format!("the panel was closed ({why})"));
-        // A panel put away within a blink of arriving did not leave by the
-        // player's choice, and the player is the only one who can say which of
-        // the ways away it took. It announces itself rather than waiting to be
-        // found in a Settings page nobody knew to open.
-        if let Some(elapsed) = open_for {
-            if elapsed < Duration::from_millis(2500) && !why.starts_with("Orbit") {
-                tell(
-                    app,
-                    "overlay-toast",
-                    &format!("The overlay closed after {:.1} s: {why}", elapsed.as_secs_f32()),
-                );
-                notify_close(elapsed, why);
-            }
-        }
     }
     OPEN.store(false, Ordering::SeqCst);
     RESTING.store(false, Ordering::SeqCst);
@@ -2181,24 +2163,8 @@ fn note_panel(text: &str) {
     }
 }
 
-/// A desktop notification naming what took the panel away, for the closes that
-/// happen mid-game: the main window's toast is behind a minimised window
-/// there, and a notification from the desktop shell is not.
-#[cfg(target_os = "linux")]
-fn notify_close(elapsed: Duration, why: &str) {
-    let _ = crate::process::command("notify-send")
-        .arg("--app-name=Orbit")
-        .arg(format!("Overlay closed after {:.1} s", elapsed.as_secs_f32()))
-        .arg(why)
-        .spawn();
-}
-
-#[cfg(not(target_os = "linux"))]
-fn notify_close(_: Duration, _: &str) {}
-
-/// A desktop note about what the panel did on its own behalf, for the same
-/// reason `notify_close` exists: while a game fills the screen, the main
-/// window's toasts are reading to an empty room.
+/// A desktop note for a panel recovery that happened without the player's
+/// action: while a game fills the screen, the main window's toast is hidden.
 #[cfg(target_os = "linux")]
 fn notify_panel(text: &str) {
     let _ = crate::process::command("notify-send")
@@ -2610,45 +2576,31 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = game_dir("screenshots")?;
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        // Orbit may run on XWayland to keep its transparent window alive, but
-        // x11grab then sees only the empty XWayland root (often black with a
-        // cursor). Ask the compositor for the real desktop image instead.
+    {
+        // The pointer that pressed the capture control is on the overlay's
+        // monitor. Spectacle follows that monitor; never grab the full desktop.
         let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
         return if linux_shot(&path).is_ok() {
             saved_picture(&path)
         } else {
-            Err("KDE Wayland did not provide a screenshot. Install Spectacle or grim and try again.".to_string())
+            Err("Could not capture the overlay's monitor. Spectacle current-monitor capture was unavailable.".to_string())
         };
     }
-    #[cfg(target_os = "linux")]
-    if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
-        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
-        if ffmpeg_shot(&ffmpeg, &path).is_ok() {
+    #[cfg(not(target_os = "linux"))]
+    {
+        if capture::available() {
+            let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
+            if capture::save_picture(&path, current_spec()).is_ok() {
+                return saved_picture(&path);
+            }
+        }
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
+        #[cfg(windows)]
+        if powershell_shot(&path).is_ok() {
             return saved_picture(&path);
         }
+        Err("Orbit could not take a picture of the screen.".to_string())
     }
-    if capture::available() {
-        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
-        if capture::save_picture(&path, current_spec()).is_ok() {
-            return saved_picture(&path);
-        }
-    }
-    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
-    #[cfg(windows)]
-    if powershell_shot(&path).is_ok() {
-        return saved_picture(&path);
-    }
-    #[cfg(target_os = "linux")]
-    if linux_shot(&path).is_ok() {
-        return saved_picture(&path);
-    }
-    if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
-        if ffmpeg_shot(&ffmpeg, &path).is_ok() {
-            return saved_picture(&path);
-        }
-    }
-    Err("Orbit could not take a picture of the screen.".to_string())
 }
 
 #[cfg(windows)]
@@ -2688,26 +2640,17 @@ $g.Dispose(); $bmp.Dispose()\r\n",
 
 #[cfg(target_os = "linux")]
 fn linux_shot(path: &Path) -> Result<(), String> {
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let wayland_attempts: &[(&str, &[&str])] = &[
-        ("spectacle", &["--background", "--nonotify", "--fullscreen", "--output"]),
-        ("grim", &[]),
-    ];
-    let x11_attempts: &[(&str, &[&str])] = &[
-        ("grim", &[]),
-        ("gnome-screenshot", &["-f"]),
-        ("scrot", &[]),
-    ];
-    let attempts = if wayland { wayland_attempts } else { x11_attempts };
-    for (program, prefix) in attempts {
-        let Some(bin) = which(program) else { continue };
-        let mut command = process::command(bin);
-        command.args(*prefix).arg(path);
-        if command.status().map(|status| status.success()).unwrap_or(false) && path.is_file() {
-            return Ok(());
-        }
+    let bin = which("spectacle").ok_or_else(|| "Spectacle is not installed".to_string())?;
+    let status = process::command(bin)
+        .args(["--background", "--nonotify", "--current-monitor", "--output"])
+        .arg(path)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() && path.is_file() {
+        Ok(())
+    } else {
+        Err("Spectacle could not capture the current monitor".to_string())
     }
-    Err("no screenshot tool".to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -2728,23 +2671,6 @@ fn system_audio_monitor() -> Option<String> {
                 .filter(|value| !value.is_empty())
         })?;
     Some(format!("{sink}.monitor"))
-}
-
-fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
-    let mut command = process::command(ffmpeg);
-    command.arg("-y");
-    push_grab(&mut command, None)?;
-    if let Some(scale) = quality_scale(&lock().quality) {
-        command.args(["-vf", scale]);
-    }
-    command.args(["-frames:v", "1"]).arg(path);
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    let status = command.status().map_err(|error| error.to_string())?;
-    if status.success() && path.is_file() {
-        Ok(())
-    } else {
-        Err("ffmpeg could not take the picture.".to_string())
-    }
 }
 
 fn spawn_recording(stamp: &str) -> Result<(), String> {
@@ -2771,7 +2697,7 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn spawn_wayland_recording(stamp: &str) -> Result<(), String> {
     let recorder = which("gpu-screen-recorder").ok_or_else(|| {
-        "KDE Wayland screen recording needs PipeWire. Install gpu-screen-recorder; FFmpeg's X11 grab only sees a black XWayland screen.".to_string()
+        "Wayland recording needs gpu-screen-recorder. PipeWire screen sharing is normally provided by Plasma; Orbit does not install system packages. FFmpeg's X11 grab only sees a black XWayland screen.".to_string()
     })?;
     let dir = game_dir("recordings")?;
     let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
@@ -2785,7 +2711,7 @@ fn spawn_wayland_recording(stamp: &str) -> Result<(), String> {
     let mut child = child;
     if let Ok(Some(_)) = child.try_wait() {
         let _ = fs::remove_file(&path);
-        return Err("gpu-screen-recorder stopped before the Wayland recording started. Check that PipeWire screen capture is available.".to_string());
+        return Err("gpu-screen-recorder stopped before recording. Check KDE's screen-sharing permission and PipeWire service.".to_string());
     }
     let mut live = lock();
     live.recording_name = path
@@ -3289,7 +3215,7 @@ fn replay_spec() -> capture::Spec {
 fn capture_missing() -> String {
     #[cfg(target_os = "linux")]
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        return "Instant replay on KDE Wayland needs PipeWire screen capture; Orbit will not save a black XWayland recording.".to_string();
+        return "Instant replay on KDE Wayland is not available through X11 capture; Orbit will not save a black recording.".to_string();
     }
     "Orbit could not capture the screen, and ffmpeg is not installed.".to_string()
 }
@@ -4106,16 +4032,16 @@ fn sync_click_through(app: &AppHandle) {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else { return };
-    // An open panel takes the pointer everywhere. A click that lands on
-    // nothing is one of the ways to put it away, and a click that reached the
-    // game through the overlay would be the overlay interfering with what is
-    // behind it - the thing the player is trying to see. A resting panel is
-    // the opposite: it has let go of the screen, and only its pins answer.
+    // The glass between boxes is never a button. Let clicks there reach the
+    // game instead of treating them as a request to hide the panel; only the
+    // boxes and menus the page reported take the pointer. This is true while
+    // open as well as while resting against pins, so the two states have the
+    // same reliable hover and click behaviour.
     //
-    // A press that began in the panel keeps the pointer until it is let go
-    // either way: a box follows the cursor while it is dragged, and half a
-    // drag would be worse than no drag at all.
-    let ignore = !open && !HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window);
+    // A press that began in the panel keeps the pointer until it is let go: a
+    // box follows the cursor while it is dragged, and half a drag would be
+    // worse than no drag at all.
+    let ignore = !HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window);
     if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
         return;
     }

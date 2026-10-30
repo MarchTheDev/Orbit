@@ -92,44 +92,35 @@ export function backdropsFor(game: Game): string[] {
 /**
  * The artwork behind the hub, swapped as the selection moves.
  *
- * Two layers on purpose. The cheap picture - the one already in the library's
- * own cache - is stretched and blurred underneath, so the screen is never empty
- * while the big one travels; the sharp one fades in over it once it is actually
- * decoded. A failed picture steps down the list rather than leaving a hole.
+ * Only a wide store background is allowed in this frame. Until one has loaded,
+ * the frame stays a colour wash: a cover or header is never stretched here as
+ * temporary art. Attempt and load state are tied to the selected game and URL,
+ * so a late state update from the previous selection cannot flash its picture.
+ * A failed picture steps down the list rather than leaving a hole.
  */
 function Backdrop({ game }: { game: Game }) {
-  const [step, setStep] = useState(0);
-  const [loaded, setLoaded] = useState(false);
+  const [failure, setFailure] = useState<{ gameId: string; step: number }>({ gameId: game.id, step: 0 });
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const shown = useRef<HTMLImageElement>(null);
   const list = backdropsFor(game);
+  // A selection change takes the first attempt synchronously. Waiting for an
+  // effect to reset `step` showed the previous game's lower-quality fallback
+  // for one frame when that image had failed.
+  const step = failure.gameId === game.id ? failure.step : 0;
   const src = list[step] ?? null;
-
-  useEffect(() => {
-    setStep(0);
-    setLoaded(false);
-  }, [game.id]);
+  const loaded = loadedSrc === src;
 
   // A picture already in the cache can finish before React's load listener is
-  // attached, and would then never be shown at all.
+  // attached. Only trust the element if it is still the source being drawn.
   useEffect(() => {
-    if (shown.current?.complete) setLoaded(true);
+    const image = shown.current;
+    if (src && image?.complete && image.naturalWidth > 0 && image.getAttribute('src') === src) {
+      setLoadedSrc(src);
+    }
   }, [src]);
 
-  const soft = game.meta?.headerUrl ?? game.meta?.backgroundUrl ?? null;
-
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {soft && (
-        <img
-          src={soft}
-          alt=""
-          aria-hidden
-          loading="eager"
-          decoding="async"
-          draggable={false}
-          className="absolute inset-0 h-full w-full object-cover opacity-45"
-        />
-      )}
+    <div data-tv-backdrop className="pointer-events-none absolute inset-0 overflow-hidden">
       {src ? (
         <img
           ref={shown}
@@ -139,18 +130,27 @@ function Backdrop({ game }: { game: Game }) {
           loading="eager"
           decoding="async"
           draggable={false}
-          onLoad={() => setLoaded(true)}
+          onLoad={(event) => setLoadedSrc(event.currentTarget.getAttribute('src'))}
           onError={() => {
-            setLoaded(false);
-            setStep((at) => at + 1);
+            setFailure((current) => ({
+              gameId: game.id,
+              step: (current.gameId === game.id ? current.step : 0) + 1,
+            }));
           }}
           className={cn(
-            'absolute inset-0 h-full w-full object-cover',
+            'tv-backdrop-image absolute inset-0 h-full w-full object-cover',
             loaded ? 'opacity-100' : 'opacity-0',
           )}
         />
       ) : (
-        <Cover game={game} className="absolute inset-0 size-full [&_span]:hidden" fit="cover" loading="eager" />
+        <div
+          data-tv-backdrop-placeholder
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background: `radial-gradient(circle at 28% 28%, hsl(${game.hue} 55% 24%), #05040d 72%)`,
+          }}
+        />
       )}
       {/* The scrims. Everything over the picture is read against the darkest
           corner of it, and the picture fades into the rail rather than ending

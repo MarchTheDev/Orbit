@@ -13,6 +13,7 @@ import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
 import { readFileSync } from 'node:fs';
 
 const tvSource = readFileSync(new URL('../src/components/TvMode.tsx', import.meta.url), 'utf8');
+const backdropSource = tvSource.slice(tvSource.indexOf('function Backdrop'), tvSource.indexOf('/** A small fact'));
 const coverSource = readFileSync(new URL('../src/components/ui/Cover.tsx', import.meta.url), 'utf8');
 const tvCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
 
@@ -296,9 +297,17 @@ check('the backdrop does not scale or transition when the selected game changes'
     !tvSource.includes('duration-700'));
 check('TV artwork keeps a stable fit and warms nearby images before selection changes',
   !tvSource.includes('key={src}') && !tvSource.includes('key={`soft-${game.id}`}') &&
-    /fit="cover"[\s\S]{0,180}loading="eager"/.test(tvSource) &&
     tvSource.includes('warmCover(game)') && tvSource.includes('warmImage(first)') &&
     coverSource.includes('const current = failures.identity === identity'));
+check('the backdrop stays on a colour wash until its wide artwork is loaded',
+  backdropSource.includes('data-tv-backdrop-placeholder') &&
+    !backdropSource.includes('<Cover') &&
+    !backdropSource.includes('const soft') &&
+    backdropSource.includes('const loaded = loadedSrc === src'));
+check('switching games cannot flash a failed or loaded image from the previous selection',
+  backdropSource.includes('failure.gameId === game.id ? failure.step : 0') &&
+    backdropSource.includes('image.getAttribute(\'src\') === src') &&
+    backdropSource.includes('setLoadedSrc(event.currentTarget.getAttribute(\'src\'))'));
 check('TV covers cannot be dragged and keep one crop while images load',
   tvSource.includes('draggable={false}') &&
     tvSource.includes('onDragStart={(event) => event.preventDefault()}') &&
@@ -307,6 +316,8 @@ check('TV mode has no entrance, exit, or child transitions',
   !tvCss.includes('@keyframes tv-in') && !tvCss.includes('@keyframes tv-out') &&
     /\.tv-root,\s*\n\.tv-root \*/.test(tvCss) &&
     /animation: none !important;[\s\S]*?transition: none !important;/.test(tvCss));
+check('the fullscreen backdrop has a fixed transform-free frame', tvSource.includes('data-tv-backdrop') && tvCss.includes('.tv-root [data-tv-backdrop] .tv-backdrop-image') && tvCss.includes('transform: none !important;'));
+check('TV mode preserves the animated top-bar music visualizer', /prefers-reduced-motion: no-preference[\s\S]{0,900}orbit-bars-active i:nth-child\(1\)[\s\S]{0,220}animation: orbit-bar-1/.test(tvCss));
 
 console.log('the rail can be read by name instead of by memory');
 

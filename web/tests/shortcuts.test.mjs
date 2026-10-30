@@ -167,13 +167,13 @@ check('the file is named in the player\'s own time, told once by the page',
 check('a panel on screen draws that toast itself, and refreshes its gallery',
   rust.includes('pub const CAPTURED_EVENT: &str = "overlay-captured"') &&
     readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes("'overlay-captured'"));
-check('a press on an empty part of the panel puts it away',
-  readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes(
+check('a click on empty glass reaches the game without putting the panel away',
+  !readFileSync(new URL('../src/components/OverlayView.tsx', import.meta.url), 'utf8').includes(
     "overlayHide('a click on an empty spot')",
   ) &&
-    // The panel takes the pointer everywhere while it is open, or the press
-    // would reach the game behind it instead of the page.
-    /let ignore = !open && /.test(rust));
+    // The same hit-test protects interactive boxes in the open and resting
+    // states; a press beginning in a box remains captured until release.
+    /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust));
 check('the settings page shows both a controller and a keyboard column',
   settingsUi.includes('Controller') && settingsUi.includes('Keyboard'));
 check('what is saved is the shape the page and the desktop side share',

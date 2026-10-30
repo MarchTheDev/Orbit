@@ -264,6 +264,10 @@ check(
     !settingsSource2.includes('function PanelDiag()') &&
     !settingsSource2.includes('<PanelDiag />'),
 );
+check('closing the overlay no longer produces an opened/closed toast',
+  /pub fn close_panel[\s\S]{0,900}note_panel\(&format!\(\"the panel was closed \(\{why\}\)\"\)\)/.test(overlaySource) &&
+    !/pub fn close_panel[\s\S]{0,1200}overlay-toast/.test(overlaySource) &&
+    !overlaySource.includes('fn notify_close(') && !overlaySource.includes('Overlay closed after'));
 check(
   'every native close says who closed the panel',
   // "the panel was closed" with nothing after it was the line that started
@@ -330,15 +334,15 @@ check(
     overlay.split("overlayHide('the close button')").length - 1 === 2,
 );
 check(
-  'a press on an empty part of the open panel puts it away',
-  // The panel covers the screen, so the press has to reach the page rather than
-  // the game behind it - and the page answers it by closing.
-  overlay.includes('onPointerDown={onBackdrop}') &&
-    overlay.includes("overlayHide('a click on an empty spot')") &&
-    /let ignore = !open && !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(overlaySource),
+  'clicking the glass does not close the overlay or steal a game click',
+  // Empty space has no pointer handler. The native side lets it through in both
+  // states, while holding the pointer only over the boxes and menus.
+  !overlay.includes('onPointerDown={onBackdrop}') &&
+    !overlay.includes("overlayHide('a click on an empty spot')") &&
+    /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(overlaySource),
 );
 check(
-  'a resting panel only answers over its pins',
+  'an open or resting panel answers only over its interactive surfaces',
   overlay.includes('function openHits()') &&
     /function openHits\(\)[\s\S]{0,600}querySelectorAll<HTMLElement>\('\[data-overlay-hit="1"\]'\)/.test(overlay) &&
     // Every surface with something to click says so: the boxes, the boxes

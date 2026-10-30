@@ -295,8 +295,6 @@ export function OverlayView() {
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
   /** Whether this page has been told the panel is up. */
   const shownSeen = useRef(false);
-  /** When it was last told, so the gesture that opened it cannot end it. */
-  const shownAt = useRef(0);
   /** The arrangement the player made, if any: preferred whenever it fits. */
   const savedPlaces = useRef<Record<BoxId, Place> | null>(null);
   const [hidden, setHidden] = useState<BoxId[]>([]);
@@ -621,7 +619,6 @@ export function OverlayView() {
     let stopPad = () => {};
     void listen('overlay-shown', () => {
       shownSeen.current = true;
-      shownAt.current = Date.now();
       setAwake(true);
       setResting(false);
       refresh();
@@ -1146,35 +1143,6 @@ export function OverlayView() {
     void rememberLayout(next);
   };
 
-  /**
-   * A press on an empty part of the panel puts it away.
-   *
-   * The panel covers the whole screen, so a click that lands on nothing used to
-   * mean nothing at all - and while it was open the game underneath was the one
-   * that got clicked. A press that begins on a box, a button or an open menu
-   * belongs to that thing - a box is dragged by its header, and its buttons are
-   * its own - so only the empty space answers this.
-   */
-  const onBackdrop = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (resting || event.button !== 0) return;
-    // The press that opened the panel is not over yet. On X11 the window is
-    // still settling under the hand when the first events arrive, and the
-    // tail of the opening gesture landing inside the first moment is the
-    // panel appearing and vanishing in one breath.
-    if (Date.now() - shownAt.current < 600) return;
-    const node = event.target as HTMLElement;
-    if (
-      node.closest(
-        '[data-overlay-hit="1"], [data-overlay], button, input, select, textarea, a, [role="dialog"], [role="menu"]',
-      )
-    ) {
-      return;
-    }
-    // Something is open over the panel: the press belongs to it, not to the bar.
-    if (deleteTarget || galleryMenu) return;
-    void overlayHide('a click on an empty spot');
-  };
-
   const pin = (id: BoxId) => {
     const next = { ...places, [id]: { ...places[id], pinned: !places[id].pinned } };
     void rememberLayout(next).then(() => {
@@ -1288,11 +1256,11 @@ export function OverlayView() {
   })[toast.kind] : null;
 
   return (
-    <div className="relative h-full text-white" onPointerDown={onBackdrop}>
-      {/* The dim only dims. What is behind it is the game, and a press there -
-          on the panel itself, outside every box - is the player asking for it
-          back, so it puts the panel away. Escape, the pad's B, and a box's own
-          close button still work. */}
+    <div className="relative h-full text-white">
+      {/* The native window passes pointer input through the empty glass and
+          keeps it for the boxes. A click on the game never dismisses the panel;
+          Escape, the pad's B, the close buttons, and the hotkey are deliberate
+          ways out. */}
       {!resting && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
       {toast && ToastIcon && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">

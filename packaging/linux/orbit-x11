@@ -14,9 +14,8 @@
 #
 #   * On a Wayland session this draws through XWayland, which does not do
 #     fractional scaling. On a high-density screen the window can look soft.
-#   * If the only symptom is a blank or white window, often on NVIDIA, then
-#     WEBKIT_DISABLE_DMABUF_RENDERER=1 orbit keeps the native backend and is
-#     the smaller hammer. Try that first.
+#   * A blank window can have several causes. Start Orbit from a terminal and
+#     inspect its logs before changing WebKit renderer settings.
 #   * If it is only the overlay that flashes up and vanishes on Wayland with
 #     the proprietary NVIDIA driver, it does not need this wrapper at all:
 #     Orbit restarts itself through X11 on that stack (XWayland keeps an

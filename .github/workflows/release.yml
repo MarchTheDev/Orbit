@@ -598,8 +598,6 @@ jobs:
           cp packaging/arch/PKGBUILD "$work/"
           cp web/src-tauri/target/release/orbit "$work/orbit"
           cp packaging/linux/orbit.desktop "$work/orbit.desktop"
-          cp packaging/linux/orbit-x11 "$work/orbit-x11"
-          cp packaging/linux/orbit-x11.desktop "$work/orbit-x11.desktop"
           cp packaging/linux/com.orbit.launcher.desktop "$work/com.orbit.launcher.desktop"
           cp packaging/linux/60-orbit-controllers.rules "$work/60-orbit-controllers.rules"
           cp web/src-tauri/icons/128x128.png "$work/orbit.png"
@@ -616,12 +614,19 @@ jobs:
           sudo -u builder makepkg -f
           cp "$work"/*.pkg.tar.zst "$GITHUB_WORKSPACE/artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
 
-      - name: Check the X11 entry point reached the package
+      - name: Check the single Orbit entry point reached the package
         shell: bash
         run: |
           version="${ORBIT_VERSION#v}"
-          bash packaging/linux/check-x11.sh "The Arch package" "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" tar -tvf
-          bash packaging/linux/check-deps.sh "The Arch package" pacman "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" \
+          package="artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
+          listing="$(tar -tvf "$package")"
+          printf '%s\n' "$listing" | grep -E 'usr/bin/orbit$' | grep -q rwx
+          printf '%s\n' "$listing" | grep -qE 'usr/share/applications/orbit\.desktop$'
+          if printf '%s\n' "$listing" | grep -qE 'usr/bin/orbit-x11$|applications/orbit-x11\.desktop$'; then
+            echo "::error title=The Arch package::The Arch package should ship only the automatically selected Orbit entry point"
+            exit 1
+          fi
+          bash packaging/linux/check-deps.sh "The Arch package" pacman "$package" \
             gst-plugins-base gst-plugins-good gst-plugin-pipewire
 
       - uses: actions/upload-artifact@v4
