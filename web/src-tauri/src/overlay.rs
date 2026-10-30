@@ -258,7 +258,7 @@ struct Live {
     recording_path: PathBuf,
     note: String,
     /// The keyboard combination that opens or closes the panel.
-    open_shortcut: String,
+    open_shortcut: Option<String>,
     /// The capture shortcuts, as the settings page last wrote them.
     shortcuts: Shortcuts,
     /// The colours of the player's theme, for the native card.
@@ -322,7 +322,7 @@ struct Step {
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
     shortcuts: Shortcuts::shipped(),
-    open_shortcut: "Alt+X".to_string(),
+    open_shortcut: None,
     enabled: true,
     replay: true,
     seconds: 30,
@@ -637,7 +637,7 @@ pub fn apply_settings(value: &Value) {
     {
         let mut live = lock();
         live.shortcuts = shortcuts;
-        live.open_shortcut = open_shortcut;
+        live.open_shortcut = Some(open_shortcut);
     }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
@@ -1214,7 +1214,11 @@ fn install_toggle_shortcut(app: &AppHandle) {
 fn install_registered_toggle_shortcut(app: &AppHandle) {
     let wanted = {
         let live = lock();
-        if live.enabled { live.open_shortcut.trim().to_string() } else { String::new() }
+        if live.enabled {
+            live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string()
+        } else {
+            String::new()
+        }
     };
     let old = REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     if old.as_deref() == Some(wanted.as_str()) {
@@ -1508,7 +1512,7 @@ fn watch_keys(app: AppHandle) {
                 let keys = live.shortcuts.keys();
                 (
                     [keys[0].to_string(), keys[1].to_string(), keys[2].to_string()],
-                    live.open_shortcut.trim().to_string(),
+                    live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string(),
                 )
             } else {
                 (["", "", ""].map(str::to_string), String::new())

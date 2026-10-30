@@ -293,7 +293,7 @@ check(
     /ShortcutState::Pressed => shortcut_toggle\(\),[\s\S]{0,100}ShortcutState::Released => shortcut_released\(\)/.test(overlaySource) &&
     /pub fn shortcut_toggle\(\) \{\n    if !HOTKEY_UP\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
     overlaySource.includes('fn install_toggle_shortcut(app: &AppHandle)') &&
-    overlaySource.includes('live.open_shortcut.trim().to_string()') &&
+    overlaySource.includes('live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string()') &&
     overlaySource.includes('The previous shortcut remains active.') &&
     /let just_opened = SHOWN_AT[\s\S]{0,300}at\.elapsed\(\) < OPEN_GRACE/.test(overlaySource) &&
     overlaySource.includes('request_toggle("the keyboard shortcut");') &&

@@ -181,7 +181,7 @@ check('the overlay-opening keyboard shortcut is configurable without changing St
   settingsView.includes("openShortcut={overlay?.openShortcut ?? 'Alt+X'}") &&
     settingsView.includes('onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}') &&
     settingsUi.includes('Start + Select remains the controller chord') &&
-    rust.includes('live.open_shortcut.trim().to_string()') &&
+    rust.includes('live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string()') &&
     rust.includes('ShortcutState::Released => shortcut_released()') &&
     /let \(wanted, wanted_toggle\): \(\[String; 3\], String\)/.test(rust) &&
     rust.includes('if now && !toggle_down') &&
