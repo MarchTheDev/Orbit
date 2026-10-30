@@ -1,9 +1,9 @@
 //! A fullscreen panel over a game: a picture, a recording, or the last few seconds.
 //!
-//! Alt+X is a global shortcut. Start+Select is read here too, because a Windows
-//! game in front does not deliver the browser pad, and asking that pad can
-//! freeze the window. The handler for Alt+X only sets a flag. Creating the
-//! panel from inside that handler can stall the shortcut lock.
+//! The opening key is a configurable global shortcut (Alt+X by default).
+//! Start+Select is read here too, because a Windows game in front does not
+//! deliver the browser pad, and asking that pad can freeze the window. A key
+//! handler only sets a flag; creating the panel from it can stall the lock.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -19,9 +19,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-// Only the registered path uses it; Windows reads the keyboard itself.
 #[cfg(not(windows))]
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::capture;
 use crate::notice::{Card, Icon, Palette};
@@ -55,13 +54,10 @@ static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::Atomic
 /// reason, so every report read "the window was destroyed" and said nothing
 /// about why it was destroyed.
 static PANEL_DIAG: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Who last asked for the toggle, for the history: Alt+X or the pad's chord.
-static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("Alt+X");
-/// Whether Alt+X has been seen up since the last press Orbit acted on.
-///
-/// Windows keeps posting the same hotkey for as long as the keys stay down.
-/// That is not a second press, and treating it as one closes the panel the
-/// player has just opened.
+/// Who last asked for the toggle, for the panel history.
+static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("the keyboard shortcut");
+/// Whether the configured keyboard shortcut has been released since its last press.
+/// Repeated press events from a held key are ignored until the plugin reports release.
 static HOTKEY_UP: AtomicBool = AtomicBool::new(true);
 /// Whether this open has already been told about a held key.
 static REPEAT_NOTED: AtomicBool = AtomicBool::new(false);
@@ -261,6 +257,8 @@ struct Live {
     recording_name: String,
     recording_path: PathBuf,
     note: String,
+    /// The keyboard combination that opens or closes the panel.
+    open_shortcut: String,
     /// The capture shortcuts, as the settings page last wrote them.
     shortcuts: Shortcuts,
     /// The colours of the player's theme, for the native card.
@@ -324,6 +322,7 @@ struct Step {
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
     shortcuts: Shortcuts::shipped(),
+    open_shortcut: "Alt+X".to_string(),
     enabled: true,
     replay: true,
     seconds: 30,
@@ -588,40 +587,23 @@ fn capture_detail(kind: &str, text: &str) -> &'static str {
     }
 }
 
-/// Alt+X and Start+Select both end here. The window work happens later, off
-/// the shortcut handler, so that handler can return while its lock is still held.
-/// The keyboard shortcut's own press.
-///
-/// Alt+X fires again and again while it is held, at the keyboard's repeat rate,
-/// and the first repeat comes sooner than the debounce below. So the panel
-/// opened on the press and the repeat closed it again a moment later: the
-/// overlay was there for a second, then gone, with nothing in the way and no
-/// game in front. Only a press that follows a release is a new press.
+/// The configured keyboard shortcut's press. Window work is deferred to the
+/// overlay watcher so the global-shortcut callback can return promptly.
 pub fn shortcut_toggle() {
-    let fresh = HOTKEY_UP.swap(false, Ordering::SeqCst) || shortcut_keys_up();
-    if !fresh {
+    if !HOTKEY_UP.swap(false, Ordering::SeqCst) {
         if is_open() && !REPEAT_NOTED.swap(true, Ordering::SeqCst) {
-            note_panel("a held-down Alt+X was ignored, so the panel stayed open");
+            note_panel("a held keyboard shortcut was ignored, so the panel stayed open");
         }
-        log::debug!("overlay: the repeat of a held Alt+X was ignored");
+        log::debug!("overlay: a repeat of the held keyboard shortcut was ignored");
         return;
     }
-    request_toggle("Alt+X");
+    request_toggle("the keyboard shortcut");
 }
 
-#[cfg(windows)]
-fn shortcut_keys_up() -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU};
-    let alt = (unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } as u16) & 0x8000 != 0;
-    let x = (unsafe { GetAsyncKeyState(b'X' as i32) } as u16) & 0x8000 != 0;
-    // Both up means this press has just begun, whatever the message ordering
-    // did; a repeat only ever arrives with the keys still down.
-    !(alt && x)
-}
-
-#[cfg(not(windows))]
-fn shortcut_keys_up() -> bool {
-    true
+/// A released global shortcut can be pressed again.
+pub fn shortcut_released() {
+    HOTKEY_UP.store(true, Ordering::SeqCst);
+    REPEAT_NOTED.store(false, Ordering::SeqCst);
 }
 
 pub fn request_toggle(why: &'static str) {
@@ -638,7 +620,7 @@ pub fn request_toggle(why: &'static str) {
     }
     // The second press closes the panel, so this is the only way to say which
     // press it was. A toggle nobody meant - a pad reporting Start and Select
-    // together - has to be tellable from the player's own Alt+X.
+    // together - has to be distinguishable from the player's own keyboard shortcut.
     *TOGGLE_WHY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = why;
     ASKED.store(true, Ordering::SeqCst);
 }
@@ -646,7 +628,17 @@ pub fn request_toggle(why: &'static str) {
 pub fn apply_settings(value: &Value) {
     let overlay = value.get("overlay");
     let shortcuts = Shortcuts::from_value(overlay.and_then(|item| item.get("shortcuts")));
-    lock().shortcuts = shortcuts;
+    let open_shortcut = overlay
+        .and_then(|item| item.get("openShortcut"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("Alt+X")
+        .to_string();
+    {
+        let mut live = lock();
+        live.shortcuts = shortcuts;
+        live.open_shortcut = open_shortcut;
+    }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
         .and_then(Value::as_bool)
@@ -688,12 +680,12 @@ pub fn apply_settings(value: &Value) {
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
     configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
-    // A saved shortcut is one in use. `configure` had no handle to register
-    // with, so it is done here, where the one kept from startup is - and after
-    // `configure`, because whether the overlay is on decides whether a key
-    // answers at all. Nothing happens on the first run, before `install`.
+    // `configure` had no app handle. The saved shortcuts are registered here,
+    // after `configure` has set whether the overlay is enabled. At first run,
+    // `install` registers them once the app handle exists.
     if let Some(app) = APP.lock().ok().and_then(|slot| slot.clone()) {
         install_keys(&app);
+        install_toggle_shortcut(&app);
     }
 }
 
@@ -758,6 +750,7 @@ pub fn configure(
     // when the combinations are the ones already in place.
     if let Some(app) = app {
         install_keys(app);
+        install_toggle_shortcut(app);
     }
     if !changed && app.is_none() {
         return;
@@ -821,8 +814,8 @@ pub fn ready_notice(app: &AppHandle) -> Result<(), String> {
         live.ready_notice = None;
         live.palette
     };
-    // One line, and no second one to explain Alt+X: it was read once and
-    // ignored every time after that.
+    // One line, and no second one to explain the opening shortcut: it was
+    // read once and ignored every time after that.
     crate::notice::show(Card::ok(READY_TITLE, "", palette));
     Ok(())
 }
@@ -978,6 +971,7 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         *slot = Some(app.clone());
     }
     install_keys(app);
+    install_toggle_shortcut(app);
     // The keyboard is watched from here on, for as long as Orbit runs: a
     // capture shortcut has to work with a game in front, which is exactly when
     // Orbit's own window cannot be typed into.
@@ -990,7 +984,7 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
                 .spawn(move || watch_keys(keys_app));
         }
     }
-    // The panel is built on the first Alt+X, not during startup. A second
+    // The panel is built on its first open, not during startup. A second
     // webview here would compete with the boot animation.
     if WATCHING.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -1177,8 +1171,7 @@ fn stamp_at(unix: i64) -> String {
     format!("{} {}", &iso[..10], iso[11..19].replace(':', "-"))
 }
 
-/// What was registered last time, so a change can be undone without removing
-/// the overlay's own Alt+X, which is registered by the app rather than here.
+/// Capture key registrations, kept separately from the overlay's opening key.
 #[cfg_attr(windows, allow(dead_code))]
 static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -1186,6 +1179,9 @@ static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// can show. A shortcut that silently did nothing looked exactly like a
 /// shortcut that was never pressed.
 static REFUSED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+#[cfg(not(windows))]
+static REGISTERED_TOGGLE_KEY: Mutex<Option<String>> = Mutex::new(None);
+static REFUSED_TOGGLE_KEY: Mutex<Option<String>> = Mutex::new(None);
 
 /// Whether the keyboard is already being watched.
 #[cfg(windows)]
@@ -1193,7 +1189,78 @@ static KEYS_WATCHED: AtomicBool = AtomicBool::new(false);
 
 /// The capture shortcuts another program would not let go of.
 pub fn refused_keys() -> Vec<String> {
-    REFUSED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    let mut refused = REFUSED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    if let Some(message) = REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+        refused.push(message);
+    }
+    refused
+}
+
+/// Register the player's chosen overlay toggle, or take the old key away when
+/// the overlay is disabled or the setting is cleared.
+fn install_toggle_shortcut(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        // The Windows keyboard watcher polls the selected chord directly so it
+        // can observe releases; RegisterHotKey cannot report a key-up edge.
+        let _ = app;
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+    #[cfg(not(windows))]
+    install_registered_toggle_shortcut(app);
+}
+
+#[cfg(not(windows))]
+fn install_registered_toggle_shortcut(app: &AppHandle) {
+    let wanted = {
+        let live = lock();
+        if live.enabled { live.open_shortcut.trim().to_string() } else { String::new() }
+    };
+    let old = REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    if old.as_deref() == Some(wanted.as_str()) {
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        return;
+    }
+    if old.is_none() && wanted.is_empty() {
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        return;
+    }
+    if wanted.is_empty() {
+        if let Some(old) = old {
+            if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                log::debug!("overlay: {old} was not registered to begin with: {error}");
+            }
+        }
+        *REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        HOTKEY_UP.store(true, Ordering::SeqCst);
+        return;
+    }
+
+    let outcome = app.global_shortcut().on_shortcut(wanted.as_str(), |_app, _shortcut, event| {
+        match event.state {
+            ShortcutState::Pressed => shortcut_toggle(),
+            ShortcutState::Released => shortcut_released(),
+        }
+    });
+    match outcome {
+        Ok(()) => {
+            if let Some(old) = old {
+                if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                    log::debug!("overlay: the old toggle {old} could not be unregistered: {error}");
+                }
+            }
+            *REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wanted);
+            *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            HOTKEY_UP.store(true, Ordering::SeqCst);
+        }
+        Err(error) => {
+            log::warn!("overlay: the open shortcut {wanted} could not be registered: {error}");
+            *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(format!(
+                "Overlay shortcut {wanted} could not be registered: {error}. The previous shortcut remains active."
+            ));
+        }
+    }
 }
 
 /// Put the keyboard capture shortcuts in place.
@@ -1428,19 +1495,44 @@ fn watch_keys(app: AppHandle) {
     let mut last: [String; 3] = Default::default();
     let mut chords: [Option<KeyChord>; 3] = [None, None, None];
     let mut down = [false; 3];
+    let mut last_toggle = String::new();
+    let mut toggle_chord: Option<KeyChord> = None;
+    let mut toggle_down = false;
     loop {
         if STOP.load(Ordering::SeqCst) || crate::quitting() {
             break;
         }
-        let wanted: [String; 3] = {
+        let (wanted, wanted_toggle): ([String; 3], String) = {
             let live = lock();
             if live.enabled {
                 let keys = live.shortcuts.keys();
-                [keys[0].to_string(), keys[1].to_string(), keys[2].to_string()]
+                (
+                    [keys[0].to_string(), keys[1].to_string(), keys[2].to_string()],
+                    live.open_shortcut.trim().to_string(),
+                )
             } else {
-                ["", "", ""].map(str::to_string)
+                (["", "", ""].map(str::to_string), String::new())
             }
         };
+        if wanted_toggle != last_toggle {
+            last_toggle.clone_from(&wanted_toggle);
+            toggle_chord = parse_key_chord(&wanted_toggle);
+            toggle_down = toggle_chord.as_ref().is_some_and(chord_down);
+            HOTKEY_UP.store(!toggle_down, Ordering::SeqCst);
+            if toggle_chord.is_none() && !wanted_toggle.is_empty() {
+                log::warn!("overlay: {:?} is not a combination Orbit can watch for", wanted_toggle);
+            } else if !wanted_toggle.is_empty() {
+                log::info!("overlay: watching {:?} to open or close the panel", wanted_toggle);
+            }
+        } else {
+            let now = toggle_chord.as_ref().is_some_and(chord_down);
+            if now && !toggle_down {
+                shortcut_toggle();
+            } else if !now && toggle_down {
+                shortcut_released();
+            }
+            toggle_down = now;
+        }
         for (index, capture) in [Capture::Shot, Capture::Record, Capture::Replay].into_iter().enumerate() {
             if wanted[index] != last[index] {
                 // A changed combination is re-read here rather than in the
@@ -1724,12 +1816,6 @@ fn watch(app: AppHandle) {
         }
         #[cfg(windows)]
         {
-            // Sampled here rather than asked for when a press arrives: the
-            // question is whether the keys were ever let go in between, and
-            // only a poll can answer that.
-            if shortcut_keys_up() {
-                HOTKEY_UP.store(true, Ordering::SeqCst);
-            }
             if let Some((buttons, axes)) = read_xinput(&mut slot) {
                 if connected != Some(slot) {
                     // Plugged in, woken up, or swapped for another pad: take
@@ -1766,13 +1852,13 @@ fn toggle_on_main(app: &AppHandle) {
     };
     let visible = window.is_visible().unwrap_or(false);
     // A panel the game has drawn over is not something the player can see, so
-    // Alt+X tries to bring it back rather than closing what cannot be found.
+    // The opening shortcut tries to bring it back rather than closing what cannot be found.
     let covered = visible && covered_by_game(&window);
-    // A pinned panel is visible but not the opened overlay. Alt+X should open it.
+    // A pinned panel is visible but not the opened overlay. The opening shortcut should open it.
     //
     // The panel's own state decides, not whether Windows gave it the focus.
     // A fullscreen game takes the focus back the moment the panel appears, and
-    // asking `is_focused` then made Alt+X open the panel again instead of
+    // asking `is_focused` then made the opening shortcut open the panel again instead of
     // closing it: the panel could not be closed and looked like a flash.
     if visible && !RESTING.load(Ordering::SeqCst) && !covered {
         // A panel closed within a moment of opening was not read by anyone:
@@ -1882,7 +1968,7 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 /// Build the panel before it is first asked for.
 ///
-/// The first Alt+X used to pay for all of it: creating the window, starting
+/// The first opening shortcut used to pay for all of it: creating the window, starting
 /// WebView2, loading the bundle and the first React render. That is the second
 /// or two where the shortcut seems not to have registered. The work is done
 /// here while the library sits idle instead, so the first open is as quick as
@@ -2011,7 +2097,7 @@ fn nudge_repaint(_window: &tauri::WebviewWindow) {}
 /// This used to be the primary monitor, always. On a desk with two screens the
 /// game is often on the second one, and a panel that opens on the other screen
 /// is not an overlay over the game: the player looks at the game, sees nothing,
-/// and presses Alt+X again, which closes the panel again. That is the flash.
+/// and presses the opening shortcut again, which closes the panel again. That is the flash.
 ///
 /// The game is the foreground window. With no game in front (Orbit itself, the
 /// desktop) the panel goes to the monitor under the pointer, and the primary
@@ -4009,7 +4095,7 @@ pub fn set_hold(on: bool) {
     HOLD.store(on, Ordering::SeqCst);
 }
 
-/// A pinned box should already be on screen when Orbit opens, without Alt+X.
+/// A pinned box should already be on screen when Orbit opens, without the opening shortcut.
 pub fn show_pins(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) || !lock().enabled {
         return;
@@ -4021,11 +4107,10 @@ pub fn show_pins(app: &AppHandle) {
 
 /// Let the screen through wherever the panel has nothing to click.
 ///
-/// The panel covers the whole monitor, so Windows hands it every click on that
-/// monitor. Over a game that is the point, but with nothing behind it the
-/// panel becomes a wall: the player opens the overlay and can no longer click
-/// anywhere on their desk. Only the places the page reports as clickable take
-/// the pointer; everywhere else the click goes to whatever is behind the panel.
+/// The panel covers the whole monitor, so clicks in its empty glass should
+/// reach the game or desktop behind it. Only page-reported boxes take the
+/// pointer; the hit rectangles are window-local physical pixels, just like
+/// `cursor_position()` returns.
 fn sync_click_through(app: &AppHandle) {
     let open = OPEN.load(Ordering::SeqCst);
     if !open && !RESTING.load(Ordering::SeqCst) {
@@ -4053,9 +4138,8 @@ fn sync_click_through(app: &AppHandle) {
 
 fn cursor_over_hits(window: &tauri::WebviewWindow) -> bool {
     let Ok(cursor) = window.cursor_position() else { return false };
-    let Ok(origin) = window.outer_position() else { return false };
-    let x = cursor.x - origin.x as f64;
-    let y = cursor.y - origin.y as f64;
+    let x = cursor.x;
+    let y = cursor.y;
     let hits = HITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     hits.iter().any(|hit| x >= hit.x && y >= hit.y && x <= hit.x + hit.w && y <= hit.y + hit.h)
 }

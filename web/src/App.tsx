@@ -237,7 +237,7 @@ export default function App() {
     let stopCovered = () => {};
     void listen<string>('overlay-covered', () => {
       toast({
-        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again.",
+        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again.",
         tone: 'error',
       });
     }).then((unlisten) => {
@@ -1149,7 +1149,7 @@ export default function App() {
       secondFrame = window.requestAnimationFrame(() => {
         const card = document.getElementById(settingsJump.id);
         if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
           card.classList.add('settings-spot');
           window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
         }

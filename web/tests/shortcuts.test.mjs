@@ -123,6 +123,7 @@ console.log('the desktop side reads the same shape');
 
 const rust = readFileSync(new URL('../src-tauri/src/overlay.rs', import.meta.url), 'utf8');
 const settingsUi = readFileSync(new URL('../src/components/ShortcutEditor.tsx', import.meta.url), 'utf8');
+const settingsView = readFileSync(new URL('../src/components/SettingsView.tsx', import.meta.url), 'utf8');
 const types = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
 check('the pad chords come from the settings, not from constants in the pad loop',
   rust.includes('let shortcuts = lock().shortcuts.clone();') &&
@@ -173,7 +174,19 @@ check('a click on empty glass reaches the game without putting the panel away',
   ) &&
     // The same hit-test protects interactive boxes in the open and resting
     // states; a press beginning in a box remains captured until release.
-    /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust));
+    /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust) &&
+    /fn cursor_over_hits[\s\S]{0,250}let x = cursor\.x;[\s\S]{0,60}let y = cursor\.y;/.test(rust) &&
+    !/fn cursor_over_hits[\s\S]{0,350}outer_position\(\)/.test(rust));
+check('the overlay-opening keyboard shortcut is configurable without changing Start + Select',
+  settingsView.includes("openShortcut={overlay?.openShortcut ?? 'Alt+X'}") &&
+    settingsView.includes('onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}') &&
+    settingsUi.includes('Start + Select remains the controller chord') &&
+    rust.includes('live.open_shortcut.trim().to_string()') &&
+    rust.includes('ShortcutState::Released => shortcut_released()') &&
+    /let \(wanted, wanted_toggle\): \(\[String; 3\], String\)/.test(rust) &&
+    rust.includes('if now && !toggle_down') &&
+    rust.includes('else if !now && toggle_down') &&
+    rust.includes('parse_key_chord(&wanted_toggle)'));
 check('the settings page shows both a controller and a keyboard column',
   settingsUi.includes('Controller') && settingsUi.includes('Keyboard'));
 check('what is saved is the shape the page and the desktop side share',

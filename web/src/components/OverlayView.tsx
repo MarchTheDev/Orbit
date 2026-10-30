@@ -18,6 +18,7 @@ import {
   overlayHold,
   overlayLengths,
   overlayMode,
+  isLinux,
   overlayOpen,
   overlayOpenKind,
   overlayPins,
@@ -61,10 +62,10 @@ const READY_TITLE = 'Overlay deployed in Orbit';
 const FPS_ARM_MS = 3000;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
-// 6: the arrangement is scaled to the window, so a layout saved by 5 was
-// measured against sizes this screen does not have. It is refitted once, and
-// the player's own arrangement takes over again from there.
-const LAYOUT_REVISION = 6;
+let PLATFORM_LINUX = false;
+// 7: Linux's default arrangement no longer reserves space for an FPS card.
+// Unchanged old default positions are migrated upward; custom positions stay put.
+const LAYOUT_REVISION = 7;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
   fps: { w: 176, h: 112, minW: 120, minH: 88 },
   clock: { w: 176, h: 112, minW: 120, minH: 88 },
@@ -215,8 +216,8 @@ function mixId(node: Element | null): string | null {
  * down the right: the gallery, what is playing, and the notes on it. Every one
  * of them can be dragged anywhere; this is only the first arrangement.
  */
-function defaults(width: number, height: number): Record<BoxId, Place> {
-  return defaultSpots(BOX, width, height);
+function defaults(width: number, height: number, omitFps = PLATFORM_LINUX): Record<BoxId, Place> {
+  return defaultSpots(BOX, width, height, omitFps);
 }
 
 function placeOf(layout: NonNullable<Settings['overlay']>['layout'], id: BoxId, fallback: Place): Place {
@@ -277,7 +278,7 @@ function physicalHits(): { x: number; y: number; w: number; h: number }[] {
 }
 
 /**
- * The panel opened with Alt+X or Start+Select.
+ * The panel opened with the configured keyboard shortcut or Start+Select.
  *
  * It is its own window, so it does not load the library. A controller moves
  * these buttons from the desktop reader. The browser pad is not asked.
@@ -290,6 +291,7 @@ export function OverlayView() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [tab, setTab] = useState<GalleryItem['kind']>('screenshot');
   const [ready, setReady] = useState(false);
+  const [linux, setLinux] = useState(false);
   const [resting, setResting] = useState(false);
   const [awake, setAwake] = useState(true);
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
@@ -383,7 +385,7 @@ export function OverlayView() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen('overlay-layout-reset', () => {
-      const next = defaults(window.innerWidth || 1280, window.innerHeight || 720);
+      const next = defaults(window.innerWidth || 1280, window.innerHeight || 720, linux);
       savedPlaces.current = next;
       setPlaces(next);
       const current = settingsRef.current;
@@ -395,7 +397,7 @@ export function OverlayView() {
       window.setTimeout(() => void overlayHits(physicalHits()), 40);
     }).then((stop) => { unlisten = stop; }).catch(() => undefined);
     return () => unlisten?.();
-  }, []);
+  }, [linux]);
 
   const flash = (title: string, detail: string, kind: OverlayToastKind = 'screenshot') => {
     // A save the player only learns about from a passing note is bad enough;
@@ -517,12 +519,14 @@ export function OverlayView() {
   useEffect(() => {
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
-    const size = () => defaults(window.innerWidth, window.innerHeight);
-    void Promise.all([loadSettings(), overlayMode()]).then(([settings, mode]) => {
+    void Promise.all([loadSettings(), overlayMode(), isLinux()]).then(([settings, mode, linuxPlatform]) => {
+      PLATFORM_LINUX = linuxPlatform;
+      setLinux(linuxPlatform);
       applyTheme(settings.theme);
       applyFont(settings.fontFamily ?? 'system');
       settingsRef.current = settings;
-      const base = size();
+      const base = defaults(window.innerWidth, window.innerHeight, linuxPlatform);
+      const oldBase = defaults(window.innerWidth, window.innerHeight, false);
       const layout = settings.overlay?.layout;
       const revision = settings.overlay?.layoutRevision ?? 0;
       const savedAudio = placeOf(layout, 'audio', base.audio);
@@ -540,7 +544,30 @@ export function OverlayView() {
             gallery: placeOf(layout, 'gallery', base.gallery),
             capture: placeOf(layout, 'capture', base.capture),
           }
-        : revision === 3
+        : revision === 6
+          ? (() => {
+              const next = {
+                fps: placeOf(layout, 'fps', base.fps),
+                performance: placeOf(layout, 'performance', base.performance),
+                clock: placeOf(layout, 'clock', base.clock),
+                notes: placeOf(layout, 'notes', base.notes),
+                audio,
+                player: placeOf(layout, 'player', base.player),
+                gallery: placeOf(layout, 'gallery', base.gallery),
+                capture: placeOf(layout, 'capture', base.capture),
+              };
+              if (linuxPlatform) {
+                (['clock', 'audio', 'performance'] as const).forEach((id) => {
+                  const saved = layout?.[id];
+                  const previous = oldBase[id];
+                  if (saved && saved.x === previous.x && saved.y === previous.y) {
+                    next[id] = { ...base[id], pinned: !!saved.pinned };
+                  }
+                });
+              }
+              return next;
+            })()
+          : revision === 3
           ? {
               fps: placeOf(layout, 'fps', base.fps),
               performance: placeOf(layout, 'performance', base.performance),
@@ -856,7 +883,7 @@ export function OverlayView() {
   useEffect(() => {
     const title = status?.readyNotice;
     if (!title) return;
-    // The title says it. A second line explaining Alt+X was noise on a toast
+    // The title says it. A second line explaining the opening shortcut was noise on a toast
     // that is already gone by the time the game's own intro finishes.
     setToast({ title: status?.readyNotice || READY_TITLE, detail: '', kind: 'ready' });
     window.clearTimeout(toastTimer.current);
@@ -961,7 +988,7 @@ export function OverlayView() {
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [ready]);
+  }, [ready, linux]);
 
   // Where the panel has something to click, told to the native side.
   //
@@ -1137,7 +1164,7 @@ export function OverlayView() {
 
   const resetSize = (id: BoxId) => {
     const current = placesRef.current;
-    const base = defaults(window.innerWidth, window.innerHeight)[id];
+    const base = defaults(window.innerWidth, window.innerHeight, linux)[id];
     const next = { ...current, [id]: { ...current[id], w: base.w, h: base.h } };
     placesRef.current = next;
     void rememberLayout(next);
@@ -1163,7 +1190,7 @@ export function OverlayView() {
     setNoteError('');
   }, [status]);
 
-  const wantFps = liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
+  const wantFps = !linux && liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
   const wantPerformance = liveStats && awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
   const wantStats = wantFps || wantPerformance;
   // Opening the panel is the moment the game is most likely to be redrawing
@@ -1226,7 +1253,7 @@ export function OverlayView() {
   const pages = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageItems = shownItems.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  const visible = (id: BoxId) => awake && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
+  const visible = (id: BoxId) => awake && !(linux && id === 'fps') && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
   const padOn = (id: BoxId) => padFocus?.level === 'box' && padFocus.id === id;
   const toggleBox = (id: BoxId) => {
     const next = hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id];
@@ -1528,7 +1555,7 @@ export function OverlayView() {
           {boxesOpen && (
             <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="flex flex-wrap gap-1.5">
-                {OVERLAY_BOXES.map((box) => {
+                {OVERLAY_BOXES.filter((box) => !linux || box.id !== 'fps').map((box) => {
                   const shown = !hidden.includes(box.id);
                   return (
                     <button

@@ -130,6 +130,7 @@ export function defaultSpots<S extends Record<string, BoxShape>>(
   boxes: S,
   width: number,
   height: number,
+  omitFps = false,
 ): Record<keyof S, Spot> {
   const edge = EDGE;
   const gap = 16;
@@ -147,23 +148,26 @@ export function defaultSpots<S extends Record<string, BoxShape>>(
   const notesSize = size('notes');
   const captureSize = size('capture');
   const fps = { x: edge, y: edge, w: fpsSize.w, h: fpsSize.h };
-  const clock = { x: edge, y: fps.y + fps.h + gap, w: clockSize.w, h: clockSize.h };
+  const clock = { x: edge, y: omitFps ? edge : fps.y + fps.h + gap, w: clockSize.w, h: clockSize.h };
   const audioY = clock.y + clock.h + gap;
   const audio = {
     x: edge,
     y: audioY,
     w: audioSize.w,
-    // The performance numbers sit under the mixer, so the mixer cannot grow
-    // until it fills the screen and push them off it.
-    h: Math.max(
-      boxes.audio.minH,
-      Math.min(audioSize.h, height - audioY - performanceSize.h - gap - edge),
-    ),
+    // The original four-card column reserves room for performance below the
+    // mixer. With FPS removed, let the mixer keep its natural height and move
+    // performance to the second column when a short screen cannot fit it.
+    h: omitFps
+      ? Math.max(boxes.audio.minH, Math.min(audioSize.h, height - audioY - edge))
+      : Math.max(
+          boxes.audio.minH,
+          Math.min(audioSize.h, height - audioY - performanceSize.h - gap - edge),
+        ),
   };
   // A second column, used when the left one has run out of height. It is what
   // stops a short screen from finding nowhere to put the performance box and
   // dropping it on top of the mixer.
-  const columnRight = edge + Math.max(fps.w, clock.w, audio.w) + gap;
+  const columnRight = edge + Math.max(omitFps ? 0 : fps.w, clock.w, audio.w) + gap;
   const audioBottom = audio.y + audio.h;
   const performanceBelow = audioBottom + gap + performanceSize.h + edge <= height;
   const performance = performanceBelow

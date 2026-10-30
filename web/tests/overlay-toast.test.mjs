@@ -281,25 +281,23 @@ check(
     overlaySource.includes('hide_window(app, &format!("{why} asked again"));') &&
     overlaySource.includes('static TOGGLE_WHY: Mutex<&\'static str>') &&
     /pub fn request_toggle\(why: &'static str\)/.test(overlaySource) &&
-    libSource.includes('overlay::shortcut_toggle();') &&
+    overlaySource.includes('request_toggle("the keyboard shortcut");') &&
     overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
 );
 check(
-  'a held Alt+X opens the panel once instead of opening and closing it',
-  // Windows repeats the hotkey for as long as the keys are down, and the first
-  // repeat is sooner than the debounce. The repeat is what closed the panel a
-  // second after it appeared, with no game anywhere near it.
+  'a held configured keyboard shortcut opens the panel only once',
+  // Press and release events from the registered key, rather than a
+  // hard-coded Alt+X poll, define a fresh keyboard press on every platform.
   overlaySource.includes('static HOTKEY_UP: AtomicBool') &&
-    overlaySource.includes('const OPEN_GRACE: Duration = Duration::from_millis(700)') &&
-    /pub fn shortcut_toggle\(\) \{\n    let fresh = HOTKEY_UP\.swap\(false, Ordering::SeqCst\) \|\| shortcut_keys_up\(\);/.test(overlaySource) &&
-    /fn shortcut_keys_up\(\) -> bool \{[\s\S]{0,400}!\(alt && x\)/.test(overlaySource) &&
-    // The keys are sampled, because the question is what happened in between.
-    /if shortcut_keys_up\(\) \{\n                HOTKEY_UP\.store\(true, Ordering::SeqCst\);/.test(overlaySource) &&
-    libSource.includes('overlay::shortcut_toggle();') &&
-    // Nothing closes in the moment after it opened: that is never a decision.
+    overlaySource.includes('pub fn shortcut_released()') &&
+    /ShortcutState::Pressed => shortcut_toggle\(\),[\s\S]{0,100}ShortcutState::Released => shortcut_released\(\)/.test(overlaySource) &&
+    /pub fn shortcut_toggle\(\) \{\n    if !HOTKEY_UP\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
+    overlaySource.includes('fn install_toggle_shortcut(app: &AppHandle)') &&
+    overlaySource.includes('live.open_shortcut.trim().to_string()') &&
+    overlaySource.includes('The previous shortcut remains active.') &&
     /let just_opened = SHOWN_AT[\s\S]{0,300}at\.elapsed\(\) < OPEN_GRACE/.test(overlaySource) &&
-    overlaySource.includes('note_panel("the panel had only just opened, so the second press was ignored")') &&
-    overlaySource.includes('note_panel("a held-down Alt+X was ignored, so the panel stayed open")'),
+    overlaySource.includes('request_toggle("the keyboard shortcut");') &&
+    overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
 );
 check(
   'a pad the loop has just started reading is not a pressed button',
@@ -393,7 +391,7 @@ check(
     // The player is told in the main window, since the card is behind the game.
     overlaySource.includes('tell(app, "overlay-covered", &shown_for());') &&
     app.includes("void listen<string>('overlay-covered', () => {") &&
-    app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again."),
+    app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again."),
 );
 
 check(
@@ -412,8 +410,9 @@ check(
   // The switch happens before anything is asked for, so "off" means no call at
   // all: no performance counters and no desktop duplication.
   overlay.includes("const [liveStats, setLiveStats] = useState(true);") &&
-    /const wantFps = liveStats && awake/.test(overlay) &&
+    /const wantFps = !linux && liveStats && awake/.test(overlay) &&
     /const wantPerformance = liveStats && awake/.test(overlay) &&
+    overlay.includes("!(linux && id === 'fps')") &&
     statsSource.includes('pub fn install(root: &Path)') &&
     statsSource.includes('let marker = root.join("live-stats-probe");') &&
     statsSource.includes('pub fn suspect() -> bool') &&

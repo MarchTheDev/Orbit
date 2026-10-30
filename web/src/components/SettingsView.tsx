@@ -430,7 +430,7 @@ function OverlaySettings({
         checked={enabled}
         onChange={(on) => setOverlay({ enabled: on })}
         label="Overlay"
-        hint="Off means Alt+X and Start+Select do nothing."
+        hint="Off means your configured keyboard shortcut and Start + Select do nothing."
       />
       <Checkbox
         checked={replay}
@@ -588,6 +588,8 @@ function OverlaySettings({
       <ShortcutEditor
         value={overlay?.shortcuts}
         onChange={(shortcuts) => setOverlay({ shortcuts })}
+        openShortcut={overlay?.openShortcut ?? 'Alt+X'}
+        onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
       />
       <div className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3">
         <div>
@@ -1210,7 +1212,7 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
+        lead="A fullscreen panel over the game. Change its keyboard shortcut below, or open it with Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
       >
         <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
       </Section>

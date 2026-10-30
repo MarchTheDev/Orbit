@@ -35,9 +35,13 @@ import { btnBrowse } from './ui/Modal';
 export function ShortcutEditor({
   value,
   onChange,
+  openShortcut = 'Alt+X',
+  onOpenShortcutChange,
 }: {
   value: OverlayShortcuts | undefined;
   onChange: (next: OverlayShortcuts) => void;
+  openShortcut?: string;
+  onOpenShortcutChange?: (next: string) => void;
 }) {
   const shortcuts = normalizeShortcuts(value);
   /** The action whose controller chord is open for choosing. */
@@ -79,35 +83,63 @@ export function ShortcutEditor({
       // Backspace clears rather than binding a key that deletes: a shortcut
       // that cannot be pressed on its own is not a shortcut.
       if (event.key === 'Backspace' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        setKey(listeningRef.current as keyof OverlayShortcuts['keys'], '');
+        if (listeningRef.current === 'toggle') onOpenShortcutChange?.('');
+        else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], '');
         setListening(null);
         return;
       }
       const combo = shortcutFromEvent(event);
       if (!combo) return;
-      setKey(listeningRef.current as keyof OverlayShortcuts['keys'], combo);
+      if (listeningRef.current === 'toggle') onOpenShortcutChange?.(combo);
+      else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], combo);
       setListening(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [listening]);
+  }, [listening, onOpenShortcutChange]);
 
-  const reset = () => onChange(normalizeShortcuts(DEFAULT_SHORTCUTS));
+  const reset = () => {
+    onChange(normalizeShortcuts(DEFAULT_SHORTCUTS));
+    onOpenShortcutChange?.('Alt+X');
+  };
 
   return (
     <div className="space-y-2 rounded-2xl border border-line bg-panel2/30 p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-sm font-medium">Capture shortcuts</p>
+          <p className="text-sm font-medium">Overlay shortcuts</p>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            For a screenshot, a recording, and a replay while a game is in front. Both sides are
-            read by Orbit itself - the pad and the keyboard - so they work over a game, and no
-            other program has to give the combination up.
+            Change the keyboard shortcut that opens and closes the overlay. Start + Select on a
+            controller stays available. Capture shortcuts below work while a game is in front.
           </p>
         </div>
         <button type="button" onClick={reset} className={btnBrowse}>
           <RotateCcw className="mr-1.5 inline size-3.5" />
           Reset all
+        </button>
+      </div>
+
+      <div className="grid gap-2 rounded-xl border border-line bg-panel/40 px-3 py-2 sm:grid-cols-[1fr_10rem] sm:items-center">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-fg">Open / close overlay</p>
+          <p className="text-[11px] leading-snug text-muted">Keyboard shortcut. Start + Select remains the controller chord.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setListening(listening === 'toggle' ? null : 'toggle')}
+          aria-label={`Open overlay keyboard shortcut: ${keyLabel(openShortcut)}`}
+          className={cn(
+            'flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
+            listening === 'toggle'
+              ? 'border-accent bg-accent/15 text-fg'
+              : 'border-line bg-panel2 text-muted hover:border-accent hover:text-fg',
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Keyboard className="size-3.5 shrink-0 opacity-70" />
+            <span className="truncate font-mono">{listening === 'toggle' ? 'Press a key…' : keyLabel(openShortcut)}</span>
+          </span>
+          {listening === 'toggle' && <span aria-hidden className="text-[10px] uppercase tracking-wider opacity-60">esc</span>}
         </button>
       </div>
 
@@ -231,8 +263,8 @@ export function ShortcutEditor({
       )}
 
       <p className="text-[11px] leading-relaxed text-muted">
-        The overlay itself is always Alt+X, or Start and Select together. Backspace while recording
-        a key clears it, and Escape leaves it as it was.
+        Backspace while recording a key clears it; Escape leaves it as it was. The pad's Start +
+        Select overlay chord is unchanged.
       </p>
     </div>
   );

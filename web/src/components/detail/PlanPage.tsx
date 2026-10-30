@@ -21,6 +21,7 @@ import { createPortal } from 'react-dom';
 import type { GameFacts, GameSuggestion, HltbData } from '../../types';
 import { fetchFacts } from '../../services/metadata';
 import { fetchHltb } from '../../services/hltb';
+import { HltbExtraEstimate } from './HltbExtraEstimate';
 import { openExternal } from '../../services/desktop';
 import { cn } from '../../utils/cn';
 import { parseRequirements, storageOf, withoutStorage } from '../../utils/requirements';
@@ -373,6 +374,7 @@ export function PlanPage({
                   : 'Nobody has written down how long this one takes yet.'}
               </p>
             )}
+            <HltbExtraEstimate hours={hltb?.mainExtra ?? 0} className="mt-2 border-t border-line pt-2" />
           </section>
 
           {/* The other half of what a plan costs. The store's figure is what it

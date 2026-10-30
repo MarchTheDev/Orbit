@@ -690,7 +690,7 @@ export interface Settings {
   /** The wine binary to use when a game does not name one. */
   winePath?: string;
   /**
-   * The panel opened with Alt+X or Start+Select.
+   * The panel opened with the configured keyboard shortcut or Start+Select.
    *
    * On unless it has been turned off. The replay length is seconds, from 5 to
    * 300, and is what "save the last few seconds" keeps while a game is playing.
@@ -742,10 +742,11 @@ export interface Settings {
     /** Empty means the built-in recorder. A path is only a fallback. */
     ffmpeg?: string;
     /**
-     * The capture shortcuts, for the pad and for the keyboard. Missing means
-     * the ones Orbit ships with: LB+RB, LB+Left and LB+Right on a controller,
-     * F12, Ctrl+F11 and Ctrl+F10 on a keyboard.
+     * Keyboard shortcut that opens or closes the overlay. Missing means Alt+X;
+     * an empty string disables the keyboard shortcut while Start+Select remains.
      */
+    openShortcut?: string;
+    /** The capture shortcuts for the pad and keyboard. */
     shortcuts?: OverlayShortcuts;
   };
   /**

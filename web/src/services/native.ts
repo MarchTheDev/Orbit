@@ -116,6 +116,11 @@ export function isWindows(): Promise<boolean> {
   return call('is_windows', {}, () => false);
 }
 
+/** Whether the current desktop shell runs on Linux. */
+export function isLinux(): Promise<boolean> {
+  return call('is_linux', {}, () => /Linux/i.test(navigator.userAgent));
+}
+
 /** Add or remove Orbit's per-user `.exe` right-click action in Explorer. */
 export function setExeContextMenu(enabled: boolean): Promise<void> {
   return call('set_exe_context_menu', { enabled }, () => undefined);

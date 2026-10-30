@@ -217,6 +217,15 @@ check('a small one shrinks them with the space between them, instead of stacking
     const small = defaultSpots(BOX, 1024, 640);
     return small.gallery.w < big.gallery.w && small.audio.w < big.audio.w;
   })());
+check('Linux hides FPS and reflows the remaining left-side boxes upward',
+  (() => {
+    const withFps = defaultSpots(BOX, 1280, 720);
+    const withoutFps = defaultSpots(BOX, 1280, 720, true);
+    return withoutFps.clock.y === 24 &&
+      withoutFps.audio.y < withFps.audio.y &&
+      withoutFps.performance.y < withFps.performance.y &&
+      withoutFps.performance.x >= withoutFps.audio.x + withoutFps.audio.w;
+  })());
 check('the scale never grows the arrangement past its design',
   fitScale(3840, 2160) === 1 && fitScale(1280, 720) === 1);
 check('and shrinks it for a smaller window',

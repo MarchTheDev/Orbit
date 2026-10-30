@@ -23,6 +23,7 @@ import { moveInOrder } from '../utils/reorder';
 import { inLibraryShelf, onBacklogPage, onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { PlanDialog } from './detail/PlanDialog';
+import { HltbExtraEstimate } from './detail/HltbExtraEstimate';
 import type { PlanPick } from './detail/PlanDialog';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
@@ -653,6 +654,7 @@ function Section({
                       ))}
                     </div>
                   )}
+                  {showTimes && <HltbExtraEstimate hours={g.hltb?.mainExtra ?? 0} className="mt-1" />}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   {!readOnlyMoves && (

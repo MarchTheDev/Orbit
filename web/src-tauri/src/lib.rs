@@ -45,7 +45,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
 use db::{CurrentPlaythrough, GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
@@ -1016,7 +1015,7 @@ fn window_ready(app: tauri::AppHandle, startup: State<'_, StartupVisibility>) {
     if !startup.start_in_background || startup.show_requested.load(Ordering::SeqCst) {
         show_main_window(&app);
     }
-    // The panel is built while the library is idle, so the first Alt+X does
+    // The panel is built while the library is idle, so its first open does
     // not have to wait for a web view to start.
     overlay::warm(&app);
 }
@@ -1037,6 +1036,11 @@ fn take_open_exe_paths(pending: State<'_, PendingOpenExePaths>) -> Vec<String> {
 #[tauri::command]
 fn is_windows() -> bool {
     cfg!(windows)
+}
+
+#[tauri::command]
+fn is_linux() -> bool {
+    cfg!(target_os = "linux")
 }
 
 /// Set or remove Orbit's user-level `.exe` Explorer verb.
@@ -2564,17 +2568,6 @@ pub fn run() {
             if let Err(error) = overlay::install(app.handle()) {
                 log::warn!("overlay was not ready: {error}");
             }
-            // Register here, not inside the plugin builder. A refused shortcut
-            // must not stop Orbit from opening, and the handler only sets a flag:
-            // building the panel from that handler can stall its lock.
-            if let Err(error) = app.global_shortcut().on_shortcut("Alt+X", |_app, _shortcut, event| {
-                if matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
-                    overlay::shortcut_toggle();
-                }
-            }) {
-                log::warn!("Alt+X could not be registered: {error}");
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2616,6 +2609,7 @@ pub fn run() {
             window_ready,
             take_open_exe_paths,
             is_windows,
+            is_linux,
             set_exe_context_menu,
             list_drives,
             folder_size,
