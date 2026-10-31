@@ -43,11 +43,9 @@ export function ShortcutEditor({
   openShortcut?: string;
   onOpenShortcutChange?: (next: string) => void;
 }) {
+  // Keep the open binding controlled by Settings. A second local copy could
+  // drift from saved state on a later capture or reset.
   const [shortcuts, setShortcuts] = useState(() => normalizeShortcuts(value));
-  // This editor owns the optimistic draft for its whole mounted lifetime. The
-  // parent prop can lag behind a queued settings save; mirroring it in an effect
-  // made a second capture visibly revert until Settings was reopened.
-  const [openShortcutDraft, setOpenShortcutDraft] = useState(openShortcut);
   useEffect(() => setShortcuts(normalizeShortcuts(value)), [value]);
   /** The action whose controller chord is open for choosing. */
   const [open, setOpen] = useState<string | null>(null);
@@ -95,7 +93,6 @@ export function ShortcutEditor({
       // that cannot be pressed on its own is not a shortcut.
       if (event.key === 'Backspace' && !event.ctrlKey && !event.altKey && !event.metaKey) {
         if (listeningRef.current === 'toggle') {
-          setOpenShortcutDraft('');
           onOpenShortcutChange?.('');
         } else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], '');
         setListening(null);
@@ -104,7 +101,6 @@ export function ShortcutEditor({
       const combo = shortcutFromEvent(event);
       if (!combo) return;
       if (listeningRef.current === 'toggle') {
-        setOpenShortcutDraft(combo);
         onOpenShortcutChange?.(combo);
       } else setKey(listeningRef.current as keyof OverlayShortcuts['keys'], combo);
       setListening(null);
@@ -116,7 +112,6 @@ export function ShortcutEditor({
   const reset = () => {
     const defaults = normalizeShortcuts(DEFAULT_SHORTCUTS);
     setShortcuts(defaults);
-    setOpenShortcutDraft('Alt+X');
     // Reset both shortcut groups in one settings write. Two queued patches built
     // from the same old overlay object could otherwise overwrite one another.
     onChange(defaults, 'Alt+X');
@@ -146,7 +141,7 @@ export function ShortcutEditor({
         <button
           type="button"
           onClick={() => setListening(listening === 'toggle' ? null : 'toggle')}
-          aria-label={`Open overlay keyboard shortcut: ${keyLabel(openShortcutDraft)}`}
+          aria-label={`Open overlay keyboard shortcut: ${keyLabel(openShortcut)}`}
           className={cn(
             'flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
             listening === 'toggle'
@@ -156,7 +151,7 @@ export function ShortcutEditor({
         >
           <span className="flex min-w-0 items-center gap-1.5">
             <Keyboard className="size-3.5 shrink-0 opacity-70" />
-            <span className="truncate font-mono">{listening === 'toggle' ? 'Press a key…' : keyLabel(openShortcutDraft)}</span>
+            <span className="truncate font-mono">{listening === 'toggle' ? 'Press a key…' : keyLabel(openShortcut)}</span>
           </span>
           {listening === 'toggle' && <span aria-hidden className="text-[10px] uppercase tracking-wider opacity-60">esc</span>}
         </button>

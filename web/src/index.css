@@ -156,8 +156,13 @@ body::before {
    depend on the mouse. */
 html.orbit-linux .glass,
 html.orbit-linux .backdrop-blur,
+html.orbit-linux .backdrop-blur-2xl,
+html.orbit-linux .backdrop-blur-3xl,
+html.orbit-linux .backdrop-blur-lg,
+html.orbit-linux .backdrop-blur-md,
+html.orbit-linux .backdrop-blur-sm,
 html.orbit-linux .backdrop-blur-xl,
-html.orbit-linux .backdrop-blur-sm {
+html.orbit-linux .backdrop-blur-xs {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }

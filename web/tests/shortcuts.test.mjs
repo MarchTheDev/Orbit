@@ -178,10 +178,10 @@ check('an open overlay always restores native pointer delivery, while resting pi
     /let ignore = !HOLD\.load\(Ordering::SeqCst\) && !cursor_over_hits\(&window\);/.test(rust) &&
     /fn cursor_over_hits[\s\S]{0,250}let x = cursor\.x;[\s\S]{0,60}let y = cursor\.y;/.test(rust) &&
     !/fn cursor_over_hits[\s\S]{0,350}outer_position\(\)/.test(rust));
-check('shortcut capture keeps its local draft instead of echoing a stale parent value',
-  settingsUi.includes('setOpenShortcutDraft(combo)') &&
-    settingsUi.includes('setShortcuts(updated)') &&
-    !settingsUi.includes('useEffect(() => setOpenShortcutDraft(openShortcut)'));
+check('the displayed open shortcut follows the live Settings value after every capture',
+  settingsUi.includes('keyLabel(openShortcut)') &&
+    !settingsUi.includes('openShortcutDraft') &&
+    settingsUi.includes('onOpenShortcutChange?.(combo)'));
 check('Reset all writes capture and opening shortcuts together',
   /onChange\(defaults, 'Alt\+X'\)/.test(settingsUi) &&
     /setOverlay\(\{ shortcuts, \...\(resetOpenShortcut === undefined \? \{\} : \{ openShortcut: resetOpenShortcut \}\) \}\)/.test(settingsView));

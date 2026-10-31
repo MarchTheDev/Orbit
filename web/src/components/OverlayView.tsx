@@ -492,11 +492,16 @@ export function OverlayView() {
   };
 
   useEffect(() => {
+    let disposed = false;
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
     void Promise.all([loadSettings(), overlayMode(), isLinux()]).then(([settings, mode, linuxPlatform]) => {
+      if (disposed) return;
       PLATFORM_LINUX = linuxPlatform;
       setLinux(linuxPlatform);
+      // OverlayView is mounted in its own WebView, not inside App, so it must
+      // opt into the Linux rendering safeguards independently.
+      document.documentElement.classList.toggle('orbit-linux', linuxPlatform);
       applyTheme(settings.theme);
       applyFont(settings.fontFamily ?? 'system');
       settingsRef.current = settings;
@@ -808,6 +813,8 @@ export function OverlayView() {
       stopAxes = unlisten;
     }).catch(() => undefined);
     return () => {
+      disposed = true;
+      document.documentElement.classList.remove('orbit-linux');
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('pointerdown', onPointer, true);
       stopShown();
