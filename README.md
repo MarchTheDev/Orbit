@@ -41,14 +41,7 @@ story`, written by hand and editable afterwards.
 **Storage** - the games grouped by drive, with how much room every library
 folder takes and a Move button that keeps the library pointing at the game.
 
-**TV mode** - the playable library read from a sofa, laid out the way Playnite's
-fullscreen mode is: the window goes fullscreen, the selected game's own artwork
-fills the screen with its name, its numbers and its Play button over it, and
-everything that can be started sits on one rail of covers along the bottom.
-Nothing is grouped into categories - there is one list, ordered by what you
-played last (or by name, if you switch it) - so the page is decided the moment it
-opens. Arrows walk the rail, Enter plays, Escape leaves; a controller drives the
-same rail. It is the TV button beside the sound controls in the top bar.
+**TV mode** - the playable library read from a sofa.
 
 ## Starting a game
 
