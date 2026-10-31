@@ -6,6 +6,7 @@ import { rememberedPlaythrough } from '../services/playthroughs';
 import { loadSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyFont, applyTheme, nativePalette } from '../data/themes';
+import { desktopOs } from '../utils/platform';
 
 /**
  * Fields a person fills in, as opposed to anything Orbit works out.
@@ -68,7 +69,7 @@ export function useLibrary() {
         applyFont(loadedSettings.fontFamily ?? 'system');
         // The native cards are drawn outside the page, so they get the same
         // colours the theme just put on the page.
-        void overlayTheme(nativePalette(loadedSettings.theme));
+        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(loadedSettings.theme));
         setReady(true);
       } catch (error) {
         if (!alive) return;
@@ -186,7 +187,7 @@ export function useLibrary() {
       const next = { ...current, ...resolved };
       if (resolved.theme) {
         applyTheme(resolved.theme);
-        void overlayTheme(nativePalette(resolved.theme));
+        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(resolved.theme));
       }
       if (resolved.fontFamily) applyFont(resolved.fontFamily);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);

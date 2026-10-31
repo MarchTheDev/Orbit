@@ -117,6 +117,9 @@ export default function App() {
     startupError,
     retryStartup,
   } = useLibrary();
+  // The current native Linux build has no reliable game-overlay surface.
+  // Keep the rest of Orbit available and leave the overlay settings untouched.
+  const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
   /** TV mode: the library fullscreen, read from a couch. */
   const [tv, setTv] = useState(false);
@@ -210,6 +213,7 @@ export default function App() {
     let stopPulse = () => {};
     let stopOverlayNote = () => {};
     let stopOverlaySettings = () => {};
+    let stopCovered = () => {};
     let stopNotes = () => {};
     void listen<{ gameId?: string; notes?: string }>('playthrough-notes', (event) => {
       const gameId = event.payload?.gameId;
@@ -217,32 +221,33 @@ export default function App() {
     }).then((unlisten) => {
       stopNotes = unlisten;
     }).catch(() => undefined);
-    void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
-      setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
-    }).then((unlisten) => {
-      stopOverlaySettings = unlisten;
-    }).catch(() => undefined);
-    void listen<string>('overlay-toast', (event) => {
-      if (event.payload) say(event.payload);
-    }).then((unlisten) => {
-      stopOverlayNote = unlisten;
-    }).catch(() => undefined);
+    if (overlayAvailable) {
+      void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
+        setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
+      }).then((unlisten) => {
+        stopOverlaySettings = unlisten;
+      }).catch(() => undefined);
+      void listen<string>('overlay-toast', (event) => {
+        if (event.payload) say(event.payload);
+      }).then((unlisten) => {
+        stopOverlayNote = unlisten;
+      }).catch(() => undefined);
+      // The panel was drawn over by the game itself. Nothing Orbit can draw is
+      // visible at that moment, so the words land here, where the player will be
+      // as soon as the game lets go.
+      void listen<string>('overlay-covered', () => {
+        toast({
+          text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again.",
+          tone: 'error',
+        });
+      }).then((unlisten) => {
+        stopCovered = unlisten;
+      }).catch(() => undefined);
+    }
     void listen('cloud-transfer-close', () => {
       setCloudClose(currentCloudTransfer() ?? 'backup');
     }).then((unlisten) => {
       stopAsk = unlisten;
-    }).catch(() => undefined);
-    // The panel was drawn over by the game itself. Nothing Orbit can draw is
-    // visible at that moment, so the words land here, where the player will be
-    // as soon as the game lets go.
-    let stopCovered = () => {};
-    void listen<string>('overlay-covered', () => {
-      toast({
-        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again.",
-        tone: 'error',
-      });
-    }).then((unlisten) => {
-      stopCovered = unlisten;
     }).catch(() => undefined);
     void listen<CloudPulse>('cloud-transfer', (event) => {
       if (!cloudTransferActive()) return;
@@ -672,7 +677,7 @@ export default function App() {
   useGamepad();
 
   useEffect(() => {
-    if (!isNative() || !settings) return;
+    if (!isNative() || !overlayAvailable || !settings) return;
     const overlay = settings.overlay;
     void overlayConfigure({
       enabled: overlay?.enabled !== false,
@@ -691,7 +696,7 @@ export default function App() {
 
   const pinsShown = useRef(false);
   useEffect(() => {
-    if (!booted || !isNative() || !settings) return;
+    if (!booted || !isNative() || !overlayAvailable || !settings) return;
     if (settings.overlay?.enabled === false) {
       pinsShown.current = false;
       return;
@@ -708,7 +713,7 @@ export default function App() {
   // away again, and say why so the switch can be found.
   const statsChecked = useRef(false);
   useEffect(() => {
-    if (!isNative() || !booted || !settings || statsChecked.current) return;
+    if (!isNative() || !overlayAvailable || !booted || !settings || statsChecked.current) return;
     statsChecked.current = true;
     if (settings.overlay?.liveStats === false) return;
     void liveStatsSuspect().then((suspected) => {
@@ -723,7 +728,7 @@ export default function App() {
   }, [booted, settings, setSettings, toast]);
 
   useEffect(() => {
-    if (!isNative() || !session || session.manual) return;
+    if (!isNative() || !overlayAvailable || !session || session.manual) return;
     void overlayPlaying(session.gameTitle);
   }, [session]);
 
@@ -1016,7 +1021,7 @@ export default function App() {
     const started = await play(g.id);
     if (!started) return;
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
-    if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
+    if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
       if (isNative()) void overlayReadyNotice().catch(fallbackNotice);
       else fallbackNotice();
@@ -1169,7 +1174,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isNative()) return;
+    if (!isNative() || !overlayAvailable) return;
     let stop = () => {};
     let stopToast = () => {};
     // The panel speaks through these when it cannot speak for itself - it is

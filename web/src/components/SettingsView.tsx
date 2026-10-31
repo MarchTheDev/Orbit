@@ -754,6 +754,10 @@ export function SettingsView({
   const [musicError, setMusicError] = useState<string | null>(null);
   const [musicBusy, setMusicBusy] = useState(false);
   const native = isNative();
+  const overlayUnavailable = native && desktopOs() === 'linux';
+  const searchItems = overlayUnavailable
+    ? SETTINGS_SEARCH_ITEMS.filter((item) => item.section !== 'orbit-overlay' || item.label === 'Overlay')
+    : SETTINGS_SEARCH_ITEMS;
 
   const chooseMusic = async () => {
     setMusicError(null);
@@ -866,7 +870,7 @@ export function SettingsView({
   };
 
   const searchResults = settingsQuery.trim()
-    ? SETTINGS_SEARCH_ITEMS.filter(
+    ? searchItems.filter(
         (item) =>
           (desktopOs() === 'windows' || desktopOs() === 'linux' || item.label !== 'Open in Orbit') &&
           `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
@@ -1221,9 +1225,20 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game. Change its keyboard shortcut below, or open it with Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
+        lead={overlayUnavailable
+          ? 'Orbit’s in-game overlay is temporarily unavailable in the Linux build.'
+          : 'A fullscreen panel over the game. Change its keyboard shortcut below, or open it with Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured.'}
       >
-        <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
+        {overlayUnavailable ? (
+          <div className="rounded-2xl border border-line bg-panel2/30 p-4 text-sm leading-relaxed text-muted">
+            <p className="font-medium text-fg">The in-game overlay is turned off on Linux for now.</p>
+            <p className="mt-2">
+              We’ll revisit a Linux-native implementation in a future version. Your existing overlay preferences are preserved, but they have no effect in this Linux build.
+            </p>
+          </div>
+        ) : (
+          <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
+        )}
       </Section>
 
       <Section

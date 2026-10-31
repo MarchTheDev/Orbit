@@ -628,6 +628,10 @@ pub fn request_toggle(why: &'static str) {
     ASKED.store(true, Ordering::SeqCst);
 }
 
+#[cfg(target_os = "linux")]
+pub fn apply_settings(_value: &Value) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn apply_settings(value: &Value) {
     let overlay = value.get("overlay");
     let shortcuts = Shortcuts::from_value(overlay.and_then(|item| item.get("shortcuts")));
@@ -697,6 +701,23 @@ pub fn apply_settings(value: &Value) {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn configure(
+    _app: Option<&AppHandle>,
+    _enabled: bool,
+    _replay: bool,
+    _seconds: u32,
+    _lengths: Option<&[u32]>,
+    _quality: &str,
+    _fps: u32,
+    _ffmpeg: &str,
+    _screenshot_directory: &str,
+    _recording_directory: &str,
+    _replay_directory: &str,
+    _game_only: bool,
+) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn configure(
     app: Option<&AppHandle>,
     enabled: bool,
@@ -781,6 +802,10 @@ pub fn configure(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn game_started(_title: &str) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn game_started(title: &str) {
     let restart = {
         let mut live = lock();
@@ -809,6 +834,12 @@ pub fn game_started(title: &str) {
 /// refresh. Otherwise a native card is drawn instead: showing the overlay
 /// window for five seconds meant a second WebView2 instance, about 50 MB of
 /// processes, on every game start.
+#[cfg(target_os = "linux")]
+pub fn ready_notice(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn ready_notice(app: &AppHandle) -> Result<(), String> {
     let panel = panel_visible(app);
     let palette = {
@@ -951,6 +982,14 @@ pub fn close_panel(app: &AppHandle, why: &str) {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn install(_app: &AppHandle) -> Result<(), String> {
+    // The Wayland/X11 implementation is being revisited. Do not register
+    // overlay shortcuts, start capture workers, or create its WebView on Linux.
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn install(app: &AppHandle) -> Result<(), String> {
     // The app's own data folder still holds the replay's working file, which is
     // thrown away and never meant to be found.
@@ -1013,6 +1052,10 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
 /// panel is open. A capture shortcut is not one of those: it is the same three
 /// things a keyboard shortcut does, and it works with the panel closed, which is
 /// how a player takes a picture of the game they are playing.
+#[cfg(target_os = "linux")]
+pub fn on_pad(_app: &AppHandle, _buttons: &[bool], _axes: &[f32]) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
     // Read before the pad's own lock is taken: the settings page writes them
     // while the pad is being polled.
@@ -1905,22 +1948,12 @@ fn toggle_on_main(app: &AppHandle) {
     }
 }
 
-/// The transparent surface is the requested default so the game remains
-/// visible between overlay boxes. Set ORBIT_OVERLAY_TRANSPARENT=0 to use a
-/// solid panel on a compositor that cannot keep the glass alive.
 #[cfg(target_os = "linux")]
-pub(crate) fn panel_see_through() -> bool {
-    if let Some(forced) = std::env::var_os("ORBIT_OVERLAY_TRANSPARENT") {
-        let forced = forced.to_string_lossy();
-        return !matches!(forced.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off");
-    }
-    true
-}
-#[cfg(not(target_os = "linux"))]
-fn panel_see_through() -> bool {
-    true
+fn ensure_window(_app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    None
 }
 
+#[cfg(not(target_os = "linux"))]
 fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if STOP.load(Ordering::SeqCst) {
         return None;
@@ -1928,11 +1961,9 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
-    // Solid underneath on Linux, glass only when the desktop asks for it by
-    // name: the records of what a see-through window can lose to are long
-    // enough now. Either way the page is the same; what changes is whether the
-    // game's pixels or Orbit's own ground stand behind it.
-    let see_through = panel_see_through();
+    // The overlay is currently built only on Windows and macOS, where a
+    // transparent surface is the intended presentation.
+    let see_through = true;
     let background = if see_through {
         tauri::window::Color(0, 0, 0, 0)
     } else {
@@ -1966,20 +1997,6 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
             error
         })
         .ok()?;
-    // Written down like every other thing the panel does, so Settings can say
-    // which face of the panel this desktop asked for - and what to change when
-    // the choice is wrong for the very machine reading it.
-    if !see_through {
-        note_panel("the panel is drawn on solid ground; ORBIT_OVERLAY_TRANSPARENT=1 restores glass");
-    }
-    #[cfg(target_os = "linux")]
-    if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_some() {
-        note_panel("the transparent panel uses X11 on this Wayland NVIDIA setup; ORBIT_X11=0 keeps Orbit on native Wayland instead");
-    }
-    #[cfg(target_os = "linux")]
-    if see_through && std::env::var_os("ORBIT_X11_SWITCHED").is_none() {
-        note_panel("the panel runs transparent; ORBIT_OVERLAY_TRANSPARENT=0 switches to solid ground if this desktop drops the glass");
-    }
     cover_screen(&window);
     let app_for_close = app.clone();
     window.on_window_event(move |event| {
@@ -2000,6 +2017,10 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 /// here while the library sits idle instead, so the first open is as quick as
 /// the ones after it. The window is created hidden, so it covers nothing, and
 /// nothing that asks whether the panel is up sees it.
+#[cfg(target_os = "linux")]
+pub fn warm(_app: &AppHandle) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn warm(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) || !lock().enabled {
         return;

@@ -606,10 +606,12 @@ fn note(
     force: bool,
 ) {
     publish(state, true);
-    // Start+Select opens the overlay even when this window is not in front.
-    // Swallow that chord, and any pad input while the panel is up, so the
-    // library does not also treat Start as play.
+    // On Linux the game overlay is temporarily disabled, so the usual
+    // Start+Select chord is passed through like every other controller input.
     crate::overlay::on_pad(app, &state.buttons, &state.axes);
+    #[cfg(target_os = "linux")]
+    let combo = false;
+    #[cfg(not(target_os = "linux"))]
     let combo = state.buttons.get(9) == Some(&true) && state.buttons.get(8) == Some(&true);
     if combo || crate::overlay::is_open() {
         *sent = state.clone();

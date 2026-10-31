@@ -61,6 +61,10 @@ A game can also list programs to start **alongside** it - a frame-rate tool, a
 mod controller. Those start with the game and are never watched, so closing one
 cannot end the session.
 
+The in-game overlay is temporarily disabled in Linux builds while a Linux-native
+implementation is studied for a future version. The rest of Orbit remains
+available, and existing overlay preferences are preserved.
+
 Dropping a program, or a folder holding one, anywhere on the window adds it
 straight away.
 
@@ -93,12 +97,12 @@ In `\com.orbit.launcher`:
 
 - `orbit.db` - the library, every session and every log note, in SQLite
 - `settings.json` - theme, library folders, and whether to look games up
-- `replay\` - the last few seconds of the game that is running, kept in a
-  temporary file so it costs no memory; removed when the session ends
+- `replay\` - on platforms with overlay capture, the last few seconds of the
+  running game, kept in a temporary file and removed when the session ends
 
-The first two are plain files you can back up or delete, and the replay folder
-never outlives a session. Deleting `orbit.db` empties the library; nothing else
-on the machine is touched.
+The first two are plain files you can back up or delete; where overlay capture
+is available, the replay folder never outlives a session. Deleting `orbit.db`
+empties the library; nothing else on the machine is touched.
 
 ## Layout
 

@@ -108,9 +108,10 @@ portable zip carries. An installed copy, an `Orbit.exe` saved on its own, and an
 AppImage all read the marker as absent and keep their files in
 `%APPDATA%\com.orbit.launcher` on Windows and `~/.local/share/com.orbit.launcher`
 elsewhere. A portable copy writes those same files - the database, the saves, the
-stats, the overlay's working files, the recording tools, the installed runners,
-the music and the captures - into `data` beside itself instead, so the folder can
-be moved and everything moves with it. A folder it cannot write to falls back to
+stats, the overlay's working files on supported platforms, the recording tools,
+the installed runners, the music and the captures - into `data` beside itself.
+The folder can be moved and everything moves with it. A folder it cannot write
+to falls back to
 the usual location rather than losing a save.
 
 **Linux.** What is needed once, on Debian or Ubuntu:

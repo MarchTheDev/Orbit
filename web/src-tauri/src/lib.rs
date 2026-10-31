@@ -2255,43 +2255,6 @@ pub fn run() {
         std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
     }
 
-    // Same stack, one beat further. The sync workaround buys the web view its
-    // frames, but a see-through Wayland surface still does not survive the
-    // proprietary NVIDIA pairing - the compositor drops the RGBA surface a
-    // moment after it appears, which is the overlay flashing up and then
-    // being gone. An X11 window composites its alpha just fine there, so when
-    // a see-through panel is wanted Orbit restarts itself on the X backend
-    // (XWayland in this session), with GDK_BACKEND set from the environment
-    // this time: setting it from inside the process would race libraries that
-    // read it on first touch. exec replaces rather than forks, so terminal,
-    // arguments and any single-instance handshake carry over untouched, and
-    // the marker plus the backend check both rule out a second round. A solid
-    // ask (ORBIT_OVERLAY_TRANSPARENT=0) stays on native Wayland, and
-    // ORBIT_X11=0 keeps the native backend no matter what.
-    #[cfg(target_os = "linux")]
-    if linux_window::wayland_backend()
-        && linux_window::nvidia_driver()
-        && overlay::panel_see_through()
-        && std::env::var_os("ORBIT_X11_SWITCHED").is_none()
-        && std::env::var_os("ORBIT_X11").is_none_or(|ask| {
-            let ask = ask.to_string_lossy();
-            !matches!(ask.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off")
-        })
-    {
-        use std::os::unix::process::CommandExt;
-        if let Ok(program) = std::env::current_exe() {
-            eprintln!(
-                "Orbit: a see-through window does not survive Wayland with this driver, so Orbit restarts itself on X11 (XWayland). ORBIT_X11=0 keeps native Wayland, ORBIT_OVERLAY_TRANSPARENT=0 a solid native panel."
-            );
-            let error = std::process::Command::new(program)
-                .args(std::env::args_os().skip(1))
-                .env("GDK_BACKEND", "x11")
-                .env("ORBIT_X11_SWITCHED", "1")
-                .exec();
-            eprintln!("Orbit: could not restart on X11 ({error}); staying on Wayland");
-        }
-    }
-
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
     let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));

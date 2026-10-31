@@ -2,18 +2,9 @@
  * The optional X11 entry point for packages that retain a manual fallback.
  *
  * `orbit-x11` is not a second build: it is the same binary with GDK_BACKEND set
- * before GDK starts. Arch no longer ships a duplicate launcher: Orbit selects
- * X11 itself on the Wayland/NVIDIA combination that needs it. The other Linux
- * packages keep the manual fallback for desktops outside that automatic case.
- *
- * One sanctioned exception lives at the end of this file: on Wayland with the
- * proprietary NVIDIA driver the compositor quietly drops a see-through surface
- * a moment after it appears, and that is the overlay the app cannot do without.
- * There the binary replaces itself through exec with the variable already set —
- * marked so a second move is impossible, and declinable two ways. What was once
- * "the program never sets the backend" is now "the program describes its one
- * move, on exactly the pairing that needs it", and the checks say which parts
- * of that description are load-bearing.
+ * before GDK starts. It remains an explicit fallback for testing the main
+ * window on desktops where native Wayland rendering misbehaves. Orbit no longer
+ * changes display backends automatically for its in-game overlay.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -111,35 +102,15 @@ console.log('nothing forces X11 on anybody who did not ask');
 const desktop = read('packaging', 'linux', 'orbit.desktop');
 check('the ordinary entry has no GDK_BACKEND in it', !/GDK_BACKEND/.test(desktop));
 check('the ordinary entry still just runs orbit', /^Exec=orbit$/m.test(desktop));
+console.log('the app does not force a display backend');
+
 const lib = read('web', 'src-tauri', 'src', 'lib.rs');
 const launch = read('web', 'src-tauri', 'src', 'launch.rs');
+check('the app never sets GDK_BACKEND and replaces itself',
+  !/\.env\(\"GDK_BACKEND\"/.test(lib) && !/CommandExt/.test(lib));
+check('Orbit no longer automatically restarts on X11 for the disabled overlay',
+  !/ORBIT_X11_SWITCHED/.test(lib) && !/overlay::panel_see_through\(\)/.test(lib));
 check('launch itself stays out of the backend question', !/GDK_BACKEND/.test(launch));
-
-console.log('the one move the program may make itself');
-
-// The gate that decides: Wayland session AND proprietary NVIDIA AND a
-// see-through panel wanted - take one away and the move must not happen.
-check('it only moves on the pairing that drops see-through windows',
-  /linux_window::wayland_backend\(\)[\s\S]*?linux_window::nvidia_driver\(\)[\s\S]*?overlay::panel_see_through\(\)/.test(lib));
-check('a solid panel stays on native Wayland', /overlay::panel_see_through\(\)/.test(lib));
-const overlaySource = read('web', 'src-tauri', 'src', 'overlay.rs');
-check('glass is the Linux default and =0 opts out to a solid panel', /pub\(crate\) fn panel_see_through\(\) -> bool[\s\S]*?return !matches!\(forced\.trim\(\)\.to_ascii_lowercase\(\)\.as_str\(\), \"0\" \| \"no\" \| \"false\" \| \"off\"\)[\s\S]*?true\s*}\s*#\[cfg\(not\(target_os = \"linux\"\)\)\]/.test(overlaySource));
-// The variable shows up exactly once, and only to move to x11: a check that
-// counts stops a second, differing backend from sneaking into a refactor.
-const moves = lib.match(/\.env\("GDK_BACKEND", "[a-z0-9]+"\)/g) ?? [];
-check('the only backend it ever sets is x11, once', moves.length === 1 && moves[0] === '.env("GDK_BACKEND", "x11")',
-  moves.join(' | '));
-// Without the marker a round trip through a wrapper or a menu launch of the
-// moved copy would move again, and again.
-check('a second move is impossible', /ORBIT_X11_SWITCHED/.test(lib));
-// Being moved without asking is only acceptable because saying no remains one
-// word of environment - and because the move is exec: the process that
-// started on Wayland does not litter the process table next to its X11 copy.
-check('the move can be declined with ORBIT_X11=0', /ORBIT_X11\b/.test(lib));
-check('it execs rather than spawning a second orbit', /\.env\("GDK_BACKEND", "x11"\)[\s\S]*?\.exec\(\)/.test(lib));
-// The moved copy is the same invocation: arguments would otherwise be eaten
-// at the seam - Explorer drops and --autostart among them.
-check('arguments cross the seam untouched', /\.args\(std::env::args_os\(\)\.skip\(1\)\)/.test(lib));
 
 console.log('the check that looks inside the finished packages');
 
