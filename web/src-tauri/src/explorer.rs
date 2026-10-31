@@ -21,7 +21,10 @@ fn register() -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not find Orbit's executable: {error}"))?;
     let executable = executable.to_string_lossy();
-    let icon = format!("\"{executable}\",0");
+    // Explorer's Icon value is a resource location, not a command line. Keep
+    // the path unquoted here so Explorer can extract the embedded icon while
+    // Orbit is closed; the command below still needs quoting for spaces.
+    let icon = icon_location(&executable);
     let command = format!("\"{executable}\" --open-in-orbit \"%1\"");
 
     let result = (|| {
@@ -36,6 +39,10 @@ fn register() -> Result<(), String> {
         let _ = remove();
     }
     result
+}
+
+fn icon_location(executable: &str) -> String {
+    format!("{executable},0")
 }
 
 fn registry_command() -> Command {
@@ -106,5 +113,18 @@ fn output_message(output: &Output) -> String {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     } else {
         stderr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::icon_location;
+
+    #[test]
+    fn icon_resource_location_keeps_spaced_exe_path_unquoted() {
+        assert_eq!(
+            icon_location(r"C:\Program Files\Orbit\Orbit.exe"),
+            r"C:\Program Files\Orbit\Orbit.exe,0",
+        );
     }
 }
