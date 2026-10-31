@@ -105,6 +105,7 @@ export default function App() {
     games,
     settings,
     setSettings,
+    replaceSettings,
     updateGame,
     adoptNotes,
     addGame,
@@ -1326,6 +1327,7 @@ export default function App() {
             <SettingsView
               settings={settings}
               setSettings={setSettings}
+              replaceSettings={replaceSettings}
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);

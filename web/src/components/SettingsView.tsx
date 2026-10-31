@@ -715,6 +715,7 @@ function fileName(path: string): string {
 export function SettingsView({
   settings,
   setSettings,
+  replaceSettings,
   onImportLauncher,
   onClearLibrary,
   onReset,
@@ -725,6 +726,8 @@ export function SettingsView({
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void;
+  /** Replaces the full settings snapshot during import. */
+  replaceSettings: (settings: Partial<Settings>) => void;
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
   onClearLibrary: () => void;
@@ -1476,7 +1479,7 @@ export function SettingsView({
         title="Export and import"
         lead="Save this Orbit to a file you keep, and bring that file back later. Settings always go in. The journal and the sessions go in only if you tick them. This is not a copy of the games' save files."
       >
-        <CopySettings settings={settings} setSettings={setSettings} onLibraryChanged={onLibraryChanged} />
+        <CopySettings settings={settings} replaceSettings={replaceSettings} onLibraryChanged={onLibraryChanged} />
       </Section>
 
       <Section id="orbit-tools" icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">

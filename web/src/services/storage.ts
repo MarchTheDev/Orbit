@@ -7,15 +7,19 @@ export { DEFAULT_SETTINGS };
  * Settings only. The library itself lives in SQLite on the Rust side, so this
  * is no longer where a game lives, only how the app is set up.
  */
+export function normalizeSettings(stored: Partial<Settings>): Settings {
+  return dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+}
+
 export async function loadSettings(): Promise<Settings> {
   const t = (window as Window & { __TAURI__?: { core: { invoke: <T>(c: string) => Promise<T> } } }).__TAURI__;
   if (t) {
     const stored = await t.core.invoke<Partial<Settings> | null>('load_settings');
-    return dropRetired({ ...DEFAULT_SETTINGS, ...(stored ?? {}) });
+    return normalizeSettings(stored ?? {});
   }
   try {
     const raw = localStorage.getItem('orbit.settings');
-    return dropRetired({ ...DEFAULT_SETTINGS, ...(raw ? (JSON.parse(raw) as Partial<Settings>) : {}) });
+    return normalizeSettings(raw ? (JSON.parse(raw) as Partial<Settings>) : {});
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

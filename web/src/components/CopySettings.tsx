@@ -24,11 +24,11 @@ import { cn } from '../utils/cn';
  */
 export function CopySettings({
   settings,
-  setSettings,
+  replaceSettings,
   onLibraryChanged,
 }: {
   settings: Settings;
-  setSettings: (patch: Partial<Settings>) => void;
+  replaceSettings: (settings: Partial<Settings>) => void;
   onLibraryChanged?: () => void;
 }) {
   const native = isNative();
@@ -92,7 +92,7 @@ export function CopySettings({
     }
     if (bringSettings) {
       const ok = await ask(
-        'Replace the settings on this computer with the ones in the file? Themes, folders, saved keys, and signed-in clouds are overwritten. The library of games is not.',
+        'Replace this computer’s global settings with the ones in the file? That includes themes, folders, overlay preferences, shortcuts, saved keys, and signed-in clouds. Game records and per-game settings are not included.',
         { title: 'Orbit', kind: 'warning' },
       );
       if (!ok) return;
@@ -104,7 +104,7 @@ export function CopySettings({
       const result = await importCopy(preview.path, bringJournal, bringSessions, bringSettings);
       if (bringSettings && result.settings) {
         const imported = result.settings as Partial<Settings>;
-        setSettings(imported);
+        replaceSettings(imported);
         if (typeof imported.launchOnStartup === 'boolean') {
           await setLaunchOnStartup(imported.launchOnStartup).catch(() => undefined);
         }
@@ -145,7 +145,7 @@ export function CopySettings({
         />
       </div>
       <p className="text-xs leading-relaxed text-muted">
-        A lit box goes into the file. Games, and the games' save files, do not. Settings includes keys and signed-in clouds, so keep the file somewhere you trust.
+        A lit box goes into the file. Global Settings—including overlay preferences and shortcuts—always go in. Game records, per-game settings such as Proton choices, and save files do not. Settings includes keys and signed-in clouds, so keep the file somewhere you trust.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">

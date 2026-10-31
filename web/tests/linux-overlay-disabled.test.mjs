@@ -33,7 +33,7 @@ check('the app does not configure, pin, or announce the overlay on Linux',
     app.includes('void overlayShowPins()') &&
     /if \(overlayAvailable && launchedFromOrbit/.test(app));
 check('theme changes do not contact the disabled Linux overlay',
-  (library.match(/if \(desktopOs\(\) !== 'linux'\) void overlayTheme/g) ?? []).length === 2);
+  (library.match(/if \(desktopOs\(\) !== 'linux'\) void overlayTheme/g) ?? []).length === 3);
 check('Linux overlay settings remain saved rather than being reset',
   settings.includes('Your existing overlay preferences are preserved'));
 

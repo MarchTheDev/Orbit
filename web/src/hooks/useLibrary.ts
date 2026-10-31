@@ -3,7 +3,7 @@ import type { Game, MetaData, Settings } from '../types';
 
 import { deleteGame as removeFromDb, listGames, overlayTheme, saveGame, clearLibrary, writePlaythroughNotes } from '../services/native';
 import { rememberedPlaythrough } from '../services/playthroughs';
-import { loadSettings, saveSettings } from '../services/storage';
+import { loadSettings, normalizeSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyFont, applyTheme, nativePalette } from '../data/themes';
 import { desktopOs } from '../utils/platform';
@@ -195,6 +195,19 @@ export function useLibrary() {
     });
   }, []);
 
+  /** Replace the complete settings snapshot, filling fields added since it was made. */
+  const replaceSettings = useCallback((incoming: Partial<Settings>) => {
+    setSettingsState((current) => {
+      if (!current) return current;
+      const next = normalizeSettings(incoming);
+      applyTheme(next.theme);
+      if (desktopOs() !== 'linux') void overlayTheme(nativePalette(next.theme));
+      applyFont(next.fontFamily ?? 'system');
+      queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
+      return next;
+    });
+  }, []);
+
   /**
    * Put the whole install back to how it looked on first run.
    *
@@ -225,7 +238,7 @@ export function useLibrary() {
       .catch(console.error);
   }, []);
 
-  return { games, settings, setSettings, updateGame, adoptNotes, addGame, addGames, removeGame, reload, flush, resetEverything, ready, startupError, retryStartup };
+  return { games, settings, setSettings, replaceSettings, updateGame, adoptNotes, addGame, addGames, removeGame, reload, flush, resetEverything, ready, startupError, retryStartup };
 }
 
 export type Library = ReturnType<typeof useLibrary>;
