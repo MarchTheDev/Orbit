@@ -679,10 +679,7 @@ export function AddGameModal({
               <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
                 <HardDrive className="size-5" />
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">Drive or folder</span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted">Review games found on disk</span>
-              </span>
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">Drive or folder</span>
               <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
             </button>
             {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => (

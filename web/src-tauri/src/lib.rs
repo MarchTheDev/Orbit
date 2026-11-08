@@ -1336,6 +1336,16 @@ async fn metadata_cards(title: String) -> Result<Vec<metadata::Card>, String> {
     metadata::suggest_cards(&title).await
 }
 
+/// Search TheGamesDB only when a personal key was supplied in Settings.
+#[tauri::command]
+async fn thegamesdb_suggest(orbit: State<'_, Orbit>, title: String) -> Result<Vec<String>, String> {
+    let settings = orbit.store.load_settings();
+    let Some(key) = setting_text(&settings, "theGamesDbApiKey") else {
+        return Ok(Vec::new());
+    };
+    metadata::thegamesdb_suggest(&title, &key).await
+}
+
 /// Every achievement the game's Steam Community page lists.
 ///
 /// The Steam app a library game belongs to.
@@ -2597,6 +2607,7 @@ pub fn run() {
             metadata_lookup,
             metadata_suggest,
             metadata_cards,
+            thegamesdb_suggest,
             game_facts,
             achievements_fetch,
             artwork_candidates,

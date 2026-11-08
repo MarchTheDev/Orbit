@@ -14,7 +14,7 @@
  * choosing it then opens on an answer that is already there.
  */
 import type { GameFacts, GameSuggestion, MetaData } from '../types';
-import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest } from './native';
+import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest, theGamesDbSuggest } from './native';
 
 /**
  * How many answers each of these keeps.
@@ -54,6 +54,7 @@ function remembered<T>(kept: Map<string, Promise<T>>, key: string, ask: () => Pr
 }
 
 const searches = new Map<string, Promise<GameSuggestion[]>>();
+const theGamesDbSearches = new Map<string, Promise<string[]>>();
 const answers = new Map<string, GameSuggestion[]>();
 const facts = new Map<string, Promise<GameFacts>>();
 
@@ -71,6 +72,18 @@ export function fetchMetadata(title: string, appId?: number): Promise<MetaData> 
 /** Titles a store suggests while a name is being typed. */
 export function searchTitles(title: string): Promise<string[]> {
   return metadataSuggest(title);
+}
+
+/** Cross-platform catalogue matches, enabled only with a TheGamesDB key in Settings. */
+export function searchTheGamesDb(title: string): Promise<string[]> {
+  const key = keyOf(title);
+  if (!key) return Promise.resolve([]);
+  return remembered(theGamesDbSearches, key, () => theGamesDbSuggest(title.trim())).then((found) => {
+    // Do not pin an empty answer: the key may be added while Orbit stays open,
+    // and a later search should then be able to reach the provider.
+    if (found.length === 0) theGamesDbSearches.delete(key);
+    return found;
+  });
 }
 
 /**

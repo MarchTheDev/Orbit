@@ -170,6 +170,7 @@ export default function App() {
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
+  const [backlogRemovalTarget, setBacklogRemovalTarget] = useState<Game | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showThemeManager, setShowThemeManager] = useState(false);
   /** True while a launcher/drive picker was opened from the Add Game form. */
@@ -982,14 +983,16 @@ export default function App() {
     });
   };
 
-  /** Remove membership only for Library games; a plan-only row can be deleted. */
-  const removeFromBacklog = (game: Game): boolean => {
+  /** Remove only this game's Backlog membership, or its planned-only record. */
+  const removeFromBacklog = (game: Game, confirmed = false): boolean => {
+    if (!confirmed) {
+      setBacklogRemovalTarget(game);
+      return false;
+    }
     if (inLibraryShelf(game)) {
-      if (!confirm(`Remove ${game.title} from the Backlog? The game will remain in your Library.`)) return false;
       setBacklogMembership(game.id, false);
       return true;
     }
-    if (!confirm(`Remove the planned entry for ${game.title}? This does not affect any Library game.`)) return false;
     removeGame(game.id);
     setSelectedId((current) => (current === game.id ? null : current));
     return true;
@@ -1663,6 +1666,22 @@ export default function App() {
         />
       )}
 
+      {backlogRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${backlogRemovalTarget.title} from the Backlog?`}
+          description={inLibraryShelf(backlogRemovalTarget)
+            ? 'The game will leave the Backlog but remain in your Library with its files, sessions and notes.'
+            : 'This deletes only the planned Backlog entry. It does not affect any Library game.'}
+          confirmLabel="Remove from Backlog"
+          onCancel={() => setBacklogRemovalTarget(null)}
+          onConfirm={() => {
+            const target = backlogRemovalTarget;
+            setBacklogRemovalTarget(null);
+            removeFromBacklog(target, true);
+          }}
+        />
+      )}
+
       {removeSteamConfirm && steamRemovalIds.length > 0 && (
         <ConfirmDialog
           title={`Remove ${steamRemovalIds.length} Steam ${steamRemovalIds.length === 1 ? 'game' : 'games'}?`}
@@ -1723,10 +1742,9 @@ export default function App() {
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
           hideLaunchSettings={editingHideLaunchSettings}
           onRemoveFromBacklog={editingHideLaunchSettings ? () => {
-            if (removeFromBacklog(editingGame)) {
-              setEditingGameId(null);
-              setEditingHideLaunchSettings(false);
-            }
+            removeFromBacklog(editingGame, true);
+            setEditingGameId(null);
+            setEditingHideLaunchSettings(false);
           } : undefined}
           onClose={() => {
             setEditingGameId(null);

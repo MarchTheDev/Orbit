@@ -8,7 +8,11 @@ export { DEFAULT_SETTINGS };
  * is no longer where a game lives, only how the app is set up.
  */
 export function normalizeSettings(stored: Partial<Settings>): Settings {
-  return dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  const normalized = dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  if (!['system', 'rounded', 'serif', 'mono', 'humanist', 'book'].includes(String(normalized.fontFamily ?? 'system'))) {
+    normalized.fontFamily = 'system';
+  }
+  return normalized;
 }
 
 export async function loadSettings(): Promise<Settings> {

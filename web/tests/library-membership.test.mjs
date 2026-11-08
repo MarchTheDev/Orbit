@@ -41,8 +41,8 @@ check('removing a plan has a visible rose danger treatment', backlogView.include
 const logsView = readFileSync(new URL('../src/components/LogsView.tsx', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const gameEditor = readFileSync(new URL('../src/components/detail/GameEditDialog.tsx', import.meta.url), 'utf8');
-check('removing a game from the Journal confirms and preserves its logs and sessions', logsView.includes('confirm(`Remove ${menuGame.title} from the Journal?') && logsView.includes('Its logs, notes and play sessions will stay'));
-check('removing a game from the Backlog confirms and preserves its Library record', app.includes('confirm(`Remove ${game.title} from the Backlog? The game will remain in your Library.`'));
+check('removing a game from the Journal uses the in-app confirmation and preserves logs and sessions', logsView.includes('<ConfirmDialog') && logsView.includes('title={`Remove ${membershipTarget.title} from the Journal?`') && logsView.includes('Its logs, notes, sessions and Library record stay intact.') && !logsView.includes('confirm(`Remove ${menuGame.title} from the Journal?'));
+check('removing a game from the Backlog uses the in-app confirmation and preserves its Library record', app.includes('<ConfirmDialog') && app.includes('title={`Remove ${backlogRemovalTarget.title} from the Backlog?`}') && app.includes('remain in your Library with its files, sessions and notes') && !app.includes('confirm(`Remove ${game.title} from the Backlog?'));
 check('the Remove from Backlog editor action uses destructive rose styling', gameEditor.includes('border-rose-500/40 bg-rose-500/10'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

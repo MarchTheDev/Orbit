@@ -225,8 +225,10 @@ export function useDragReorder(
             onPointerDown: (e: ReactPointerEvent) => {
               if (e.button !== 0) return;
               // A button inside the card is being pressed, not the card.
-              const interactive = (e.target as HTMLElement).closest('button, a, input, select, textarea');
-              if (interactive && !optionsRef.current?.fromButtons) return;
+              const target = e.target as HTMLElement;
+              const interactive = target.closest('button, a, input, select, textarea');
+              const explicitHandle = target.closest('[data-orbit-drag-handle]');
+              if (interactive && !optionsRef.current?.fromButtons && !explicitHandle) return;
               if (optionsRef.current?.hold) {
                 // The dialog's scroller must not take this gesture, and the
                 // events have to keep arriving on the card even if the window

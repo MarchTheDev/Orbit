@@ -940,6 +940,68 @@ pub async fn suggest_cards(title: &str) -> Result<Vec<Card>, String> {
         .collect())
 }
 
+/// Search TheGamesDB's multi-platform catalogue when the player supplied a
+/// personal API key. Steam remains the default, no-key source; this provider is
+/// an additive title lookup for games that are not on Steam.
+pub async fn thegamesdb_suggest(title: &str, api_key: &str) -> Result<Vec<String>, String> {
+    let title = title.trim();
+    let api_key = api_key.trim();
+    if title.chars().count() < 2 || api_key.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION"), " (game library tracker)"))
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get("https://api.thegamesdb.net/v1/Games/ByGameName")
+        .query(&[("apikey", api_key), ("name", title)])
+        .send()
+        .await
+        .map_err(|_| "TheGamesDB is unreachable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("TheGamesDB answered {}.", response.status()));
+    }
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("TheGamesDB returned an unreadable reply: {error}"))?;
+    let Some(games) = payload.pointer("/data/games") else {
+        return Ok(Vec::new());
+    };
+    let entries: Vec<&serde_json::Value> = if let Some(array) = games.as_array() {
+        array.iter().collect()
+    } else if let Some(object) = games.as_object() {
+        object.values().collect()
+    } else {
+        Vec::new()
+    };
+    let mut titles = Vec::new();
+    for game in entries {
+        let name = game
+            .get("game_title")
+            .or_else(|| game.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        if let Some(name) = name {
+            if !titles.iter().any(|known: &String| known.eq_ignore_ascii_case(name)) {
+                titles.push(name.to_string());
+            }
+        }
+    }
+    let want = normalize(title);
+    titles.sort_by_key(|name| {
+        let got = normalize(name);
+        if got == want { 0 }
+        else if got.starts_with(&want) || want.starts_with(&got) { 1 }
+        else { 2 }
+    });
+    titles.truncate(8);
+    Ok(titles)
+}
+
 /// The result whose name is closest to what was asked for.
 fn best_match<'a>(items: &'a [SteamItem], title: &str) -> Option<&'a SteamItem> {
     let want = normalize(title);

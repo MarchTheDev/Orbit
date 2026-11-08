@@ -11,7 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Game, GameFacts, GameSuggestion, HltbData, PlanPlatform } from '../../types';
-import { fetchFacts, knownGames, searchGames } from '../../services/metadata';
+import { fetchFacts, knownGames, searchGames, searchTheGamesDb } from '../../services/metadata';
 import { fetchHltb } from '../../services/hltb';
 import { cn } from '../../utils/cn';
 import { PlanPage } from './PlanPage';
@@ -77,6 +77,9 @@ export function PlanDialog({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<GameSuggestion[]>([]);
+  const [externalResults, setExternalResults] = useState<string[]>([]);
+  const [externalLooking, setExternalLooking] = useState(false);
+  const [externalError, setExternalError] = useState<string | null>(null);
   const [hltbMatch, setHltbMatch] = useState<{ name: string; data: HltbData } | null>(null);
   const [looking, setLooking] = useState(false);
   /** The suggestion whose own page is open, if one is. */
@@ -107,6 +110,9 @@ export function PlanDialog({
   useEffect(() => {
     const text = query.trim();
     setHltbMatch(null);
+    setExternalResults([]);
+    setExternalLooking(false);
+    setExternalError(null);
     if (text.length < 2) {
       asked.current += 1;
       setResults([]);
@@ -119,16 +125,33 @@ export function PlanDialog({
         if (asked.current === now && data.gameName) setHltbMatch({ name: data.gameName, data });
       }).catch(() => undefined);
     };
+    const lookupTheGamesDb = () => {
+      setExternalLooking(true);
+      void searchTheGamesDb(text)
+        .then((names) => {
+          if (asked.current === now) setExternalResults(names);
+        })
+        .catch(() => {
+          if (asked.current === now) {
+            setExternalResults([]);
+            setExternalError('TheGamesDB search failed. Check the API key in Settings.');
+          }
+        })
+        .finally(() => {
+          if (asked.current === now) setExternalLooking(false);
+        });
+    };
 
     // A name searched before is on screen in the same frame as the keystroke.
     // The wider HLTB index is searched too, so console-only titles can be found
     // even when Steam has no listing for them.
     const ready = knownGames(text);
-    if (ready && ready.length > 0) {
+    if (ready) {
       setResults(ready);
       setAt(0);
       setLooking(false);
       lookupOtherCatalog();
+      if (ready.length === 0) lookupTheGamesDb();
       return;
     }
 
@@ -139,6 +162,7 @@ export function PlanDialog({
           if (asked.current !== now) return;
           setResults(found);
           setAt(0);
+          if (found.length === 0) lookupTheGamesDb();
         })
         .catch(() => {
           if (asked.current === now) setResults([]);
@@ -306,6 +330,7 @@ export function PlanDialog({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {externalError && <p role="status" className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">{externalError}</p>}
               {typed.length < 2 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                   <span className="grid size-14 place-items-center rounded-2xl border border-dashed border-line text-muted">
@@ -325,7 +350,7 @@ export function PlanDialog({
                     </span>
                   </p>
                 </div>
-              ) : results.length === 0 && looking ? (
+              ) : results.length === 0 && (looking || externalLooking) ? (
                 <ul className="space-y-1.5">
                   {[0, 1, 2, 3].map((n) => (
                     <li key={n} className="flex animate-pulse items-center gap-3 rounded-xl px-2 py-1.5">
@@ -334,7 +359,7 @@ export function PlanDialog({
                     </li>
                   ))}
                 </ul>
-              ) : results.length === 0 && !hltbMatch ? (
+              ) : results.length === 0 && externalResults.length === 0 && !hltbMatch ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <span className="grid size-12 place-items-center rounded-2xl border border-dashed border-line text-muted">
                     <CircleDashed className="size-5" />
@@ -369,6 +394,27 @@ export function PlanDialog({
                     <Plus className="size-4 shrink-0 text-accent" />
                   </button>
                 )}
+                {externalResults
+                  .filter((name) =>
+                    !results.some((suggestion) => suggestion.name.toLowerCase() === name.toLowerCase()) &&
+                    name.toLowerCase() !== hltbMatch?.name.toLowerCase(),
+                  )
+                  .map((name) => (
+                    <button
+                      key={`thegamesdb-${name}`}
+                      type="button"
+                      onClick={() => void add({ name, platform: 'Other' })}
+                      disabled={adding || isHeld(name)}
+                      className="mb-1 flex w-full items-center gap-3 rounded-xl border border-line bg-panel/50 px-3 py-2 text-left transition hover:border-accent/50 hover:bg-panel2 disabled:opacity-50"
+                    >
+                      <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2"><CircleDashed className="size-4 text-accent" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{name}</span>
+                        <span className="block text-[11px] text-muted">TheGamesDB · cross-platform title</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-accent">{isHeld(name) ? 'Already added' : 'Add'}</span>
+                    </button>
+                  ))}
                 <ul ref={list} className="space-y-1">
                   {results.map((suggestion, index) => (
                     <li

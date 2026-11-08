@@ -61,6 +61,7 @@ export function LogsView({
   const [clearTarget, setClearTarget] = useState<{ game: Game; kind: 'logs' | 'notes'; run: { id: string; name: string } } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showAddGames, setShowAddGames] = useState(false);
+  const [membershipTarget, setMembershipTarget] = useState<Game | null>(null);
   const [addQuery, setAddQuery] = useState('');
 
   const load = useCallback(() => {
@@ -219,11 +220,7 @@ export function LogsView({
           label: 'Remove from Journal',
           icon: Trash2,
           danger: true,
-          onSelect: () => {
-            if (confirm(`Remove ${menuGame.title} from the Journal? Its logs, notes and play sessions will stay in your Library.`)) {
-              onJournalMembership(menuGame.id, false);
-            }
-          },
+          onSelect: () => setMembershipTarget(menuGame),
         },
         { kind: 'sep' },
         {
@@ -291,7 +288,24 @@ export function LogsView({
 
       <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
         <aside className="space-y-3">
-          <SearchField value={query} onChange={setQuery} placeholder="Find a game" className="w-full" inputClassName="w-full" />
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Find a game"
+            className="w-full"
+            inputWrapperClassName="min-w-0 flex-1"
+            inputClassName="w-full"
+          >
+            <button
+              type="button"
+              onClick={() => setShowAddGames(true)}
+              title="Add games to the Journal"
+              aria-label="Add games to the Journal"
+              className="grid size-10 shrink-0 place-items-center rounded-full border border-line bg-panel text-muted transition hover:border-accent hover:bg-accent/10 hover:text-accent"
+            >
+              <Plus className="size-4" />
+            </button>
+          </SearchField>
           {onOrder && query.trim() === '' && (
             <p className="px-1 text-[11px] text-muted">Press a game and move it to put the ones you write about most first.</p>
           )}
@@ -413,6 +427,19 @@ export function LogsView({
         </Modal>
       )}
       {menu && menuGame && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      {membershipTarget && (
+        <ConfirmDialog
+          title={`Remove ${membershipTarget.title} from the Journal?`}
+          description="This removes the game from the Journal only. Its logs, notes, sessions and Library record stay intact."
+          confirmLabel="Remove from Journal"
+          onCancel={() => setMembershipTarget(null)}
+          onConfirm={() => {
+            const target = membershipTarget;
+            setMembershipTarget(null);
+            onJournalMembership(target.id, false);
+          }}
+        />
+      )}
       {clearTarget && (
         <ConfirmDialog
           title={clearTarget.kind === 'logs'

@@ -29,6 +29,7 @@ import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { cn } from '../utils/cn';
 import { Modal } from './ui/Modal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { btnAccent } from './ui/buttons';
 
 /**
@@ -114,6 +115,7 @@ export function BacklogView({
   const [order, setOrder] = useState<Order>('mine');
   /** True while the page for planning a game is open. */
   const [planning, setPlanning] = useState(false);
+  const [planRemovalTarget, setPlanRemovalTarget] = useState<Game | null>(null);
   const [picking, setPicking] = useState(false);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
@@ -425,6 +427,20 @@ export function BacklogView({
         />
       )}
 
+      {planRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${planRemovalTarget.title} from the Backlog?`}
+          description="This removes only the planned entry. It does not delete or change any game in your Library."
+          confirmLabel="Remove planned game"
+          onCancel={() => setPlanRemovalTarget(null)}
+          onConfirm={() => {
+            const target = planRemovalTarget;
+            setPlanRemovalTarget(null);
+            onRemove(target.id);
+          }}
+        />
+      )}
+
       <Section
         title="Playing now"
         icon={Play}
@@ -467,7 +483,7 @@ export function BacklogView({
           onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
           onRemove={(id) => {
             const game = games.find((g) => g.id === id);
-            if (game && confirm(`Take ${game.title} off the list?`)) onRemove(id);
+            if (game) setPlanRemovalTarget(game);
           }}
         />
       )}
@@ -585,15 +601,23 @@ function Section({
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
-                <span
-                  className={`grid size-8 shrink-0 place-items-center rounded-lg border ${movable ? 'border-accent/35 bg-accent/10 text-accent shadow-sm' : 'border-transparent text-muted/45'}`}
-                  title={movable ? 'Drag to rearrange' : undefined}
-                  aria-hidden="true"
-                >
-                  <GripVertical className="size-4" />
-                </span>
+                {movable ? (
+                  <button
+                    type="button"
+                    data-orbit-drag-handle=""
+                    aria-label={`Drag ${g.title} to rearrange`}
+                    title="Drag to rearrange"
+                    className="grid size-8 shrink-0 touch-none cursor-grab place-items-center rounded-lg border border-accent/35 bg-accent/10 text-accent shadow-sm transition hover:border-accent hover:bg-accent/20 active:cursor-grabbing"
+                  >
+                    <GripVertical className="size-4" />
+                  </button>
+                ) : (
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-transparent text-muted/45" aria-hidden="true">
+                    <GripVertical className="size-4" />
+                  </span>
+                )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button

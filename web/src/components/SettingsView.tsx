@@ -1435,6 +1435,45 @@ export function SettingsView({
             )}
           </div>
         </div>
+        <div className="rounded-2xl border border-line bg-panel/40 p-3">
+          <label className="block text-sm font-semibold text-fg" htmlFor="thegamesdb-key">
+            TheGamesDB game search
+          </label>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            Optional. Adds cross-platform title suggestions when you plan a game. TheGamesDB requires
+            a developer API key; see its{' '}
+            <button
+              type="button"
+              className="underline decoration-line underline-offset-2 transition hover:text-accent"
+              onClick={() => void openExternal('https://api.thegamesdb.net/')}
+            >
+              API documentation
+            </button>
+            . Orbit only asks its title-search endpoint and stores the key in this machine's settings.
+            Leave it empty to skip TheGamesDB.
+          </p>
+          <div className="mt-2.5 flex gap-2">
+            <input
+              id="thegamesdb-key"
+              type="password"
+              value={settings.theGamesDbApiKey ?? ''}
+              onChange={(e) => setSettings({ theGamesDbApiKey: e.target.value })}
+              placeholder="Leave empty to skip TheGamesDB"
+              className={`${inputCls} min-w-0 flex-1 font-mono`}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {settings.theGamesDbApiKey && (
+              <button
+                type="button"
+                onClick={() => setSettings({ theGamesDbApiKey: '' })}
+                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
         <Checkbox
           checked={settings.fetchMetadata}
           onChange={(v) => setSettings({ fetchMetadata: v })}

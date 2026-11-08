@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { Game } from '../../types';
 import { Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Modal, btnGhost } from '../ui/Modal';
 import { GameEditTab } from './GameEditTab';
 
@@ -19,7 +21,9 @@ export function GameEditDialog({
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
 }) {
+  const [confirmRemove, setConfirmRemove] = useState(false);
   return (
+    <>
     <Modal
       title={`Edit ${game.title}`}
       subtitle={hideLaunchSettings
@@ -29,7 +33,7 @@ export function GameEditDialog({
       onClose={onClose}
       footer={onRemoveFromBacklog ? (
         <div className="flex justify-start">
-          <button type="button" className={`${btnGhost} flex items-center gap-2 border-rose-500/40 bg-rose-500/10 text-rose-300 hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200 text-xs`} onClick={onRemoveFromBacklog}>
+          <button type="button" className={`${btnGhost} flex items-center gap-2 border-rose-500/40 bg-rose-500/10 text-rose-300 hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200 text-xs`} onClick={() => setConfirmRemove(true)}>
             <Trash2 className="size-3.5" /> Remove from Backlog
           </button>
         </div>
@@ -37,5 +41,18 @@ export function GameEditDialog({
     >
       <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} />
     </Modal>
+    {confirmRemove && onRemoveFromBacklog && (
+      <ConfirmDialog
+        title={`Remove ${game.title} from the Backlog?`}
+        description="The game stays in your Library with its files, sessions and notes. Only its Backlog membership is removed."
+        confirmLabel="Remove from Backlog"
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          onRemoveFromBacklog();
+        }}
+      />
+    )}
+    </>
   );
 }

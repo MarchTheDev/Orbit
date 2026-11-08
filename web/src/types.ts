@@ -37,7 +37,7 @@ export type OtherLauncher =
   | 'Amazon Luna'
   | 'Lutris';
 export type LauncherId = 'Steam' | OtherLauncher;
-export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book' | 'matisse';
+export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
 export interface HltbData {
   /** Canonical title from the broad HLTB catalogue search, when available. */
@@ -567,6 +567,8 @@ export interface Settings {
    * ships one nor invents one.
    */
   sgdbApiKey?: string;
+  /** Optional TheGamesDB key for searching games outside the Steam catalogue. */
+  theGamesDbApiKey?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

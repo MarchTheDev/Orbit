@@ -524,6 +524,11 @@ export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
 }
 
+/** Cross-platform title matches from TheGamesDB, enabled with a personal key in Settings. */
+export function theGamesDbSuggest(title: string): Promise<string[]> {
+  return call('thegamesdb_suggest', { title }, async () => []);
+}
+
 /**
  * The games a partial title suggests, with the store's own little capsule.
  *

@@ -44,14 +44,18 @@ function partsForExecutable(path: string): { parts: string[]; directories: strin
 }
 
 function cleanTitle(candidate: string): string {
-  const withoutVersion = candidate
+  const separated = candidate
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2');
+  const withoutVersion = separated
     .replace(/[\s._-]+v(?:ersion)?[\s_-]*\d+(?:[._-]\d+)*(?:.*)$/i, '')
     .replace(/[\s._-]+\d+(?:[._-]\d+)+(?:.*)$/i, '');
   // Install folders often append release/client labels that are not part of
   // the store title. Keep this list conservative so meaningful subtitles such
   // as "Director's Cut" and "Remastered" remain intact.
   const withoutPackager = withoutVersion.replace(
-    /[\s._-]+(?:anker|fitgirl|dodi|repack(?:ed)?|steamrip|elamigos|onlinefix|codex|rune|tenoke|gog|steam|epic|portable|installer|installation|backup|download|win64|win32|x64|x86)$/i,
+    /[\s._-]+(?:anker(?:\s*games)?|fitgirl|dodi|repack(?:ed)?|steamrip|elamigos|onlinefix|codex|rune|tenoke|gog|steam|epic|portable|installer|installation|backup|download|win64|win32|x64|x86)$/i,
     '',
   );
   return withoutPackager.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();

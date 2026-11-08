@@ -29,6 +29,7 @@ const exported = {
   journalOn: ['journal-game'],
   scanPath: 'C:\\Games',
   scanOnLaunch: true,
+  theGamesDbApiKey: 'local-api-key',
   customThemes: [{ id: 'custom-coral', name: 'Coral', bg: '#100000', panel: '#200000', panel2: '#300000', border: '#400000', text: '#ffffff', muted: '#aaaaaa', accent: '#ff6677', accent2: '#ffaa88' }],
   window: { onLaunch: 'minimize', onClose: 'show', onAppClose: 'tray', onMinimize: 'tray' },
   sound: { enabled: true, volume: 0.2, unfocused: true, file: '/music/theme.ogg' },
@@ -53,7 +54,7 @@ check('overlay, sound, backlog, Journal, drive-scan, theme, and system settings 
     imported.launchOnStartupBackground === true && imported.openExeInOrbit === false &&
     imported.backlogOn?.[0] === 'planned-game' && imported.window.onMinimize === 'tray' &&
     imported.syncJournal === false && imported.journalOn?.[0] === 'journal-game' &&
-    imported.scanPath === 'C:\\Games' && imported.scanOnLaunch === true && imported.customThemes?.[0]?.id === 'custom-coral' &&
+    imported.scanPath === 'C:\\Games' && imported.scanOnLaunch === true && imported.theGamesDbApiKey === 'local-api-key' && imported.customThemes?.[0]?.id === 'custom-coral' &&
     imported.futureSetting?.nested === true);
 const oldImport = normalizeSettings({ theme: 'nebula' });
 check('settings absent from an older copy do not retain stale target-only values',

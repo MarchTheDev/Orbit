@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, CopyPlus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, CopyPlus, Save, Trash2, X } from 'lucide-react';
 import type { Settings, Theme } from '../types';
 import { THEMES, applyTheme } from '../data/themes';
 import { cn } from '../utils/cn';
 
-// Four choices drive the whole palette. Orbit derives the quieter surfaces,
-// borders and secondary text so a theme stays coherent without nine knobs.
-const COLOR_FIELDS: { key: 'panel' | 'text' | 'accent' | 'accent2'; label: string }[] = [
+// Five choices drive the whole palette, including the page background separately
+// from the surface. Orbit derives quieter surfaces, borders and secondary text.
+const COLOR_FIELDS: { key: 'bg' | 'panel' | 'text' | 'accent' | 'accent2'; label: string }[] = [
+  { key: 'bg', label: 'Background' },
   { key: 'panel', label: 'Surface' },
   { key: 'text', label: 'Text' },
   { key: 'accent', label: 'Main accent' },
@@ -31,12 +32,11 @@ function luminance(hex: string): number {
 }
 
 function derivePalette(theme: Theme): Theme {
-  if (![theme.panel, theme.text, theme.accent, theme.accent2].every((value) => HEX.test(value))) return theme;
+  if (![theme.bg, theme.panel, theme.text, theme.accent, theme.accent2].every((value) => HEX.test(value))) return theme;
   const isLight = luminance(theme.panel) > 0.48;
   const edge = isLight ? '#000000' : '#ffffff';
   return {
     ...theme,
-    bg: mix(theme.panel, edge, isLight ? 0.08 : 0.42),
     panel2: mix(theme.panel, edge, isLight ? 0.055 : 0.12),
     border: mix(theme.panel, edge, isLight ? 0.17 : 0.2),
     muted: mix(theme.text, theme.panel, 0.46),
@@ -60,33 +60,123 @@ function blankTheme(): Theme {
   });
 }
 
+const QUICK_COLORS = [
+  '#f43f5e', '#fb7185', '#f97316', '#f59e0b', '#facc15', '#84cc16',
+  '#22c55e', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+  '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f8fafc', '#1e293b',
+];
+
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const r = Number.parseInt(hex.slice(1, 3), 16) / 255;
+  const g = Number.parseInt(hex.slice(3, 5), 16) / 255;
+  const b = Number.parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    if (max === r) h = 60 * (((g - b) / delta) % 6);
+    else if (max === g) h = 60 * ((b - r) / delta + 2);
+    else h = 60 * ((r - g) / delta + 4);
+  }
+  return { h: (h + 360) % 360, s: s * 100, l: l * 100 };
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const h = ((hue % 360) + 360) % 360;
+  const s = Math.max(0, Math.min(100, saturation)) / 100;
+  const l = Math.max(0, Math.min(100, lightness)) / 100;
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const x = chroma * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - chroma / 2;
+  const [r, g, b] = h < 60 ? [chroma, x, 0]
+    : h < 120 ? [x, chroma, 0]
+      : h < 180 ? [0, chroma, x]
+        : h < 240 ? [0, x, chroma]
+          : h < 300 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  return `#${[r, g, b].map((value) => Math.round((value + m) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
 function ThemeColor({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
   const safe = HEX.test(value) ? value : '#000000';
+  const hsl = useMemo(() => hexToHsl(safe), [safe]);
+  const chooseHsl = (h: number, s: number, l: number) => onChange(hslToHex(h, s, l));
   return (
-    <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-line bg-panel2/50 p-3 transition hover:border-accent/40">
-      <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-white/15 shadow-inner">
-        <span className="absolute inset-0" style={{ background: safe }} />
-        <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 to-transparent" />
+    <div className="relative min-w-0 rounded-2xl border border-line bg-panel2/50 p-3 transition hover:border-accent/40">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-label={`${open ? 'Close' : 'Open'} ${label.toLowerCase()} colour picker`}
+          aria-expanded={open}
+          className="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-white/15 shadow-inner" style={{ background: safe }}>
+            <span className="size-5 rounded-full border border-white/45 shadow-sm" style={{ background: `linear-gradient(135deg, ${safe}, transparent)` }} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold text-fg">{label}</span>
+            <span className="mt-0.5 block text-[10px] text-muted">Pick a shade or enter a hex</span>
+          </span>
+          <ChevronDown className={`size-4 shrink-0 text-muted transition ${open ? 'rotate-180 text-accent' : ''}`} />
+        </button>
         <input
-          type="color"
-          value={safe}
+          value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          aria-label={`Choose ${label.toLowerCase()} color`}
+          className="w-[5.5rem] rounded-xl border border-line bg-panel px-2.5 py-2 font-mono text-xs uppercase tracking-wide text-fg outline-none transition focus:border-accent"
+          aria-label={`${label} hex value`}
+          spellCheck={false}
         />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-xs font-semibold text-fg">{label}</span>
-        <span className="mt-0.5 block text-[10px] text-muted">Click the swatch or edit the hex</span>
-      </span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-[5.5rem] rounded-xl border border-line bg-panel px-2.5 py-2 font-mono text-xs uppercase tracking-wide text-fg outline-none transition focus:border-accent"
-        aria-label={`${label} hex value`}
-        spellCheck={false}
-      />
-    </label>
+      </div>
+      {open && (
+        <div className="absolute left-1/2 top-full z-30 mt-2 w-[min(19rem,calc(100vw-2.5rem))] -translate-x-1/2 rounded-2xl border border-line bg-panel p-4 text-fg shadow-2xl shadow-black/40 sm:left-0 sm:translate-x-0">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold">Choose {label.toLowerCase()}</p>
+              <p className="mt-0.5 text-[10px] text-muted">Fine-tune the shade or pick a quick colour.</p>
+            </div>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close colour picker" className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-accent hover:text-fg">
+              <X className="size-3.5" />
+            </button>
+          </div>
+          <div className="mb-3 flex h-12 items-center justify-between rounded-xl border border-line px-3" style={{ background: safe }}>
+            <span className="rounded-md bg-black/35 px-2 py-1 font-mono text-xs uppercase text-white">{safe}</span>
+          </div>
+          <div className="mb-4 grid grid-cols-9 gap-1.5" aria-label="Quick colours">
+            {QUICK_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                onClick={() => onChange(color)}
+                aria-label={`Choose ${color}`}
+                aria-pressed={color.toLowerCase() === safe.toLowerCase()}
+                className={`size-6 rounded-lg border transition hover:scale-110 ${color.toLowerCase() === safe.toLowerCase() ? 'border-white ring-2 ring-accent' : 'border-white/15'}`}
+                style={{ background: color }}
+              />
+            ))}
+          </div>
+          <div className="space-y-3">
+            <label className="block text-[10px] font-medium text-muted">
+              <span className="mb-1 flex justify-between"><span>Hue</span><span>{Math.round(hsl.h)}°</span></span>
+              <input type="range" min="0" max="360" value={Math.round(hsl.h)} onChange={(event) => chooseHsl(Number(event.target.value), hsl.s, hsl.l)} className="h-2 w-full cursor-pointer appearance-none rounded-full accent-accent" style={{ background: 'linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }} />
+            </label>
+            <label className="block text-[10px] font-medium text-muted">
+              <span className="mb-1 flex justify-between"><span>Saturation</span><span>{Math.round(hsl.s)}%</span></span>
+              <input type="range" min="0" max="100" value={Math.round(hsl.s)} onChange={(event) => chooseHsl(hsl.h, Number(event.target.value), hsl.l)} className="h-2 w-full cursor-pointer appearance-none rounded-full accent-accent" style={{ background: `linear-gradient(90deg,${hslToHex(hsl.h, 0, hsl.l)},${hslToHex(hsl.h, 100, hsl.l)})` }} />
+            </label>
+            <label className="block text-[10px] font-medium text-muted">
+              <span className="mb-1 flex justify-between"><span>Lightness</span><span>{Math.round(hsl.l)}%</span></span>
+              <input type="range" min="4" max="96" value={Math.max(4, Math.min(96, Math.round(hsl.l)))} onChange={(event) => chooseHsl(hsl.h, hsl.s, Number(event.target.value))} className="h-2 w-full cursor-pointer appearance-none rounded-full accent-accent" style={{ background: `linear-gradient(90deg,${hslToHex(hsl.h, hsl.s, 4)},${hslToHex(hsl.h, hsl.s, 50)},${hslToHex(hsl.h, hsl.s, 96)})` }} />
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -107,7 +197,7 @@ export function ThemeManagerPage({
   const custom = settings.customThemes ?? [];
   const valid = useMemo(() => Boolean(draft.name.trim()) && COLOR_FIELDS.every(({ key }) => HEX.test(String(draft[key] ?? ''))), [draft]);
 
-  const updateColor = (key: 'panel' | 'text' | 'accent' | 'accent2', value: string) => {
+  const updateColor = (key: 'bg' | 'panel' | 'text' | 'accent' | 'accent2', value: string) => {
     setDraft((current) => {
       const next = { ...current, [key]: value };
       return HEX.test(value) ? derivePalette(next) : next;
@@ -185,7 +275,7 @@ export function ThemeManagerPage({
             <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-2 rounded-lg text-sm text-muted hover:text-fg"><ArrowLeft className="size-4" /> Back to appearance</button>
             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">Orbit appearance</p>
             <h1 className="mt-1 text-2xl font-bold">Custom themes</h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted">Choose a surface, text and two accents. Orbit builds the matching backgrounds and supporting colours for you.</p>
+            <p className="mt-1 max-w-2xl text-sm text-muted">Choose a background, surface, text and two accents. Orbit builds the supporting colours for you.</p>
           </div>
         </header>
 

@@ -33,6 +33,11 @@ check(
   gameTitleFromPath('D:\\Games\\Red-Dead-Redemption-2-Anker'),
 );
 check(
+  'strips the AnkerGames suffix without a separator',
+  gameTitleFromPath('D:\\Games\\Red Dead Redemption 2 AnkerGames') === 'Red Dead Redemption 2',
+  gameTitleFromPath('D:\\Games\\Red Dead Redemption 2 AnkerGames'),
+);
+check(
   'uses a recognizable executable name to trim an arbitrary extra folder word',
   gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection') === 'Red Dead Redemption 2',
   gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection'),
