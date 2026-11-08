@@ -83,7 +83,6 @@ export const DEFAULT_SETTINGS: Settings = {
   journalOn: [],
   journalOff: [],
   scanPath: '',
-  scanOnLaunch: false,
   window: {
     // Nothing happens to the window unless the player asks for it, which is the
     // only safe default: minimising or closing somebody's window on their behalf

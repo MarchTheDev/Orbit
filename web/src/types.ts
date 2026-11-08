@@ -298,6 +298,14 @@ export interface GameSuggestion {
   coverUrl: string | null;
 }
 
+/** A keyless cross-platform game suggestion from Wikidata. */
+export interface WikidataGameSuggestion {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+}
+
 /** A still from the store page, thumbnailed and full. */
 export interface GameFactShot {
   thumb: string;
@@ -567,8 +575,6 @@ export interface Settings {
    * ships one nor invents one.
    */
   sgdbApiKey?: string;
-  /** Optional TheGamesDB key for searching games outside the Steam catalogue. */
-  theGamesDbApiKey?: string;
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */
@@ -645,8 +651,6 @@ export interface Settings {
   journalOff?: string[];
   /** Root folder or drive to check for new game programs. */
   scanPath?: string;
-  /** Whether to review new programs found there whenever Orbit starts. */
-  scanOnLaunch?: boolean;
   /**
    * Whether the interface fades in when the app opens. On by default: it is
    * forty-five hundredths of a second, and it covers the moment the library is

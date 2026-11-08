@@ -327,6 +327,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
   { label: 'rclone', section: 'orbit-backups', keywords: 'rclone get update folder path check backups' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
+  { label: 'Drive or folder scan', section: 'orbit-libraries', keywords: 'drive folder executable scan review import path' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
@@ -728,6 +729,7 @@ export function SettingsView({
   setSettings,
   replaceSettings,
   onImportLauncher,
+  onScanDrive,
   onOpenThemeManager,
   onClearLibrary,
   onReset,
@@ -742,6 +744,8 @@ export function SettingsView({
   replaceSettings: (settings: Partial<Settings>) => void;
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
+  /** Opens the review-first scan for the saved drive or folder path. */
+  onScanDrive?: () => void;
   /** Open the in-app custom-theme editor page. */
   onOpenThemeManager?: () => void;
   onClearLibrary: () => void;
@@ -1120,35 +1124,6 @@ export function SettingsView({
           hint="When on, newly added Library games also join the Journal. Turning it off never removes existing entries; you can still add or remove games manually. Backlog-only plans are never included."
         />
 
-        <SubHead>Drive scan</SubHead>
-        <p className="text-xs leading-relaxed text-muted">
-          Scan a chosen drive or game folder for new programs. Orbit only suggests candidates; you review and select them before anything is added.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={settings.scanPath ?? ''}
-            onChange={(event) => setSettings({ scanPath: event.target.value })}
-            placeholder="Choose a drive or folder"
-            className={`${inputCls} min-w-[14rem] flex-1 font-mono`}
-            spellCheck={false}
-          />
-          {isNative() && (
-            <button
-              type="button"
-              className={`${btnBrowse} flex items-center gap-2`}
-              onClick={() => void pickFolder('Choose a drive or game folder to scan', settings.scanPath || undefined).then((path) => path && setSettings({ scanPath: path }))}
-            >
-              <FolderOpen className="size-4" /> Browse…
-            </button>
-          )}
-        </div>
-        <Checkbox
-          checked={settings.scanOnLaunch === true}
-          onChange={(value) => setSettings({ scanOnLaunch: value })}
-          label="Review new programs at startup"
-          hint="Orbit checks the selected path when it starts and opens a review only if it finds new candidates. It never adds them automatically."
-        />
-
         <SubHead>Jump back in</SubHead>
         <Checkbox
           checked={settings.showHero !== false}
@@ -1344,10 +1319,41 @@ export function SettingsView({
         id="orbit-libraries"
         icon={LibraryIcon}
         title="Libraries"
-        lead="Scan one launcher and choose games to add. Rescans on Orbit launch are off by default."
+        lead="Scan launchers or a drive and review the games Orbit finds before adding anything."
       >
-        {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
+        {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
+          <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+            <button
+              type="button"
+              onClick={onScanDrive}
+              disabled={!native || !onScanDrive}
+              className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+                <FolderOpen className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-fg">Drive or folder</span>
+                <span className="block truncate text-[11px] text-muted">
+                  {settings.scanPath?.trim() || 'Choose a drive or game folder to scan'}
+                </span>
+              </span>
+              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+            </button>
+            <div className="flex items-center justify-between gap-3 border-t border-line/70 px-3 py-2.5">
+              <span className="min-w-0 text-[11px] text-muted">Review and select before adding</span>
+              <button
+                type="button"
+                disabled={!native}
+                onClick={() => void pickFolder('Choose a drive or game folder to scan', settings.scanPath || undefined)
+                  .then((path) => path && setSettings({ scanPath: path }))}
+                className={`${btnBrowse} shrink-0 py-1.5 text-xs disabled:opacity-50`}
+              >
+                <FolderOpen className="size-3.5" /> Choose path
+              </button>
+            </div>
+          </div>
           {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
@@ -1428,45 +1434,6 @@ export function SettingsView({
               <button
                 type="button"
                 onClick={() => setSettings({ sgdbApiKey: '' })}
-                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-line bg-panel/40 p-3">
-          <label className="block text-sm font-semibold text-fg" htmlFor="thegamesdb-key">
-            TheGamesDB game search
-          </label>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            Optional. Adds cross-platform title suggestions when you plan a game. TheGamesDB requires
-            a developer API key; see its{' '}
-            <button
-              type="button"
-              className="underline decoration-line underline-offset-2 transition hover:text-accent"
-              onClick={() => void openExternal('https://api.thegamesdb.net/')}
-            >
-              API documentation
-            </button>
-            . Orbit only asks its title-search endpoint and stores the key in this machine's settings.
-            Leave it empty to skip TheGamesDB.
-          </p>
-          <div className="mt-2.5 flex gap-2">
-            <input
-              id="thegamesdb-key"
-              type="password"
-              value={settings.theGamesDbApiKey ?? ''}
-              onChange={(e) => setSettings({ theGamesDbApiKey: e.target.value })}
-              placeholder="Leave empty to skip TheGamesDB"
-              className={`${inputCls} min-w-0 flex-1 font-mono`}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {settings.theGamesDbApiKey && (
-              <button
-                type="button"
-                onClick={() => setSettings({ theGamesDbApiKey: '' })}
                 className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
               >
                 Clear

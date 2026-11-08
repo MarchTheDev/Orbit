@@ -10,8 +10,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Game, GameFacts, GameSuggestion, HltbData, PlanPlatform } from '../../types';
-import { fetchFacts, knownGames, searchGames, searchTheGamesDb } from '../../services/metadata';
+import type { Game, GameFacts, GameSuggestion, HltbData, PlanPlatform, WikidataGameSuggestion } from '../../types';
+import { fetchFacts, knownGames, searchGames, searchWikidataGames } from '../../services/metadata';
 import { fetchHltb } from '../../services/hltb';
 import { cn } from '../../utils/cn';
 import { PlanPage } from './PlanPage';
@@ -41,6 +41,13 @@ export interface PlanPick {
  * be given.
  */
 const WAIT = 170;
+const WIKIDATA_WAIT = 500;
+const titleKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+type PlanSearchResult =
+  | { key: string; source: 'steam'; name: string; suggestion: GameSuggestion }
+  | { key: string; source: 'wikidata'; name: string; suggestion: WikidataGameSuggestion }
+  | { key: string; source: 'hltb'; name: string; suggestion: HltbData };
 
 /**
  * Planning a game, as one place in the middle of the window.
@@ -77,9 +84,9 @@ export function PlanDialog({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<GameSuggestion[]>([]);
-  const [externalResults, setExternalResults] = useState<string[]>([]);
-  const [externalLooking, setExternalLooking] = useState(false);
-  const [externalError, setExternalError] = useState<string | null>(null);
+  const [wikidataResults, setWikidataResults] = useState<WikidataGameSuggestion[]>([]);
+  const [wikidataLooking, setWikidataLooking] = useState(false);
+  const [wikidataError, setWikidataError] = useState<string | null>(null);
   const [hltbMatch, setHltbMatch] = useState<{ name: string; data: HltbData } | null>(null);
   const [looking, setLooking] = useState(false);
   /** The suggestion whose own page is open, if one is. */
@@ -110,59 +117,55 @@ export function PlanDialog({
   useEffect(() => {
     const text = query.trim();
     setHltbMatch(null);
-    setExternalResults([]);
-    setExternalLooking(false);
-    setExternalError(null);
+    setWikidataResults([]);
+    setWikidataLooking(false);
+    setWikidataError(null);
     if (text.length < 2) {
       asked.current += 1;
       setResults([]);
       setLooking(false);
       return;
     }
+    setWikidataLooking(true);
     const now = ++asked.current;
-    const lookupOtherCatalog = () => {
+    const lookupHltb = () => {
       void fetchHltb(text).then((data) => {
         if (asked.current === now && data.gameName) setHltbMatch({ name: data.gameName, data });
       }).catch(() => undefined);
     };
-    const lookupTheGamesDb = () => {
-      setExternalLooking(true);
-      void searchTheGamesDb(text)
-        .then((names) => {
-          if (asked.current === now) setExternalResults(names);
+    const lookupWikidata = () => {
+      void searchWikidataGames(text)
+        .then((found) => {
+          if (asked.current === now) setWikidataResults(found);
         })
         .catch(() => {
           if (asked.current === now) {
-            setExternalResults([]);
-            setExternalError('TheGamesDB search failed. Check the API key in Settings.');
+            setWikidataResults([]);
+            setWikidataError('The public game catalogue is temporarily unavailable.');
           }
         })
         .finally(() => {
-          if (asked.current === now) setExternalLooking(false);
+          if (asked.current === now) setWikidataLooking(false);
         });
     };
 
-    // A name searched before is on screen in the same frame as the keystroke.
-    // The wider HLTB index is searched too, so console-only titles can be found
-    // even when Steam has no listing for them.
     const ready = knownGames(text);
     if (ready) {
       setResults(ready);
       setAt(0);
       setLooking(false);
-      lookupOtherCatalog();
-      if (ready.length === 0) lookupTheGamesDb();
-      return;
+      lookupHltb();
+      const wikidataTimer = window.setTimeout(lookupWikidata, WIKIDATA_WAIT);
+      return () => window.clearTimeout(wikidataTimer);
     }
 
     setLooking(true);
-    const timer = window.setTimeout(() => {
+    const steamTimer = window.setTimeout(() => {
       void searchGames(text)
         .then((found) => {
           if (asked.current !== now) return;
           setResults(found);
           setAt(0);
-          if (found.length === 0) lookupTheGamesDb();
         })
         .catch(() => {
           if (asked.current === now) setResults([]);
@@ -171,12 +174,14 @@ export function PlanDialog({
           if (asked.current === now) setLooking(false);
         });
     }, WAIT);
-    // The wider catalogue is slower and not rate-limited like the local cache;
-    // let a short pause in typing settle before asking it.
-    const widerTimer = window.setTimeout(lookupOtherCatalog, 350);
+    const hltbTimer = window.setTimeout(lookupHltb, 350);
+    // Wikidata is open and keyless, but we still wait for the user to pause
+    // before asking so every half-typed query does not become a request.
+    const wikidataTimer = window.setTimeout(lookupWikidata, WIKIDATA_WAIT);
     return () => {
-      window.clearTimeout(timer);
-      window.clearTimeout(widerTimer);
+      window.clearTimeout(steamTimer);
+      window.clearTimeout(hltbTimer);
+      window.clearTimeout(wikidataTimer);
     };
   }, [query]);
 
@@ -228,6 +233,54 @@ export function PlanDialog({
   };
 
   const typed = query.trim();
+  const displayResults = useMemo(() => {
+    const steamRows: PlanSearchResult[] = results.map((suggestion) => ({
+      key: `steam-${suggestion.appId}`,
+      source: 'steam',
+      name: suggestion.name,
+      suggestion,
+    }));
+    const steamNames = new Set(results.map((suggestion) => titleKey(suggestion.name)));
+    const wikidataRows: PlanSearchResult[] = wikidataResults
+      .filter((suggestion) => !steamNames.has(titleKey(suggestion.name)))
+      .map((suggestion) => ({
+        key: `wikidata-${suggestion.id}`,
+        source: 'wikidata',
+        name: suggestion.name,
+        suggestion,
+      }));
+    const knownNames = new Set([...steamNames, ...wikidataRows.map((row) => titleKey(row.name))]);
+    const hltbRows: PlanSearchResult[] = hltbMatch && !knownNames.has(titleKey(hltbMatch.name))
+      ? [{ key: `hltb-${titleKey(hltbMatch.name)}`, source: 'hltb', name: hltbMatch.name, suggestion: hltbMatch.data }]
+      : [];
+    const relevance = (name: string) => {
+      const candidate = titleKey(name);
+      const search = titleKey(typed);
+      if (candidate === search) return 0;
+      if (candidate.startsWith(search) || search.startsWith(candidate)) return 1;
+      if (candidate.includes(search) || search.includes(candidate)) return 2;
+      return 3;
+    };
+    const sourceRank = (result: PlanSearchResult) => result.source === 'steam' ? 0 : result.source === 'wikidata' ? 1 : 2;
+    return [...steamRows, ...wikidataRows, ...hltbRows].sort((a, b) =>
+      relevance(a.name) - relevance(b.name) || sourceRank(a) - sourceRank(b),
+    );
+  }, [results, wikidataResults, hltbMatch, typed]);
+
+  const selectSearchResult = (result: PlanSearchResult) => {
+    if (result.source === 'steam') {
+      warm(result.suggestion);
+      setChosen(result.suggestion);
+    } else if (result.source === 'hltb') {
+      void add({ name: result.name, platform: 'Other', hltb: result.suggestion });
+    } else {
+      void add({ name: result.name, platform: 'Other' });
+    }
+  };
+
+  useEffect(() => {
+    setAt((current) => Math.min(current, Math.max(0, displayResults.length - 1)));
+  }, [displayResults.length]);
 
   const panel = (
     <div
@@ -290,12 +343,13 @@ export function PlanDialog({
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                      if (results.length === 0) return;
+                      if (displayResults.length === 0) return;
                       event.preventDefault();
                       const next = event.key === 'ArrowDown' ? at + 1 : at - 1;
-                      const wrapped = (next + results.length) % results.length;
+                      const wrapped = (next + displayResults.length) % displayResults.length;
                       setAt(wrapped);
-                      warm(results[wrapped]);
+                      const result = displayResults[wrapped];
+                      if (result.source === 'steam') warm(result.suggestion);
                       list.current
                         ?.querySelector<HTMLElement>(`[data-plan-row="${wrapped}"]`)
                         ?.scrollIntoView({ block: 'nearest' });
@@ -303,12 +357,8 @@ export function PlanDialog({
                     }
                     if (event.key === 'Enter') {
                       event.preventDefault();
-                      if (results[at]) {
-                        warm(results[at]);
-                        setChosen(results[at]);
-                      } else if (typed) {
-                        void add({ name: typed });
-                      }
+                      if (displayResults[at]) selectSearchResult(displayResults[at]);
+                      else if (typed) void add({ name: typed });
                     }
                   }}
                   placeholder="Search all games…"
@@ -317,8 +367,8 @@ export function PlanDialog({
                   className="w-full rounded-xl border border-line bg-panel2/60 py-2.5 pl-10 pr-24 text-sm outline-none transition focus:border-accent focus:bg-panel2"
                 />
                 <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                  {looking && <LoaderCircle className="size-4 animate-spin text-muted" />}
-                  {!looking && results.length > 0 && (
+                  {(looking || wikidataLooking) && <LoaderCircle className="size-4 animate-spin text-muted" />}
+                  {!looking && !wikidataLooking && displayResults.length > 0 && (
                     <span className="hidden items-center gap-1 text-[10px] text-muted sm:flex">
                       <span className="rounded border border-line bg-panel px-1 py-0.5 font-sans">↑↓</span>
                       <span className="rounded border border-line bg-panel px-1 py-0.5 font-sans">↵</span>
@@ -330,7 +380,7 @@ export function PlanDialog({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              {externalError && <p role="status" className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">{externalError}</p>}
+              {wikidataError && <p role="status" className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">{wikidataError}</p>}
               {typed.length < 2 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                   <span className="grid size-14 place-items-center rounded-2xl border border-dashed border-line text-muted">
@@ -350,7 +400,7 @@ export function PlanDialog({
                     </span>
                   </p>
                 </div>
-              ) : results.length === 0 && (looking || externalLooking) ? (
+              ) : displayResults.length === 0 && (looking || wikidataLooking) ? (
                 <ul className="space-y-1.5">
                   {[0, 1, 2, 3].map((n) => (
                     <li key={n} className="flex animate-pulse items-center gap-3 rounded-xl px-2 py-1.5">
@@ -359,7 +409,7 @@ export function PlanDialog({
                     </li>
                   ))}
                 </ul>
-              ) : results.length === 0 && externalResults.length === 0 && !hltbMatch ? (
+              ) : displayResults.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <span className="grid size-12 place-items-center rounded-2xl border border-dashed border-line text-muted">
                     <CircleDashed className="size-5" />
@@ -379,102 +429,81 @@ export function PlanDialog({
                 </div>
               ) : (
                 <>
-                {hltbMatch && !results.some((suggestion) => suggestion.name.toLowerCase() === hltbMatch.name.toLowerCase()) && (
-                  <button
-                    type="button"
-                    onClick={() => void add({ name: hltbMatch.name, platform: 'Other', hltb: hltbMatch.data })}
-                    disabled={adding || isHeld(hltbMatch.name)}
-                    className="mb-2 flex w-full items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2 text-left transition hover:border-accent/60 hover:bg-accent/10 disabled:opacity-50"
-                  >
-                    <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2"><Sparkles className="size-4 text-accent" /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{hltbMatch.name}</span>
-                      <span className="block text-[11px] text-muted">Found in the wider game catalogue · {hltbMatch.data.main > 0 ? `${hltbMatch.data.main}h main story` : 'cross-platform match'}</span>
-                    </span>
-                    <Plus className="size-4 shrink-0 text-accent" />
-                  </button>
-                )}
-                {externalResults
-                  .filter((name) =>
-                    !results.some((suggestion) => suggestion.name.toLowerCase() === name.toLowerCase()) &&
-                    name.toLowerCase() !== hltbMatch?.name.toLowerCase(),
-                  )
-                  .map((name) => (
-                    <button
-                      key={`thegamesdb-${name}`}
-                      type="button"
-                      onClick={() => void add({ name, platform: 'Other' })}
-                      disabled={adding || isHeld(name)}
-                      className="mb-1 flex w-full items-center gap-3 rounded-xl border border-line bg-panel/50 px-3 py-2 text-left transition hover:border-accent/50 hover:bg-panel2 disabled:opacity-50"
-                    >
-                      <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2"><CircleDashed className="size-4 text-accent" /></span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{name}</span>
-                        <span className="block text-[11px] text-muted">TheGamesDB · cross-platform title</span>
-                      </span>
-                      <span className="shrink-0 text-xs text-accent">{isHeld(name) ? 'Already added' : 'Add'}</span>
-                    </button>
-                  ))}
                 <ul ref={list} className="space-y-1">
-                  {results.map((suggestion, index) => (
-                    <li
-                      key={suggestion.appId}
-                      data-plan-row={index}
-                      onMouseEnter={() => {
-                        setAt(index);
-                        warm(suggestion);
-                      }}
-                      className={cn(
-                        'group flex items-center gap-2 rounded-xl pr-2 transition',
-                        at === index ? 'bg-panel2 ring-1 ring-inset ring-accent/50' : 'hover:bg-panel2/60',
-                      )}
-                    >
-                      {/* The whole row opens the game's page; the button at its
-                          end is for the times the answer is already known. */}
-                      <button
-                        onClick={() => {
-                          warm(suggestion);
-                          setChosen(suggestion);
+                  {displayResults.map((result, index) => {
+                    const steam = result.source === 'steam';
+                    const suggestion = steam ? result.suggestion : null;
+                    return (
+                      <li
+                        key={result.key}
+                        data-plan-row={index}
+                        onMouseEnter={() => {
+                          setAt(index);
+                          if (suggestion) warm(suggestion);
                         }}
-                        onFocus={() => setAt(index)}
-                        className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left outline-none"
+                        className={cn(
+                          'group flex items-center gap-2 rounded-xl pr-2 transition',
+                          at === index ? 'bg-panel2 ring-1 ring-inset ring-accent/50' : 'hover:bg-panel2/60',
+                        )}
                       >
-                        <span className="grid h-12 w-28 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-panel2">
-                          {suggestion.coverUrl ? (
-                            <img
-                              src={suggestion.coverUrl}
-                              alt=""
-                              loading="lazy"
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <CircleDashed className="size-4 text-muted" />
-                          )}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-fg">{suggestion.name}</span>
-                          <span className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
-                            {isHeld(suggestion.name) ? 'already written down' : 'open its page'}
+                        <button
+                          type="button"
+                          onClick={() => selectSearchResult(result)}
+                          onFocus={() => setAt(index)}
+                          disabled={!steam && (adding || isHeld(result.name))}
+                          className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left outline-none disabled:opacity-50"
+                        >
+                          <span className="grid h-12 w-28 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-panel2">
+                            {suggestion?.coverUrl ? (
+                              <img
+                                src={suggestion.coverUrl}
+                                alt=""
+                                loading="lazy"
+                                className="h-full w-full object-cover"
+                              />
+                            ) : result.source === 'hltb' ? (
+                              <Sparkles className="size-4 text-accent" />
+                            ) : (
+                              <CircleDashed className="size-4 text-accent" />
+                            )}
                           </span>
-                        </span>
-                      </button>
-                      <button
-                        onClick={() =>
-                          void add({
-                            name: suggestion.name,
-                            appId: suggestion.appId,
-                            coverUrl: suggestion.coverUrl,
-                          })
-                        }
-                        disabled={adding}
-                        title={`Add ${suggestion.name} without opening it`}
-                        aria-label={`Add ${suggestion.name} without opening it`}
-                        className="grid size-7 shrink-0 place-items-center rounded-lg border border-line bg-panel text-muted opacity-0 transition hover:border-accent hover:text-accent focus:opacity-100 disabled:opacity-40 group-hover:opacity-100"
-                      >
-                        <Plus className="size-3.5" />
-                      </button>
-                    </li>
-                  ))}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-fg">{result.name}</span>
+                            <span className="mt-0.5 block truncate text-[11px] text-muted">
+                              {isHeld(result.name)
+                                ? 'already written down'
+                                : result.source === 'steam'
+                                  ? 'Steam · open details'
+                                  : result.source === 'wikidata'
+                                    ? `Wikidata · ${result.suggestion.description}`
+                                    : `HowLongToBeat · ${result.suggestion.main > 0 ? `${result.suggestion.main}h main story` : 'game match'}`}
+                            </span>
+                          </span>
+                        </button>
+                        {steam ? (
+                          <button
+                            type="button"
+                            onClick={() => void add({
+                              name: result.name,
+                              appId: result.suggestion.appId,
+                              coverUrl: result.suggestion.coverUrl,
+                            })}
+                            disabled={adding || isHeld(result.name)}
+                            title={`Add ${result.name} without opening details`}
+                            aria-label={`Add ${result.name} without opening details`}
+                            className="grid size-7 shrink-0 place-items-center rounded-lg border border-line bg-panel text-muted opacity-0 transition hover:border-accent hover:text-accent focus:opacity-100 disabled:opacity-40 group-hover:opacity-100"
+                          >
+                            <Plus className="size-3.5" />
+                          </button>
+                        ) : (
+                          <span className="flex shrink-0 items-center gap-1 text-xs text-accent">
+                            {isHeld(result.name) ? 'Already added' : 'Add'}
+                            <Plus className="size-3.5" />
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
                 {typed && !isHeld(typed) && (
                   <button
@@ -496,10 +525,20 @@ export function PlanDialog({
                   <span className="text-rose-400">{error}</span>
                 ) : isHeld(typed) ? (
                   <span className="text-amber-300/90">“{typed}” is already on this page.</span>
+                ) : displayResults[at]?.source === 'steam' ? (
+                  <>
+                    <CornerDownLeft className="mr-1 inline size-3 align-[-1px]" />
+                    opens Steam details · times and store info load with it
+                  </>
+                ) : displayResults[at] ? (
+                  <>
+                    <CornerDownLeft className="mr-1 inline size-3 align-[-1px]" />
+                    adds the selected game to your Backlog
+                  </>
                 ) : (
                   <>
                     <CornerDownLeft className="mr-1 inline size-3 align-[-1px]" />
-                    opens the game · times and store details load with it
+                    adds the title as typed
                   </>
                 )}
               </p>

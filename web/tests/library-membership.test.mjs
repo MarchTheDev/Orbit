@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { inLibraryShelf, libraryCount, onBacklogPage, onJournalPage } from '../src/utils/library.ts';
 
+const dragHook = readFileSync(new URL('../src/hooks/useDragReorder.ts', import.meta.url), 'utf8');
+
 let failures = 0;
 function check(name, okay) {
   console.log(`  ${okay ? 'ok   ' : 'FAIL '}${name}`);
@@ -37,6 +39,8 @@ check('planned-only Backlog records can never appear in the Journal', !onJournal
 check('Backlog-only owned records cannot appear in the Journal', !onJournalPage(backlogOnly, true, ['backlog-only']));
 const backlogView = readFileSync(new URL('../src/components/BacklogView.tsx', import.meta.url), 'utf8');
 check('Backlog cards show a square drag handle and reserve its width in every lane', backlogView.includes('grid size-8 shrink-0 place-items-center rounded-lg border') && backlogView.includes('<GripVertical className="size-4" />'));
+check('Backlog pointer reordering targets the card under the pointer in both grid directions', backlogView.includes('{ container: list, grid: true }') && dragHook.includes('cardAt(cards, x, y, heldId)') && dragHook.includes('setPointerCapture'));
+check('Backlog covers fit fully inside their frame instead of being cropped', backlogView.includes('<Cover game={g} fit="contain"'));
 check('removing a plan has a visible rose danger treatment', backlogView.includes('border-rose-500/30 bg-rose-500/10') && backlogView.includes('hover:bg-rose-500/20'));
 const logsView = readFileSync(new URL('../src/components/LogsView.tsx', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');

@@ -4,6 +4,8 @@ import { normalizeSettings } from '../src/services/storage.ts';
 
 const copySettings = readFileSync(new URL('../src/components/CopySettings.tsx', import.meta.url), 'utf8');
 const libraryHook = readFileSync(new URL('../src/hooks/useLibrary.ts', import.meta.url), 'utf8');
+const settingsView = readFileSync(new URL('../src/components/SettingsView.tsx', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
 let failures = 0;
 function check(name, ok) {
@@ -54,8 +56,16 @@ check('overlay, sound, backlog, Journal, drive-scan, theme, and system settings 
     imported.launchOnStartupBackground === true && imported.openExeInOrbit === false &&
     imported.backlogOn?.[0] === 'planned-game' && imported.window.onMinimize === 'tray' &&
     imported.syncJournal === false && imported.journalOn?.[0] === 'journal-game' &&
-    imported.scanPath === 'C:\\Games' && imported.scanOnLaunch === true && imported.theGamesDbApiKey === 'local-api-key' && imported.customThemes?.[0]?.id === 'custom-coral' &&
+    imported.scanPath === 'C:\\Games' && imported.customThemes?.[0]?.id === 'custom-coral' &&
     imported.futureSetting?.nested === true);
+check('retired startup-scan and TheGamesDB settings are removed from saved settings',
+  !('scanOnLaunch' in imported) && !('theGamesDbApiKey' in imported));
+check('drive scans live in Libraries and open the review-first scan action',
+  settingsView.includes("id=\"orbit-libraries\"") && settingsView.includes('Drive or folder') &&
+    settingsView.includes('onClick={onScanDrive}') && settingsView.includes('Choose path') &&
+    app.includes('onScanDrive={() => {') && !app.includes('driveScanChecked'));
+check('drive scans do not run automatically on Orbit launch',
+  !settingsView.includes('Review new programs at startup') && !app.includes('settings.scanOnLaunch'));
 const oldImport = normalizeSettings({ theme: 'nebula' });
 check('settings absent from an older copy do not retain stale target-only values',
   !('overlay' in oldImport) && !('sound' in oldImport) && !('proton' in oldImport));

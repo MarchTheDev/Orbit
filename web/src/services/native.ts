@@ -23,6 +23,7 @@ import type {
   FolderProgram,
   Achievement,
   GameSuggestion,
+  WikidataGameSuggestion,
   LauncherGame,
   OtherLauncher,
 } from '../types';
@@ -524,9 +525,9 @@ export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
 }
 
-/** Cross-platform title matches from TheGamesDB, enabled with a personal key in Settings. */
-export function theGamesDbSuggest(title: string): Promise<string[]> {
-  return call('thegamesdb_suggest', { title }, async () => []);
+/** Keyless cross-platform game-title matches from Wikidata. */
+export function wikidataGameSuggestions(title: string): Promise<WikidataGameSuggestion[]> {
+  return call('wikidata_game_suggestions', { title }, async () => []);
 }
 
 /**

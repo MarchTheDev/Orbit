@@ -35,6 +35,7 @@ const checks = [
   'tests/gameTitle.test.mjs',
   'tests/launcherGame.test.mjs',
   'tests/library-membership.test.mjs',
+  'tests/journal-behavior.test.mjs',
   'tests/steam.test.mjs',
   'tests/artwork-fallback.test.mjs',
   'tests/updates.test.mjs',

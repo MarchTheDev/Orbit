@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Check,
   CircleCheck,
@@ -573,9 +573,13 @@ function Section({
   /** Comparing times: each card says how long it takes, three ways. */
   showTimes?: boolean;
 }) {
-  // The same pointer-based reordering the library uses: a webview that keeps
-  // file drags for itself never delivers a browser drag here either.
-  const { bind, dragging, over } = useDragReorder(movable && onMove ? onMove : undefined);
+  // A grid needs its own measured drop targets: elementFromPoint alone can lose
+  // the gesture in card gaps or after the pointer leaves the original card.
+  const list = useRef<HTMLUListElement>(null);
+  const { bind, dragging, over } = useDragReorder(
+    movable && onMove ? onMove : undefined,
+    { container: list, grid: true },
+  );
 
   return (
     <section>
@@ -586,7 +590,7 @@ function Section({
       {games.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{empty}</p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <ul ref={list} className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {games.map((g) => {
             const main = g.hltb?.main ?? 0;
             const left = Math.max(0, main - g.playSecs / 3600);
@@ -617,7 +621,7 @@ function Section({
                   </span>
                 )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="contain" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button

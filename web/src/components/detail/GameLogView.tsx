@@ -140,7 +140,11 @@ export function GameLogView({
   useEffect(() => {
     const onImport = () => load();
     window.addEventListener('orbit-imported', onImport);
-    return () => window.removeEventListener('orbit-imported', onImport);
+    window.addEventListener('orbit-journal-changed', onImport);
+    return () => {
+      window.removeEventListener('orbit-imported', onImport);
+      window.removeEventListener('orbit-journal-changed', onImport);
+    };
   }, [load]);
 
   useEffect(() => {

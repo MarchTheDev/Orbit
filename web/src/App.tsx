@@ -36,8 +36,6 @@ import {
   saveHintsOf,
   setPlaytime,
   steamLibrary,
-  folderPrograms,
-  knownExePaths,
   takeOpenExePaths,
   windowReady,
   overlayConfigure,
@@ -48,6 +46,7 @@ import {
   overlayQuality,
   overlayShowPins,
   setClockOffset,
+  addGameLog,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -87,7 +86,6 @@ import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
-import { driveScanDepth } from './utils/driveScan';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -673,29 +671,6 @@ export default function App() {
     })().catch(() => undefined);
   }, [ready]);
 
-  /** A startup drive scan finds candidates but never adds them without review. */
-  const driveScanChecked = useRef(false);
-  useEffect(() => {
-    if (!ready || !settings || driveScanChecked.current) return;
-    driveScanChecked.current = true;
-    const path = settings.scanPath?.trim();
-    if (!isNative() || settings.scanOnLaunch !== true || !path) return;
-
-    void Promise.all([folderPrograms(path, driveScanDepth(path)), knownExePaths()])
-      .then(([programs, known]) => {
-        const existing = new Set([
-          ...known,
-          ...games.map((game) => game.exePath ?? ''),
-        ].filter(Boolean).map((item) => item.toLowerCase()));
-        const fresh = programs.filter((program) => !existing.has(program.exePath.toLowerCase()));
-        if (fresh.length === 0) return;
-        setImportFolder(path);
-        setShowImport(true);
-        toast({ text: `${fresh.length} new program ${fresh.length === 1 ? 'candidate' : 'candidates'} ready to review` });
-      })
-      .catch(() => undefined);
-  }, [ready]);
-
   /**
    * A finished session changes one game's numbers, so re-read that game. If the
    * player asked for an automatic copy, take it now, while the files are the
@@ -1107,6 +1082,14 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
+    // A playthrough start is worth a Journal entry even if the game is not in
+    // the Journal yet. Its session timestamp is the moment the game started,
+    // not when the player later adds it to the Journal.
+    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
+      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
+      .catch(() => {
+        toast({ text: `Could not save the Journal entry for ${g.title}.` });
+      });
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
     if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
@@ -1436,6 +1419,10 @@ export default function App() {
                 else setShowOtherLaunchers(launcher);
               }}
               onOpenThemeManager={() => setShowThemeManager(true)}
+              onScanDrive={() => {
+                setImportFolder(settings.scanPath?.trim() || null);
+                setShowImport(true);
+              }}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}

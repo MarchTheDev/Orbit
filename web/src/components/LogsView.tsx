@@ -83,6 +83,11 @@ export function LogsView({
   }, [version]);
 
   useEffect(() => load(), [load]);
+  useEffect(() => {
+    const onJournalChanged = () => setVersion((current) => current + 1);
+    window.addEventListener('orbit-journal-changed', onJournalChanged);
+    return () => window.removeEventListener('orbit-journal-changed', onJournalChanged);
+  }, []);
 
   const currentByGame = useMemo(() => new Map(currents.map((run) => [run.gameId, run])), [currents]);
 

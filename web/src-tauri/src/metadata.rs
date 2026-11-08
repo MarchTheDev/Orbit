@@ -940,66 +940,133 @@ pub async fn suggest_cards(title: &str) -> Result<Vec<Card>, String> {
         .collect())
 }
 
-/// Search TheGamesDB's multi-platform catalogue when the player supplied a
-/// personal API key. Steam remains the default, no-key source; this provider is
-/// an additive title lookup for games that are not on Steam.
-pub async fn thegamesdb_suggest(title: &str, api_key: &str) -> Result<Vec<String>, String> {
+/// A public, cross-platform title match from Wikidata.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikidataGame {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub url: String,
+}
+
+/// Search Wikidata's public entity index for video games, with no key or
+/// account. Steam suggestions remain first-class results; these fill the gaps
+/// for console, retro and other titles outside Steam's catalogue.
+pub async fn wikidata_game_suggestions(title: &str) -> Result<Vec<WikidataGame>, String> {
     let title = title.trim();
-    let api_key = api_key.trim();
-    if title.chars().count() < 2 || api_key.is_empty() {
+    if title.chars().count() < 2 {
         return Ok(Vec::new());
     }
     let client = reqwest::Client::builder()
-        .user_agent(concat!("Orbit/", env!("CARGO_PKG_VERSION"), " (game library tracker)"))
+        .user_agent(concat!(
+            "Orbit/",
+            env!("CARGO_PKG_VERSION"),
+            " (https://github.com/MarchTheDev/Orbit/issues)"
+        ))
         .timeout(Duration::from_secs(8))
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|_| "Could not prepare the Wikidata search.".to_string())?;
     let response = client
-        .get("https://api.thegamesdb.net/v1/Games/ByGameName")
-        .query(&[("apikey", api_key), ("name", title)])
+        .get("https://www.wikidata.org/w/api.php")
+        .query(&[
+            ("action", "wbsearchentities"),
+            ("search", title),
+            ("language", "en"),
+            ("uselang", "en"),
+            ("type", "item"),
+            ("limit", "10"),
+            ("format", "json"),
+            ("maxlag", "5"),
+        ])
         .send()
         .await
-        .map_err(|_| "TheGamesDB is unreachable.".to_string())?;
+        .map_err(|_| "Wikidata is temporarily unreachable.".to_string())?;
     if !response.status().is_success() {
-        return Err(format!("TheGamesDB answered {}.", response.status()));
+        return Err(format!("Wikidata answered {}.", response.status()));
     }
     let payload: serde_json::Value = response
         .json()
         .await
-        .map_err(|error| format!("TheGamesDB returned an unreadable reply: {error}"))?;
-    let Some(games) = payload.pointer("/data/games") else {
+        .map_err(|_| "Wikidata returned an unreadable search result.".to_string())?;
+    let Some(results) = payload.get("search").and_then(serde_json::Value::as_array) else {
         return Ok(Vec::new());
     };
-    let entries: Vec<&serde_json::Value> = if let Some(array) = games.as_array() {
-        array.iter().collect()
-    } else if let Some(object) = games.as_object() {
-        object.values().collect()
-    } else {
-        Vec::new()
-    };
-    let mut titles = Vec::new();
-    for game in entries {
-        let name = game
-            .get("game_title")
-            .or_else(|| game.get("name"))
+
+    let want = normalize(title);
+    let mut games = Vec::new();
+    for (position, result) in results.iter().enumerate() {
+        let Some(id) = result.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(name) = result
+            .get("label")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
-            .filter(|name| !name.is_empty());
-        if let Some(name) = name {
-            if !titles.iter().any(|known: &String| known.eq_ignore_ascii_case(name)) {
-                titles.push(name.to_string());
-            }
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let description = result
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|description| is_video_game_description(description));
+        let Some(description) = description else {
+            continue;
+        };
+        if games.iter().any(|(_, _, known): &(u8, usize, WikidataGame)| {
+            normalize(&known.name) == normalize(name)
+        }) {
+            continue;
         }
-    }
-    let want = normalize(title);
-    titles.sort_by_key(|name| {
         let got = normalize(name);
-        if got == want { 0 }
-        else if got.starts_with(&want) || want.starts_with(&got) { 1 }
-        else { 2 }
-    });
-    titles.truncate(8);
-    Ok(titles)
+        let rank = if got == want {
+            0
+        } else if got.starts_with(&want) || want.starts_with(&got) {
+            1
+        } else if got.contains(&want) || want.contains(&got) {
+            2
+        } else {
+            3
+        };
+        games.push((
+            rank,
+            position,
+            WikidataGame {
+                id: id.to_string(),
+                name: name.to_string(),
+                description: description.to_string(),
+                url: format!("https://www.wikidata.org/wiki/{id}"),
+            },
+        ));
+    }
+    games.sort_by_key(|(rank, position, _)| (*rank, *position));
+    Ok(games
+        .into_iter()
+        .take(8)
+        .map(|(_, _, game)| game)
+        .collect())
+}
+
+/// Keep actual video games, not the many people, characters and franchises
+/// that share the same words in Wikidata's general entity search.
+fn is_video_game_description(description: &str) -> bool {
+    let description = description.to_ascii_lowercase();
+    let game = description.contains("video game")
+        || description.contains("computer game")
+        || description.contains("mobile game")
+        || description.contains("arcade game");
+    game && ![
+        "video game series",
+        "video game franchise",
+        "video game character",
+        "video game developer",
+        "video game publisher",
+        "video game console",
+    ]
+    .iter()
+    .any(|excluded| description.contains(excluded))
 }
 
 /// The result whose name is closest to what was asked for.
@@ -1125,6 +1192,15 @@ mod tests {
             name: name.to_string(),
             tiny_image: format!("https://cdn.example/{id}.jpg"),
         }
+    }
+
+    #[test]
+    fn wikidata_description_filter_keeps_games_not_people_or_franchises() {
+        assert!(is_video_game_description("2017 video game"));
+        assert!(is_video_game_description("Japanese role-playing video game"));
+        assert!(!is_video_game_description("video game character"));
+        assert!(!is_video_game_description("video game series"));
+        assert!(!is_video_game_description("Japanese video game developer"));
     }
 
     #[test]
