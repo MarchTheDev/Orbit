@@ -1288,6 +1288,12 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
     hltb::lookup(&title).await
 }
 
+/// Search HowLongToBeat's game catalogue with titles, covers and playtimes.
+#[tauri::command]
+async fn hltb_suggestions(title: String) -> Result<Vec<hltb::HltbSuggestion>, String> {
+    hltb::suggestions(&title).await
+}
+
 /// The factsheet the planning sheet shows for a store app id.
 ///
 /// Bonker's cache of the Steam catalogue carries it, with Steam's own page
@@ -1334,12 +1340,6 @@ async fn folder_programs(path: String, max_depth: Option<usize>) -> Result<Vec<l
 #[tauri::command]
 async fn metadata_cards(title: String) -> Result<Vec<metadata::Card>, String> {
     metadata::suggest_cards(&title).await
-}
-
-/// Search Wikidata's public game catalogue without a key or account.
-#[tauri::command]
-async fn wikidata_game_suggestions(title: String) -> Result<Vec<metadata::WikidataGame>, String> {
-    metadata::wikidata_game_suggestions(&title).await
 }
 
 /// Every achievement the game's Steam Community page lists.
@@ -2600,10 +2600,10 @@ pub fn run() {
             update::run_update,
             update::forget_update,
             hltb_search,
+            hltb_suggestions,
             metadata_lookup,
             metadata_suggest,
             metadata_cards,
-            wikidata_game_suggestions,
             game_facts,
             achievements_fetch,
             artwork_candidates,

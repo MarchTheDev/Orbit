@@ -1,5 +1,5 @@
-import type { HltbData } from '../types';
-import { hltbSearch } from './native';
+import type { HltbData, HltbSuggestion } from '../types';
+import { hltbSearch, hltbSuggestions } from './native';
 
 /**
  * HowLongToBeat, asked once per game.
@@ -36,6 +36,27 @@ export function fetchHltb(title: string): Promise<HltbData> {
     const oldest = times.keys().next();
     if (oldest.done) break;
     times.delete(oldest.value);
+  }
+  return started;
+}
+
+const catalogues = new Map<string, Promise<HltbSuggestion[]>>();
+
+/** Search HLTB's catalogue for full title, cover art and time results. */
+export function searchHltbGames(title: string): Promise<HltbSuggestion[]> {
+  const key = title.trim().toLowerCase();
+  if (key.length < 2) return Promise.resolve([]);
+  const known = catalogues.get(key);
+  if (known) return known;
+  const started = hltbSuggestions(title.trim()).catch((error: unknown) => {
+    catalogues.delete(key);
+    throw error;
+  });
+  catalogues.set(key, started);
+  while (catalogues.size > KEPT) {
+    const oldest = catalogues.keys().next();
+    if (oldest.done) break;
+    catalogues.delete(oldest.value);
   }
   return started;
 }

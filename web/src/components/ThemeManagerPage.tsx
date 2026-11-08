@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, ChevronDown, CopyPlus, Save, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, CopyPlus, Save, Trash2 } from 'lucide-react';
 import type { Settings, Theme } from '../types';
 import { THEMES, applyTheme } from '../data/themes';
 import { cn } from '../utils/cn';
@@ -61,73 +61,31 @@ function blankTheme(): Theme {
 }
 
 function ThemeColor({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const [open, setOpen] = useState(false);
   const safe = HEX.test(value) ? value : '#000000';
   return (
-    <div className="relative min-w-0 rounded-2xl border border-line bg-panel2/50 p-3 transition hover:border-accent/40">
-      <div className="flex items-center gap-3">
-        <label className="relative grid size-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-xl border border-white/15 shadow-inner" title={`Choose ${label.toLowerCase()} colour`}>
-          <span className="absolute inset-0" style={{ background: safe }} />
-          <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 to-transparent" />
-          <input
-            type="color"
-            value={safe}
-            onChange={(event) => onChange(event.target.value)}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            aria-label={`Choose ${label.toLowerCase()} colour`}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          aria-label={`${open ? 'Close' : 'Open'} ${label.toLowerCase()} colour controls`}
-          aria-expanded={open}
-          className="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold text-fg">{label}</span>
-            <span className="mt-0.5 block text-[10px] text-muted">Choose a colour or enter a hex</span>
-          </span>
-          <ChevronDown className={`size-4 shrink-0 text-muted transition ${open ? 'rotate-180 text-accent' : ''}`} />
-        </button>
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel2/50 p-3 transition hover:border-accent/50 focus-within:border-accent">
+      <label className="relative grid size-10 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-lg border border-line shadow-inner" title={`Choose ${label.toLowerCase()} colour`}>
+        <span className="absolute inset-0" style={{ background: safe }} />
+        <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 to-transparent" />
         <input
-          value={value}
+          type="color"
+          value={safe}
           onChange={(event) => onChange(event.target.value)}
-          className="w-[5.5rem] rounded-xl border border-line bg-panel px-2.5 py-2 font-mono text-xs uppercase tracking-wide text-fg outline-none transition focus:border-accent"
-          aria-label={`${label} hex value`}
-          spellCheck={false}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          aria-label={`Choose ${label.toLowerCase()} colour`}
         />
-      </div>
-      {open && (
-        <div className="absolute left-1/2 top-full z-30 mt-2 w-[min(19rem,calc(100vw-2.5rem))] -translate-x-1/2 rounded-2xl border border-line bg-panel p-4 text-fg shadow-2xl shadow-black/40 sm:left-0 sm:translate-x-0">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold">{label}</p>
-              <p className="mt-0.5 text-[10px] text-muted">Use the system colour picker or enter a hex value.</p>
-            </div>
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close colour controls" className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-accent hover:text-fg">
-              <X className="size-3.5" />
-            </button>
-          </div>
-          <div className="flex items-center gap-3 rounded-xl border border-line bg-panel2/50 p-3">
-            <label className="relative grid size-12 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-xl border border-white/15 shadow-inner" title={`Choose ${label.toLowerCase()} colour`}>
-              <span className="absolute inset-0" style={{ background: safe }} />
-              <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 to-transparent" />
-              <input
-                type="color"
-                value={safe}
-                onChange={(event) => onChange(event.target.value)}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                aria-label={`Choose ${label.toLowerCase()} colour`}
-              />
-            </label>
-            <div className="min-w-0">
-              <p className="text-xs font-medium">Current colour</p>
-              <p className="mt-1 font-mono text-xs uppercase text-muted">{safe}</p>
-            </div>
-          </div>
-        </div>
-      )}
+      </label>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-semibold text-fg">{label}</span>
+        <span className="mt-0.5 block truncate text-[10px] text-muted">Pick a colour or enter its hex code</span>
+      </span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-[5.5rem] rounded-lg border border-line bg-panel px-2.5 py-2 font-mono text-xs uppercase tracking-wide text-fg outline-none transition focus:border-accent"
+        aria-label={`${label} hex value`}
+        spellCheck={false}
+      />
     </div>
   );
 }
@@ -266,14 +224,43 @@ export function ThemeManagerPage({
               ))}
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-line" style={{ background: draft.bg, color: draft.text }}>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4" style={{ borderColor: draft.border, background: draft.panel }}>
-                <div><p className="text-sm font-semibold">{draft.name || 'Theme preview'}</p><p className="text-xs" style={{ color: draft.muted }}>Background, border, muted text and contrast are matched automatically.</p></div>
-                <button className="rounded-lg px-3 py-1.5 text-xs font-semibold" style={{ background: draft.accent, color: draft.onAccent }}>Accent action</button>
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Live app preview</p>
+                <p className="mt-0.5 text-[11px] text-muted">A small Orbit window, with the page background visible around its surfaces.</p>
               </div>
-              <div className="grid gap-2 p-4 sm:grid-cols-2" style={{ background: draft.panel2 }}>
-                <div className="rounded-xl border p-3 text-sm" style={{ borderColor: draft.border, background: draft.panel }}>Panel <span className="ml-2 text-xs" style={{ color: draft.muted }}>Muted text</span></div>
-                <div className="rounded-xl border p-3 text-sm" style={{ borderColor: draft.accent2, background: draft.panel }}>Second accent</div>
+              <div className="overflow-hidden rounded-2xl border shadow-xl" style={{ borderColor: draft.border, background: draft.bg, color: draft.text }}>
+                <div className="flex min-h-64">
+                  <aside className="hidden w-36 shrink-0 flex-col gap-1 border-r p-3 sm:flex" style={{ borderColor: draft.border, background: draft.panel }}>
+                    <div className="mb-3 flex items-center gap-2 px-2 py-1">
+                      <span className="grid size-6 place-items-center rounded-md text-[10px] font-black" style={{ background: draft.accent, color: draft.onAccent }}>O</span>
+                      <span className="text-xs font-bold">Orbit</span>
+                    </div>
+                    {['Library', 'Backlog', 'Journal'].map((item, index) => (
+                      <div key={item} className="rounded-lg px-2.5 py-2 text-[11px]" style={{ background: index === 0 ? draft.panel2 : 'transparent', color: index === 0 ? draft.text : draft.muted }}>{item}</div>
+                    ))}
+                  </aside>
+                  <div className="min-w-0 flex-1" style={{ background: draft.bg }}>
+                    <div className="flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: draft.border, background: draft.panel }}>
+                      <div><p className="text-xs font-semibold">{draft.name || 'Your Library'}</p><p className="text-[10px]" style={{ color: draft.muted }}>Recently played · 12 games</p></div>
+                      <span className="rounded-lg border px-2.5 py-1.5 text-[10px]" style={{ borderColor: draft.border, background: draft.panel2, color: draft.muted }}>Search games</span>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold">Continue playing</p>
+                        <span className="rounded-md px-2 py-1 text-[10px] font-semibold" style={{ background: draft.accent, color: draft.onAccent }}>View all</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {['Hollow Knight', 'Hades II', 'Celeste'].map((game, index) => (
+                          <div key={game} className="overflow-hidden rounded-xl border" style={{ borderColor: draft.border, background: draft.panel }}>
+                            <div className="h-16" style={{ background: index === 1 ? `linear-gradient(135deg, ${draft.accent2}, ${draft.accent})` : index === 2 ? `linear-gradient(135deg, ${draft.panel2}, ${draft.accent2})` : `linear-gradient(135deg, ${draft.accent}, ${draft.panel2})` }} />
+                            <div className="p-2"><p className="truncate text-[10px] font-semibold">{game}</p><p className="mt-0.5 text-[9px]" style={{ color: draft.muted }}>Recently played</p></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             {notice && <p role="status" className="text-sm text-muted">{notice}</p>}

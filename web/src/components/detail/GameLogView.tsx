@@ -4,9 +4,8 @@ import type { Game, GameLog, Playthrough } from '../../types';
 import { addGameLog, addPlaythrough, deleteGameLog, deletePlaythrough, listGameLogs, listPlaythroughs, renamePlaythrough, reorderGameLogs, setCurrentPlaythrough, updateGameLog } from '../../services/native';
 import { rememberPlaythrough } from '../../services/playthroughs';
 import { useDragReorder } from '../../hooks/useDragReorder';
-import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
+import { fmtClock, fmtDateTime, parseDuration } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
-import { DateTimePicker } from '../ui/DateTimePicker';
 import { Select } from '../ui/Select';
 import { MarkdownEditor } from '../ui/Markdown';
 import { btnAccent } from '../ui/buttons';
@@ -17,19 +16,50 @@ import { cn } from '../../utils/cn';
 interface Draft {
   id: number | null;
   at: string;
+  time: string;
   secs: string;
   note: string;
   details: string;
 }
 
 /**
- * A new entry starts with neither date nor length filled in.
- *
- * Both are optional and both have an obvious default: today, and no time at
- * all. Somebody writing "beat the last boss" should not have to answer two
- * questions about numbers they never counted.
+ * A new entry needs a day, but not a time of day or a play duration.
  */
-const blank = (): Draft => ({ id: null, at: '', secs: '', note: '', details: '' });
+const blank = (): Draft => ({ id: null, at: '', time: '', secs: '', note: '', details: '' });
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+function localDateValue(unixSeconds: number): string {
+  const date = new Date(unixSeconds * 1000);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function localTimeValue(unixSeconds: number): string {
+  const date = new Date(unixSeconds * 1000);
+  if (date.getHours() === 0 && date.getMinutes() === 0) return '';
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function timestampForDay(day: string, time: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return null;
+  const [, year, month, dateOfMonth] = match;
+  const date = new Date(`${day}T${time || '00:00'}:00`);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(dateOfMonth)
+  ) return null;
+  return Math.floor(date.getTime() / 1000);
+}
+
+function displayLogDate(unixSeconds: number, withClock: boolean): string {
+  if (unixSeconds <= 0) return 'No date';
+  const date = new Date(unixSeconds * 1000);
+  if (withClock && (date.getHours() !== 0 || date.getMinutes() !== 0)) return fmtDateTime(unixSeconds);
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 /** How the entries are read. `mine` is the order they were dragged into. */
 type Order = 'mine' | 'newest' | 'oldest' | 'longest' | 'shortest';
@@ -49,10 +79,8 @@ const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete',
  * The player's own log for one game.
  *
  * Deliberately separate from sessions: nothing here is tracked or measured by
- * Orbit. The player writes what happened, picks the date it happened on, and
- * says how long it took, and every field can be corrected later. That is what
- * makes "10h · 08-12-26 · finished main story" a thing they typed rather than a
- * thing the tracker guessed at.
+ * Orbit. The player writes what happened and picks the day; clock time and play
+ * duration are optional, and every field can be corrected later.
  *
  * The game's own notes live underneath the entries rather than above them: the
  * entries are the record, and a box of loose notes is what you read after them.
@@ -213,16 +241,20 @@ export function GameLogView({
 
   const save = async () => {
     if (!draft) return;
-    // Left empty means "today" and "no time to add", which is what most short
-    // entries want; only a value that is there and unreadable is an error.
+    if (!draft.at.trim()) {
+      setError('Choose a day for this entry.');
+      return;
+    }
+    // Clock time and play duration are optional; an omitted clock time means
+    // midnight on the selected day, while a missing duration is stored as zero.
     const secs = draft.secs.trim() === '' ? 0 : parseDuration(draft.secs);
     if (secs === null) {
       setError('That is not a length of time. Try 10h, 45m, or 90, or leave it empty.');
       return;
     }
-    const at = draft.at.trim() === '' ? Math.floor(Date.now() / 1000) : fromLocalInput(draft.at);
+    const at = timestampForDay(draft.at, draft.time);
     if (at === null) {
-      setError('That is not a date.');
+      setError('That is not a valid day or time.');
       return;
     }
     setError(null);
@@ -261,7 +293,8 @@ export function GameLogView({
     setError(null);
     setDraft({
       id: row.id,
-      at: toLocalInput(row.at),
+      at: row.at > 0 ? localDateValue(row.at) : '',
+      time: row.at > 0 ? localTimeValue(row.at) : '',
       secs: fmtShort(row.secs),
       note: row.note,
       details: row.details ?? '',
@@ -286,7 +319,7 @@ export function GameLogView({
 
   const current = runs.find((run) => run.id === currentId.current) ?? runs.find((run) => run.current) ?? runs[0];
   const unsavedEntry = () =>
-    Boolean(draft && (draft.note.trim() || draft.details.trim() || draft.at.trim() || draft.secs.trim()));
+    Boolean(draft && (draft.note.trim() || draft.details.trim() || draft.at.trim() || draft.time.trim() || draft.secs.trim()));
 
   const chooseRun = async (run: Playthrough) => {
     if (runBusy || run.id === current?.id) return;
@@ -401,18 +434,31 @@ export function GameLogView({
       {draft ? (
         <div className="mb-4 space-y-2 rounded-xl border border-accent/40 bg-accent/5 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 min-[480px]:grid-cols-2">
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-muted">Day (required)</span>
+                <input
+                  type="date"
+                  required
+                  className={inputCls}
+                  value={draft.at}
+                  onChange={(e) => setDraft({ ...draft, at: e.target.value })}
+                  aria-label="Day (required)"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-muted">Time (optional)</span>
+                <input
+                  type="time"
+                  className={inputCls}
+                  value={draft.time}
+                  onChange={(e) => setDraft({ ...draft, time: e.target.value })}
+                  aria-label="Time (optional)"
+                />
+              </label>
+            </div>
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">When (optional)</span>
-              <DateTimePicker
-                value={draft.at}
-                onChange={(at) => setDraft({ ...draft, at })}
-                placeholder="Leave empty for today"
-                title="Choose when it happened, or leave it empty for today"
-                clearable
-              />
-            </label>
-            <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">How long (optional)</span>
+              <span className="text-[11px] uppercase tracking-widest text-muted">Play duration (optional)</span>
               <input
                 className={inputCls}
                 value={draft.secs}
@@ -551,7 +597,7 @@ export function GameLogView({
                       </span>
                     )}
                     <span className={`shrink-0 font-mono text-xs text-muted ${withClock ? 'w-32' : 'w-20'}`}>
-                      {withClock ? fmtDateTime(r.at) : fmtDate(new Date(r.at * 1000).toISOString())}
+                      {displayLogDate(r.at, withClock)}
                     </span>
                     <span className="min-w-0 flex-1 truncate">
                       {r.note || <span className="text-muted">no note</span>}

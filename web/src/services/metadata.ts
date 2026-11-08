@@ -13,8 +13,8 @@
  * a suggestion being pointed at can be asked about before it is chosen, and
  * choosing it then opens on an answer that is already there.
  */
-import type { GameFacts, GameSuggestion, MetaData, WikidataGameSuggestion } from '../types';
-import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest, wikidataGameSuggestions } from './native';
+import type { GameFacts, GameSuggestion, MetaData } from '../types';
+import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest } from './native';
 
 /**
  * How many answers each of these keeps.
@@ -54,7 +54,6 @@ function remembered<T>(kept: Map<string, Promise<T>>, key: string, ask: () => Pr
 }
 
 const searches = new Map<string, Promise<GameSuggestion[]>>();
-const wikidataSearches = new Map<string, Promise<WikidataGameSuggestion[]>>();
 const answers = new Map<string, GameSuggestion[]>();
 const facts = new Map<string, Promise<GameFacts>>();
 
@@ -72,13 +71,6 @@ export function fetchMetadata(title: string, appId?: number): Promise<MetaData> 
 /** Titles a store suggests while a name is being typed. */
 export function searchTitles(title: string): Promise<string[]> {
   return metadataSuggest(title);
-}
-
-/** Public cross-platform game titles from Wikidata, remembered while typing. */
-export function searchWikidataGames(title: string): Promise<WikidataGameSuggestion[]> {
-  const key = keyOf(title);
-  if (!key) return Promise.resolve([]);
-  return remembered(wikidataSearches, key, () => wikidataGameSuggestions(title.trim()));
 }
 
 /**

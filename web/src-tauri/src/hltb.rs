@@ -11,7 +11,7 @@
 //! Nothing in the app depends on this succeeding, so every failure turns into a
 //! sentence a player can read rather than a panic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,16 @@ pub struct HltbData {
     pub source: &'static str,
 }
 
+/// One HLTB search result, including the cover art shown on the website.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HltbSuggestion {
+    pub id: i64,
+    pub name: String,
+    pub cover_url: Option<String>,
+    pub hltb: HltbData,
+}
+
 /// One entry as HLTB returns it: times arrive in seconds, ids as numbers.
 #[derive(Debug, Deserialize)]
 struct HltbGame {
@@ -47,6 +57,10 @@ struct HltbGame {
     game_id: i64,
     #[serde(default)]
     game_name: String,
+    #[serde(default)]
+    game_image: String,
+    #[serde(default)]
+    game_type: String,
     #[serde(default)]
     comp_main: f64,
     #[serde(default)]
@@ -76,6 +90,11 @@ struct Session {
 
 fn cache() -> &'static Mutex<HashMap<String, HltbData>> {
     static CACHE: OnceLock<Mutex<HashMap<String, HltbData>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn suggestions_cache() -> &'static Mutex<HashMap<String, Vec<HltbSuggestion>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Vec<HltbSuggestion>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -140,9 +159,44 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
     }
 
     let client = client()?;
+    let games = search_results(&client, title).await?;
+    let Some(best) = pick_best(&games, title) else {
+        return Err(format!("HowLongToBeat has no match for \"{title}\"."));
+    };
+    let hit = data_for(best);
+    Ok(remember_hit(key, hit))
+}
 
-    // The remembered endpoint first, then the known names, then whatever the
-    // site's JavaScript says its endpoint is called now.
+/// Search HLTB's full title list, including entries without playtime reports.
+///
+/// The website includes image filenames in each search row, so this serves the
+/// same cover art as HLTB for console, upcoming, and other non-Steam titles.
+pub async fn suggestions(title: &str) -> Result<Vec<HltbSuggestion>, String> {
+    let key = title.trim().to_lowercase();
+    if key.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    if let Ok(kept) = suggestions_cache().lock() {
+        if let Some(found) = kept.get(&key) {
+            return Ok(found.clone());
+        }
+    }
+
+    let client = client()?;
+    let games = search_results(&client, title).await?;
+    let found = ranked_suggestions(games, title);
+    if let Ok(mut kept) = suggestions_cache().lock() {
+        if kept.len() >= 100 {
+            kept.clear();
+        }
+        kept.insert(key, found.clone());
+    }
+    Ok(found)
+}
+
+/// The endpoint that worked last time, known names, and then the name read from
+/// the site's JavaScript. A successful empty search is still a valid answer.
+async fn search_results(client: &reqwest::Client, title: &str) -> Result<Vec<HltbGame>, String> {
     let mut candidates: Vec<String> = Vec::new();
     if let Ok(found) = working_endpoint().lock() {
         if let Some(current) = found.as_ref() {
@@ -150,60 +204,43 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
         }
     }
     for known in ENDPOINTS {
-        if !candidates.iter().any(|c| c == known) {
+        if !candidates.iter().any(|candidate| candidate == known) {
             candidates.push(known.to_string());
         }
     }
 
     let mut last_error = String::from("HowLongToBeat did not answer.");
     for endpoint in &candidates {
-        match search(&client, endpoint, title).await {
-            Ok(Some(hit)) => {
+        match search(client, endpoint, title).await {
+            Ok(games) => {
                 remember(endpoint);
-                return Ok(remember_hit(key, hit));
+                return Ok(games);
             }
-            // The search itself went through and simply has no such game, which
-            // is the answer: there is nothing to gain by asking elsewhere.
-            Ok(None) => {
-                remember(endpoint);
-                return Err(format!("HowLongToBeat has no match for \"{title}\"."));
-            }
-            Err(e) => last_error = e,
+            Err(error) => last_error = error,
         }
     }
 
-    for found in discover(&client).await {
-        if candidates.iter().any(|c| c == &found) {
+    for endpoint in discover(client).await {
+        if candidates.iter().any(|candidate| candidate == &endpoint) {
             continue;
         }
-        match search(&client, &found, title).await {
-            Ok(Some(hit)) => {
-                remember(&found);
-                return Ok(remember_hit(key, hit));
+        match search(client, &endpoint, title).await {
+            Ok(games) => {
+                remember(&endpoint);
+                return Ok(games);
             }
-            Ok(None) => {
-                remember(&found);
-                return Err(format!("HowLongToBeat has no match for \"{title}\"."));
-            }
-            Err(e) => last_error = e,
+            Err(error) => last_error = error,
         }
     }
-
     Err(last_error)
 }
 
 /// One search against one endpoint, with a session reused where possible.
 ///
 /// A search is a handshake and then a question. The handshake is skipped when a
-/// session from this endpoint is still in hand, which is half the round trips a
-/// lookup costs - the difference a plan makes on the first page it opens. A
-/// session the site has stopped honouring is the one refusal worth asking
-/// again for; every other failure is an answer of its own.
-async fn search(
-    client: &reqwest::Client,
-    endpoint: &str,
-    title: &str,
-) -> Result<Option<HltbData>, String> {
+/// session from this endpoint is still in hand. A stale session is refreshed
+/// once, then the search is retried.
+async fn search(client: &reqwest::Client, endpoint: &str, title: &str) -> Result<Vec<HltbGame>, String> {
     if let Some(session) = remembered_session(endpoint) {
         match ask(client, endpoint, title, &session).await {
             Ok(found) => return Ok(found),
@@ -238,7 +275,7 @@ async fn ask(
     endpoint: &str,
     title: &str,
     session: &Session,
-) -> Result<Option<HltbData>, Refusal> {
+) -> Result<Vec<HltbGame>, Refusal> {
     // The same query the site's own search box builds.
     let body = serde_json::json!({
         "searchType": "games",
@@ -296,20 +333,7 @@ async fn ask(
     let reply: SearchReply = serde_json::from_str(&text)
         .map_err(|e| Refusal::Failed(format!("Unexpected HowLongToBeat reply: {e}")))?;
 
-    Ok(pick_best(&reply.data, title).map(|best| {
-        log::debug!(
-            "HowLongToBeat matched \"{}\" ({}) to \"{title}\"",
-            best.game_name,
-            best.game_id
-        );
-        HltbData {
-            game_name: best.game_name.clone(),
-            main: to_hours(best.comp_main),
-            main_extra: to_hours(best.comp_plus),
-            completionist: to_hours(best.comp_100),
-            source: "hltb",
-        }
-    }))
+    Ok(reply.data)
 }
 
 /// Ask the site for a session token.
@@ -443,6 +467,63 @@ fn remember_hit(key: String, hit: HltbData) -> HltbData {
     hit
 }
 
+fn data_for(game: &HltbGame) -> HltbData {
+    HltbData {
+        game_name: game.game_name.clone(),
+        main: to_hours(game.comp_main),
+        main_extra: to_hours(game.comp_plus),
+        completionist: to_hours(game.comp_100),
+        source: "hltb",
+    }
+}
+
+fn ranked_suggestions(games: Vec<HltbGame>, title: &str) -> Vec<HltbSuggestion> {
+    let mut scored: Vec<(i64, HltbGame)> = games
+        .into_iter()
+        .filter(|game| {
+            game.game_id > 0
+                && !game.game_name.trim().is_empty()
+                && !game.game_type.eq_ignore_ascii_case("dlc")
+        })
+        .filter_map(|game| title_score(&game, title).map(|score| (score, game)))
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    scored
+        .into_iter()
+        .filter_map(|(_, game)| {
+            if !ids.insert(game.game_id) || !names.insert(normalize(&game.game_name)) {
+                return None;
+            }
+            Some(HltbSuggestion {
+                id: game.game_id,
+                name: game.game_name.clone(),
+                cover_url: image_url(&game.game_image),
+                hltb: data_for(&game),
+            })
+        })
+        .take(20)
+        .collect()
+}
+
+fn image_url(image: &str) -> Option<String> {
+    let image = image.trim();
+    if image.is_empty() {
+        return None;
+    }
+    if image.starts_with("https://") || image.starts_with("http://") {
+        return Some(image.to_string());
+    }
+    let path = image.trim_start_matches('/');
+    Some(if path.starts_with("games/") {
+        format!("{SITE}/{path}")
+    } else {
+        format!("{SITE}/games/{path}")
+    })
+}
+
 /// HLTB reports seconds; the front end wants hours.
 ///
 /// A reply shape from long ago carried hours directly, so a number too small to
@@ -472,39 +553,37 @@ fn client() -> Result<reqwest::Client, String> {
 /// series prefix ("The Legend of Zelda: Ocarina of Time") or a subtitle, so
 /// contained titles and shared words matter more than identical prefixes.
 fn pick_best<'a>(games: &'a [HltbGame], title: &str) -> Option<&'a HltbGame> {
-    if games.is_empty() {
-        return None;
-    }
-    let want = normalize(title);
-    let want_words = title_words(title);
     games
         .iter()
-        .filter_map(|game| {
-            let got = normalize(&game.game_name);
-            let got_words = title_words(&game.game_name);
-            let shared = want_words.iter().filter(|word| got_words.contains(word)).count();
-            let required = if want_words.len() < 2 { 1 } else { 2 };
-            if shared < required {
-                return None;
-            }
-            let name_score = if got == want {
-                100_000
-            } else if got.contains(want.as_str()) {
-                80_000 - (got.len().saturating_sub(want.len()) as i64)
-            } else if want.contains(got.as_str()) {
-                70_000 - (want.len().saturating_sub(got.len()) as i64)
-            } else {
-                // Allow a query to match the memorable part of a subtitle,
-                // while requiring at least two shared words for multiword names.
-                1_000 + (shared as i64 * 1_000) + (shared as i64 * 500 / want_words.len() as i64)
-            };
-            // Playtime presence is only a tie-breaker; a wrong game with times
-            // must never beat the right title with no reported estimates.
-            let has_data = if game.comp_main > 0.0 || game.comp_plus > 0.0 || game.comp_100 > 0.0 { 1 } else { 0 };
-            Some((name_score + has_data, game))
-        })
-        .max_by(|a, b| a.0.cmp(&b.0))
+        .filter_map(|game| title_score(game, title).map(|score| (score, game)))
+        .max_by_key(|(score, _)| *score)
         .map(|(_, game)| game)
+}
+
+fn title_score(game: &HltbGame, title: &str) -> Option<i64> {
+    let want = normalize(title);
+    let got = normalize(&game.game_name);
+    let want_words = title_words(title);
+    if want_words.is_empty() {
+        return None;
+    }
+    let got_words = title_words(&game.game_name);
+    let shared = want_words.iter().filter(|word| got_words.contains(word)).count();
+    let required = if want_words.len() < 2 { 1 } else { 2 };
+    if shared < required {
+        return None;
+    }
+    let name_score = if got == want {
+        100_000
+    } else if got.contains(want.as_str()) {
+        80_000 - (got.len().saturating_sub(want.len()) as i64)
+    } else if want.contains(got.as_str()) {
+        70_000 - (want.len().saturating_sub(got.len()) as i64)
+    } else {
+        1_000 + (shared as i64 * 1_000) + (shared as i64 * 500 / want_words.len() as i64)
+    };
+    let has_data = if game.comp_main > 0.0 || game.comp_plus > 0.0 || game.comp_100 > 0.0 { 1 } else { 0 };
+    Some(name_score + has_data)
 }
 
 fn title_words(s: &str) -> Vec<String> {
@@ -529,10 +608,35 @@ mod tests {
         HltbGame {
             game_id: 1,
             game_name: name.to_string(),
+            game_image: "cover.jpg".to_string(),
+            game_type: "game".to_string(),
             comp_main: main,
             comp_plus: main * 1.5,
             comp_100: main * 2.5,
         }
+    }
+
+    #[test]
+    fn hltb_suggestions_keep_upcoming_games_and_use_the_site_cover_url() {
+        let mut upcoming = game("Palia 2", 0.0);
+        upcoming.game_id = 2;
+        upcoming.game_image = "2_Palia_2.jpg".to_string();
+        let results = ranked_suggestions(vec![upcoming], "Palia");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Palia 2");
+        assert_eq!(results[0].cover_url.as_deref(), Some("https://howlongtobeat.com/games/2_Palia_2.jpg"));
+        assert_eq!(results[0].hltb.main, 0.0);
+    }
+
+    #[test]
+    fn hltb_suggestions_skip_dlc_and_duplicate_names() {
+        let mut dlc = game("Hades DLC", 3_600.0);
+        dlc.game_type = "dlc".to_string();
+        let mut duplicate = game("Hades", 3_600.0);
+        duplicate.game_id = 2;
+        let results = ranked_suggestions(vec![game("Hades", 3_600.0), duplicate, dlc], "Hades");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Hades");
     }
 
     #[test]

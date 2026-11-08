@@ -621,7 +621,7 @@ function Section({
                   </span>
                 )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} fit="contain" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button

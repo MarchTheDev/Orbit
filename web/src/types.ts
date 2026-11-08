@@ -48,6 +48,14 @@ export interface HltbData {
   source: 'hltb' | 'estimate';
 }
 
+/** A full HLTB catalogue result, with its cover and available playtime data. */
+export interface HltbSuggestion {
+  id: number;
+  name: string;
+  coverUrl: string | null;
+  hltb: HltbData;
+}
+
 /**
  * What a store knows about a game.
  *
@@ -296,14 +304,6 @@ export interface GameSuggestion {
   appId: number;
   name: string;
   coverUrl: string | null;
-}
-
-/** A keyless cross-platform game suggestion from Wikidata. */
-export interface WikidataGameSuggestion {
-  id: string;
-  name: string;
-  description: string;
-  url: string;
 }
 
 /** A still from the store page, thumbnailed and full. */

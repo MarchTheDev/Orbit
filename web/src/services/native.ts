@@ -23,7 +23,7 @@ import type {
   FolderProgram,
   Achievement,
   GameSuggestion,
-  WikidataGameSuggestion,
+  HltbSuggestion,
   LauncherGame,
   OtherLauncher,
 } from '../types';
@@ -525,9 +525,9 @@ export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
 }
 
-/** Keyless cross-platform game-title matches from Wikidata. */
-export function wikidataGameSuggestions(title: string): Promise<WikidataGameSuggestion[]> {
-  return call('wikidata_game_suggestions', { title }, async () => []);
+/** Full title, artwork and playtime results from HowLongToBeat. */
+export function hltbSuggestions(title: string): Promise<HltbSuggestion[]> {
+  return call('hltb_suggestions', { title }, async () => []);
 }
 
 /**

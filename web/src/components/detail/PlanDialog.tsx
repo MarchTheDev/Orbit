@@ -10,9 +10,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Game, GameFacts, GameSuggestion, HltbData, PlanPlatform, WikidataGameSuggestion } from '../../types';
-import { fetchFacts, knownGames, searchGames, searchWikidataGames } from '../../services/metadata';
-import { fetchHltb } from '../../services/hltb';
+import type { Game, GameFacts, GameSuggestion, HltbData, HltbSuggestion, PlanPlatform } from '../../types';
+import { fetchFacts, knownGames, searchGames } from '../../services/metadata';
+import { fetchHltb, searchHltbGames } from '../../services/hltb';
 import { cn } from '../../utils/cn';
 import { PlanPage } from './PlanPage';
 
@@ -41,13 +41,12 @@ export interface PlanPick {
  * be given.
  */
 const WAIT = 170;
-const WIKIDATA_WAIT = 500;
+const HLTB_WAIT = 500;
 const titleKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 type PlanSearchResult =
   | { key: string; source: 'steam'; name: string; suggestion: GameSuggestion }
-  | { key: string; source: 'wikidata'; name: string; suggestion: WikidataGameSuggestion }
-  | { key: string; source: 'hltb'; name: string; suggestion: HltbData };
+  | { key: string; source: 'hltb'; name: string; suggestion: HltbSuggestion };
 
 /**
  * Planning a game, as one place in the middle of the window.
@@ -84,10 +83,9 @@ export function PlanDialog({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<GameSuggestion[]>([]);
-  const [wikidataResults, setWikidataResults] = useState<WikidataGameSuggestion[]>([]);
-  const [wikidataLooking, setWikidataLooking] = useState(false);
-  const [wikidataError, setWikidataError] = useState<string | null>(null);
-  const [hltbMatch, setHltbMatch] = useState<{ name: string; data: HltbData } | null>(null);
+  const [hltbResults, setHltbResults] = useState<HltbSuggestion[]>([]);
+  const [hltbLooking, setHltbLooking] = useState(false);
+  const [hltbError, setHltbError] = useState<string | null>(null);
   const [looking, setLooking] = useState(false);
   /** The suggestion whose own page is open, if one is. */
   const [chosen, setChosen] = useState<GameSuggestion | null>(null);
@@ -116,36 +114,30 @@ export function PlanDialog({
 
   useEffect(() => {
     const text = query.trim();
-    setHltbMatch(null);
-    setWikidataResults([]);
-    setWikidataLooking(false);
-    setWikidataError(null);
+    setHltbResults([]);
+    setHltbLooking(false);
+    setHltbError(null);
     if (text.length < 2) {
       asked.current += 1;
       setResults([]);
       setLooking(false);
       return;
     }
-    setWikidataLooking(true);
+    setHltbLooking(true);
     const now = ++asked.current;
     const lookupHltb = () => {
-      void fetchHltb(text).then((data) => {
-        if (asked.current === now && data.gameName) setHltbMatch({ name: data.gameName, data });
-      }).catch(() => undefined);
-    };
-    const lookupWikidata = () => {
-      void searchWikidataGames(text)
+      void searchHltbGames(text)
         .then((found) => {
-          if (asked.current === now) setWikidataResults(found);
+          if (asked.current === now) setHltbResults(found);
         })
         .catch(() => {
           if (asked.current === now) {
-            setWikidataResults([]);
-            setWikidataError('The public game catalogue is temporarily unavailable.');
+            setHltbResults([]);
+            setHltbError('HowLongToBeat search is temporarily unavailable. You can still add the title as typed.');
           }
         })
         .finally(() => {
-          if (asked.current === now) setWikidataLooking(false);
+          if (asked.current === now) setHltbLooking(false);
         });
     };
 
@@ -154,9 +146,8 @@ export function PlanDialog({
       setResults(ready);
       setAt(0);
       setLooking(false);
-      lookupHltb();
-      const wikidataTimer = window.setTimeout(lookupWikidata, WIKIDATA_WAIT);
-      return () => window.clearTimeout(wikidataTimer);
+      const hltbTimer = window.setTimeout(lookupHltb, HLTB_WAIT);
+      return () => window.clearTimeout(hltbTimer);
     }
 
     setLooking(true);
@@ -174,14 +165,12 @@ export function PlanDialog({
           if (asked.current === now) setLooking(false);
         });
     }, WAIT);
-    const hltbTimer = window.setTimeout(lookupHltb, 350);
-    // Wikidata is open and keyless, but we still wait for the user to pause
-    // before asking so every half-typed query does not become a request.
-    const wikidataTimer = window.setTimeout(lookupWikidata, WIKIDATA_WAIT);
+    // Search HLTB only after typing settles: it is the second full catalogue
+    // request, not the separate single-game timing lookup.
+    const hltbTimer = window.setTimeout(lookupHltb, HLTB_WAIT);
     return () => {
       window.clearTimeout(steamTimer);
       window.clearTimeout(hltbTimer);
-      window.clearTimeout(wikidataTimer);
     };
   }, [query]);
 
@@ -241,18 +230,14 @@ export function PlanDialog({
       suggestion,
     }));
     const steamNames = new Set(results.map((suggestion) => titleKey(suggestion.name)));
-    const wikidataRows: PlanSearchResult[] = wikidataResults
+    const hltbRows: PlanSearchResult[] = hltbResults
       .filter((suggestion) => !steamNames.has(titleKey(suggestion.name)))
       .map((suggestion) => ({
-        key: `wikidata-${suggestion.id}`,
-        source: 'wikidata',
+        key: `hltb-${suggestion.id}`,
+        source: 'hltb',
         name: suggestion.name,
         suggestion,
       }));
-    const knownNames = new Set([...steamNames, ...wikidataRows.map((row) => titleKey(row.name))]);
-    const hltbRows: PlanSearchResult[] = hltbMatch && !knownNames.has(titleKey(hltbMatch.name))
-      ? [{ key: `hltb-${titleKey(hltbMatch.name)}`, source: 'hltb', name: hltbMatch.name, suggestion: hltbMatch.data }]
-      : [];
     const relevance = (name: string) => {
       const candidate = titleKey(name);
       const search = titleKey(typed);
@@ -261,21 +246,23 @@ export function PlanDialog({
       if (candidate.includes(search) || search.includes(candidate)) return 2;
       return 3;
     };
-    const sourceRank = (result: PlanSearchResult) => result.source === 'steam' ? 0 : result.source === 'wikidata' ? 1 : 2;
-    return [...steamRows, ...wikidataRows, ...hltbRows].sort((a, b) =>
-      relevance(a.name) - relevance(b.name) || sourceRank(a) - sourceRank(b),
+    return [...steamRows, ...hltbRows].sort((a, b) =>
+      relevance(a.name) - relevance(b.name) || (a.source === b.source ? 0 : a.source === 'hltb' ? -1 : 1),
     );
-  }, [results, wikidataResults, hltbMatch, typed]);
+  }, [results, hltbResults, typed]);
 
   const selectSearchResult = (result: PlanSearchResult) => {
     if (result.source === 'steam') {
       warm(result.suggestion);
       setChosen(result.suggestion);
-    } else if (result.source === 'hltb') {
-      void add({ name: result.name, platform: 'Other', hltb: result.suggestion });
-    } else {
-      void add({ name: result.name, platform: 'Other' });
+      return;
     }
+    void add({
+      name: result.name,
+      platform: 'Other',
+      coverUrl: result.suggestion.coverUrl,
+      hltb: result.suggestion.hltb,
+    });
   };
 
   useEffect(() => {
@@ -367,8 +354,8 @@ export function PlanDialog({
                   className="w-full rounded-xl border border-line bg-panel2/60 py-2.5 pl-10 pr-24 text-sm outline-none transition focus:border-accent focus:bg-panel2"
                 />
                 <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                  {(looking || wikidataLooking) && <LoaderCircle className="size-4 animate-spin text-muted" />}
-                  {!looking && !wikidataLooking && displayResults.length > 0 && (
+                  {(looking || hltbLooking) && <LoaderCircle className="size-4 animate-spin text-muted" />}
+                  {!looking && !hltbLooking && displayResults.length > 0 && (
                     <span className="hidden items-center gap-1 text-[10px] text-muted sm:flex">
                       <span className="rounded border border-line bg-panel px-1 py-0.5 font-sans">↑↓</span>
                       <span className="rounded border border-line bg-panel px-1 py-0.5 font-sans">↵</span>
@@ -380,7 +367,7 @@ export function PlanDialog({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              {wikidataError && <p role="status" className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">{wikidataError}</p>}
+              {hltbError && <p role="status" className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">{hltbError}</p>}
               {typed.length < 2 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                   <span className="grid size-14 place-items-center rounded-2xl border border-dashed border-line text-muted">
@@ -400,7 +387,7 @@ export function PlanDialog({
                     </span>
                   </p>
                 </div>
-              ) : displayResults.length === 0 && (looking || wikidataLooking) ? (
+              ) : displayResults.length === 0 && (looking || hltbLooking) ? (
                 <ul className="space-y-1.5">
                   {[0, 1, 2, 3].map((n) => (
                     <li key={n} className="flex animate-pulse items-center gap-3 rounded-xl px-2 py-1.5">
@@ -433,6 +420,7 @@ export function PlanDialog({
                   {displayResults.map((result, index) => {
                     const steam = result.source === 'steam';
                     const suggestion = steam ? result.suggestion : null;
+                    const coverUrl = result.suggestion.coverUrl;
                     return (
                       <li
                         key={result.key}
@@ -454,9 +442,9 @@ export function PlanDialog({
                           className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left outline-none disabled:opacity-50"
                         >
                           <span className="grid h-12 w-28 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-panel2">
-                            {suggestion?.coverUrl ? (
+                            {coverUrl ? (
                               <img
-                                src={suggestion.coverUrl}
+                                src={coverUrl}
                                 alt=""
                                 loading="lazy"
                                 className="h-full w-full object-cover"
@@ -474,9 +462,7 @@ export function PlanDialog({
                                 ? 'already written down'
                                 : result.source === 'steam'
                                   ? 'Steam · open details'
-                                  : result.source === 'wikidata'
-                                    ? `Wikidata · ${result.suggestion.description}`
-                                    : `HowLongToBeat · ${result.suggestion.main > 0 ? `${result.suggestion.main}h main story` : 'game match'}`}
+                                  : `HowLongToBeat · ${result.suggestion.hltb.main > 0 ? `${result.suggestion.hltb.main}h main story` : 'catalogue result'}`}
                             </span>
                           </span>
                         </button>

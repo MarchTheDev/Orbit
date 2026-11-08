@@ -11,12 +11,13 @@ function check(name, okay) {
 }
 
 console.log('Journal entries and game starts');
-check('new Journal entries begin with no date or duration prefilled',
-  journal.includes("const blank = (): Draft => ({ id: null, at: '', secs: '', note: '', details: '' });"));
-check('date and duration are optional and saved as today and zero when left blank',
-  journal.includes('When (optional)') && journal.includes('How long (optional)') &&
+check('new Journal entries leave clock time and play duration blank',
+  journal.includes("const blank = (): Draft => ({ id: null, at: '', time: '', secs: '', note: '', details: '' });"));
+check('only the day is required; clock time and play duration are optional',
+  journal.includes('Day (required)') && journal.includes('Time (optional)') && journal.includes('Play duration (optional)') &&
+    journal.includes("if (!draft.at.trim())") && journal.includes('timestampForDay(draft.at, draft.time)') &&
     journal.includes("draft.secs.trim() === '' ? 0 : parseDuration(draft.secs)") &&
-    journal.includes("draft.at.trim() === '' ? Math.floor(Date.now() / 1000) : fromLocalInput(draft.at)"));
+    journal.includes("time: row.at > 0 ? localTimeValue(row.at) : ''") && journal.includes("return 'No date'"));
 check('starting a game writes a Started playing entry with the actual session start time',
   app.includes("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") &&
     app.indexOf("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") > app.indexOf('const started = await play(g.id);'));

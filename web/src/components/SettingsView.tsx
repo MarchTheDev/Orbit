@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FolderOpen,
+  HardDrive,
   Library as LibraryIcon,
   Ghost,
   GitBranch,
@@ -1323,37 +1324,18 @@ export function SettingsView({
       >
         {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
-            <button
-              type="button"
-              onClick={onScanDrive}
-              disabled={!native || !onScanDrive}
-              className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
-                <FolderOpen className="size-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-fg">Drive or folder</span>
-                <span className="block truncate text-[11px] text-muted">
-                  {settings.scanPath?.trim() || 'Choose a drive or game folder to scan'}
-                </span>
-              </span>
-              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
-            </button>
-            <div className="flex items-center justify-between gap-3 border-t border-line/70 px-3 py-2.5">
-              <span className="min-w-0 text-[11px] text-muted">Review and select before adding</span>
-              <button
-                type="button"
-                disabled={!native}
-                onClick={() => void pickFolder('Choose a drive or game folder to scan', settings.scanPath || undefined)
-                  .then((path) => path && setSettings({ scanPath: path }))}
-                className={`${btnBrowse} shrink-0 py-1.5 text-xs disabled:opacity-50`}
-              >
-                <FolderOpen className="size-3.5" /> Choose path
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={onScanDrive}
+            disabled={!native || !onScanDrive}
+            className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+              <HardDrive className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold">Drive or folder</span>
+            <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+          </button>
           {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
