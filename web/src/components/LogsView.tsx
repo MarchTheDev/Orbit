@@ -219,7 +219,11 @@ export function LogsView({
           label: 'Remove from Journal',
           icon: Trash2,
           danger: true,
-          onSelect: () => onJournalMembership(menuGame.id, false),
+          onSelect: () => {
+            if (confirm(`Remove ${menuGame.title} from the Journal? Its logs, notes and play sessions will stay in your Library.`)) {
+              onJournalMembership(menuGame.id, false);
+            }
+          },
         },
         { kind: 'sep' },
         {

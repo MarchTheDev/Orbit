@@ -985,10 +985,11 @@ export default function App() {
   /** Remove membership only for Library games; a plan-only row can be deleted. */
   const removeFromBacklog = (game: Game): boolean => {
     if (inLibraryShelf(game)) {
+      if (!confirm(`Remove ${game.title} from the Backlog? The game will remain in your Library.`)) return false;
       setBacklogMembership(game.id, false);
       return true;
     }
-    if (!confirm(`Remove ${game.title} from the Backlog?`)) return false;
+    if (!confirm(`Remove the planned entry for ${game.title}? This does not affect any Library game.`)) return false;
     removeGame(game.id);
     setSelectedId((current) => (current === game.id ? null : current));
     return true;
@@ -1038,6 +1039,7 @@ export default function App() {
           {
             label: 'Remove from Backlog',
             icon: Trash2,
+            danger: true,
             onSelect: () => removeFromBacklog(menuGame),
           },
         ]

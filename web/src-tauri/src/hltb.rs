@@ -468,40 +468,50 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Score a candidate against the requested title, preferring exact-ish matches
-/// and penalising common suffixes like "(Remastered)" or platform tags.
+/// Score a candidate against the requested title. Search results often add a
+/// series prefix ("The Legend of Zelda: Ocarina of Time") or a subtitle, so
+/// contained titles and shared words matter more than identical prefixes.
 fn pick_best<'a>(games: &'a [HltbGame], title: &str) -> Option<&'a HltbGame> {
     if games.is_empty() {
         return None;
     }
     let want = normalize(title);
+    let want_words = title_words(title);
     games
         .iter()
-        .map(|g| {
-            let got = normalize(&g.game_name);
-            let score: i64 = if got == want {
-                1000
-            } else if got.starts_with(&want) || want.starts_with(&got) {
-                500
+        .filter_map(|game| {
+            let got = normalize(&game.game_name);
+            let got_words = title_words(&game.game_name);
+            let shared = want_words.iter().filter(|word| got_words.contains(word)).count();
+            let required = if want_words.len() < 2 { 1 } else { 2 };
+            if shared < required {
+                return None;
+            }
+            let name_score = if got == want {
+                100_000
+            } else if got.contains(want.as_str()) {
+                80_000 - (got.len().saturating_sub(want.len()) as i64)
+            } else if want.contains(got.as_str()) {
+                70_000 - (want.len().saturating_sub(got.len()) as i64)
             } else {
-                // Count shared leading characters as a weak signal.
-                want.chars()
-                    .zip(got.chars())
-                    .take_while(|(a, b)| a == b)
-                    .count() as i64
+                // Allow a query to match the memorable part of a subtitle,
+                // while requiring at least two shared words for multiword names.
+                1_000 + (shared as i64 * 1_000) + (shared as i64 * 500 / want_words.len() as i64)
             };
-            // An entry with no times at all is no use, however good the title
-            // match is: a near match with real numbers beats an exact one that
-            // would report 0h.
-            let has_data = if g.comp_main > 0.0 || g.comp_plus > 0.0 || g.comp_100 > 0.0 {
-                50
-            } else {
-                -500
-            };
-            (score + has_data, g)
+            // Playtime presence is only a tie-breaker; a wrong game with times
+            // must never beat the right title with no reported estimates.
+            let has_data = if game.comp_main > 0.0 || game.comp_plus > 0.0 || game.comp_100 > 0.0 { 1 } else { 0 };
+            Some((name_score + has_data, game))
         })
         .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, g)| g)
+        .map(|(_, game)| game)
+}
+
+fn title_words(s: &str) -> Vec<String> {
+    s.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 fn normalize(s: &str) -> String {
@@ -533,10 +543,23 @@ mod tests {
     }
 
     #[test]
-    fn a_match_with_no_times_loses_to_one_with_times() {
+    fn the_exact_title_wins_even_when_it_has_no_times() {
         let games = vec![game("Hades", 0.0), game("Hades Remastered", 22.0)];
         let best = pick_best(&games, "Hades").expect("a match");
-        assert_eq!(best.game_name, "Hades Remastered");
+        assert_eq!(best.game_name, "Hades");
+    }
+
+    #[test]
+    fn a_subtitle_search_finds_the_console_game_inside_its_series_name() {
+        let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0), game("Mario Kart 8 Deluxe", 35.0)];
+        let best = pick_best(&games, "Ocarina of Time").expect("a match");
+        assert_eq!(best.game_name, "The Legend of Zelda: Ocarina of Time");
+    }
+
+    #[test]
+    fn unrelated_search_results_are_not_returned_as_catalogue_matches() {
+        let games = vec![game("Mario Kart 8 Deluxe", 35.0)];
+        assert!(pick_best(&games, "Ocarina of Time").is_none());
     }
 
     #[test]

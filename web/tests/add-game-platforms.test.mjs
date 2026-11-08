@@ -15,9 +15,10 @@ const addGame = readFileSync(new URL('../src/components/modals/AddGameModal.tsx'
 const plan = readFileSync(new URL('../src/components/detail/PlanDialog.tsx', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 check('the Add Game picker filters its launcher rows by the current desktop OS', addGame.includes('LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs()))'));
-check('planning searches stay active regardless of the selected platform', !plan.includes("if (platform !== 'Steam')") && plan.includes('searchGames(text)'));
-check('the planning search also consults the broad game-time catalogue for console-only titles', plan.includes('fetchHltb(text)') && plan.includes('data.gameName'));
-check('manual planning remains available when a store has no match', plan.includes('without a store match'));
+check('drive scanning is a library card in the same picker rather than a separate header button', addGame.includes('Game libraries') && addGame.includes('Drive or folder') && addGame.includes('<HardDrive') && !addGame.includes('Scan a drive or folder</button>'));
+check('planning uses one platform-agnostic search with no platform selector', plan.includes('Search all games') && !plan.includes('setPlatform') && !plan.includes('<select'));
+check('the planning search also consults the broader catalogue for console-only titles', plan.includes('fetchHltb(text)') && plan.includes('data.gameName') && plan.includes("platform: 'Other'"));
+check('manual planning remains available when a store has no match', plan.includes('without a catalogue match'));
 check('adding from a library picker closes the Add Game form only after a selection is saved', app.includes('closeAddTabAfterLibraryImport();') && app.includes('addTabImport.current = true;'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

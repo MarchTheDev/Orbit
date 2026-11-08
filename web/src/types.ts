@@ -37,7 +37,7 @@ export type OtherLauncher =
   | 'Amazon Luna'
   | 'Lutris';
 export type LauncherId = 'Steam' | OtherLauncher;
-export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
+export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book' | 'matisse';
 
 export interface HltbData {
   /** Canonical title from the broad HLTB catalogue search, when available. */
@@ -516,7 +516,7 @@ export interface Theme {
 }
 
 export interface Settings {
-  /** Player-created palettes, managed in their own window. */
+  /** Player-created palettes, managed on the in-app Custom themes page. */
   customThemes?: Theme[];
   theme: string;
   /** The system font stack used throughout the interface. */

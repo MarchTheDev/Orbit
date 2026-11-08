@@ -29,7 +29,7 @@ export function GameEditDialog({
       onClose={onClose}
       footer={onRemoveFromBacklog ? (
         <div className="flex justify-start">
-          <button type="button" className={`${btnGhost} flex items-center gap-2 text-xs`} onClick={onRemoveFromBacklog}>
+          <button type="button" className={`${btnGhost} flex items-center gap-2 border-rose-500/40 bg-rose-500/10 text-rose-300 hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200 text-xs`} onClick={onRemoveFromBacklog}>
             <Trash2 className="size-3.5" /> Remove from Backlog
           </button>
         </div>

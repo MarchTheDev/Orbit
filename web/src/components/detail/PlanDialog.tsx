@@ -85,7 +85,6 @@ export function PlanDialog({
   const [at, setAt] = useState(0);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [platform, setPlatform] = useState<PlanPlatform>('Steam');
 
   /**
    * Which question is the current one.
@@ -150,7 +149,7 @@ export function PlanDialog({
     }, WAIT);
     // The wider catalogue is slower and not rate-limited like the local cache;
     // let a short pause in typing settle before asking it.
-    const widerTimer = window.setTimeout(lookupOtherCatalog, 600);
+    const widerTimer = window.setTimeout(lookupOtherCatalog, 350);
     return () => {
       window.clearTimeout(timer);
       window.clearTimeout(widerTimer);
@@ -196,7 +195,7 @@ export function PlanDialog({
     setAdding(true);
     setError(null);
     try {
-      await onAdd({ ...pick, platform: pick.platform ?? platform });
+      await onAdd({ ...pick, platform: pick.platform ?? (pick.appId ? 'Steam' : 'Other') });
       onClose();
     } catch (failed) {
       setError(failed instanceof Error ? failed.message : String(failed));
@@ -259,21 +258,6 @@ export function PlanDialog({
             </div>
 
             <div className="shrink-0 space-y-2 px-6">
-              <label className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                <span className="font-medium text-fg">Add for</span>
-                <select
-                  value={platform}
-                  onChange={(event) => setPlatform(event.target.value as PlanPlatform)}
-                  className="rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-xs text-fg outline-none focus:border-accent"
-                  aria-label="Platform or store for planned game"
-                >
-                  <option value="Steam">Steam</option>
-                  <option value="Epic Games">Epic Games</option>
-                  <option value="Nintendo">Nintendo</option>
-                  <option value="Other">Other</option>
-                </select>
-                <span>Search suggestions are the same for every choice; this platform is saved with the plan.</span>
-              </label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
                 <input
@@ -303,7 +287,7 @@ export function PlanDialog({
                       }
                     }
                   }}
-                  placeholder="Search games across your platforms…"
+                  placeholder="Search all games…"
                   spellCheck={false}
                   aria-label="Search for a game to plan"
                   className="w-full rounded-xl border border-line bg-panel2/60 py-2.5 pl-10 pr-24 text-sm outline-none transition focus:border-accent focus:bg-panel2"
@@ -357,15 +341,15 @@ export function PlanDialog({
                   </span>
                   <p className="text-sm text-fg">No catalogue match for “{typed}”</p>
                   <p className="max-w-sm text-xs leading-relaxed text-muted">
-                    You can still add it as a {platform} plan. The title and platform can be changed later.
+                    You can still add it to your Backlog. Add details or change the platform later.
                   </p>
                   <button
-                    onClick={() => void add({ name: typed, platform })}
+                    onClick={() => void add({ name: typed, platform: 'Other' })}
                     disabled={adding || isHeld(typed)}
                     className="btn-accent mt-2 flex items-center gap-2 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
                   >
                     {adding ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                    {isHeld(typed) ? 'Already in Orbit' : `Add to ${platform}`}
+                    {isHeld(typed) ? 'Already in Orbit' : 'Add to Backlog'}
                   </button>
                 </div>
               ) : (
@@ -373,14 +357,14 @@ export function PlanDialog({
                 {hltbMatch && !results.some((suggestion) => suggestion.name.toLowerCase() === hltbMatch.name.toLowerCase()) && (
                   <button
                     type="button"
-                    onClick={() => void add({ name: hltbMatch.name, platform, hltb: hltbMatch.data })}
+                    onClick={() => void add({ name: hltbMatch.name, platform: 'Other', hltb: hltbMatch.data })}
                     disabled={adding || isHeld(hltbMatch.name)}
                     className="mb-2 flex w-full items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2 text-left transition hover:border-accent/60 hover:bg-accent/10 disabled:opacity-50"
                   >
                     <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2"><Sparkles className="size-4 text-accent" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{hltbMatch.name}</span>
-                      <span className="block text-[11px] text-muted">Found in the wider game catalogue · {hltbMatch.data.main > 0 ? `${hltbMatch.data.main}h main story` : platform}</span>
+                      <span className="block text-[11px] text-muted">Found in the wider game catalogue · {hltbMatch.data.main > 0 ? `${hltbMatch.data.main}h main story` : 'cross-platform match'}</span>
                     </span>
                     <Plus className="size-4 shrink-0 text-accent" />
                   </button>
@@ -449,11 +433,11 @@ export function PlanDialog({
                 {typed && !isHeld(typed) && (
                   <button
                     type="button"
-                    onClick={() => void add({ name: typed, platform })}
+                    onClick={() => void add({ name: typed, platform: 'Other' })}
                     disabled={adding}
                     className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg disabled:opacity-50"
                   >
-                    <Plus className="size-3.5" /> Plan “{typed}” as {platform} without a store match
+                    <Plus className="size-3.5" /> Plan “{typed}” without a catalogue match
                   </button>
                 )}
                 </>
@@ -477,7 +461,7 @@ export function PlanDialog({
                 Cancel
               </button>
               <button
-                onClick={() => typed && void add({ name: typed, platform })}
+                onClick={() => typed && void add({ name: typed, platform: 'Other' })}
                 disabled={adding || typed.length === 0}
                 title="Write it down just as it is typed"
                 className="flex items-center gap-2 rounded-xl border border-line bg-panel px-4 py-2 text-sm text-fg transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"

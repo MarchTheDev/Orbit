@@ -23,6 +23,7 @@ export const FONTS = [
   { id: 'mono', name: 'Terminal', stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace', sample: 'Compact and technical' },
   { id: 'humanist', name: 'Humanist', stack: 'Verdana, Geneva, sans-serif', sample: 'Roomy, screen-friendly letterforms' },
   { id: 'book', name: 'Book', stack: '"Palatino Linotype", "Book Antiqua", Palatino, serif', sample: 'A little more character' },
+  { id: 'matisse', name: 'Matisse EB', stack: '"Matisse EB", "FOT-Matisse Pro EB", "Yu Gothic", "Noto Sans JP", sans-serif', sample: 'Evangelion title-style lettering · uses the font if installed' },
 ] as const;
 
 /** Built-in and saved player themes, with built-ins kept first. */

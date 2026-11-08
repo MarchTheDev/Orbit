@@ -36,7 +36,13 @@ check('manual Journal removal wins with sync on', !onJournalPage(installed, true
 check('planned-only Backlog records can never appear in the Journal', !onJournalPage(planned, true, ['planned']));
 check('Backlog-only owned records cannot appear in the Journal', !onJournalPage(backlogOnly, true, ['backlog-only']));
 const backlogView = readFileSync(new URL('../src/components/BacklogView.tsx', import.meta.url), 'utf8');
-check('Backlog cards reserve an equal-sized drag slot even when a lane is not reorderable', backlogView.includes('grid size-4 shrink-0 place-items-center') && backlogView.includes('{movable && <GripVertical'));
+check('Backlog cards show a square drag handle and reserve its width in every lane', backlogView.includes('grid size-8 shrink-0 place-items-center rounded-lg border') && backlogView.includes('<GripVertical className="size-4" />'));
 check('removing a plan has a visible rose danger treatment', backlogView.includes('border-rose-500/30 bg-rose-500/10') && backlogView.includes('hover:bg-rose-500/20'));
+const logsView = readFileSync(new URL('../src/components/LogsView.tsx', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const gameEditor = readFileSync(new URL('../src/components/detail/GameEditDialog.tsx', import.meta.url), 'utf8');
+check('removing a game from the Journal confirms and preserves its logs and sessions', logsView.includes('confirm(`Remove ${menuGame.title} from the Journal?') && logsView.includes('Its logs, notes and play sessions will stay'));
+check('removing a game from the Backlog confirms and preserves its Library record', app.includes('confirm(`Remove ${game.title} from the Backlog? The game will remain in your Library.`'));
+check('the Remove from Backlog editor action uses destructive rose styling', gameEditor.includes('border-rose-500/40 bg-rose-500/10'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

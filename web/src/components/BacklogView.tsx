@@ -585,8 +585,12 @@ function Section({
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
-                <span className="grid size-4 shrink-0 place-items-center text-muted" aria-hidden="true">
-                  {movable && <GripVertical className="size-4" />}
+                <span
+                  className={`grid size-8 shrink-0 place-items-center rounded-lg border ${movable ? 'border-accent/35 bg-accent/10 text-accent shadow-sm' : 'border-transparent text-muted/45'}`}
+                  title={movable ? 'Drag to rearrange' : undefined}
+                  aria-hidden="true"
+                >
+                  <GripVertical className="size-4" />
                 </span>
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
                   <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />

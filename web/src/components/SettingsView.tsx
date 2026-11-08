@@ -886,6 +886,8 @@ export function SettingsView({
     window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
   };
 
+  const featuredCustomTheme = settings.customThemes?.find((theme) => theme.id === settings.theme) ?? settings.customThemes?.[0] ?? null;
+
   const searchResults = settingsQuery.trim()
     ? searchItems.filter(
         (item) =>
@@ -990,41 +992,33 @@ export function SettingsView({
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => onOpenThemeManager?.()}
-            className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent/40 bg-accent/5 px-3 text-sm font-semibold text-fg transition hover:border-accent hover:bg-accent/10"
-          >
-            <Wand2 className="size-5 text-accent" />
-            Create or edit themes
-          </button>
+          {featuredCustomTheme ? (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="overflow-hidden rounded-xl border-2 border-accent/45 text-left transition hover:border-accent hover:shadow-[0_0_0_1px_var(--c-accent)]"
+              aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
+            >
+              <div className="flex h-16 items-center justify-center gap-2" style={{ background: featuredCustomTheme.bg }}>
+                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${featuredCustomTheme.accent}, ${featuredCustomTheme.accent2})` }} />
+                <span className="h-3 w-16 rounded" style={{ background: featuredCustomTheme.panel2 }} />
+              </div>
+              <div className="bg-panel px-3 py-2">
+                <span className="block truncate text-sm font-medium">{featuredCustomTheme.name}</span>
+                <span className="block text-[10px] text-muted">Edit custom themes</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent/40 bg-accent/5 px-3 text-sm font-semibold text-fg transition hover:border-accent hover:bg-accent/10"
+            >
+              <Wand2 className="size-5 text-accent" />
+              Create a custom theme
+            </button>
+          )}
         </div>
-        {(settings.customThemes?.length ?? 0) > 0 && (
-          <>
-            <SubHead>Your custom themes</SubHead>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {settings.customThemes?.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  aria-pressed={settings.theme === t.id}
-                  onClick={() => setSettings({ theme: t.id })}
-                  className={cn(
-                    'overflow-hidden rounded-xl border-2 text-left transition',
-                    settings.theme === t.id ? 'border-accent' : 'border-line hover:border-muted',
-                  )}
-                >
-                  <div className="flex h-16 items-center justify-center gap-2" style={{ background: t.bg }}>
-                    <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent2})` }} />
-                    <span className="h-3 w-16 rounded" style={{ background: t.panel2 }} />
-                  </div>
-                  <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
         <SubHead>Typeface</SubHead>
         <div className="grid gap-2 sm:grid-cols-2">
           {FONTS.map((font) => (

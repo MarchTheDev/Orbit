@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { themesFor, themeById, nativePalette, THEMES } from '../src/data/themes.ts';
+import { themesFor, themeById, nativePalette, THEMES, FONTS } from '../src/data/themes.ts';
 import { normalizeSettings } from '../src/services/storage.ts';
 
 let failures = 0;
@@ -24,7 +24,10 @@ const manager = readFileSync(new URL('../src/components/ThemeManagerPage.tsx', i
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const settings = readFileSync(new URL('../src/components/SettingsView.tsx', import.meta.url), 'utf8');
 check('the manager provides create, edit, save/apply, and delete workflows', manager.includes('Create a theme') && manager.includes('const edit =') && manager.includes('Save and apply') && manager.includes('const remove ='));
+check('the editor uses four coordinated colours and derives background, border, muted and contrast colours', manager.includes("key: 'panel'") && manager.includes("key: 'accent2'") && manager.includes('function derivePalette') && !manager.includes("key: 'bg'") && !manager.includes("key: 'border'"));
+check('colour controls use a styled swatch and compact hex input', manager.includes('opacity-0') && manager.includes('rounded-2xl border border-line bg-panel2/50'));
 check('the manager saves through the shared settings page state', manager.includes('setSettings(next)') && !manager.includes('saveSettings'));
-check('custom themes are selectable and the editor is an in-app page', settings.includes('Your custom themes') && app.includes('ThemeManagerPage') && !app.includes('openThemeManager'));
+check('the featured saved theme opens the in-app manager page', settings.includes('featuredCustomTheme') && settings.includes('Edit custom themes') && app.includes('ThemeManagerPage') && !app.includes('openThemeManager'));
+check('Matisse EB is offered as a local font stack without bundling a third-party font', FONTS.some((font) => font.id === 'matisse' && font.stack.includes('Matisse EB') && font.sample.includes('if installed')));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

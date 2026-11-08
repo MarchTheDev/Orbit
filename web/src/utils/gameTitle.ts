@@ -28,6 +28,12 @@ const LIBRARY_FOLDERS = new Set([
   'library',
 ]);
 
+const GENERIC_PROGRAM_NAMES = new Set([
+  'game', 'launcher', 'start', 'startgame', 'play', 'client', 'bootstrap',
+  'setup', 'install', 'uninstall', 'crashreporter', 'crashhandler',
+  'unitycrashhandler', 'redprelauncher', 'easyanticheat', 'unins000',
+]);
+
 function partsForExecutable(path: string): { parts: string[]; directories: string[] } {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   const directories = parts.slice(0, -1);
@@ -41,14 +47,53 @@ function cleanTitle(candidate: string): string {
   const withoutVersion = candidate
     .replace(/[\s._-]+v(?:ersion)?[\s_-]*\d+(?:[._-]\d+)*(?:.*)$/i, '')
     .replace(/[\s._-]+\d+(?:[._-]\d+)+(?:.*)$/i, '');
-  // Install folders often append a repack/release label that is not part of
-  // the store title (for example `Red-Dead-Redemption-2-Anker`). Strip only
-  // known trailing distribution tags; do not discard arbitrary last words.
+  // Install folders often append release/client labels that are not part of
+  // the store title. Keep this list conservative so meaningful subtitles such
+  // as "Director's Cut" and "Remastered" remain intact.
   const withoutPackager = withoutVersion.replace(
-    /[\s._-]+(?:anker|fitgirl|dodi|repack(?:ed)?|steamrip|elamigos|onlinefix|codex|rune|tenoke)$/i,
+    /[\s._-]+(?:anker|fitgirl|dodi|repack(?:ed)?|steamrip|elamigos|onlinefix|codex|rune|tenoke|gog|steam|epic|portable|installer|installation|backup|download|win64|win32|x64|x86)$/i,
     '',
   );
   return withoutPackager.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function titleWords(value: string): string[] {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function executableTitle(path: string): string {
+  const filename = path.split(/[\\/]+/).filter(Boolean).pop() ?? path;
+  const stem = filename.replace(/\.[a-z0-9]{1,8}$/i, '')
+    .replace(/(?:[\s._-]+(?:win64|win32|x64|x86|shipping|development|release|debug|client|launcher))+$/i, '');
+  return cleanTitle(stem
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2'));
+}
+
+/**
+ * Folder labels are often more descriptive than executable names, but a folder
+ * may have a trailing build/client label that makes catalogue matching fail.
+ * If the executable name is a clear prefix of the folder title, prefer that
+ * shorter, recognizable title. Generic names like `Game.exe` are ignored.
+ */
+function preferRecognizableTitle(folder: string, executable: string): string {
+  if (!folder) return executable;
+  if (!executable) return folder;
+  const exeKey = executable.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!exeKey || GENERIC_PROGRAM_NAMES.has(exeKey)) return folder;
+  const folderWords = titleWords(folder);
+  const comparableFolder = ['the', 'a', 'an'].includes(folderWords[0]) ? folderWords.slice(1) : folderWords;
+  const exeWords = titleWords(executable);
+  if (exeWords.length < 2 || comparableFolder.length <= exeWords.length) return folder;
+  const isPrefix = exeWords.every((word, index) => comparableFolder[index] === word);
+  return isPrefix ? executable : folder;
 }
 
 /**
@@ -61,15 +106,21 @@ export function gameTitleFromExecutable(path: string): string {
   const { parts, directories } = partsForExecutable(path);
   const file = parts[parts.length - 1] ?? path;
   const folder = directories[directories.length - 1];
-  const fallback = file.replace(/\.[a-z0-9]{1,8}$/i, '');
-  const candidate = folder && !LIBRARY_FOLDERS.has(folder.toLowerCase()) ? folder : fallback;
-  return cleanTitle(candidate) || cleanTitle(fallback);
+  const fallback = cleanTitle(executableTitle(path) || file.replace(/\.[a-z0-9]{1,8}$/i, ''));
+  const candidate = folder && !LIBRARY_FOLDERS.has(folder.toLowerCase()) ? cleanTitle(folder) : fallback;
+  return preferRecognizableTitle(candidate, fallback) || candidate || fallback;
 }
 
 /** Guess from a dropped path that has no executable to inspect. */
 export function gameTitleFromPath(path: string): string {
   const name = path.split(/[\\/]+/).filter(Boolean).pop() ?? path;
   return cleanTitle(name.replace(/\.[a-z0-9]{1,8}$/i, ''));
+}
+
+/** Guess a scanned candidate's title, using its executable to trim noisy folder tails. */
+export function gameTitleFromScannedProgram(executable: string, gameFolder: string): string {
+  const folder = gameTitleFromPath(gameFolder);
+  return preferRecognizableTitle(folder, executableTitle(executable)) || folder || gameTitleFromExecutable(executable);
 }
 
 /**

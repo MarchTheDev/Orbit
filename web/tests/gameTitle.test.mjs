@@ -1,4 +1,4 @@
-import { gameFolderFromExecutable, gameFolderFromScan, gameTitleFromExecutable, gameTitleFromPath } from '../src/utils/gameTitle.ts';
+import { gameFolderFromExecutable, gameFolderFromScan, gameTitleFromExecutable, gameTitleFromPath, gameTitleFromScannedProgram } from '../src/utils/gameTitle.ts';
 
 let failures = 0;
 
@@ -31,6 +31,11 @@ check(
   'drops a known release suffix from a scanned game folder',
   gameTitleFromPath('D:\\Games\\Red-Dead-Redemption-2-Anker') === 'Red Dead Redemption 2',
   gameTitleFromPath('D:\\Games\\Red-Dead-Redemption-2-Anker'),
+);
+check(
+  'uses a recognizable executable name to trim an arbitrary extra folder word',
+  gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection') === 'Red Dead Redemption 2',
+  gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection'),
 );
 check(
   'falls back to the executable name for a generic library folder',

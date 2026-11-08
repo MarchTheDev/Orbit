@@ -8,7 +8,7 @@ import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
 import { desktopOs, launchForAddedProgram } from '../utils/platform';
 import { driveScanDepth } from '../utils/driveScan';
-import { gameFolderFromScan, gameTitleFromPath } from '../utils/gameTitle';
+import { gameFolderFromScan, gameTitleFromPath, gameTitleFromScannedProgram } from '../utils/gameTitle';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 import { ArtworkThumb } from './ui/ArtworkThumb';
@@ -97,7 +97,7 @@ export function ImportModal({
           // one background walk, and catalogue art can load lazily.
           next.push({
             key: dir,
-            title: gameTitleFromPath(dir) || 'Untitled',
+            title: ordered.map((program) => gameTitleFromScannedProgram(program.exePath, dir)).find((title) => title && title !== gameTitleFromPath(dir)) || gameTitleFromPath(dir) || 'Untitled',
             installDir: dir,
             drive: /^[a-z]:/i.exec(dir)?.[0].toUpperCase() ?? '',
             sizeBytes: top.folderBytes || top.sizeBytes || 0,
