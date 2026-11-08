@@ -1,0 +1,23 @@
+import { readFileSync } from 'node:fs';
+import { launcherOn } from '../src/data/launchers.ts';
+
+let failures = 0;
+function check(name, okay) {
+  console.log(`  ${okay ? 'ok   ' : 'FAIL '}${name}`);
+  if (!okay) failures += 1;
+}
+
+console.log('OS-specific Add Game library choices');
+check('Windows excludes Linux-only Heroic and Lutris libraries', !launcherOn('Lutris', 'windows') && !launcherOn('Heroic Games Library', 'windows'));
+check('Linux excludes Windows-only libraries', !launcherOn('Epic Games', 'linux') && !launcherOn('Xbox', 'linux') && !launcherOn('EA app', 'linux'));
+check('Steam remains available on both desktops', launcherOn('Steam', 'windows') && launcherOn('Steam', 'linux'));
+const addGame = readFileSync(new URL('../src/components/modals/AddGameModal.tsx', import.meta.url), 'utf8');
+const plan = readFileSync(new URL('../src/components/detail/PlanDialog.tsx', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+check('the Add Game picker filters its launcher rows by the current desktop OS', addGame.includes('LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs()))'));
+check('planning searches stay active regardless of the selected platform', !plan.includes("if (platform !== 'Steam')") && plan.includes('searchGames(text)'));
+check('the planning search also consults the broad game-time catalogue for console-only titles', plan.includes('fetchHltb(text)') && plan.includes('data.gameName'));
+check('manual planning remains available when a store has no match', plan.includes('without a store match'));
+check('adding from a library picker closes the Add Game form only after a selection is saved', app.includes('closeAddTabAfterLibraryImport();') && app.includes('addTabImport.current = true;'));
+
+globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

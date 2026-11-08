@@ -36,6 +36,8 @@ import {
   saveHintsOf,
   setPlaytime,
   steamLibrary,
+  folderPrograms,
+  knownExePaths,
   takeOpenExePaths,
   windowReady,
   overlayConfigure,
@@ -45,14 +47,18 @@ import {
   overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
+  setClockOffset,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { desktopOs } from './utils/platform';
+import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { TvMode } from './components/TvMode';
+import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Hero } from './components/Hero';
@@ -76,10 +82,12 @@ import { MoveProgressOrb } from './components/MoveProgressOrb';
 import { CloudTransferOrb } from './components/CloudTransferOrb';
 import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
+import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, onDisk } from './utils/library';
+import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
+import { driveScanDepth } from './utils/driveScan';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -96,11 +104,25 @@ function FilledStar({ className }: { className?: string }) {
   return <Star className={className} fill="currentColor" strokeWidth={0} />;
 }
 
+const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
+const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
+
+function savedSort(): SortKey {
+  const value = localStorage.getItem('orbit.sort');
+  return SORT_KEYS.includes(value as SortKey) ? value as SortKey : 'title';
+}
+
+function savedFilter(): Filter {
+  const value = localStorage.getItem('orbit.filter');
+  return LIBRARY_FILTER_KEYS.includes(value as Filter) ? value as Filter : 'all';
+}
+
 export default function App() {
   const {
     games,
     settings,
     setSettings,
+    replaceSettings,
     updateGame,
     adoptNotes,
     addGame,
@@ -110,12 +132,37 @@ export default function App() {
     flush,
     resetEverything,
     ready,
+    startupError,
+    retryStartup,
   } = useLibrary();
+  // The current native Linux build has no reliable game-overlay surface.
+  // Keep the rest of Orbit available and leave the overlay settings untouched.
+  const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
-  const [filter, setFilter] = useState<Filter>('all');
+  /** TV mode: the library fullscreen, read from a couch. */
+  const [tv, setTv] = useState(false);
+
+  /**
+   * Fill the screen, and give it back.
+   *
+   * The window is made fullscreen by whoever asked for TV mode, not by the page
+   * itself, because a browser only honours the request while a click is still
+   * being handled. A refusal is not a failure: the hub works in the window it
+   * has, so nothing is undone and nothing is said about it.
+   */
+  const enterTv = useCallback(() => {
+    setTv(true);
+    void enterFullscreen();
+  }, []);
+
+  const leaveTv = useCallback(() => {
+    setTv(false);
+    void leaveFullscreen();
+  }, []);
+  const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
-  const [sort, setSort] = useState<SortKey>('title');
+  const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
@@ -124,6 +171,9 @@ export default function App() {
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showThemeManager, setShowThemeManager] = useState(false);
+  /** True while a launcher/drive picker was opened from the Add Game form. */
+  const addTabImport = useRef(false);
   /** Whether the opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
@@ -174,6 +224,8 @@ export default function App() {
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+  useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
+  useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
   useEffect(() => {
     if (!isNative()) return;
@@ -184,6 +236,7 @@ export default function App() {
     let stopPulse = () => {};
     let stopOverlayNote = () => {};
     let stopOverlaySettings = () => {};
+    let stopCovered = () => {};
     let stopNotes = () => {};
     void listen<{ gameId?: string; notes?: string }>('playthrough-notes', (event) => {
       const gameId = event.payload?.gameId;
@@ -191,32 +244,33 @@ export default function App() {
     }).then((unlisten) => {
       stopNotes = unlisten;
     }).catch(() => undefined);
-    void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
-      setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
-    }).then((unlisten) => {
-      stopOverlaySettings = unlisten;
-    }).catch(() => undefined);
-    void listen<string>('overlay-toast', (event) => {
-      if (event.payload) say(event.payload);
-    }).then((unlisten) => {
-      stopOverlayNote = unlisten;
-    }).catch(() => undefined);
+    if (overlayAvailable) {
+      void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
+        setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
+      }).then((unlisten) => {
+        stopOverlaySettings = unlisten;
+      }).catch(() => undefined);
+      void listen<string>('overlay-toast', (event) => {
+        if (event.payload) say(event.payload);
+      }).then((unlisten) => {
+        stopOverlayNote = unlisten;
+      }).catch(() => undefined);
+      // The panel was drawn over by the game itself. Nothing Orbit can draw is
+      // visible at that moment, so the words land here, where the player will be
+      // as soon as the game lets go.
+      void listen<string>('overlay-covered', () => {
+        toast({
+          text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again.",
+          tone: 'error',
+        });
+      }).then((unlisten) => {
+        stopCovered = unlisten;
+      }).catch(() => undefined);
+    }
     void listen('cloud-transfer-close', () => {
       setCloudClose(currentCloudTransfer() ?? 'backup');
     }).then((unlisten) => {
       stopAsk = unlisten;
-    }).catch(() => undefined);
-    // The panel was drawn over by the game itself. Nothing Orbit can draw is
-    // visible at that moment, so the words land here, where the player will be
-    // as soon as the game lets go.
-    let stopCovered = () => {};
-    void listen<string>('overlay-covered', () => {
-      toast({
-        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again.",
-        tone: 'error',
-      });
-    }).then((unlisten) => {
-      stopCovered = unlisten;
     }).catch(() => undefined);
     void listen<CloudPulse>('cloud-transfer', (event) => {
       if (!cloudTransferActive()) return;
@@ -618,6 +672,29 @@ export default function App() {
     })().catch(() => undefined);
   }, [ready]);
 
+  /** A startup drive scan finds candidates but never adds them without review. */
+  const driveScanChecked = useRef(false);
+  useEffect(() => {
+    if (!ready || !settings || driveScanChecked.current) return;
+    driveScanChecked.current = true;
+    const path = settings.scanPath?.trim();
+    if (!isNative() || settings.scanOnLaunch !== true || !path) return;
+
+    void Promise.all([folderPrograms(path, driveScanDepth(path)), knownExePaths()])
+      .then(([programs, known]) => {
+        const existing = new Set([
+          ...known,
+          ...games.map((game) => game.exePath ?? ''),
+        ].filter(Boolean).map((item) => item.toLowerCase()));
+        const fresh = programs.filter((program) => !existing.has(program.exePath.toLowerCase()));
+        if (fresh.length === 0) return;
+        setImportFolder(path);
+        setShowImport(true);
+        toast({ text: `${fresh.length} new program ${fresh.length === 1 ? 'candidate' : 'candidates'} ready to review` });
+      })
+      .catch(() => undefined);
+  }, [ready]);
+
   /**
    * A finished session changes one game's numbers, so re-read that game. If the
    * player asked for an automatic copy, take it now, while the files are the
@@ -646,7 +723,7 @@ export default function App() {
   useGamepad();
 
   useEffect(() => {
-    if (!isNative() || !settings) return;
+    if (!isNative() || !overlayAvailable || !settings) return;
     const overlay = settings.overlay;
     void overlayConfigure({
       enabled: overlay?.enabled !== false,
@@ -659,12 +736,14 @@ export default function App() {
       screenshotDirectory: overlay?.screenshotDirectory ?? '',
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
+      gameOnly: overlay?.gameOnly === true,
+      captureShortcutsOutsideOverlay: overlay?.captureShortcutsOutsideOverlay === true,
     });
   }, [settings]);
 
   const pinsShown = useRef(false);
   useEffect(() => {
-    if (!booted || !isNative() || !settings) return;
+    if (!booted || !isNative() || !overlayAvailable || !settings) return;
     if (settings.overlay?.enabled === false) {
       pinsShown.current = false;
       return;
@@ -681,7 +760,7 @@ export default function App() {
   // away again, and say why so the switch can be found.
   const statsChecked = useRef(false);
   useEffect(() => {
-    if (!isNative() || !booted || !settings || statsChecked.current) return;
+    if (!isNative() || !overlayAvailable || !booted || !settings || statsChecked.current) return;
     statsChecked.current = true;
     if (settings.overlay?.liveStats === false) return;
     void liveStatsSuspect().then((suspected) => {
@@ -696,7 +775,7 @@ export default function App() {
   }, [booted, settings, setSettings, toast]);
 
   useEffect(() => {
-    if (!isNative() || !session || session.manual) return;
+    if (!isNative() || !overlayAvailable || !session || session.manual) return;
     void overlayPlaying(session.gameTitle);
   }, [session]);
 
@@ -879,6 +958,42 @@ export default function App() {
     if (game) updateGame(id, { favorite: !game.favorite });
   };
 
+  const setBacklogMembership = (id: string, on: boolean) => {
+    setSettings((current) => {
+      const currentOn = current.backlogOn ?? [];
+      const currentOff = current.backlogOff ?? [];
+      return {
+        backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  const setJournalMembership = (id: string, on: boolean) => {
+    const game = games.find((item) => item.id === id);
+    if (on && (!game || game.planned || !inLibraryShelf(game))) return;
+    setSettings((current) => {
+      const currentOn = current.journalOn ?? [];
+      const currentOff = current.journalOff ?? [];
+      return {
+        journalOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        journalOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  /** Remove membership only for Library games; a plan-only row can be deleted. */
+  const removeFromBacklog = (game: Game): boolean => {
+    if (inLibraryShelf(game)) {
+      setBacklogMembership(game.id, false);
+      return true;
+    }
+    if (!confirm(`Remove ${game.title} from the Backlog?`)) return false;
+    removeGame(game.id);
+    setSelectedId((current) => (current === game.id ? null : current));
+    return true;
+  };
+
   /**
    * What can be done to a game from the library, without opening it.
    *
@@ -921,10 +1036,9 @@ export default function App() {
           },
           { kind: 'sep' },
           {
-            label: 'Delete from Orbit…',
+            label: 'Remove from Backlog',
             icon: Trash2,
-            danger: true,
-            onSelect: () => setRemoveConfirmId(menuGame.id),
+            onSelect: () => removeFromBacklog(menuGame),
           },
         ]
       : [
@@ -989,7 +1103,7 @@ export default function App() {
     const started = await play(g.id);
     if (!started) return;
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
-    if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
+    if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
       if (isNative()) void overlayReadyNotice().catch(fallbackNotice);
       else fallbackNotice();
@@ -1007,6 +1121,13 @@ export default function App() {
    * title the store does not know still gets its HowLongToBeat time, and the
    * other way round.
    */
+  const closeAddTabAfterLibraryImport = () => {
+    if (!addTabImport.current) return;
+    addTabImport.current = false;
+    setShowAdd(false);
+    setDroppedPaths(null);
+  };
+
   const handleAdd = async (g: Game, fetchMeta: boolean) => {
     addGame(g);
     setSelectedId(g.id);
@@ -1053,7 +1174,11 @@ export default function App() {
   // clears a selection, then leaves the page. Escape, which the pad also
   // sends, already closes a dialog that is open.
   useEffect(() => {
+    // TV mode has its own keys, and the shelf it is on is not this page's
+    // selection. Anything the pad does there is answered by the hub, so the
+    // library's own handlers step aside rather than starting a second game.
     const onPlay = () => {
+      if (tv) return;
       if (session) {
         void stop();
         return;
@@ -1069,10 +1194,15 @@ export default function App() {
       if (picked) void startGame(picked);
     };
     const onBack = () => {
+      // Back in TV mode is answered by the hub, which knows whether it should
+      // step out of a game's page or out of the mode itself.
+      if (tv) return;
       if (selectedId) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
     };
     const onPage = (event: Event) => {
+      // The shoulders page the library, which is not what is on screen.
+      if (tv) return;
       // The details drawer listens too, but both listeners are on the window, and
       // a capture listener added later does not run first. While the drawer is
       // open the shoulders belong to its tabs, not to these pages.
@@ -1095,7 +1225,7 @@ export default function App() {
       window.removeEventListener('orbit-pad-back', onBack);
       window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder]);
+  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder, tv]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -1104,9 +1234,8 @@ export default function App() {
    * Scroll to a requested Settings card after the new page has committed.
    *
    * Two animation frames are more reliable than a fixed timeout: the first
-   * renders Settings, the next lets layout settle before the scroll position is
-   * calculated. The card's scroll margin leaves room below the sticky top bar
-   * and the quick-jump row.
+   * renders Settings, the next lets layout settle before the shared scroll
+   * helper measures the app scroller and the sticky category bar.
    */
   useEffect(() => {
     if (page !== 'settings' || !settingsJump) return;
@@ -1115,7 +1244,7 @@ export default function App() {
       secondFrame = window.requestAnimationFrame(() => {
         const card = document.getElementById(settingsJump.id);
         if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          scrollSettingsSectionToTop(card);
           card.classList.add('settings-spot');
           window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
         }
@@ -1129,20 +1258,80 @@ export default function App() {
   }, [page, settingsJump]);
 
   const openSettings = useCallback((at?: string) => {
+    setShowThemeManager(false);
     setSettingsJump(at ? { id: at, token: ++settingsJumpToken.current } : null);
     setPage('settings');
   }, []);
 
   useEffect(() => {
-    if (!isNative()) return;
+    if (!isNative() || !overlayAvailable) return;
     let stop = () => {};
+    let stopToast = () => {};
+    // The panel speaks through these when it cannot speak for itself - it is
+    // the very window that is going away, so the words have to land here.
+    void listen('overlay-toast', (event) => {
+      const text = typeof event.payload === 'string' ? event.payload : '';
+      if (text) say(text, 'error');
+    }).then((unlisten) => {
+      stopToast = unlisten;
+    }).catch(() => undefined);
     void listen('overlay-open-settings', () => openSettings('orbit-overlay')).then((unlisten) => {
       stop = unlisten;
     }).catch(() => undefined);
-    return () => stop();
+    return () => {
+      stop();
+      stopToast();
+    };
   }, [openSettings]);
 
+  /**
+   * Tell the desktop side what time it is here.
+   *
+   * A capture taken by a keyboard shortcut is named there, not here: with a
+   * game in front this window is minimised, and a minimised web view is exactly
+   * the thing that does not run. Rust has no time zone of its own, so it is
+   * given this one, once - and again whenever the window comes back, because a
+   * laptop can be carried across one.
+   */
+  useEffect(() => {
+    if (!isNative()) return;
+    const report = () => void setClockOffset(new Date().getTimezoneOffset()).catch(() => undefined);
+    report();
+    document.addEventListener('visibilitychange', report);
+    return () => document.removeEventListener('visibilitychange', report);
+  }, []);
+
   const showHome = page === 'library' && !query;
+
+  // A native startup command rejecting used to leave only the dark empty
+  // background on screen. Keep its real error visible and give the player a
+  // retry instead of making a broken launch indistinguishable from a blank app.
+  if (startupError) {
+    return (
+      <main className="grid h-full place-items-center overflow-auto bg-bg p-6 text-fg">
+        <section role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-panel p-7 shadow-2xl">
+          <div className="mb-5 flex items-center gap-3">
+            <Logo className="size-9 shrink-0" animated={false} />
+            <h1 className="text-2xl font-semibold">Orbit couldn’t finish starting</h1>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">
+            The library or settings request failed. The details below can help identify why this installation opened without its interface.
+          </p>
+          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-red-200">{startupError}</pre>
+          <button
+            type="button"
+            onClick={retryStartup}
+            className="mt-5 rounded-xl bg-accent px-5 py-2.5 font-semibold text-white hover:brightness-110"
+          >
+            Retry startup
+          </button>
+          <p className="mt-4 text-xs leading-relaxed text-muted">
+            If this repeats, launch <code>orbit</code> from a terminal and include its error output when reporting the problem.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   // Nothing can be drawn until the settings have loaded, which also decides the
   // theme. Every hook above has already run, so this is safe. While that
@@ -1153,6 +1342,32 @@ export default function App() {
         {!booted && <Startup onDone={() => setBooted(true)} />}
         <div className="h-full bg-bg" />
       </>
+    );
+  }
+
+  // TV mode is the whole window, not a panel over it: the app's own shell is
+  // not drawn at all while it is on, so nothing behind it can take focus, be
+  // clicked through, or keep the controller ring wandering off the shelves.
+  if (tv) {
+    return (
+      <TvMode
+        games={played}
+        runningId={runningGame?.id ?? null}
+        sound={settings.sound}
+        setSound={(sound) => setSettings({ sound })}
+        showMusic={settings.topbarMusic !== false}
+        showBars={settings.musicBars !== false}
+        onPlay={(game) => void startGame(game)}
+        onStop={() => void stop()}
+        // Details is a page of the hub: the game is read in TV mode, at the
+        // size TV mode is read, and Back returns to the rail.
+        onDetails={() => undefined}
+        onExit={leaveTv}
+        onOpenSettings={() => {
+          leaveTv();
+          openSettings('orbit-sound');
+        }}
+      />
     );
   }
 
@@ -1175,13 +1390,17 @@ export default function App() {
       >
       <TopNav
         page={page}
-        setPage={setPage}
+        setPage={(next) => {
+          setShowThemeManager(false);
+          setPage(next);
+        }}
         onOpenSettings={openSettings}
         order={settings?.tabOrder}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
         showBars={settings.musicBars !== false}
+        onTv={enterTv}
       />
 
       {dragOver && !showAdd && (
@@ -1195,15 +1414,23 @@ export default function App() {
       )}
 
       <main key={page} className="orbit-tab-enter pb-24">
-        {!settings ? null : page === 'settings' ? (
+        {!settings ? null : showThemeManager ? (
+          <ThemeManagerPage
+            settings={settings}
+            setSettings={setSettings}
+            onBack={() => setShowThemeManager(false)}
+          />
+        ) : page === 'settings' ? (
           <div className="glass mx-6 mt-5 rounded-3xl">
             <SettingsView
               settings={settings}
               setSettings={setSettings}
+              replaceSettings={replaceSettings}
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);
               }}
+              onOpenThemeManager={() => setShowThemeManager(true)}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
               }}
@@ -1228,16 +1455,7 @@ export default function App() {
             syncLibrary={settings.syncBacklog === true}
             backlogOn={settings.backlogOn ?? []}
             backlogOff={settings.backlogOff ?? []}
-            onBacklogMembership={(id, on) => {
-              setSettings((current) => {
-                const currentOn = current.backlogOn ?? [];
-                const currentOff = current.backlogOff ?? [];
-                return {
-                  backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
-                  backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
-                };
-              });
-            }}
+            onBacklogMembership={setBacklogMembership}
             myOrder={settings.backlogOrder}
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
@@ -1249,7 +1467,9 @@ export default function App() {
           />
         ) : page === 'logs' ? (
           <LogsView
-            games={games}
+            games={games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? []))}
+            allGames={games}
+            onJournalMembership={setJournalMembership}
             onUpdate={(id, patch) => updateGame(id, patch)}
             onEditGame={openGameEditor}
             // The Journal is read for the game being written about, so it can be
@@ -1283,7 +1503,7 @@ export default function App() {
             )}
             <Toolbar
               count={visible.length}
-              total={games.length}
+              total={libraryCount(games)}
               filter={activeFilter}
               setFilter={setFilter}
               query={query}
@@ -1374,8 +1594,10 @@ export default function App() {
       )}
 
       {/* Bottom left, the way the app talks to the player: out of the way of the
-          player bar in the middle and the Stop button at the top right. */}
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
+          player bar in the middle and the Stop button at the top right. It also
+          sits above any dialog, because a "download is ready" that lands behind
+          the dialog it came from is a secret. */}
+      <div className="pointer-events-none fixed bottom-4 left-4 z-[80] flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1498,6 +1720,12 @@ export default function App() {
           game={editingGame}
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
           hideLaunchSettings={editingHideLaunchSettings}
+          onRemoveFromBacklog={editingHideLaunchSettings ? () => {
+            if (removeFromBacklog(editingGame)) {
+              setEditingGameId(null);
+              setEditingHideLaunchSettings(false);
+            }
+          } : undefined}
           onClose={() => {
             setEditingGameId(null);
             setEditingHideLaunchSettings(false);
@@ -1510,10 +1738,17 @@ export default function App() {
           initialPaths={droppedPaths}
           // The selected library opens over this form; closing it returns here.
           onImportLauncher={(launcher) => {
+            addTabImport.current = true;
             if (launcher === 'Steam') setShowSteam(true);
             else setShowOtherLaunchers(launcher);
           }}
+          onScanFolder={() => {
+            addTabImport.current = true;
+            setImportFolder(settings.scanPath?.trim() || null);
+            setShowImport(true);
+          }}
           onClose={() => {
+            addTabImport.current = false;
             setShowAdd(false);
             setDroppedPaths(null);
           }}
@@ -1525,9 +1760,15 @@ export default function App() {
           existing={games}
           initialFolder={importFolder}
           fetchMetadata={settings.fetchMetadata}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
-          onClose={() => setShowImport(false)}
+          onClose={() => {
+            setShowImport(false);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showOtherLaunchers && (
@@ -1535,13 +1776,20 @@ export default function App() {
           existing={games}
           launcher={showOtherLaunchers}
           path={settings?.launcherPaths?.[showOtherLaunchers]}
+          fetchArtwork={settings?.fetchMetadata !== false}
           onPath={(picked) =>
             setSettings({
               launcherPaths: { ...settings?.launcherPaths, [showOtherLaunchers]: picked },
             })
           }
-          onAdd={addGames}
-          onClose={() => setShowOtherLaunchers(null)}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
+          onClose={() => {
+            setShowOtherLaunchers(null);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showSteam && settings && (
@@ -1549,10 +1797,16 @@ export default function App() {
           existing={games}
           fetchMeta={settings.fetchMetadata}
           from={page === 'backlog' ? 'backlog' : 'library'}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
-          onClose={() => setShowSteam(false)}
+          onClose={() => {
+            setShowSteam(false);
+            addTabImport.current = false;
+          }}
           steamPath={settings.steamPath}
           onSteamPath={(steamPath) => setSettings({ steamPath })}
         />

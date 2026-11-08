@@ -8,8 +8,10 @@ import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
+import { inLibraryShelf } from '../utils/library';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { Modal, btnGhost } from './ui/Modal';
 
 /**
  * The logs: every game's entries, in one place.
@@ -24,12 +26,18 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
  */
 export function LogsView({
   games,
+  allGames = games,
+  onJournalMembership,
   onUpdate,
   onEditGame,
   order = [],
   onOrder,
 }: {
+  /** The games currently included in the Journal. */
   games: Game[];
+  /** All records, including those not currently included, for manual addition. */
+  allGames?: Game[];
+  onJournalMembership: (id: string, on: boolean) => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
   onEditGame: (id: string) => void;
   /** The player's own order for the game list, as ids. */
@@ -52,6 +60,8 @@ export function LogsView({
   const addToken = useRef(0);
   const [clearTarget, setClearTarget] = useState<{ game: Game; kind: 'logs' | 'notes'; run: { id: string; name: string } } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showAddGames, setShowAddGames] = useState(false);
+  const [addQuery, setAddQuery] = useState('');
 
   const load = useCallback(() => {
     let alive = true;
@@ -126,7 +136,14 @@ export function LogsView({
     return map;
   }, [games, logs, currentByGame, openRun]);
 
-  const gamesWithLogs = useMemo(() => new Set(logs.map((log) => log.gameId)).size, [logs]);
+  const visibleLogCount = useMemo(() => {
+    const included = new Set(games.map((game) => game.id));
+    return logs.filter((log) => included.has(log.gameId)).length;
+  }, [games, logs]);
+  const gamesWithLogs = useMemo(() => {
+    const included = new Set(games.map((game) => game.id));
+    return new Set(logs.filter((log) => included.has(log.gameId)).map((log) => log.gameId)).size;
+  }, [games, logs]);
 
   /**
    * The games down the left, in the player's own order when there is one.
@@ -160,6 +177,12 @@ export function LogsView({
     });
   }, [games, perGame, query, order]);
 
+  const addCandidates = useMemo(() => {
+    const included = new Set(games.map((game) => game.id));
+    const term = addQuery.trim().toLowerCase();
+    return allGames.filter((game) => inLibraryShelf(game) && !included.has(game.id) && (!term || game.title.toLowerCase().includes(term)));
+  }, [allGames, games, addQuery]);
+
   const list = useRef<HTMLUListElement>(null);
   const { bind, dragging, over } = useDragReorder(
     onOrder
@@ -192,6 +215,12 @@ export function LogsView({
           },
         },
         { label: 'Edit game…', icon: Pencil, onSelect: () => onEditGame(menuGame.id) },
+        {
+          label: 'Remove from Journal',
+          icon: Trash2,
+          danger: true,
+          onSelect: () => onJournalMembership(menuGame.id, false),
+        },
         { kind: 'sep' },
         {
           label: menuRun ? `Reset log entries on ${menuRun.name}…` : 'Reset log entries…',
@@ -244,12 +273,15 @@ export function LogsView({
         {/* Counts, not clocks: the Journal is read for what was written, and the
             hours and minutes beside every date were a second set of numbers to
             skip past. */}
-        <div className="text-right">
-          <p className="text-[11px] text-muted">
-            {logs.length} {logs.length === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
+        <div className="flex items-center gap-3">
+          <p className="text-right text-[11px] text-muted">
+            {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
             {gamesWithLogs === 1 ? 'game' : 'games'}
-            {total > logs.length && ` · the latest ${logs.length} of ${total}`}
+            {games.length === allGames.length && total > logs.length && ` · the latest ${logs.length} of ${total}`}
           </p>
+          <button type="button" className={`${btnGhost} flex items-center gap-2`} onClick={() => setShowAddGames(true)}>
+            <Plus className="size-4" /> Add games
+          </button>
         </div>
       </header>
 
@@ -351,12 +383,31 @@ export function LogsView({
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">
               <NotebookPen className="size-8 opacity-60" />
-              <p className="text-sm">Add a game and its log shows up here.</p>
+              <p className="text-sm">Add a game to the Journal with the button above.</p>
             </div>
           )}
         </section>
       </div>
 
+      {showAddGames && (
+        <Modal title="Add games to the Journal" subtitle="Choose records to show in the Journal. This does not create or remove any entries." onClose={() => setShowAddGames(false)} size="md">
+          <div className="space-y-3">
+            <SearchField value={addQuery} onChange={setAddQuery} placeholder="Find a game" className="w-full" inputClassName="w-full" />
+            <ul className="max-h-[55vh] space-y-1 overflow-y-auto pr-1">
+              {addCandidates.map((game) => (
+                <li key={game.id} className="flex items-center gap-3 rounded-xl border border-line bg-panel2/40 p-2">
+                  <Cover game={game} className="size-10 shrink-0 rounded-lg" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{game.title}</span>
+                  <button type="button" className={`${btnGhost} shrink-0`} onClick={() => onJournalMembership(game.id, true)}>
+                    Add
+                  </button>
+                </li>
+              ))}
+              {addCandidates.length === 0 && <li className="px-2 py-4 text-sm text-muted">No games to add.</li>}
+            </ul>
+          </div>
+        </Modal>
+      )}
       {menu && menuGame && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
       {clearTarget && (
         <ConfirmDialog

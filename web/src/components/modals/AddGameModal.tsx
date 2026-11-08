@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
-import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../../data/launchers';
+import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../../data/launchers';
 import { exeInfo, findArtworkChoices, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
-import { launchForAddedProgram } from '../../utils/platform';
+import { desktopOs, launchForAddedProgram } from '../../utils/platform';
 import { gameFolderFromExecutable, gameTitleFromExecutable, gameTitleFromPath } from '../../utils/gameTitle';
 import type { FolderProgram } from '../../types';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
@@ -82,12 +82,15 @@ export function AddGameModal({
   onClose,
   onAdd,
   onImportLauncher,
+  onScanFolder,
   initialPaths,
 }: {
   onClose: () => void;
   onAdd: (g: Game, fetchMeta: boolean) => void;
   /** Opens one named launcher library over this Add Game form. */
   onImportLauncher: (launcher: LauncherId) => void;
+  /** Opens the path-selectable scan and review flow over this form. */
+  onScanFolder: () => void;
   /** Programs dropped on the window before the dialog was opened. */
   initialPaths?: string[] | null;
 }) {
@@ -279,7 +282,9 @@ export function AddGameModal({
     : details.coverUrl.trim() || meta?.coverUrl || match?.coverUrl || (match ? portraitOf(match.appId) : null);
 
   const browseExe = async () => {
-    const picked = await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
+    const picked = desktopOs() === 'linux'
+      ? await pickAnyFile('Choose the game program', d.installDir || undefined)
+      : await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
     if (picked) await takePaths([picked]);
   };
 
@@ -661,12 +666,17 @@ export function AddGameModal({
 
         {/* Every local game library lives in the same picker, including Steam. */}
         <section className="space-y-3 border-t border-line pt-4">
-          <div>
-            <p className="text-sm font-semibold text-fg">Scan a game library</p>
-            <p className="mt-0.5 text-xs text-muted">Choose a launcher, then select which games to add.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-fg">Scan a game library</p>
+              <p className="mt-0.5 text-xs text-muted">Choose a launcher or review a drive/folder scan before adding.</p>
+            </div>
+            <button type="button" onClick={onScanFolder} className={`${btnGhost} flex items-center gap-2`}>
+              <FolderOpen className="size-4" /> Scan a drive or folder
+            </button>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            {LAUNCHERS.map((launcher) => (
+            {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => (
               <button
                 key={launcher.id}
                 type="button"

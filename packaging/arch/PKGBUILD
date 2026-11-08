@@ -33,17 +33,12 @@ license=('GPL-3.0-only')
 depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl'
          'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire')
 options=('!strip')
-source=('orbit' 'orbit.desktop' 'orbit-x11' 'orbit-x11.desktop' 'orbit.png' 'com.orbit.launcher.desktop' '60-orbit-controllers.rules' 'LICENSE')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+source=('orbit' 'orbit.desktop' 'orbit.png' 'com.orbit.launcher.desktop' '60-orbit-controllers.rules' 'LICENSE')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 package() {
   install -Dm755 "$srcdir/orbit" "$pkgdir/usr/bin/orbit"
   install -Dm644 "$srcdir/orbit.desktop" "$pkgdir/usr/share/applications/orbit.desktop"
-  # The same binary under X11, for the sessions where WebKitGTK's native
-  # Wayland window misbehaves. A wrapper rather than a second build, because
-  # the only difference is an environment variable.
-  install -Dm755 "$srcdir/orbit-x11" "$pkgdir/usr/bin/orbit-x11"
-  install -Dm644 "$srcdir/orbit-x11.desktop" "$pkgdir/usr/share/applications/orbit-x11.desktop"
   install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/orbit.png"
   # Wayland panels ask for the app id, not the binary name. Same picture.
   install -Dm644 "$srcdir/orbit.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/com.orbit.launcher.png"

@@ -1,9 +1,9 @@
 //! A fullscreen panel over a game: a picture, a recording, or the last few seconds.
 //!
-//! Alt+X is a global shortcut. Start+Select is read here too, because a Windows
-//! game in front does not deliver the browser pad, and asking that pad can
-//! freeze the window. The handler for Alt+X only sets a flag. Creating the
-//! panel from inside that handler can stall the shortcut lock.
+//! The opening key is a configurable global shortcut (Alt+X by default).
+//! Start+Select is read here too, because a Windows game in front does not
+//! deliver the browser pad, and asking that pad can freeze the window. A key
+//! handler only sets a flag; creating the panel from it can stall the lock.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -19,6 +19,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(windows))]
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::capture;
 use crate::notice::{Card, Icon, Palette};
@@ -52,16 +54,15 @@ static FRONT_TRIES_CELL: std::sync::atomic::AtomicU8 = std::sync::atomic::Atomic
 /// reason, so every report read "the window was destroyed" and said nothing
 /// about why it was destroyed.
 static PANEL_DIAG: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Who last asked for the toggle, for the history: Alt+X or the pad's chord.
-static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("Alt+X");
-/// Whether Alt+X has been seen up since the last press Orbit acted on.
-///
-/// Windows keeps posting the same hotkey for as long as the keys stay down.
-/// That is not a second press, and treating it as one closes the panel the
-/// player has just opened.
+/// Who last asked for the toggle, for the panel history.
+static TOGGLE_WHY: Mutex<&'static str> = Mutex::new("the keyboard shortcut");
+/// Whether the configured keyboard shortcut has been released since its last press.
+/// Repeated press events from a held key are ignored until the plugin reports release.
 static HOTKEY_UP: AtomicBool = AtomicBool::new(true);
 /// Whether this open has already been told about a held key.
 static REPEAT_NOTED: AtomicBool = AtomicBool::new(false);
+/// The hidden-window rescue speaks once per open, not every guard beat.
+static HIDDEN_NOTED: AtomicBool = AtomicBool::new(false);
 /// A close that arrives this soon after the open is not someone's decision.
 const OPEN_GRACE: Duration = Duration::from_millis(700);
 const PANEL_DIAG_LINES: usize = 8;
@@ -71,6 +72,9 @@ static CLOSING: AtomicBool = AtomicBool::new(false);
 /// What the panel's page said to on its last heartbeat, and when it opened.
 static HEARD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static SHOWN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// The last time a page that had not answered was asked to draw again, so the
+/// asking stays a few seconds apart rather than once per guard tick.
+static NUDGE_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 /// When the panel was last rebuilt, so a page that keeps dying cannot loop.
 static REVIVED: Mutex<Vec<std::time::Instant>> = Mutex::new(Vec::new());
 const TOGGLE_GAP: Duration = Duration::from_millis(320);
@@ -80,10 +84,145 @@ const PANEL_GUARD: Duration = Duration::from_millis(700);
 const FRONT_TRIES: u8 = 4;
 /// A page that has never spoken gets longer than one that has gone quiet.
 const PAGE_START: Duration = Duration::from_secs(7);
+#[cfg(target_os = "linux")]
+const PAGE_SILENT: Duration = Duration::from_secs(30);
+#[cfg(not(target_os = "linux"))]
 const PAGE_SILENT: Duration = Duration::from_secs(3);
+/// How long a page that has never answered is given before its window is
+/// rebuilt.
+///
+/// On Linux the panel is a WebKitGTK web view that loads the whole bundle
+/// again whenever the window is thrown away, and a virtual machine can take
+/// most of a minute about it. Rebuilding it at seven seconds destroyed the
+/// load that was still coming, and the panel that appeared and went straight
+/// back out was that loop. Windows has a warm WebView2 behind every open, so
+/// it keeps the shorter patience it has always had.
+#[cfg(target_os = "linux")]
+const PAGE_COLD: Duration = Duration::from_secs(45);
+#[cfg(not(target_os = "linux"))]
+const PAGE_COLD: Duration = PAGE_START;
 /// Rebuilds allowed in a minute. Past this the panel is not coming back.
 const REVIVALS: usize = 3;
 static HITS: Mutex<Vec<HitBox>> = Mutex::new(Vec::new());
+
+/// How many buttons a pad reports. The same sixteen the page reads.
+const PAD_COUNT: usize = 16;
+
+/// One capture shortcut as the pad sees it.
+///
+/// `hold` is a button held first and `button` the one that completes the chord.
+/// A chord with no hold is a single button on its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Chord {
+    pub hold: Option<usize>,
+    pub button: usize,
+}
+
+impl Chord {
+    const fn new(hold: Option<usize>, button: usize) -> Self {
+        Self { hold, button }
+    }
+
+    /// Whether every button of the chord is down in this report.
+    fn all_down(&self, buttons: &[bool]) -> bool {
+        pressed(buttons, self.button) && self.hold.map(|hold| pressed(buttons, hold)).unwrap_or(true)
+    }
+
+    /// Whether the whole chord is down now and was not on the previous report.
+    /// Holding it therefore fires once, not once per poll.
+    fn fired(&self, buttons: &[bool], prev: &[bool]) -> bool {
+        self.all_down(buttons) && !self.all_down(prev)
+    }
+}
+
+/// The three capture shortcuts, for the pad and for the keyboard.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shortcuts {
+    /// Screenshot, recording, replay, in that order.
+    pub pad: [Chord; 3],
+    /// The keyboard combinations, in the same order. An empty one is a shortcut
+    /// the player turned off, and is never registered.
+    pub keys: [String; 3],
+}
+
+/// The shortcuts Orbit ships with: LB with RB, left, and right on a pad.
+pub const SHIPPED_PAD: [Chord; 3] = [
+    Chord::new(Some(4), 5),
+    Chord::new(Some(4), 14),
+    Chord::new(Some(4), 15),
+];
+
+/// And on a keyboard: the picture key, and the two beside it with Ctrl.
+///
+/// Deliberately not bare F11: a great many games use it for fullscreen, and a
+/// shortcut Orbit took from them would be worse than one nobody presses.
+pub const SHIPPED_KEYS: [&str; 3] = ["F12", "Ctrl+F11", "Ctrl+F10"];
+
+impl Shortcuts {
+    /// The shipped ones, in the shape a `const` static can hold.
+    pub const fn shipped() -> Self {
+        Self {
+            pad: SHIPPED_PAD,
+            keys: [String::new(), String::new(), String::new()],
+        }
+    }
+
+    /// The keyboard combinations, as written. Empty means nothing is chosen,
+    /// which is a combination the player turned off rather than a mistake.
+    pub fn keys(&self) -> [&str; 3] {
+        [self.keys[0].trim(), self.keys[1].trim(), self.keys[2].trim()]
+    }
+
+    /// Read the page's settings, keeping a default wherever a value is missing
+    /// or cannot be a real button. A hand-edited file cannot leave a shortcut
+    /// pointing at a button this pad does not have.
+    fn from_value(value: Option<&Value>) -> Self {
+        let pad = value.and_then(|item| item.get("pad"));
+        let chord = |name: &str, fallback: Chord| -> Chord {
+            let Some(item) = pad.and_then(|pad| pad.get(name)) else { return fallback };
+            let button = item
+                .get("button")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize)
+                .filter(|index| *index < PAD_COUNT);
+            let Some(button) = button else { return fallback };
+            let hold = match item.get("hold") {
+                Some(Value::Null) => None,
+                Some(Value::Number(number)) => number
+                    .as_u64()
+                    .map(|index| index as usize)
+                    .filter(|index| *index < PAD_COUNT && *index != button),
+                _ => fallback.hold,
+            };
+            Chord { hold, button }
+        };
+        // No `keys` at all is a file written before shortcuts existed, so the
+        // shipped ones stand. A combination written as an empty string is a
+        // choice: that action has no keyboard shortcut.
+        let keys = value.and_then(|item| item.get("keys"));
+        let key = |name: &str, shipped: &str| -> String {
+            keys.and_then(|keys| keys.get(name))
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_string())
+                .unwrap_or_else(|| shipped.to_string())
+        };
+        Self {
+            pad: [
+                chord("shot", SHIPPED_PAD[0]),
+                chord("record", SHIPPED_PAD[1]),
+                chord("replay", SHIPPED_PAD[2]),
+            ],
+            keys: [
+                key("shot", SHIPPED_KEYS[0]),
+                key("record", SHIPPED_KEYS[1]),
+                key("replay", SHIPPED_KEYS[2]),
+            ],
+        }
+    }
+}
+
+/// The three actions, in the order the shortcuts are held.
+const ACTIONS: [&str; 3] = ["screenshot", "recording", "replay"];
 
 struct Live {
     enabled: bool,
@@ -118,6 +257,14 @@ struct Live {
     recording_name: String,
     recording_path: PathBuf,
     note: String,
+    /// The keyboard combination that opens or closes the panel.
+    open_shortcut: Option<String>,
+    /// Refuse to open unless an Orbit game session is active.
+    game_only: bool,
+    /// The capture shortcuts, as the settings page last wrote them.
+    shortcuts: Shortcuts,
+    /// Whether those shortcuts may capture while the panel is hidden.
+    capture_shortcuts_outside_overlay: bool,
     /// The colours of the player's theme, for the native card.
     palette: Palette,
     /// The chime, for a capture that finishes after the panel is gone. The
@@ -131,11 +278,12 @@ struct Live {
 
 struct Watch {
     both: bool,
-    /// LB is the modifier for the capture shortcuts; RB only completes LB+RB.
-    left_shoulder: bool,
+    /// RB alone is the pad's right click, so its last state is kept for the edge.
     right_shoulder: bool,
-    dpad_left: bool,
-    dpad_right: bool,
+    /// Every button as it was on the last report. A capture chord fires on the
+    /// edge of the whole chord, so what matters is which buttons were already
+    /// down - not which shortcut is being watched for.
+    prev: [bool; PAD_COUNT],
     a: bool,
     b: bool,
     held: Option<&'static str>,
@@ -143,6 +291,21 @@ struct Watch {
     /// Whether the right stick was out of its dead zone on the last poll, so
     /// the one report that puts it back to rest is sent as well.
     stick_moving: bool,
+}
+
+impl Watch {
+    const fn new() -> Self {
+        Self {
+            both: false,
+            right_shoulder: false,
+            prev: [false; PAD_COUNT],
+            a: false,
+            b: false,
+            held: None,
+            ticks: 0,
+            stick_moving: false,
+        }
+    }
 }
 
 /// A capture asked for from the pad, with the panel open.
@@ -162,6 +325,10 @@ struct Step {
 }
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
+    shortcuts: Shortcuts::shipped(),
+    capture_shortcuts_outside_overlay: false,
+    open_shortcut: None,
+    game_only: false,
     enabled: true,
     replay: true,
     seconds: 30,
@@ -198,18 +365,16 @@ static LIVE: Mutex<Live> = Mutex::new(Live {
     cover_note: false,
 });
 static GATE: Mutex<()> = Mutex::new(());
-static PAD: Mutex<Watch> = Mutex::new(Watch {
-    both: false,
-    left_shoulder: false,
-    right_shoulder: false,
-    dpad_left: false,
-    dpad_right: false,
-    a: false,
-    b: false,
-    held: None,
-    ticks: 0,
-    stick_moving: false,
-});
+static PAD: Mutex<Watch> = Mutex::new(Watch::new());
+
+/// The three folders captures land in, as the page shows them.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureDirs {
+    pub screenshots: String,
+    pub recordings: String,
+    pub replays: String,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -428,40 +593,23 @@ fn capture_detail(kind: &str, text: &str) -> &'static str {
     }
 }
 
-/// Alt+X and Start+Select both end here. The window work happens later, off
-/// the shortcut handler, so that handler can return while its lock is still held.
-/// The keyboard shortcut's own press.
-///
-/// Alt+X fires again and again while it is held, at the keyboard's repeat rate,
-/// and the first repeat comes sooner than the debounce below. So the panel
-/// opened on the press and the repeat closed it again a moment later: the
-/// overlay was there for a second, then gone, with nothing in the way and no
-/// game in front. Only a press that follows a release is a new press.
+/// The configured keyboard shortcut's press. Window work is deferred to the
+/// overlay watcher so the global-shortcut callback can return promptly.
 pub fn shortcut_toggle() {
-    let fresh = HOTKEY_UP.swap(false, Ordering::SeqCst) || shortcut_keys_up();
-    if !fresh {
+    if !HOTKEY_UP.swap(false, Ordering::SeqCst) {
         if is_open() && !REPEAT_NOTED.swap(true, Ordering::SeqCst) {
-            note_panel("a held-down Alt+X was ignored, so the panel stayed open");
+            note_panel("a held keyboard shortcut was ignored, so the panel stayed open");
         }
-        log::debug!("overlay: the repeat of a held Alt+X was ignored");
+        log::debug!("overlay: a repeat of the held keyboard shortcut was ignored");
         return;
     }
-    request_toggle("Alt+X");
+    request_toggle("the keyboard shortcut");
 }
 
-#[cfg(windows)]
-fn shortcut_keys_up() -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU};
-    let alt = (unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } as u16) & 0x8000 != 0;
-    let x = (unsafe { GetAsyncKeyState(b'X' as i32) } as u16) & 0x8000 != 0;
-    // Both up means this press has just begun, whatever the message ordering
-    // did; a repeat only ever arrives with the keys still down.
-    !(alt && x)
-}
-
-#[cfg(not(windows))]
-fn shortcut_keys_up() -> bool {
-    true
+/// A released global shortcut can be pressed again.
+pub fn shortcut_released() {
+    HOTKEY_UP.store(true, Ordering::SeqCst);
+    REPEAT_NOTED.store(false, Ordering::SeqCst);
 }
 
 pub fn request_toggle(why: &'static str) {
@@ -478,13 +626,39 @@ pub fn request_toggle(why: &'static str) {
     }
     // The second press closes the panel, so this is the only way to say which
     // press it was. A toggle nobody meant - a pad reporting Start and Select
-    // together - has to be tellable from the player's own Alt+X.
+    // together - has to be distinguishable from the player's own keyboard shortcut.
     *TOGGLE_WHY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = why;
     ASKED.store(true, Ordering::SeqCst);
 }
 
+#[cfg(target_os = "linux")]
+pub fn apply_settings(_value: &Value) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn apply_settings(value: &Value) {
     let overlay = value.get("overlay");
+    let shortcuts = Shortcuts::from_value(overlay.and_then(|item| item.get("shortcuts")));
+    let open_shortcut = overlay
+        .and_then(|item| item.get("openShortcut"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("Alt+X")
+        .to_string();
+    let game_only = overlay
+        .and_then(|item| item.get("gameOnly"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let capture_shortcuts_outside_overlay = overlay
+        .and_then(|item| item.get("captureShortcutsOutsideOverlay"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    {
+        let mut live = lock();
+        live.shortcuts = shortcuts;
+        live.open_shortcut = Some(open_shortcut);
+        live.game_only = game_only;
+        live.capture_shortcuts_outside_overlay = capture_shortcuts_outside_overlay;
+    }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
         .and_then(Value::as_bool)
@@ -525,9 +699,34 @@ pub fn apply_settings(value: &Value) {
     let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
-    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory);
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory, game_only, capture_shortcuts_outside_overlay);
+    // `configure` had no app handle. The saved shortcuts are registered here,
+    // after `configure` has set whether the overlay is enabled. At first run,
+    // `install` registers them once the app handle exists.
+    if let Some(app) = APP.lock().ok().and_then(|slot| slot.clone()) {
+        install_keys(&app);
+        install_toggle_shortcut(&app);
+    }
 }
 
+#[cfg(target_os = "linux")]
+pub fn configure(
+    _app: Option<&AppHandle>,
+    _enabled: bool,
+    _replay: bool,
+    _seconds: u32,
+    _lengths: Option<&[u32]>,
+    _quality: &str,
+    _fps: u32,
+    _ffmpeg: &str,
+    _screenshot_directory: &str,
+    _recording_directory: &str,
+    _replay_directory: &str,
+    _game_only: bool,
+    _capture_shortcuts_outside_overlay: bool,
+) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn configure(
     app: Option<&AppHandle>,
     enabled: bool,
@@ -540,6 +739,8 @@ pub fn configure(
     screenshot_directory: &str,
     recording_directory: &str,
     replay_directory: &str,
+    game_only: bool,
+    capture_shortcuts_outside_overlay: bool,
 ) {
     let seconds = clamp_seconds(seconds);
     let lengths = lengths.map(|items| {
@@ -556,9 +757,15 @@ pub fn configure(
             None => live.lengths.clone(),
         };
         let keep = keep_seconds(&lengths, seconds);
-        let screenshot_root = configured_capture_dir(&live.root, screenshot_directory, "screenshots");
-        let recording_root = configured_capture_dir(&live.root, recording_directory, "recordings");
-        let replay_root = configured_capture_dir(&live.root, replay_directory, "replays");
+        // A chosen folder wins. With none chosen, the folder already resolved
+        // stays: `install` put the user's Pictures and Videos there, and asking
+        // again with an empty string must not quietly move the captures back
+        // into the app's own data directory.
+        let root = live.root.clone();
+        let current = (live.screenshot_root.clone(), live.recording_root.clone(), live.replay_root.clone());
+        let screenshot_root = configured_capture_dir(&current.0, &root, screenshot_directory, "screenshots");
+        let recording_root = configured_capture_dir(&current.1, &root, recording_directory, "recordings");
+        let replay_root = configured_capture_dir(&current.2, &root, replay_directory, "replays");
         let capture_changed = live.screenshot_root != screenshot_root || live.recording_root != recording_root || live.replay_root != replay_root;
         live.screenshot_root = screenshot_root;
         live.recording_root = recording_root;
@@ -574,10 +781,19 @@ pub fn configure(
         live.quality = quality;
         live.fps = fps;
         live.ffmpeg = ffmpeg.to_string();
+        live.game_only = game_only;
+        live.capture_shortcuts_outside_overlay = capture_shortcuts_outside_overlay;
         let stop = live.playing && (!replay || !enabled);
         let restart = must_restart && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
     };
+    // A new combination is registered here, where the app handle is. The page
+    // sends this after every settings change, and `install_keys` does nothing
+    // when the combinations are the ones already in place.
+    if let Some(app) = app {
+        install_keys(app);
+        install_toggle_shortcut(app);
+    }
     if !changed && app.is_none() {
         return;
     }
@@ -597,6 +813,10 @@ pub fn configure(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn game_started(_title: &str) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn game_started(title: &str) {
     let restart = {
         let mut live = lock();
@@ -625,6 +845,12 @@ pub fn game_started(title: &str) {
 /// refresh. Otherwise a native card is drawn instead: showing the overlay
 /// window for five seconds meant a second WebView2 instance, about 50 MB of
 /// processes, on every game start.
+#[cfg(target_os = "linux")]
+pub fn ready_notice(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn ready_notice(app: &AppHandle) -> Result<(), String> {
     let panel = panel_visible(app);
     let palette = {
@@ -640,8 +866,8 @@ pub fn ready_notice(app: &AppHandle) -> Result<(), String> {
         live.ready_notice = None;
         live.palette
     };
-    // One line, and no second one to explain Alt+X: it was read once and
-    // ignored every time after that.
+    // One line, and no second one to explain the opening shortcut: it was
+    // read once and ignored every time after that.
     crate::notice::show(Card::ok(READY_TITLE, "", palette));
     Ok(())
 }
@@ -727,32 +953,98 @@ pub fn close_panel(app: &AppHandle, why: &str) {
     tell(app, "overlay-visible", "false");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
-        // Orbit is taking its own window down. The `Destroyed` event that
-        // follows is expected, and must not be written down as the reason the
-        // panel went away.
-        CLOSING.store(true, Ordering::SeqCst);
-        if window.destroy().is_err() {
-            let _ = window.close();
+        // Windows lets the window go: WebView2 keeps a warm process behind it,
+        // so the next open costs a show rather than a load, and a topmost
+        // window that is only hidden can hold the screen.
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Orbit is taking its own window down. The `Destroyed` event that
+            // follows is expected, and must not be written down as the reason
+            // the panel went away.
+            CLOSING.store(true, Ordering::SeqCst);
+            if window.destroy().is_err() {
+                let _ = window.close();
+            }
+        }
+        // Linux is the other way round. Its page is the whole bundle read by
+        // WebKitGTK, and throwing the window away means reading it again for
+        // every press - seconds of a translucent rectangle on a virtual
+        // machine, which reads as an overlay that never arrives. So the window
+        // stays, hidden: the page it already has is the panel the next press
+        // gets, at once. It is still told the panel is gone, so its readings
+        // stop and the next open starts clean.
+        //
+        // That bargain broke on WebKitGTK 2.54's transparent windows, which
+        // only repaint what they count as damaged: a long-lived see-through
+        // window accumulates paint bookkeeping that never matches the screen,
+        // and the panel that "stays, hidden" wakes as the overlay that opened
+        // for one frame and then stopped working - still there, never drawn
+        // again, click-through on top of it. A window that is never reused
+        // cannot be stale: the bundle reload of a fresh build is the price of
+        // a panel that is really there, and here it is paid.
+        #[cfg(target_os = "linux")]
+        {
+            let _ = window.emit("overlay-hidden", ());
+            CLOSING.store(true, Ordering::SeqCst);
+            if window.destroy().is_err() {
+                let _ = window.close();
+            }
         }
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn install(_app: &AppHandle) -> Result<(), String> {
+    // The Wayland/X11 implementation is being revisited. Do not register
+    // overlay shortcuts, start capture workers, or create its WebView on Linux.
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn install(app: &AppHandle) -> Result<(), String> {
-    if let Ok(dir) = app.path().app_data_dir() {
-        capture::sweep_replay_files(&dir);
+    // The app's own data folder still holds the replay's working file, which is
+    // thrown away and never meant to be found.
+    let root = crate::storage::root(app);
+    capture::sweep_replay_files(&root);
+    {
         let mut live = lock();
-        live.root = dir.clone();
+        live.root = root;
+    }
+    // A portable copy keeps its captures beside the program: pictures and
+    // videos taken at a friend's house leave with the stick.
+    let (screenshots, recordings, replays) = capture_defaults(app);
+    {
+        let mut live = lock();
         if live.screenshot_root.as_os_str().is_empty() {
-            live.screenshot_root = dir.join("screenshots");
+            live.screenshot_root = screenshots;
         }
         if live.recording_root.as_os_str().is_empty() {
-            live.recording_root = dir.join("recordings");
+            live.recording_root = recordings;
         }
         if live.replay_root.as_os_str().is_empty() {
-            live.replay_root = dir.join("replays");
+            live.replay_root = replays;
         }
     }
-    // The panel is built on the first Alt+X, not during startup. A second
+    // Kept so a pad chord or a keyboard shortcut pressed much later can still
+    // ask the library window to take the capture.
+    if let Ok(mut slot) = APP.lock() {
+        *slot = Some(app.clone());
+    }
+    install_keys(app);
+    install_toggle_shortcut(app);
+    // The keyboard is watched from here on, for as long as Orbit runs. The
+    // capture handler decides whether the panel must be open or the player's
+    // allow-while-closed setting permits a capture over the game.
+    #[cfg(windows)]
+    {
+        if !KEYS_WATCHED.swap(true, Ordering::SeqCst) {
+            let keys_app = app.clone();
+            let _ = thread::Builder::new()
+                .name("orbit-shortcut-keys".to_string())
+                .spawn(move || watch_keys(keys_app));
+        }
+    }
+    // The panel is built on its first open, not during startup. A second
     // webview here would compete with the boot animation.
     if WATCHING.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -765,12 +1057,22 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Start+Select, LB+RB and the LB shortcuts, from the pad thread. Everything
-/// but Start+Select is only sent while the panel is open.
+/// Start+Select and the capture shortcuts, from the pad thread.
+///
+/// The panel's own buttons - A, B, the ring, the menu - are only sent while the
+/// panel is open. Capture shortcuts are handled by the same desktop path as the
+/// keyboard and are gated by the player's allow-while-closed setting.
+#[cfg(target_os = "linux")]
+pub fn on_pad(_app: &AppHandle, _buttons: &[bool], _axes: &[f32]) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
+    // Read before the pad's own lock is taken: the settings page writes them
+    // while the pad is being polled.
+    let shortcuts = lock().shortcuts.clone();
     let step = {
         let mut watch = PAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let step = take_step(&mut watch, buttons, axes);
+        let step = take_step(&mut watch, buttons, axes, &shortcuts);
         // A stick already held must not start stepping the moment the panel opens.
         if !is_open() {
             watch.ticks = 0;
@@ -781,12 +1083,13 @@ pub fn on_pad(app: &AppHandle, buttons: &[bool], axes: &[f32]) {
         request_toggle("the pad's Start+Select");
         return;
     }
-    // Every shortcut but Start+Select belongs to the opened panel. LB and RB
-    // are ordinary game buttons: a shooter uses them every few seconds, and a
-    // chord that also fired with the panel closed took a screenshot or stopped
-    // a replay buffer in the middle of a match. Reading the pad is passive, so
-    // a closed panel now costs the game nothing.
+    // With the panel closed a capture is taken the same way a keyboard shortcut
+    // takes one: here, so it captures, chimes, and says so in a card even
+    // though the panel was never up.
     if !is_open() {
+        if let Some(capture) = step.capture {
+            capture_from_shortcut(app, capture);
+        }
         return;
     }
     if let Some(capture) = step.capture {
@@ -821,6 +1124,513 @@ fn capture_action(capture: Capture) -> &'static str {
         Capture::Shot => "capture-shot",
         Capture::Record => "capture-record",
         Capture::Replay => "capture-replay",
+    }
+}
+
+/// The app, kept for the presses that arrive long after startup.
+static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
+
+/// The event a panel that is on screen listens for: a capture a shortcut took
+/// while it was up. The panel draws the toast and refreshes the gallery; the
+/// card is for the case where there is no panel to say it.
+pub const CAPTURED_EVENT: &str = "overlay-captured";
+
+/// What a shortcut capture did, for a panel that is on screen to repeat.
+#[derive(Clone, Serialize)]
+struct ShortcutCapture {
+    /// `screenshot`, `recording` or `replay`.
+    kind: &'static str,
+    ok: bool,
+    /// The desktop side's own words: the panel shows them unchanged.
+    message: String,
+}
+
+/// Take the capture a shortcut asked for - here, not in the page.
+///
+/// A game in front means Orbit's own window is minimised or hidden, and a
+/// hidden web view is the thing Windows throttles: a job handed to it arrives
+/// late, or not until the game is closed. A screenshot needs no browser, so the
+/// whole capture happens on this side. Off the calling thread, because a
+/// picture of the screen takes a moment and a pressed key must not wait for it.
+fn capture_from_shortcut(app: &AppHandle, capture: Capture) {
+    if !is_open() && !lock().capture_shortcuts_outside_overlay {
+        return;
+    }
+    let handle = app.clone();
+    let _ = thread::Builder::new()
+        .name("orbit-shortcut-capture".to_string())
+        .spawn(move || run_shortcut_capture(&handle, capture));
+}
+
+fn run_shortcut_capture(app: &AppHandle, capture: Capture) {
+    if !lock().enabled {
+        // Turned off in Settings: a key that still took a picture would be the
+        // overlay doing something the settings page said it does not.
+        return;
+    }
+    let stamp = stamp_now();
+    note_panel(&format!(
+        "a {} shortcut asked for a capture",
+        match capture {
+            Capture::Shot => "screenshot",
+            Capture::Record => "recording",
+            Capture::Replay => "replay",
+        }
+    ));
+    let seconds = lock().seconds;
+    let (kind, result) = match capture {
+        Capture::Shot => ("screenshot", shot(app, &stamp)),
+        Capture::Record => ("recording", record(app, &stamp)),
+        Capture::Replay => ("replay", save_replay(app, seconds, &stamp)),
+    };
+    // A card when there is no panel; the panel's own toast when there is, which
+    // is why it is told either way.
+    announce_capture(app, kind, &result);
+    if panel_visible(app) {
+        if let Some(window) = app.get_webview_window(WINDOW) {
+            let done = ShortcutCapture {
+                kind,
+                ok: result.is_ok(),
+                message: result.clone().unwrap_or_else(|error| error),
+            };
+            let _ = window.emit(CAPTURED_EVENT, done);
+        }
+    }
+}
+
+/// How far this machine's clock is from UTC, in minutes, as the page reads it.
+///
+/// A capture taken by a shortcut is named here, not in the page, and the one
+/// thing this side cannot ask the operating system for without another
+/// dependency is the local time zone. The page has a `Date`, so it says once at
+/// startup; until it has, a name is written in UTC rather than not at all.
+static CLOCK_OFFSET: Mutex<Option<i32>> = Mutex::new(None);
+
+pub fn set_clock_offset(minutes: i32) {
+    *CLOCK_OFFSET.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(minutes);
+}
+
+/// The date and time a capture is filed under, in the player's own time.
+///
+/// The file name is the one thing the player reads outside Orbit, and a picture
+/// named in UTC is filed under yesterday for anyone playing after midnight east
+/// of Greenwich.
+fn stamp_now() -> String {
+    let unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0);
+    let offset = *CLOCK_OFFSET.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    stamp_at(unix - i64::from(offset.unwrap_or(0)) * 60)
+}
+
+/// Seconds since the epoch, written the way the file names are.
+///
+/// `db::iso8601` is the crate's one civil-date conversion - 2024 is a leap year
+/// and every desktop agrees on it - so the date comes from there and only the
+/// separators change.
+fn stamp_at(unix: i64) -> String {
+    let iso = crate::db::iso8601(unix);
+    if iso.len() < 19 {
+        return unix.to_string();
+    }
+    format!("{} {}", &iso[..10], iso[11..19].replace(':', "-"))
+}
+
+/// Capture key registrations, kept separately from the overlay's opening key.
+#[cfg_attr(windows, allow(dead_code))]
+static REGISTERED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The combinations the system refused last time, in words the settings page
+/// can show. A shortcut that silently did nothing looked exactly like a
+/// shortcut that was never pressed.
+static REFUSED_KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+#[cfg(not(windows))]
+static REGISTERED_TOGGLE_KEY: Mutex<Option<String>> = Mutex::new(None);
+static REFUSED_TOGGLE_KEY: Mutex<Option<String>> = Mutex::new(None);
+
+/// Whether the keyboard is already being watched.
+#[cfg(windows)]
+static KEYS_WATCHED: AtomicBool = AtomicBool::new(false);
+
+/// The capture shortcuts another program would not let go of.
+pub fn refused_keys() -> Vec<String> {
+    let mut refused = REFUSED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    if let Some(message) = REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+        refused.push(message);
+    }
+    refused
+}
+
+/// Register the player's chosen overlay toggle, or take the old key away when
+/// the overlay is disabled or the setting is cleared.
+fn install_toggle_shortcut(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        // The Windows keyboard watcher polls the selected chord directly so it
+        // can observe releases; RegisterHotKey cannot report a key-up edge.
+        let _ = app;
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+    #[cfg(not(windows))]
+    install_registered_toggle_shortcut(app);
+}
+
+#[cfg(not(windows))]
+fn install_registered_toggle_shortcut(app: &AppHandle) {
+    let wanted = {
+        let live = lock();
+        if live.enabled {
+            live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string()
+        } else {
+            String::new()
+        }
+    };
+    let old = REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    if old.as_deref() == Some(wanted.as_str()) {
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        return;
+    }
+    if old.is_none() && wanted.is_empty() {
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        return;
+    }
+    if wanted.is_empty() {
+        if let Some(old) = old {
+            if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                log::debug!("overlay: {old} was not registered to begin with: {error}");
+            }
+        }
+        *REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        HOTKEY_UP.store(true, Ordering::SeqCst);
+        return;
+    }
+
+    let outcome = app.global_shortcut().on_shortcut(wanted.as_str(), |_app, _shortcut, event| {
+        match event.state {
+            ShortcutState::Pressed => shortcut_toggle(),
+            ShortcutState::Released => shortcut_released(),
+        }
+    });
+    match outcome {
+        Ok(()) => {
+            if let Some(old) = old {
+                if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                    log::debug!("overlay: the old toggle {old} could not be unregistered: {error}");
+                }
+            }
+            *REGISTERED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wanted);
+            *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            HOTKEY_UP.store(true, Ordering::SeqCst);
+        }
+        Err(error) => {
+            log::warn!("overlay: the open shortcut {wanted} could not be registered: {error}");
+            *REFUSED_TOGGLE_KEY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(format!(
+                "Overlay shortcut {wanted} could not be registered: {error}. The previous shortcut remains active."
+            ));
+        }
+    }
+}
+
+/// Put the keyboard capture shortcuts in place.
+///
+/// Called at startup, after the settings page writes a new combination, and
+/// whenever the overlay is turned on or off. Off Windows the combination is
+/// registered with the system, where another program may already own it: that
+/// one is logged and skipped so it cannot cost the other two. On Windows there
+/// is nothing to register - the keyboard is watched instead.
+fn install_keys(app: &AppHandle) {
+    // On Windows the keyboard is read directly instead - see `watch_keys`.
+    // A registered hotkey belongs to one program, and the combinations a
+    // capture shortcut wants are the ones every launcher, chat app and overlay
+    // on a gaming machine already holds: `RegisterHotKey` refuses, and the key
+    // then does nothing at all, which is exactly the silence a player reports
+    // as "the shortcut does not work". Reading the key state asks nobody's
+    // permission.
+    #[cfg(windows)]
+    {
+        let _ = app;
+        if let Ok(mut slot) = REFUSED_KEYS.lock() {
+            slot.clear();
+        }
+        return;
+    }
+    #[cfg(not(windows))]
+    {
+        install_registered_keys(app);
+    }
+}
+
+/// The other desktops' way: the shortcut is registered with the system, which
+/// hands it to Orbit and to nobody else.
+#[cfg(not(windows))]
+fn install_registered_keys(app: &AppHandle) {
+    let wanted: Vec<(&'static str, String)> = {
+        let live = lock();
+        // The overlay is off: nothing of it should answer a key. The old
+        // combinations are taken out below, because the list is empty.
+        let keys = if live.enabled { live.shortcuts.keys() } else { ["", "", ""] };
+        ACTIONS
+            .iter()
+            .zip(keys.iter())
+            .map(|(action, key)| (*action, key.to_string()))
+            .filter(|(_, key)| !key.is_empty())
+            .collect()
+    };
+    let names: Vec<String> = wanted.iter().map(|(_, key)| key.clone()).collect();
+    {
+        let registered = REGISTERED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *registered == names {
+            return;
+        }
+    }
+    {
+        let mut registered = REGISTERED_KEYS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        for old in registered.drain(..) {
+            if let Err(error) = app.global_shortcut().unregister(old.as_str()) {
+                log::debug!("overlay: {old} was not registered to begin with: {error}");
+            }
+        }
+    }
+    let mut refused: Vec<String> = Vec::new();
+    for (action, key) in wanted {
+        // The closure is written in the call rather than made first: the
+        // handler has to work for any lifetime the plugin calls it with, and a
+        // separately-typed binding pins it to one.
+        let outcome = app.global_shortcut().on_shortcut(key.as_str(), move |app, _shortcut, event| {
+            // A held key repeats; one press is one capture.
+            if !matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
+                return;
+            }
+            let capture = match action {
+                "screenshot" => Capture::Shot,
+                "recording" => Capture::Record,
+                _ => Capture::Replay,
+            };
+            capture_from_shortcut(app, capture);
+        });
+        match outcome {
+            Ok(()) => {
+                if let Ok(mut registered) = REGISTERED_KEYS.lock() {
+                    registered.push(key.clone());
+                }
+            }
+            Err(error) => {
+                log::warn!("overlay: {key} could not be registered as a capture shortcut: {error}");
+                refused.push(format!("{key} is already taken by another program."));
+            }
+        }
+    }
+    if let Ok(mut slot) = REFUSED_KEYS.lock() {
+        *slot = refused;
+    }
+}
+
+/// A keyboard chord, as the keys it is made of.
+///
+/// Every key has to be down for the chord to be down. The last one is the key
+/// that completes it; the rest are the modifiers held first. Modifier keys are
+/// matched by their generic code, so either Ctrl answers, which is what a
+/// player means by "Ctrl".
+#[cfg(windows)]
+struct KeyChord {
+    keys: Vec<i32>,
+}
+
+/// The virtual-key code a name stands for.
+///
+/// Two spellings are understood: the name the settings page stores for a
+/// combination the player recorded - `KeyS`, `F12`, `ArrowUp` - and the short
+/// one a hand-edited file is likely to contain - `Ctrl+S`, `Up`.
+#[cfg(windows)]
+fn virtual_key(token: &str) -> Option<i32> {
+    const NAMED: [(&str, i32); 28] = [
+        ("Space", 0x20),
+        ("Enter", 0x0D),
+        ("Escape", 0x1B),
+        ("Tab", 0x09),
+        ("Backspace", 0x08),
+        ("Delete", 0x2E),
+        ("Insert", 0x2D),
+        ("Home", 0x24),
+        ("End", 0x23),
+        ("PageUp", 0x21),
+        ("PageDown", 0x22),
+        ("ArrowUp", 0x26),
+        ("ArrowDown", 0x28),
+        ("ArrowLeft", 0x25),
+        ("ArrowRight", 0x27),
+        ("PrintScreen", 0x2C),
+        ("Minus", 0xBD),
+        ("Equal", 0xBB),
+        ("Comma", 0xBC),
+        ("Period", 0xBE),
+        ("Slash", 0xBF),
+        ("Backslash", 0xDC),
+        ("Semicolon", 0xBA),
+        ("Quote", 0xDE),
+        ("Backquote", 0xC0),
+        ("BracketLeft", 0xDB),
+        ("BracketRight", 0xDD),
+        ("NumLock", 0x90),
+    ];
+    const SHORT: [(&str, i32); 12] = [
+        ("UP", 0x26),
+        ("DOWN", 0x28),
+        ("LEFT", 0x25),
+        ("RIGHT", 0x27),
+        ("ESC", 0x1B),
+        ("RETURN", 0x0D),
+        ("DEL", 0x2E),
+        ("INS", 0x2D),
+        ("PGUP", 0x21),
+        ("PGDN", 0x22),
+        ("SPACEBAR", 0x20),
+        ("PRTSC", 0x2C),
+    ];
+    if let Some((_, code)) = NAMED.iter().find(|(name, _)| name.eq_ignore_ascii_case(token)) {
+        return Some(*code);
+    }
+    let upper = token.trim().to_ascii_uppercase();
+    if let Some((_, code)) = SHORT.iter().find(|(name, _)| *name == upper) {
+        return Some(*code);
+    }
+    if let Some(rest) = upper.strip_prefix('F') {
+        if let Ok(number) = rest.parse::<i32>() {
+            if (1..=24).contains(&number) {
+                return Some(0x70 + number - 1);
+            }
+        }
+    }
+    if let Some(letter) = upper.strip_prefix("KEY").filter(|rest| rest.len() == 1) {
+        return Some(letter.as_bytes()[0] as i32);
+    }
+    if let Some(digit) = upper.strip_prefix("DIGIT").filter(|rest| rest.len() == 1) {
+        return digit.parse::<i32>().ok().map(|digit| 0x30 + digit);
+    }
+    if let Some(digit) = upper.strip_prefix("NUMPAD").filter(|rest| rest.len() == 1) {
+        return digit.parse::<i32>().ok().map(|digit| 0x60 + digit);
+    }
+    // A single letter or digit, as a hand-written combination would have it.
+    let mut chars = upper.chars();
+    if let (Some(only), None) = (chars.next(), chars.next()) {
+        if only.is_ascii_uppercase() || only.is_ascii_digit() {
+            return Some(only as i32);
+        }
+    }
+    None
+}
+
+/// A combination, as the keys that have to be down together.
+#[cfg(windows)]
+fn parse_key_chord(text: &str) -> Option<KeyChord> {
+    let mut keys = Vec::new();
+    for token in text.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+        let code = match token.to_ascii_lowercase().as_str() {
+            // The generic modifier codes: either Ctrl, either Shift, either Alt.
+            "ctrl" | "control" => 0x11,
+            "shift" => 0x10,
+            "alt" => 0x12,
+            "super" | "meta" | "cmd" | "command" | "win" => 0x5B,
+            _ => virtual_key(token)?,
+        };
+        keys.push(code);
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    Some(KeyChord { keys })
+}
+
+#[cfg(windows)]
+fn key_down(code: i32) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    unsafe { GetAsyncKeyState(code) as u16 & 0x8000 != 0 }
+}
+
+#[cfg(windows)]
+fn chord_down(chord: &KeyChord) -> bool {
+    chord.keys.iter().all(|code| key_down(*code))
+}
+
+/// Watch the keyboard for the capture chords.
+///
+/// The pad has its own reader and the panel has its own shortcuts; this is the
+/// keyboard's, and it exists because registering a hotkey is a request another
+/// program can have got in first for. Polling costs one call per key every few
+/// milliseconds and cannot be refused.
+#[cfg(windows)]
+fn watch_keys(app: AppHandle) {
+    let mut last: [String; 3] = Default::default();
+    let mut chords: [Option<KeyChord>; 3] = [None, None, None];
+    let mut down = [false; 3];
+    let mut last_toggle = String::new();
+    let mut toggle_chord: Option<KeyChord> = None;
+    let mut toggle_down = false;
+    loop {
+        if STOP.load(Ordering::SeqCst) || crate::quitting() {
+            break;
+        }
+        let (wanted, wanted_toggle): ([String; 3], String) = {
+            let live = lock();
+            if live.enabled {
+                let keys = live.shortcuts.keys();
+                (
+                    [keys[0].to_string(), keys[1].to_string(), keys[2].to_string()],
+                    live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string(),
+                )
+            } else {
+                (["", "", ""].map(str::to_string), String::new())
+            }
+        };
+        if wanted_toggle != last_toggle {
+            last_toggle.clone_from(&wanted_toggle);
+            toggle_chord = parse_key_chord(&wanted_toggle);
+            toggle_down = toggle_chord.as_ref().is_some_and(chord_down);
+            HOTKEY_UP.store(!toggle_down, Ordering::SeqCst);
+            if toggle_chord.is_none() && !wanted_toggle.is_empty() {
+                log::warn!("overlay: {:?} is not a combination Orbit can watch for", wanted_toggle);
+            } else if !wanted_toggle.is_empty() {
+                log::info!("overlay: watching {:?} to open or close the panel", wanted_toggle);
+            }
+        } else {
+            let now = toggle_chord.as_ref().is_some_and(chord_down);
+            if now && !toggle_down {
+                shortcut_toggle();
+            } else if !now && toggle_down {
+                shortcut_released();
+            }
+            toggle_down = now;
+        }
+        for (index, capture) in [Capture::Shot, Capture::Record, Capture::Replay].into_iter().enumerate() {
+            if wanted[index] != last[index] {
+                // A changed combination is re-read here rather than in the
+                // settings call, so a combination typed into the file by hand
+                // works on the next press too.
+                last[index].clone_from(&wanted[index]);
+                chords[index] = parse_key_chord(&wanted[index]);
+                if chords[index].is_none() && !wanted[index].is_empty() {
+                    // Said once, not sixteen times a second: a combination
+                    // Orbit cannot read is otherwise indistinguishable from one
+                    // nobody pressed.
+                    log::warn!("overlay: {:?} is not a combination Orbit can watch for", wanted[index]);
+                } else {
+                    log::info!("overlay: watching {:?} for the {:?} shortcut", wanted[index], capture);
+                }
+                // Whatever is already held is the state it arrived in, so a
+                // combination changed while it is being pressed does not fire.
+                down[index] = chords[index].as_ref().is_some_and(chord_down);
+                continue;
+            }
+            let now = chords[index].as_ref().is_some_and(chord_down);
+            // A held chord is one capture: the press is the edge.
+            if now && !down[index] {
+                capture_from_shortcut(&app, capture);
+            }
+            down[index] = now;
+        }
+        thread::sleep(Duration::from_millis(16));
     }
 }
 
@@ -951,22 +1761,11 @@ pub struct GalleryItem {
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
-    // On Windows the panel is excluded from every capture path by its display
-    // affinity, so a picture taken from it is a picture of the game. Other
-    // desktops have no such flag, so the panel steps aside for the one frame.
-    #[cfg(not(windows))]
-    let was_open = is_open();
-    #[cfg(not(windows))]
-    if was_open {
-        conceal(app);
-        thread::sleep(Duration::from_millis(180));
-    }
-    let result = take_shot(stamp);
-    #[cfg(not(windows))]
-    if was_open {
-        show_window(app);
-    }
+    // Never withdraw and remap the Linux overlay to take one picture. That
+    // could make WebKit lose the window's damaged regions and leave the panel
+    // looking frozen after the shutter. Keep its native window alive instead.
     let _ = app;
+    let result = take_shot(stamp);
     remember(&result);
     result
 }
@@ -1087,12 +1886,6 @@ fn watch(app: AppHandle) {
         }
         #[cfg(windows)]
         {
-            // Sampled here rather than asked for when a press arrives: the
-            // question is whether the keys were ever let go in between, and
-            // only a poll can answer that.
-            if shortcut_keys_up() {
-                HOTKEY_UP.store(true, Ordering::SeqCst);
-            }
             if let Some((buttons, axes)) = read_xinput(&mut slot) {
                 if connected != Some(slot) {
                     // Plugged in, woken up, or swapped for another pad: take
@@ -1115,12 +1908,24 @@ fn watch(app: AppHandle) {
     }
 }
 
+fn game_only_blocks_open(game_only: bool, playing: bool, already_open: bool) -> bool {
+    game_only && !playing && !already_open
+}
+
 fn toggle_on_main(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) {
         return;
     }
-    if !lock().enabled {
+    let (enabled, game_only, playing) = {
+        let live = lock();
+        (live.enabled, live.game_only, live.playing)
+    };
+    if !enabled {
         tell(app, "overlay-toast", "The overlay is off. Turn it on in Settings.");
+        return;
+    }
+    if game_only_blocks_open(game_only, playing, is_open()) {
+        note_panel("the overlay shortcut was ignored because game-only mode is on and no game session is active");
         return;
     }
     let Some(window) = ensure_window(app) else {
@@ -1129,13 +1934,13 @@ fn toggle_on_main(app: &AppHandle) {
     };
     let visible = window.is_visible().unwrap_or(false);
     // A panel the game has drawn over is not something the player can see, so
-    // Alt+X tries to bring it back rather than closing what cannot be found.
+    // The opening shortcut tries to bring it back rather than closing what cannot be found.
     let covered = visible && covered_by_game(&window);
-    // A pinned panel is visible but not the opened overlay. Alt+X should open it.
+    // A pinned panel is visible but not the opened overlay. The opening shortcut should open it.
     //
     // The panel's own state decides, not whether Windows gave it the focus.
     // A fullscreen game takes the focus back the moment the panel appears, and
-    // asking `is_focused` then made Alt+X open the panel again instead of
+    // asking `is_focused` then made the opening shortcut open the panel again instead of
     // closing it: the panel could not be closed and looked like a flash.
     if visible && !RESTING.load(Ordering::SeqCst) && !covered {
         // A panel closed within a moment of opening was not read by anyone:
@@ -1156,6 +1961,12 @@ fn toggle_on_main(app: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn ensure_window(_app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
 fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if STOP.load(Ordering::SeqCst) {
         return None;
@@ -1163,26 +1974,34 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window(WINDOW) {
         return Some(window);
     }
-    // Leave capture protection off so Windows screenshot tools can include the
-    // overlay. Orbit's own screen captures can include it as well.
+    // The overlay is currently built only on Windows and macOS, where a
+    // transparent surface is the intended presentation.
+    let see_through = true;
+    let background = if see_through {
+        tauri::window::Color(0, 0, 0, 0)
+    } else {
+        tauri::window::Color(0x0b, 0x0a, 0x16, 255)
+    };
+    // Exclude the panel from screenshots and recordings where the platform
+    // supports capture protection, so captures contain the game behind it.
     let window = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
         .title("Orbit overlay")
         .inner_size(1280.0, 720.0)
         .resizable(false)
         .decorations(false)
-        .transparent(true)
+        .transparent(see_through)
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        // Leave the overlay out of the pictures and videos Orbit itself takes,
-        // and out of everyone else's too. On Windows this is
-        // WDA_EXCLUDEFROMCAPTURE, so the game behind the panel is what the
-        // capture sees.
-        .content_protected(true)
+        // Ask the desktop capture APIs to exclude the overlay itself, so the
+        // game remains visible in screenshots, recordings, and replays. Linux
+        // must stay false: KWin can black out the whole output for a protected
+        // transparent fullscreen surface, including the game behind it.
+        .content_protected(cfg!(any(windows, target_os = "macos")))
         .visible(false)
         .focused(false)
         .center()
-        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .background_color(background)
         .initialization_script(
             "window.__ORBIT_OVERLAY__=true;var orbitOverlayStyle=document.createElement('style');orbitOverlayStyle.textContent='html,body,#root{background:transparent!important;height:100%}body::before{display:none!important}';(document.head||document.documentElement).appendChild(orbitOverlayStyle);",
         )
@@ -1206,12 +2025,16 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 /// Build the panel before it is first asked for.
 ///
-/// The first Alt+X used to pay for all of it: creating the window, starting
+/// The first opening shortcut used to pay for all of it: creating the window, starting
 /// WebView2, loading the bundle and the first React render. That is the second
 /// or two where the shortcut seems not to have registered. The work is done
 /// here while the library sits idle instead, so the first open is as quick as
 /// the ones after it. The window is created hidden, so it covers nothing, and
 /// nothing that asks whether the panel is up sees it.
+#[cfg(target_os = "linux")]
+pub fn warm(_app: &AppHandle) {}
+
+#[cfg(not(target_os = "linux"))]
 pub fn warm(app: &AppHandle) {
     if STOP.load(Ordering::SeqCst) || !lock().enabled {
         return;
@@ -1245,6 +2068,12 @@ fn show_window(app: &AppHandle) {
     let _ = window.set_focusable(true);
     cover_screen(&window);
     let _ = window.show();
+    // Once more after the window is on screen. A monitor list read from an
+    // unmapped window can come back empty - the GTK backend only fills it in
+    // from the display once the window exists - and the cover would then be
+    // skipped, leaving the panel as its 1280 by 720 creation size in the
+    // corner of a bigger screen. Sizing it again is free when it was right.
+    cover_screen(&window);
     let _ = window.unminimize();
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
@@ -1257,9 +2086,15 @@ fn show_window(app: &AppHandle) {
     FRONT_WARNED.store(false, Ordering::SeqCst);
     FRONT_TRIES_CELL.store(0, Ordering::SeqCst);
     *SHOWN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::time::Instant::now());
-    heartbeat();
+    *NUDGE_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    // Nothing has been heard from this page yet, and pretending otherwise is
+    // what made the guard give a freshly opened panel the three seconds a
+    // running page gets. `guard_panel` reads `None` as "still loading" and
+    // waits out `PAGE_START`.
+    *HEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     OPEN.store(true, Ordering::SeqCst);
     REPEAT_NOTED.store(false, Ordering::SeqCst);
+    HIDDEN_NOTED.store(false, Ordering::SeqCst);
     note_panel("the panel opened");
     tell(app, "overlay-visible", "true");
     let _ = window.emit("overlay-shown", ());
@@ -1278,15 +2113,52 @@ fn show_window(app: &AppHandle) {
                 raise(&again);
                 let _ = again.emit("overlay-shown", ());
             }
+            thread::sleep(Duration::from_millis(150));
+            nudge_repaint(&again);
+            #[cfg(target_os = "linux")]
+            {
+                // KWin settles a fullscreen game back on top once the panel is
+                // mapped; claiming the top again after a beat keeps the panel
+                // from living underneath the very thing it is meant to cover.
+                let _ = again.set_always_on_top(false);
+                let _ = again.set_always_on_top(true);
+            }
         });
 }
+
+/// Force one full repaint of the panel's surface.
+///
+/// WebKitGTK 2.54 on Linux decides which parts of a transparent window are
+/// worth painting, and a freshly shown one is treated as having none: boxes
+/// land on the screen half-drawn, in the wrong place, or not at all, while the
+/// window itself is very much still there. The one-pixel dance marks the whole
+/// surface damaged once, which is the difference between a panel that opened
+/// and a panel that only seems to have vanished.
+#[cfg(target_os = "linux")]
+fn nudge_repaint(window: &tauri::WebviewWindow) {
+    if !is_open() || !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
+        size.width.saturating_add(1),
+        size.height,
+    )));
+    thread::sleep(Duration::from_millis(80));
+    let _ = window.set_size(tauri::Size::Physical(size));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn nudge_repaint(_window: &tauri::WebviewWindow) {}
 
 /// Cover the monitor the game is on.
 ///
 /// This used to be the primary monitor, always. On a desk with two screens the
 /// game is often on the second one, and a panel that opens on the other screen
 /// is not an overlay over the game: the player looks at the game, sees nothing,
-/// and presses Alt+X again, which closes the panel again. That is the flash.
+/// and presses the opening shortcut again, which closes the panel again. That is the flash.
 ///
 /// The game is the foreground window. With no game in front (Orbit itself, the
 /// desktop) the panel goes to the monitor under the pointer, and the primary
@@ -1410,6 +2282,17 @@ fn shown_for() -> String {
     }
 }
 
+/// Say what a device was, in the one place a panel that cannot explain itself
+/// is read afterwards.
+///
+/// A controller is chosen by a guess about a device node, and on Linux that
+/// guess can be wrong in a way nobody can see from the screen: a pointer read
+/// as a pad moves the panel around with the cursor. The line names the node so
+/// the guess can be checked from Settings instead of from the log folder.
+pub(crate) fn note_device(text: &str) {
+    note_panel(text);
+}
+
 /// Write down what the panel is doing.
 ///
 /// The same words go to the log and to one line in Settings, because the
@@ -1426,6 +2309,20 @@ fn note_panel(text: &str) {
         lines.drain(0..extra);
     }
 }
+
+/// A desktop note for a panel recovery that happened without the player's
+/// action: while a game fills the screen, the main window's toast is hidden.
+#[cfg(target_os = "linux")]
+fn notify_panel(text: &str) {
+    let _ = crate::process::command("notify-send")
+        .arg("--app-name=Orbit")
+        .arg("The overlay")
+        .arg(text)
+        .spawn();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify_panel(_: &str) {}
 
 /// Rebuild the panel's window and open it again.
 fn revive(app: &AppHandle) {
@@ -1445,9 +2342,11 @@ fn revive(app: &AppHandle) {
         OPEN.store(false, Ordering::SeqCst);
         note_panel("the page would not stay loaded; the panel was left closed");
         tell(app, "overlay-toast", "The overlay could not stay open. See Settings, then try again.");
+        notify_panel("its page kept dying, so the panel was left closed; Settings tells the whole story.");
         return;
     }
     note_panel("the panel went away; it was rebuilt");
+    notify_panel("its page or window vanished underneath it; it was rebuilt.");
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
         CLOSING.store(true, Ordering::SeqCst);
@@ -1478,6 +2377,7 @@ fn guard_panel(app: &AppHandle) {
     };
     if !window.is_visible().unwrap_or(false) {
         note_panel("its window was hidden while the panel was open; it was shown again");
+        if !HIDDEN_NOTED.swap(true, Ordering::SeqCst) { notify_panel("taken away mid-show; put back"); }
         let _ = window.show();
         let _ = window.set_always_on_top(true);
         raise(&window);
@@ -1485,6 +2385,10 @@ fn guard_panel(app: &AppHandle) {
         let _ = window.emit("overlay-shown", ());
         return;
     }
+    // Reassert the topmost hint while open. Some compositors drop the hint
+    // after a click hands focus back to a fullscreen game; without this, the
+    // panel looks as if it closed even though its native open state is intact.
+    let _ = window.set_always_on_top(true);
     // A window whose web view has gone is an empty frame. There is nothing to
     // see in it and nothing answers inside it, which is why it is checked here
     // and not only by the page's own heartbeat.
@@ -1494,7 +2398,12 @@ fn guard_panel(app: &AppHandle) {
         return;
     }
     // The page has to have spoken. A slow first load is given longer than a
-    // page that has already answered once and then went quiet.
+    // page that has already answered once and then went quiet - and a panel
+    // that has just opened is loading, not dead, however long the one before it
+    // had been up. Three seconds is enough for a warm page on a fast disk and
+    // not for the first open of a copy running from a stick, which used to be
+    // rebuilt before it had drawn anything: what the player saw was an overlay
+    // that opened and then closed.
     let quiet = HEARD
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1504,10 +2413,19 @@ fn guard_panel(app: &AppHandle) {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .map(|at| at.elapsed())
         .unwrap_or_default();
-    let stale = match quiet {
-        Some(silent) => silent >= PAGE_SILENT,
-        None => since >= PAGE_START,
-    };
+    // A page that has said nothing is still loading: taking its window away
+    // was what made the panel flash - the bundle had to be read from the start.
+    if quiet.is_none() {
+        if since < PAGE_COLD {
+            nudge(&window, since);
+            return;
+        }
+        note_panel("its page never answered; it was rebuilt");
+        revive(app);
+        return;
+    }
+    let allowed = if since < PAGE_START { PAGE_START } else { PAGE_SILENT };
+    let stale = quiet.map(|silent| silent >= allowed).unwrap_or(false);
     if stale {
         log::warn!(
             "overlay: the page stopped answering after {} ms; rebuilding",
@@ -1548,6 +2466,33 @@ fn guard_panel(app: &AppHandle) {
     lock().cover_note = true;
     tell(app, "overlay-covered", &shown_for());
     note_panel("the game is drawn over the panel and will not let go of the screen");
+}
+
+/// Ask a page that has not answered yet to draw.
+///
+/// `overlay-shown` is what puts the boxes on screen, and it is sent at the
+/// moment the window is shown - which, for a window built for this press, is
+/// before the page has a listener to hear it. Sending it again costs a read of
+/// the settings and one render, and it is sent at most every few seconds so a
+/// page that is genuinely stuck is not handed events it cannot use.
+fn nudge(window: &tauri::WebviewWindow, since: Duration) {
+    let allowed = {
+        let mut last = NUDGE_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *last {
+            Some(at) if at.elapsed() < Duration::from_secs(3) => false,
+            _ => {
+                *last = Some(std::time::Instant::now());
+                true
+            }
+        }
+    };
+    if !allowed {
+        return;
+    }
+    if since >= PAGE_START {
+        note_panel("its page has not answered yet; it was asked to draw again");
+    }
+    let _ = window.emit("overlay-shown", ());
 }
 
 /// The monitor the panel was put on: where it starts, and how big it is.
@@ -1727,14 +2672,6 @@ fn raise(window: &tauri::WebviewWindow) {
 #[cfg(not(windows))]
 fn raise(_window: &tauri::WebviewWindow) {}
 
-/// Hide even a pinned panel, for the one moment a picture is taken.
-#[cfg(not(windows))]
-fn conceal(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.hide();
-    }
-}
-
 fn hide_window(app: &AppHandle, why: &str) {
     if HAS_PINS.load(Ordering::SeqCst) {
         rest_window(app);
@@ -1789,27 +2726,32 @@ fn tell(app: &AppHandle, event: &str, payload: &str) {
 
 fn take_shot(stamp: &str) -> Result<String, String> {
     let dir = game_dir("screenshots")?;
-    if capture::available() {
-        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
-        if capture::save_picture(&path, current_spec()).is_ok() {
-            return saved_picture(&path);
-        }
-    }
-    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
-    #[cfg(windows)]
-    if powershell_shot(&path).is_ok() {
-        return saved_picture(&path);
-    }
     #[cfg(target_os = "linux")]
-    if linux_shot(&path).is_ok() {
-        return saved_picture(&path);
+    {
+        // The pointer that pressed the capture control is on the overlay's
+        // monitor. Spectacle follows that monitor; never grab the full desktop.
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
+        return if linux_shot(&path).is_ok() {
+            saved_picture(&path)
+        } else {
+            Err("Could not capture the overlay's monitor. Spectacle current-monitor capture was unavailable.".to_string())
+        };
     }
-    if let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) {
-        if ffmpeg_shot(&ffmpeg, &path).is_ok() {
+    #[cfg(not(target_os = "linux"))]
+    {
+        if capture::available() {
+            let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "jpg");
+            if capture::save_picture(&path, current_spec()).is_ok() {
+                return saved_picture(&path);
+            }
+        }
+        let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "png");
+        #[cfg(windows)]
+        if powershell_shot(&path).is_ok() {
             return saved_picture(&path);
         }
+        Err("Orbit could not take a picture of the screen.".to_string())
     }
-    Err("Orbit could not take a picture of the screen.".to_string())
 }
 
 #[cfg(windows)]
@@ -1849,20 +2791,17 @@ $g.Dispose(); $bmp.Dispose()\r\n",
 
 #[cfg(target_os = "linux")]
 fn linux_shot(path: &Path) -> Result<(), String> {
-    let attempts: &[(&str, &[&str])] = &[
-        ("grim", &[]),
-        ("gnome-screenshot", &["-f"]),
-        ("scrot", &[]),
-    ];
-    for (program, prefix) in attempts {
-        let Some(bin) = which(program) else { continue };
-        let mut command = process::command(bin);
-        command.args(*prefix).arg(path);
-        if command.status().map(|status| status.success()).unwrap_or(false) && path.is_file() {
-            return Ok(());
-        }
+    let bin = which("spectacle").ok_or_else(|| "Spectacle is not installed".to_string())?;
+    let status = process::command(bin)
+        .args(["--background", "--nonotify", "--current-monitor", "--output"])
+        .arg(path)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() && path.is_file() {
+        Ok(())
+    } else {
+        Err("Spectacle could not capture the current monitor".to_string())
     }
-    Err("no screenshot tool".to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -1885,24 +2824,11 @@ fn system_audio_monitor() -> Option<String> {
     Some(format!("{sink}.monitor"))
 }
 
-fn ffmpeg_shot(ffmpeg: &Path, path: &Path) -> Result<(), String> {
-    let mut command = process::command(ffmpeg);
-    command.arg("-y");
-    push_grab(&mut command, None)?;
-    if let Some(scale) = quality_scale(&lock().quality) {
-        command.args(["-vf", scale]);
-    }
-    command.args(["-frames:v", "1"]).arg(path);
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    let status = command.status().map_err(|error| error.to_string())?;
-    if status.success() && path.is_file() {
-        Ok(())
-    } else {
-        Err("ffmpeg could not take the picture.".to_string())
-    }
-}
-
 fn spawn_recording(stamp: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return spawn_wayland_recording(stamp);
+    }
     if capture::available() {
         match spawn_native_recording(stamp) {
             Ok(()) => return Ok(()),
@@ -1917,6 +2843,35 @@ fn spawn_recording(stamp: &str) -> Result<(), String> {
         return Err(capture_missing());
     }
     spawn_ffmpeg_recording(stamp)
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_wayland_recording(stamp: &str) -> Result<(), String> {
+    let recorder = which("gpu-screen-recorder").ok_or_else(|| {
+        "Wayland recording needs gpu-screen-recorder. PipeWire screen sharing is normally provided by Plasma; Orbit does not install system packages. FFmpeg's X11 grab only sees a black XWayland screen.".to_string()
+    })?;
+    let dir = game_dir("recordings")?;
+    let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
+    let fps = quality_fps(lock().fps);
+    let mut command = process::command(recorder);
+    command.args(["-w", "screen", "-f", fps, "-a", "default_output", "-o"]);
+    command.arg(&path);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let child = command.spawn().map_err(|error| format!("Could not start gpu-screen-recorder: {error}"))?;
+    thread::sleep(Duration::from_millis(350));
+    let mut child = child;
+    if let Ok(Some(_)) = child.try_wait() {
+        let _ = fs::remove_file(&path);
+        return Err("gpu-screen-recorder stopped before recording. Check KDE's screen-sharing permission and PipeWire service.".to_string());
+    }
+    let mut live = lock();
+    live.recording_name = path
+        .file_name()
+        .map(|item| item.to_string_lossy().to_string())
+        .unwrap_or_else(|| "recording.mp4".to_string());
+    live.recording_path = path;
+    live.recording = Some(child);
+    Ok(())
 }
 
 fn spawn_native_recording(stamp: &str) -> Result<(), String> {
@@ -1944,7 +2899,8 @@ fn spawn_ffmpeg_recording(stamp: &str) -> Result<(), String> {
     let path = clip_path(&dir, &capture_name_for_dir(&dir), stamp, "mp4");
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, Some(quality_fps(lock().fps)))?;
+    let fps = if cfg!(target_os = "linux") { "30" } else { quality_fps(lock().fps) };
+    push_grab(&mut command, Some(fps))?;
     #[cfg(target_os = "linux")]
     {
         let source = system_audio_monitor().ok_or_else(|| {
@@ -1986,22 +2942,32 @@ fn start_buffer(_clear: bool) -> Result<(), String> {
             return Ok(());
         }
     }
-    if capture::available() {
-        match start_native_buffer() {
-            Ok(()) => return Ok(()),
-            #[cfg(windows)]
-            Err(error) => return Err(error),
-            #[cfg(not(windows))]
-            Err(error) => {
-                if find_ffmpeg(&lock().ffmpeg).is_none() {
-                    return Err(error);
+    #[cfg(target_os = "linux")]
+    {
+        if find_ffmpeg(&lock().ffmpeg).is_none() {
+            return Err(capture_missing());
+        }
+        return start_pipe_buffer();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if capture::available() {
+            match start_native_buffer() {
+                Ok(()) => return Ok(()),
+                #[cfg(windows)]
+                Err(error) => return Err(error),
+                #[cfg(not(windows))]
+                Err(error) => {
+                    if find_ffmpeg(&lock().ffmpeg).is_none() {
+                        return Err(error);
+                    }
                 }
             }
+        } else if find_ffmpeg(&lock().ffmpeg).is_none() {
+            return Err(capture_missing());
         }
-    } else if find_ffmpeg(&lock().ffmpeg).is_none() {
-        return Err(capture_missing());
+        start_pipe_buffer()
     }
-    start_pipe_buffer()
 }
 
 /// The rolling replay is a temporary file, not a memory ring. Keeping it in
@@ -2016,10 +2982,11 @@ fn replay_workspace() -> PathBuf {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn start_native_buffer() -> Result<(), String> {
     lock().note.clear();
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
-    let hold = capture::start_buffer(keep, current_spec(), replay_workspace())?;
+    let hold = capture::start_buffer(keep, replay_spec(), replay_workspace())?;
     #[cfg(target_os = "linux")]
     let audio = {
         let Some(ffmpeg) = find_ffmpeg(&lock().ffmpeg) else {
@@ -2058,19 +3025,23 @@ fn start_pipe_buffer() -> Result<(), String> {
         None => return Ok(()),
     };
     let keep = Duration::from_secs(lock().keep.max(1) as u64 + 2);
-    let fps = lock().fps.max(1);
+    let fps = replay_spec().fps.max(1);
+    let fps_arg = fps.to_string();
     let buffer = capture::Buffer::new(&replay_workspace(), fps, keep)?;
     let mut command = process::command(&ffmpeg);
     command.arg("-y");
-    push_grab(&mut command, Some(quality_fps(fps)))?;
+    push_grab(&mut command, Some(&fps_arg))?;
     // This worker pipes JPEG frames only; system audio is captured into the same
     // replay file by the companion PCM worker below.
     command.arg("-an");
+    #[cfg(target_os = "linux")]
+    let scale = "scale=1280:-2";
+    #[cfg(not(target_os = "linux"))]
     let scale = quality_scale(&lock().quality).unwrap_or("");
     let filter = if scale.is_empty() {
-        format!("fps={}", quality_fps(fps))
+        format!("fps={fps}")
     } else {
-        format!("fps={},{}", quality_fps(fps), scale)
+        format!("fps={fps},{scale}")
     };
     command.args(["-vf", &filter]);
     command.args(["-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]);
@@ -2214,6 +3185,10 @@ fn ffmpeg_from_jpegs(ffmpeg: &Path, path: &Path, kept: &capture::Kept) -> Result
         "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v",
         "libx264",
+        "-preset",
+        "ultrafast",
+        "-threads",
+        "2",
         "-pix_fmt",
         "yuv420p",
         "-c:a",
@@ -2373,10 +3348,25 @@ fn current_spec() -> capture::Spec {
     }
 }
 
+/// The Linux rolling buffer is a background convenience, not a broadcast
+/// master. Full-size 30/60 fps X11 readback monopolised the CPU the overlay
+/// and game need; keep it to a light 720p/15 fps regardless of other settings.
+fn replay_spec() -> capture::Spec {
+    let mut spec = current_spec();
+    #[cfg(target_os = "linux")]
+    {
+        spec.max_width = spec.max_width.min(1280);
+        spec.max_height = spec.max_height.min(720);
+        spec.fps = spec.fps.min(15);
+        spec.jpeg_quality = spec.jpeg_quality.min(68);
+    }
+    spec
+}
+
 fn capture_missing() -> String {
     #[cfg(target_os = "linux")]
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        return "This Wayland desktop cannot be recorded without ffmpeg. An X11 session records on its own.".to_string();
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return "Instant replay on KDE Wayland is not available through X11 capture; Orbit will not save a black recording.".to_string();
     }
     "Orbit could not capture the screen, and ffmpeg is not installed.".to_string()
 }
@@ -2393,8 +3383,8 @@ fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(
     }
     #[cfg(target_os = "linux")]
     {
-        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            return Err("Recording on this Wayland desktop needs an X11 display, or ffmpeg could not grab the screen.".to_string());
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return Err("FFmpeg's X11 grab cannot capture the Wayland desktop. Use the PipeWire screen recorder.".to_string());
         }
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
         let source = if display.contains('.') { display } else { format!("{display}.0") };
@@ -2413,11 +3403,19 @@ fn push_grab(command: &mut std::process::Command, fps: Option<&str>) -> Result<(
 }
 
 fn push_encode(command: &mut std::process::Command, quality: &str) {
+    #[cfg(target_os = "linux")]
+    command.args(["-vf", "scale=1280:-2"]);
+    #[cfg(not(target_os = "linux"))]
     if let Some(scale) = quality_scale(quality) {
         command.args(["-vf", scale]);
     }
     let (preset, crf) = quality_encode(quality);
+    #[cfg(target_os = "linux")]
+    command.args(["-threads", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", crf, "-pix_fmt", "yuv420p"]);
+    #[cfg(not(target_os = "linux"))]
     command.args(["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]);
+    #[cfg(target_os = "linux")]
+    let _ = preset;
 }
 
 fn stop_child(mut child: Child) {
@@ -2470,12 +3468,60 @@ pub(crate) fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn configured_capture_dir(root: &Path, selected: &str, kind: &str) -> PathBuf {
-    if selected.trim().is_empty() {
-        if root.as_os_str().is_empty() { PathBuf::new() } else { root.join(kind) }
-    } else {
+fn configured_capture_dir(current: &Path, root: &Path, selected: &str, kind: &str) -> PathBuf {
+    if !selected.trim().is_empty() {
         PathBuf::from(selected.trim())
+    } else if !current.as_os_str().is_empty() {
+        current.to_path_buf()
+    } else if root.as_os_str().is_empty() {
+        PathBuf::new()
+    } else {
+        root.join(kind)
     }
+}
+
+/// Where captures go when nobody has chosen a folder.
+///
+/// A screenshot is a picture and a recording is a video, so they belong where
+/// the rest of the machine's pictures and videos are, not in the folder the app
+/// keeps its own data in: the point of taking one is to find it later, from the
+/// file manager, the phone sync, or the photo app. Each game gets its own folder
+/// inside, which is added when the file is written.
+fn capture_defaults(app: &AppHandle) -> (PathBuf, PathBuf, PathBuf) {
+    // A portable copy carries its captures with it, in its own folder, next to
+    // the library it belongs to.
+    if let Some(root) = crate::storage::portable_capture_root(app) {
+        return (
+            root.join("Screenshots"),
+            root.join("Recordings"),
+            root.join("Replays"),
+        );
+    }
+    let pictures = app
+        .path()
+        .picture_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Pictures")))
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_default();
+    let videos = app
+        .path()
+        .video_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Videos")))
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_default();
+    let orbit_pictures = pictures.join("Orbit");
+    (
+        orbit_pictures,
+        videos.join("Orbit").join("Recordings"),
+        videos.join("Orbit").join("Replays"),
+    )
+}
+
+/// The three folders as they stand, for the page that shows them.
+pub fn capture_dirs() -> (String, String, String) {
+    let live = lock();
+    let text = |path: &Path| path.to_string_lossy().to_string();
+    (text(&live.screenshot_root), text(&live.recording_root), text(&live.replay_root))
 }
 
 fn kind_name(kind: &str) -> &'static str {
@@ -2891,10 +3937,12 @@ fn seed_pad(buttons: &[bool], axes: &[f32]) {
     watch.both = pressed(buttons, 9) && pressed(buttons, 8);
     watch.a = pressed(buttons, 0);
     watch.b = pressed(buttons, 1);
-    watch.left_shoulder = pressed(buttons, 4);
     watch.right_shoulder = pressed(buttons, 5);
-    watch.dpad_left = pressed(buttons, 14);
-    watch.dpad_right = pressed(buttons, 15);
+    // Whatever is already held is the state it arrived in, so no capture
+    // fires on the first report after the pad is picked up.
+    for index in 0..PAD_COUNT {
+        watch.prev[index] = pressed(buttons, index);
+    }
     watch.held = direction(
         pressed(buttons, 12) || axes.get(1).copied().unwrap_or(0.0) < -0.45,
         pressed(buttons, 13) || axes.get(1).copied().unwrap_or(0.0) > 0.45,
@@ -2914,7 +3962,7 @@ fn pressed(buttons: &[bool], index: usize) -> bool {
 /// LB+RB is a screenshot, LB+Left and LB+Right are record and replay. With LB
 /// down the stick and A/B keep quiet, so a shortcut cannot also move the ring.
 /// RB alone is the pad's right click, the way a mouse opens a capture's menu.
-fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
+fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32], shortcuts: &Shortcuts) -> Step {
     let both = pressed(buttons, 9) && pressed(buttons, 8);
     let toggle = both && !watch.both;
     watch.both = both;
@@ -2924,29 +3972,25 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let down = pressed(buttons, 13) || y > 0.45;
     let left = pressed(buttons, 14) || x < -0.45;
     let right = pressed(buttons, 15) || x > 0.45;
-    let shoulder = pressed(buttons, 4);
     let trigger = pressed(buttons, 5);
     // R on its own is the pad's right click: the gallery menu on the tile the
     // ring is on. It has to be read before `right_shoulder` is updated below.
     let menu = trigger && !watch.right_shoulder;
-    let dpad_left = pressed(buttons, 14);
-    let dpad_right = pressed(buttons, 15);
-    // An edge on the second button of a chord, so holding it does not fire
-    // again every poll.
-    let shot = shoulder && trigger && !(watch.left_shoulder && watch.right_shoulder);
-    let record = shoulder && dpad_left && !(watch.left_shoulder && watch.dpad_left);
-    let replay = shoulder && dpad_right && !(watch.left_shoulder && watch.dpad_right);
-    watch.left_shoulder = shoulder;
-    watch.right_shoulder = trigger;
-    watch.dpad_left = dpad_left;
-    watch.dpad_right = dpad_right;
+    // The capture chords, as the player set them. Any button that is the first
+    // half of one is a modifier: while it is down a direction is half a
+    // shortcut, not a move, so the ring does not walk off under the press.
+    let modifier = shortcuts
+        .pad
+        .iter()
+        .filter_map(|chord| chord.hold)
+        .any(|hold| pressed(buttons, hold));
     let capture = if toggle {
         None
-    } else if shot {
+    } else if shortcuts.pad[0].fired(buttons, &watch.prev) {
         Some(Capture::Shot)
-    } else if record {
+    } else if shortcuts.pad[1].fired(buttons, &watch.prev) {
         Some(Capture::Record)
-    } else if replay {
+    } else if shortcuts.pad[2].fired(buttons, &watch.prev) {
         Some(Capture::Replay)
     } else {
         None
@@ -2954,7 +3998,7 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
     let dir = direction(up, down, left, right);
     // A stick already over is not a press. Record it before the panel opens,
     // or the next poll would move the first button. Holding it repeats.
-    let repeated = if shoulder {
+    let repeated = if modifier {
         // The direction is treated as already dealt with, so letting LB go while
         // still holding it does not step the ring.
         watch.held = dir;
@@ -2969,17 +4013,21 @@ fn take_step(watch: &mut Watch, buttons: &[bool], axes: &[f32]) -> Step {
         None
     } else if let Some(dir) = repeated {
         Some(dir)
-    } else if !shoulder && a && !watch.a {
+    } else if !modifier && a && !watch.a {
         Some("activate")
-    } else if !shoulder && b && !watch.b {
+    } else if !modifier && b && !watch.b {
         Some("back")
-    } else if !shoulder && menu {
+    } else if !modifier && menu {
         Some("menu")
     } else {
         None
     };
     watch.a = a;
     watch.b = b;
+    watch.right_shoulder = trigger;
+    for index in 0..PAD_COUNT {
+        watch.prev[index] = pressed(buttons, index);
+    }
     // The right stick is streamed, not stepped: the page turns it into a
     // scroll. One idle report is sent too, or the scroll would keep its last
     // speed after the stick is let go.
@@ -3112,9 +4160,16 @@ pub fn set_hold(on: bool) {
     HOLD.store(on, Ordering::SeqCst);
 }
 
-/// A pinned box should already be on screen when Orbit opens, without Alt+X.
+/// A pinned box should already be on screen when Orbit opens, without the opening shortcut.
 pub fn show_pins(app: &AppHandle) {
-    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) || !lock().enabled {
+    if STOP.load(Ordering::SeqCst) || OPEN.load(Ordering::SeqCst) {
+        return;
+    }
+    let (enabled, game_only, playing) = {
+        let live = lock();
+        (live.enabled, live.game_only, live.playing)
+    };
+    if !enabled || (game_only && !playing) {
         return;
     }
     HAS_PINS.store(true, Ordering::SeqCst);
@@ -3122,38 +4177,50 @@ pub fn show_pins(app: &AppHandle) {
 }
 
 
-/// Let the screen through wherever the panel has nothing to click.
+/// Keep an open panel interactive; let the screen through around resting pins.
 ///
-/// The panel covers the whole monitor, so Windows hands it every click on that
-/// monitor. Over a game that is the point, but with nothing behind it the
-/// panel becomes a wall: the player opens the overlay and can no longer click
-/// anywhere on their desk. Only the places the page reports as clickable take
-/// the pointer; everywhere else the click goes to whatever is behind the panel.
+/// While open, the full-screen window must receive pointer input so clicking a
+/// box cannot pass through to a game and make the panel appear to disappear.
+/// A resting panel has only its pins: those page-reported hit rectangles are
+/// window-local physical pixels, just like `cursor_position()` returns.
 fn sync_click_through(app: &AppHandle) {
     let open = OPEN.load(Ordering::SeqCst);
-    if !open && !RESTING.load(Ordering::SeqCst) {
+    let resting = RESTING.load(Ordering::SeqCst);
+    if !open && !resting {
         return;
     }
     let Some(window) = app.get_webview_window(WINDOW) else { return };
-    // A press that began in the panel keeps the pointer until it is let go:
-    // a box follows the cursor while it is dragged, and half a drag would be
-    // worse than no drag at all.
-    let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);
-    let ignore = !over;
+
+    // An opened overlay must always receive pointer input. The panel spans the
+    // monitor, and a hit-test-driven ignore-cursor toggle can leave WebKitGTK
+    // click-through even over buttons on transparent surfaces. Letting the
+    // full-screen window receive events while open is the reliable interactive
+    // state; only the resting, pinned panel uses regional click-through.
+    if open {
+        // Do not trust the cached flag here: platform state can outlive or fail
+        // to mirror it (notably when a transparent WebKit window has just been
+        // remapped). Explicitly restore native pointer delivery on every guard
+        // pass while the interactive panel is open.
+        IGNORE.store(false, Ordering::SeqCst);
+        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_focusable(true);
+        return;
+    }
+
+    // A resting panel has only its pins. Let everything else through to the
+    // desktop, while holding a drag that started on one of those pins.
+    let ignore = !HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window);
     if IGNORE.swap(ignore, Ordering::SeqCst) == ignore {
         return;
     }
     let _ = window.set_ignore_cursor_events(ignore);
-    // A resting panel is not a thing to type into. The open one keeps its
-    // keyboard wherever the pointer is: Escape has to reach it.
-    let _ = window.set_focusable(!ignore || open);
+    let _ = window.set_focusable(!ignore);
 }
 
 fn cursor_over_hits(window: &tauri::WebviewWindow) -> bool {
     let Ok(cursor) = window.cursor_position() else { return false };
-    let Ok(origin) = window.outer_position() else { return false };
-    let x = cursor.x - origin.x as f64;
-    let y = cursor.y - origin.y as f64;
+    let x = cursor.x;
+    let y = cursor.y;
     let hits = HITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     hits.iter().any(|hit| x >= hit.x && y >= hit.y && x <= hit.x + hit.w && y <= hit.y + hit.h)
 }
@@ -3270,6 +4337,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn game_only_blocks_desktop_open_but_never_prevents_closing() {
+        assert!(game_only_blocks_open(true, false, false));
+        assert!(!game_only_blocks_open(true, true, false));
+        assert!(!game_only_blocks_open(true, false, true));
+        assert!(!game_only_blocks_open(false, false, false));
+    }
+
+    #[test]
     fn a_desktop_capture_does_not_reuse_the_last_game_title() {
         assert_eq!(capture_label("Previously Opened", false), "Desktop");
         assert_eq!(capture_label("", true), "Desktop");
@@ -3295,31 +4370,41 @@ mod tests {
         assert_eq!(clamp_seconds(900), 300);
     }
 
+    /// A capture is named the way the panel names one, so a picture taken with
+    /// F12 and one taken with the panel's button sort together in the gallery.
+    #[test]
+    fn a_capture_is_named_the_way_the_panel_names_it() {
+        assert_eq!(stamp_at(1_792_860_125), "2026-10-24 16-42-05");
+        // The leap day is the day a hand-written date goes wrong.
+        assert_eq!(stamp_at(1_709_164_800), "2024-02-29 00-00-00");
+    }
+
+    /// The shortcuts a fresh install has.
+    fn shipped() -> Shortcuts {
+        Shortcuts {
+            pad: SHIPPED_PAD,
+            keys: [
+                SHIPPED_KEYS[0].to_string(),
+                SHIPPED_KEYS[1].to_string(),
+                SHIPPED_KEYS[2].to_string(),
+            ],
+        }
+    }
+
     #[test]
     fn start_and_select_open_once_until_they_are_released() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         buttons[8] = true;
         buttons[9] = true;
-        let first = take_step(&mut watch, &buttons, &[0.0, 0.0]);
-        let held = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let first = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
+        let held = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         buttons[8] = false;
         buttons[9] = false;
-        let released = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let released = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         buttons[8] = true;
         buttons[9] = true;
-        let again = take_step(&mut watch, &buttons, &[0.0, 0.0]);
+        let again = take_step(&mut watch, &buttons, &[0.0, 0.0], &shipped());
         assert!(first.toggle);
         assert!(!held.toggle);
         assert!(!released.toggle);
@@ -3331,71 +4416,49 @@ mod tests {
     /// The shortcuts, and only once per press.
     #[test]
     fn the_shoulder_shortcuts_fire_on_the_second_button() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         let axes = [0.0, 0.0];
         buttons[4] = true;
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         buttons[5] = true;
-        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Shot));
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert_eq!(take_step(&mut watch, &buttons, &axes, &shipped()).capture, Some(Capture::Shot));
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         buttons[5] = false;
         buttons[4] = false;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[4] = true;
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
         // LB plus the left d-pad is a recording, and it must not also move the ring.
         buttons[14] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.capture, Some(Capture::Record));
         assert!(step.action.is_none());
         buttons[14] = false;
         buttons[15] = true;
-        assert_eq!(take_step(&mut watch, &buttons, &axes).capture, Some(Capture::Replay));
-        assert!(take_step(&mut watch, &buttons, &axes).capture.is_none());
+        assert_eq!(take_step(&mut watch, &buttons, &axes, &shipped()).capture, Some(Capture::Replay));
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).capture.is_none());
     }
 
     /// R on its own is the pad's right click, and it is still one press.
     #[test]
     fn the_right_shoulder_alone_is_the_menu() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let mut buttons = vec![false; 16];
         let axes = [0.0, 0.0];
         buttons[5] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.action, Some("menu"));
         assert!(step.capture.is_none());
         // Held, it does not keep opening menus.
-        assert!(take_step(&mut watch, &buttons, &axes).action.is_none());
+        assert!(take_step(&mut watch, &buttons, &axes, &shipped()).action.is_none());
         // With LB down the same button is the screenshot, never the menu.
         buttons[5] = false;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[4] = true;
-        take_step(&mut watch, &buttons, &axes);
+        take_step(&mut watch, &buttons, &axes, &shipped());
         buttons[5] = true;
-        let step = take_step(&mut watch, &buttons, &axes);
+        let step = take_step(&mut watch, &buttons, &axes, &shipped());
         assert_eq!(step.capture, Some(Capture::Shot));
         assert!(step.action.is_none());
     }
@@ -3410,25 +4473,14 @@ mod tests {
 
     #[test]
     fn a_held_direction_waits_and_then_repeats() {
-        let mut watch = Watch {
-            both: false,
-            left_shoulder: false,
-            right_shoulder: false,
-            dpad_left: false,
-            dpad_right: false,
-            a: false,
-            b: false,
-            held: None,
-            ticks: 0,
-            stick_moving: false,
-        };
+        let mut watch = Watch::new();
         let axes = [1.0, 0.0];
-        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
-        assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action, Some("right"));
+        assert!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action.is_none());
         for _ in 0..6 {
-            assert!(take_step(&mut watch, &[false; 16], &axes).action.is_none());
+            assert!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action.is_none());
         }
-        assert_eq!(take_step(&mut watch, &[false; 16], &axes).action, Some("right"));
+        assert_eq!(take_step(&mut watch, &[false; 16], &axes, &shipped()).action, Some("right"));
     }
 
     #[test]

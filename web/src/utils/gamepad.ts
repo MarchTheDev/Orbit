@@ -56,6 +56,12 @@ export function padEdges(previous: PadSnapshot | null, next: PadSnapshot): PadAc
   if (pressed(14)) actions.push('left');
   if (pressed(15)) actions.push('right');
 
+  // The same direction can arrive twice - a hat plus its button - and one press
+  // should move the ring once.
+  const hatBefore = hatDirection(previous?.axes ?? []);
+  const hatNow = hatDirection(next.axes);
+  if (hatNow && hatNow !== hatBefore) actions.push(hatNow);
+
   const beforeX = previous?.axes[0] ?? 0;
   const beforeY = previous?.axes[1] ?? 0;
   const x = next.axes[0] ?? 0;
@@ -64,7 +70,24 @@ export function padEdges(previous: PadSnapshot | null, next: PadSnapshot): PadAc
   if (y > DEAD && beforeY <= DEAD) actions.push('down');
   if (x < -DEAD && beforeX >= -DEAD) actions.push('left');
   if (x > DEAD && beforeX <= DEAD) actions.push('right');
-  return actions;
+  return actions.filter((action, index) => actions.indexOf(action) === index);
+}
+
+/**
+ * A d-pad that arrives as a hat on axes 6 and 7 instead of as four buttons.
+ *
+ * Most controllers send the d-pad as buttons 12 to 15, but enough of them - and
+ * most of them on Linux - report it as a little axis pair with exactly one
+ * direction down at a time. A pad whose d-pad reads as nothing but buttons
+ * would leave a whole control lying dead, which is the one thing a couch
+ * interface cannot afford.
+ */
+export function hatDirection(axes: number[], dead = 0.5): 'up' | 'down' | 'left' | 'right' | null {
+  const x = axes[6] ?? 0;
+  const y = axes[7] ?? 0;
+  if (Math.abs(x) < dead && Math.abs(y) < dead) return null;
+  if (Math.abs(x) >= Math.abs(y)) return x < 0 ? 'left' : 'right';
+  return y < 0 ? 'up' : 'down';
 }
 
 export interface PadBox {
@@ -172,11 +195,12 @@ const NONE_HELD: HeldDirs = { up: false, down: false, left: false, right: false 
 export function directionsHeld(pad: PadSnapshot): HeldDirs {
   const y = pad.axes[1] ?? 0;
   const x = pad.axes[0] ?? 0;
+  const hat = hatDirection(pad.axes);
   return {
-    up: pad.buttons[12] === true || y < -DEAD,
-    down: pad.buttons[13] === true || y > DEAD,
-    left: pad.buttons[14] === true || x < -DEAD,
-    right: pad.buttons[15] === true || x > DEAD,
+    up: pad.buttons[12] === true || y < -DEAD || hat === 'up',
+    down: pad.buttons[13] === true || y > DEAD || hat === 'down',
+    left: pad.buttons[14] === true || x < -DEAD || hat === 'left',
+    right: pad.buttons[15] === true || x > DEAD || hat === 'right',
   };
 }
 
@@ -202,9 +226,10 @@ export function withoutRest(actions: PadAction[], rest: HeldDirs): PadAction[] {
 
 /** Whether a direction is still held, so a grid can keep stepping. */
 export function heldDirection(pad: PadSnapshot, rest: HeldDirs = NONE_HELD): 'up' | 'down' | 'left' | 'right' | null {
-  if ((pad.buttons[12] || (pad.axes[1] ?? 0) < -DEAD) && !rest.up) return 'up';
-  if ((pad.buttons[13] || (pad.axes[1] ?? 0) > DEAD) && !rest.down) return 'down';
-  if ((pad.buttons[14] || (pad.axes[0] ?? 0) < -DEAD) && !rest.left) return 'left';
-  if ((pad.buttons[15] || (pad.axes[0] ?? 0) > DEAD) && !rest.right) return 'right';
+  const hat = hatDirection(pad.axes);
+  if ((pad.buttons[12] || (pad.axes[1] ?? 0) < -DEAD || hat === 'up') && !rest.up) return 'up';
+  if ((pad.buttons[13] || (pad.axes[1] ?? 0) > DEAD || hat === 'down') && !rest.down) return 'down';
+  if ((pad.buttons[14] || (pad.axes[0] ?? 0) < -DEAD || hat === 'left') && !rest.left) return 'left';
+  if ((pad.buttons[15] || (pad.axes[0] ?? 0) > DEAD || hat === 'right') && !rest.right) return 'right';
   return null;
 }

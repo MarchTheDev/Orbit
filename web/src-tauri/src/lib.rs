@@ -28,6 +28,7 @@ mod cloud;
 mod metadata;
 mod notice;
 mod process;
+mod proton;
 mod saves;
 mod session;
 mod sgdb;
@@ -44,7 +45,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
 use db::{CurrentPlaythrough, GameLogRow, GameRow, GameWrite, PlaythroughRow, SessionRow, Stats};
@@ -669,6 +669,8 @@ fn overlay_configure(
     screenshot_directory: String,
     recording_directory: String,
     replay_directory: String,
+    game_only: bool,
+    capture_shortcuts_outside_overlay: bool,
 ) {
     overlay::configure(
         Some(&app),
@@ -682,6 +684,8 @@ fn overlay_configure(
         &screenshot_directory,
         &recording_directory,
         &replay_directory,
+        game_only,
+        capture_shortcuts_outside_overlay,
     );
 }
 
@@ -897,6 +901,16 @@ fn overlay_folder() -> Result<String, String> {
     overlay::open_folder()
 }
 
+/// Where screenshots, recordings and replays are being written.
+///
+/// The page cannot guess these: the defaults are the machine's own Pictures and
+/// Videos folders, which only the desktop side knows how to find.
+#[tauri::command]
+fn overlay_capture_dirs() -> overlay::CaptureDirs {
+    let (screenshots, recordings, replays) = overlay::capture_dirs();
+    overlay::CaptureDirs { screenshots, recordings, replays }
+}
+
 #[tauri::command]
 fn overlay_open_kind(kind: String) -> Result<String, String> {
     overlay::open_kind(&kind)
@@ -1005,7 +1019,7 @@ fn window_ready(app: tauri::AppHandle, startup: State<'_, StartupVisibility>) {
     if !startup.start_in_background || startup.show_requested.load(Ordering::SeqCst) {
         show_main_window(&app);
     }
-    // The panel is built while the library is idle, so the first Alt+X does
+    // The panel is built while the library is idle, so its first open does
     // not have to wait for a web view to start.
     overlay::warm(&app);
 }
@@ -1026,6 +1040,11 @@ fn take_open_exe_paths(pending: State<'_, PendingOpenExePaths>) -> Vec<String> {
 #[tauri::command]
 fn is_windows() -> bool {
     cfg!(windows)
+}
+
+#[tauri::command]
+fn is_linux() -> bool {
+    cfg!(target_os = "linux")
 }
 
 /// Set or remove Orbit's user-level `.exe` Explorer verb.
@@ -1269,6 +1288,15 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
     hltb::lookup(&title).await
 }
 
+/// The factsheet the planning sheet shows for a store app id.
+///
+/// Bonker's cache of the Steam catalogue carries it, with Steam's own page
+/// filling the gaps - the answer needs no key from the player either way.
+#[tauri::command]
+async fn game_facts(app_id: u64) -> Result<metadata::Facts, String> {
+    metadata::facts(app_id).await
+}
+
 /// Everything Orbit can find out about a game with no setup at all.
 ///
 /// The Steam store needs no key. SteamGridDB is asked for a portrait only when
@@ -1295,8 +1323,11 @@ async fn metadata_lookup(
 
 /// Every program in a folder, so an import can ask which one is the game.
 #[tauri::command]
-fn folder_programs(path: String, max_depth: Option<usize>) -> Vec<launch::FolderProgram> {
-    launch::folder_programs(Path::new(&path), max_depth.unwrap_or(3))
+async fn folder_programs(path: String, max_depth: Option<usize>) -> Result<Vec<launch::FolderProgram>, String> {
+    let depth = max_depth.unwrap_or(3).min(6);
+    tokio::task::spawn_blocking(move || launch::folder_programs(Path::new(&path), depth))
+        .await
+        .map_err(|error| format!("Could not scan that folder: {error}"))
 }
 
 /// A partial title, as the games the store suggests for it, with pictures.
@@ -1684,6 +1715,53 @@ fn remember_wine(_settings: Option<&Settings>) {
 #[tauri::command]
 fn data_dir(orbit: State<'_, Orbit>) -> String {
     orbit.store.root().to_string_lossy().to_string()
+}
+
+/// Whether this copy carries its own files, beside the program.
+#[tauri::command]
+fn data_portable(app: tauri::AppHandle) -> bool {
+    storage::portable(&app)
+}
+
+/// The Proton builds already on this machine, plus the ones Orbit fetched.
+#[tauri::command]
+fn proton_builds(app: tauri::AppHandle) -> Vec<proton::ProtonBuild> {
+    proton::installed(&app)
+}
+
+/// The newest Proton-GE releases GitHub has, for the picker.
+#[tauri::command]
+async fn proton_ge_releases(app: tauri::AppHandle) -> Result<Vec<proton::GeRelease>, String> {
+    proton::ge_releases(&app).await
+}
+
+/// Fetch one Proton-GE release into Orbit's own runners folder.
+#[tauri::command]
+async fn proton_install(app: tauri::AppHandle, tag: String, url: String) -> Result<String, String> {
+    proton::install_ge(&app, tag, url).await
+}
+
+/// Take back a build Orbit downloaded. A Steam build is not Orbit's to remove.
+#[tauri::command]
+fn proton_remove(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    proton::remove_build(&app, &path)
+}
+
+/// The capture shortcuts the system refused, so Settings can say which.
+#[tauri::command]
+fn overlay_refused_shortcuts() -> Vec<String> {
+    overlay::refused_keys()
+}
+
+/// How far this machine's clock is from UTC, in minutes, as the page reads it.
+///
+/// The page says once at startup. A capture taken by a shortcut is named on the
+/// desktop side - a game in front means the library window is minimised, and a
+/// minimised web view must not be what a screenshot waits for - so the local
+/// time has to reach this side some other way.
+#[tauri::command]
+fn clock_offset(minutes: i32) {
+    overlay::set_clock_offset(minutes);
 }
 
 /// Play the background pad through the system. False means the web view should try.
@@ -2169,6 +2247,19 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     linux_window::prepare();
 
+    // Before anything WebKit touches, too. On Wayland with the proprietary
+    // NVIDIA driver, the compositor's explicit-sync path can strand a surface
+    // after its first frames - a window that flashes up and then never paints
+    // again. This is the stack's standard answer (and can only lose its job
+    // to a value the user set themselves).
+    #[cfg(target_os = "linux")]
+    if linux_window::wayland_backend()
+        && linux_window::nvidia_driver()
+        && std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none()
+    {
+        std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
+    }
+
     let initial_args: Vec<String> = std::env::args().collect();
     let started_by_autostart = initial_args.iter().any(|arg| arg == "--autostart");
     let pending_paths = Arc::new(Mutex::new(open_exe_paths_from_args(&initial_args)));
@@ -2213,10 +2304,9 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let root = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("Orbit"));
+            // Portable copies keep everything beside the program; an install
+            // keeps it where the desktop puts an application's data.
+            let root = storage::root(app.handle());
             // Read the note the last run may have left behind: it says whether
             // the panel went away while it was reading live stats.
             stats::install(&root);
@@ -2448,17 +2538,6 @@ pub fn run() {
             if let Err(error) = overlay::install(app.handle()) {
                 log::warn!("overlay was not ready: {error}");
             }
-            // Register here, not inside the plugin builder. A refused shortcut
-            // must not stop Orbit from opening, and the handler only sets a flag:
-            // building the panel from that handler can stall its lock.
-            if let Err(error) = app.global_shortcut().on_shortcut("Alt+X", |_app, _shortcut, event| {
-                if matches!(event.state, tauri_plugin_global_shortcut::ShortcutState::Pressed) {
-                    overlay::shortcut_toggle();
-                }
-            }) {
-                log::warn!("Alt+X could not be registered: {error}");
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2500,6 +2579,7 @@ pub fn run() {
             window_ready,
             take_open_exe_paths,
             is_windows,
+            is_linux,
             set_exe_context_menu,
             list_drives,
             folder_size,
@@ -2517,6 +2597,7 @@ pub fn run() {
             metadata_lookup,
             metadata_suggest,
             metadata_cards,
+            game_facts,
             achievements_fetch,
             artwork_candidates,
             artwork_choices,
@@ -2528,6 +2609,13 @@ pub fn run() {
             save_settings,
             cloud_quit,
             data_dir,
+            data_portable,
+            clock_offset,
+            overlay_refused_shortcuts,
+            proton_builds,
+            proton_ge_releases,
+            proton_install,
+            proton_remove,
             data_dir_size,
             ambient_set,
             ambient_stop,
@@ -2586,6 +2674,7 @@ pub fn run() {
             overlay_replay,
             overlay_hide,
             overlay_folder,
+            overlay_capture_dirs,
             overlay_open_kind,
             overlay_open,
             overlay_delete,

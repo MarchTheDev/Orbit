@@ -9,10 +9,13 @@ import { disable, enable } from '@tauri-apps/plugin-autostart';
 import type {
   ActiveSession,
   Game,
+  GameFacts,
   GameLog,
   Playthrough,
   LaunchInfo,
   LaunchTarget,
+  ProtonBuild,
+  ProtonRelease,
   Session,
   Settings,
   Stats,
@@ -111,6 +114,11 @@ export function windowReady(): Promise<void> {
 /** Whether the current desktop shell runs on Windows. */
 export function isWindows(): Promise<boolean> {
   return call('is_windows', {}, () => false);
+}
+
+/** Whether the current desktop shell runs on Linux. */
+export function isLinux(): Promise<boolean> {
+  return call('is_linux', {}, () => /Linux/i.test(navigator.userAgent));
 }
 
 /** Add or remove Orbit's per-user `.exe` right-click action in Explorer. */
@@ -536,6 +544,50 @@ export function gameSuggestions(title: string): Promise<GameSuggestion[]> {
 }
 
 /**
+ * The factsheet for one store app id: what the game is, who made it, what it
+ * costs, how it was received, its screenshots and trailers.
+ *
+ * Bonker's cache of the Steam catalogue answers most of it and Steam's own
+ * page fills the gaps, both asked on the Rust side where the browser's rules
+ * do not reach. A browser preview has no store to ask, so it shows a
+ * deterministic stand-in and says so.
+ */
+export function gameFacts(appId: number): Promise<GameFacts> {
+  return call('game_facts', { appId }, async () => {
+    await sleep(500);
+    return {
+      appId,
+      name: `Store app ${appId}`,
+      summary: 'In the desktop app this is what the store says about the game. The browser preview has no store to ask.',
+      description: '',
+      genres: ['Preview'],
+      releaseYear: null,
+      releaseDate: null,
+      comingSoon: false,
+      isFree: true,
+      priceText: null,
+      developer: null,
+      publisher: null,
+      homepage: null,
+      headerUrl: null,
+      heroUrl: null,
+      portraitUrl: null,
+      logoUrl: null,
+      screenshots: [],
+      movies: [],
+      reviews: null,
+      // A plausible set of requirements, so the browser preview can show how
+      // they read once they are put in rows and the room it takes is lifted
+      // out of them.
+      pcMinimum:
+        'Minimum: OS: Windows 10 64-bit Processor: Intel Core i5-8400 Memory: 12 GB RAM ' +
+        'Graphics: NVIDIA GeForce GTX 1060 DirectX: Version 12 Storage: 60 GB available space ' +
+        'Additional Notes: an SSD is recommended',
+    };
+  });
+}
+
+/**
  * Every achievement the game's Steam Community page lists.
  *
  * The list is read fresh, because the share of players who have each one moves.
@@ -700,6 +752,126 @@ export function openGameFolder(path: string): Promise<void> {
 export function dataDir(): Promise<string | null> {
   const t = tauri();
   return t ? t.core.invoke<string>('data_dir') : Promise.resolve(null);
+}
+
+/**
+ * How far this machine's clock is from UTC, in minutes.
+ *
+ * A capture taken from a keyboard shortcut is named by the desktop side, which
+ * cannot read a time zone without another dependency: the page has a `Date`, so
+ * it says once and the file names come out in the player's own time.
+ */
+export function setClockOffset(minutes: number): Promise<void> {
+  return call('clock_offset', { minutes }, () => undefined);
+}
+
+/**
+ * The keyboard capture shortcuts the system would not give Orbit.
+ *
+ * A combination another program already owns is refused rather than fatal - the
+ * other two still work - but a shortcut that silently does nothing looks
+ * exactly like a shortcut nobody pressed, so the settings page says which.
+ */
+export function overlayRefusedShortcuts(): Promise<string[]> {
+  return call('overlay_refused_shortcuts', {}, async () => []);
+}
+
+/**
+ * Every Proton build on this machine.
+ *
+ * Steam's own, the ones in its `compatibilitytools.d`, the ones other launchers
+ * fetched, and the ones Orbit downloaded - a game can be pointed at any of them,
+ * which is the point: the build that runs a game is often not the newest.
+ */
+export function protonBuilds(): Promise<ProtonBuild[]> {
+  return call('proton_builds', {}, async () => []);
+}
+
+/** The newest Proton-GE releases, for the picker. */
+export function protonReleases(): Promise<ProtonRelease[]> {
+  return call('proton_ge_releases', {}, async () => []);
+}
+
+/**
+ * Watch the desktop's notes about work it is doing on its own, such as a fetch.
+ *
+ * `orbit-launch-status` is one line at a time - "Downloading GE-Proton9-20" -
+ * and a Proton build takes long enough that a dialog wants to show them.
+ */
+export function watchLaunchStatus(fn: (text: string) => void): () => void {
+  const api = tauri()?.event;
+  if (!api) return () => {};
+  let alive = true;
+  let stop: (() => void) | undefined;
+  void api
+    .listen('orbit-launch-status', (e) => {
+      const payload = e.payload as { message?: string } | string;
+      const text = typeof payload === 'string' ? payload : payload?.message;
+      if (text) fn(text);
+    })
+    .then((un) => {
+      if (alive) stop = un;
+      else un();
+    });
+  return () => {
+    alive = false;
+    stop?.();
+  };
+}
+
+/** Fetch one Proton-GE release into Orbit's own runners folder. */
+export function protonInstall(tag: string, url: string): Promise<string> {
+  return call('proton_install', { tag, url }, () => {
+    throw new Error('Proton-GE can only be fetched by the desktop app.');
+  });
+}
+
+/** How far a Proton-GE fetch has got, in bytes. */
+export interface ProtonProgress {
+  tag: string;
+  phase: 'download' | 'extract' | 'done';
+  loaded: number;
+  total: number;
+}
+
+/**
+ * Watch a fetch move: `orbit-proton-progress` carries loaded/total bytes, so
+ * the manager can draw a real bar instead of asking a spinner to be believed.
+ */
+export function watchProtonProgress(fn: (progress: ProtonProgress) => void): () => void {
+  const api = tauri()?.event;
+  if (!api) return () => {};
+  let alive = true;
+  let stop: (() => void) | undefined;
+  void api
+    .listen('orbit-proton-progress', (e) => {
+      const p = e.payload as Partial<ProtonProgress>;
+      if (!p?.tag || !p.phase) return;
+      fn({
+        tag: p.tag,
+        phase: p.phase as ProtonProgress['phase'],
+        loaded: p.loaded ?? 0,
+        total: p.total ?? 0,
+      });
+    })
+    .then((un) => {
+      if (alive) stop = un;
+      else un();
+    });
+  return () => {
+    alive = false;
+    stop?.();
+  };
+}
+
+/** Take back a build Orbit downloaded. */
+export function protonRemove(path: string): Promise<void> {
+  return call('proton_remove', { path }, () => undefined);
+}
+
+/** Whether this copy keeps everything beside the program, like a portable one. */
+export function dataPortable(): Promise<boolean> {
+  return call('data_portable', {}, async () => false);
 }
 
 /** How much space Orbit's own files take. */
@@ -1250,6 +1422,8 @@ export function overlayConfigure(options: {
   screenshotDirectory: string;
   recordingDirectory: string;
   replayDirectory: string;
+  gameOnly: boolean;
+  captureShortcutsOutsideOverlay: boolean;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
 }
@@ -1474,6 +1648,17 @@ export function overlayCopy(path: string): Promise<void> {
   return call('overlay_copy', { path }, async () => {
     throw new Error('Copying a screenshot needs the desktop app.');
   });
+}
+
+export interface CaptureDirs {
+  screenshots: string;
+  recordings: string;
+  replays: string;
+}
+
+/** Where the captures are being written, as the desktop side resolves it. */
+export function overlayCaptureDirs(): Promise<CaptureDirs | null> {
+  return call('overlay_capture_dirs', {}, async () => null);
 }
 
 export function overlayOpenKind(kind: string): Promise<string> {

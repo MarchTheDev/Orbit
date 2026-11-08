@@ -1,4 +1,30 @@
+/**
+ * One capture shortcut as a controller sees it.
+ *
+ * `hold` is a button held down first - LB in the shipped shortcuts - and
+ * `button` is the one that completes the chord. A chord with no `hold` is the
+ * single button on its own. Both are the standard gamepad indices the rest of
+ * Orbit uses: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Select, 9 Start,
+ * 12 up, 13 down, 14 left, 15 right.
+ */
+export interface PadChord {
+  hold: number | null;
+  button: number;
+}
+
+/** The three things a shortcut can do from inside a game. */
+export interface OverlayShortcuts {
+  pad: { shot: PadChord; record: PadChord; replay: PadChord };
+  /**
+   * Keyboard combinations as the system parses them - 'F12', 'Ctrl+KeyS' - which
+   * the settings page draws as 'F12' and 'Ctrl + S'. An empty string is a
+   * shortcut that was turned off, not one that should fall back.
+   */
+  keys: { shot: string; record: string; replay: string };
+}
+
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
+export type PlanPlatform = 'Steam' | 'Epic Games' | 'Nintendo' | 'Other';
 /** The Library has an Unplayed filter; Backlog is its own page. */
 export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
 export type OtherLauncher =
@@ -14,6 +40,8 @@ export type LauncherId = 'Steam' | OtherLauncher;
 export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
 export interface HltbData {
+  /** Canonical title from the broad HLTB catalogue search, when available. */
+  gameName?: string;
   main: number; // hours
   mainExtra: number;
   completionist: number;
@@ -66,6 +94,50 @@ export interface MetaData {
  * not something the launch editor offers: it is set on games brought in from a
  * Steam library, which have to go through Steam to start at all.
  */
+/**
+ * One line of a game's own environment, written as a name and a value.
+ *
+ * The name is checked on the desktop side before it reaches the process: a
+ * name that is not letters, digits and underscores is a typo, not a variable.
+ */
+export interface EnvVar {
+  key: string;
+  value: string;
+}
+
+/**
+ * The switches that make one Windows game behave better on Linux.
+ *
+ * The set Faugus and Lutris both offer, because they are what the pieces
+ * underneath read: GameMode for the system's performance profile, MangoHud for
+ * the overlay, and Proton's own environment for the rest. A switch that is off
+ * is not written at all, so the game sees what the machine normally gives it.
+ */
+export interface WineTweaks {
+  /** Run the game under `gamemoderun`. */
+  gamemode: boolean;
+  /** Run it under `mangohud`. */
+  mangohud: boolean;
+  /** `PROTON_PREFER_SDL=1`: the controller through SDL, for pads some games miss. */
+  sdl: boolean;
+  /** `PROTON_ENABLE_WAYLAND=1`: Wine's own Wayland driver. */
+  wayland: boolean;
+  /** `PROTON_USE_WOW64=1`: 32-bit games through the 64-bit driver. */
+  wow64: boolean;
+  /** `WINEFSYNC`: true forces it on, false off, null leaves the machine's own. */
+  fsync: boolean | null;
+  /** `WINEESYNC`, the same three ways. */
+  esync: boolean | null;
+  /** `DXVK_HUD`, such as `fps,frametimes`. Empty means none. */
+  hud: string;
+  /** `GAMEID`, umu's name for the game: it is what applies its collected fixes. */
+  gameid: string;
+  /** `WINEDLLOVERRIDES`, such as `d3d11=n,b`. */
+  dllOverrides: string;
+  /** Anything else the player wants in the environment. */
+  env: EnvVar[];
+}
+
 export type LaunchTarget =
   | { kind: 'none' }
   | { kind: 'executable'; path: string; args: string; workingDir: string | null }
@@ -74,10 +146,14 @@ export type LaunchTarget =
       kind: 'wine';
       path: string;
       args: string;
-      /** The Wine prefix. Empty means Wine's default. */
+      /** The Wine prefix. Empty means Wine's default, or Proton's shared one. */
       prefix: string | null;
       /** The wine binary. Empty means `wine` on PATH, or the one in Settings. */
       wine: string | null;
+      /** A Proton build to run it through, as the folder it lives in. */
+      proton?: string | null;
+      /** The switches for this game. Missing means all of them off. */
+      tweaks?: WineTweaks;
     }
   | {
       kind: 'lutris';
@@ -86,6 +162,30 @@ export type LaunchTarget =
       exe: string | null;
       prefix: string | null;
     };
+
+/** One Proton build on this machine. */
+export interface ProtonBuild {
+  /** The folder, which is also what a game stores. */
+  id: string;
+  name: string;
+  path: string;
+  /** Orbit, Steam, or the launcher that fetched it. */
+  source: string;
+  /** What its own `version` file says, when it has one. */
+  version: string;
+  /** True for a build Orbit downloaded, so only those can be removed here. */
+  orbit: boolean;
+}
+
+/** One downloadable Proton-GE release. */
+export interface ProtonRelease {
+  tag: string;
+  url: string;
+  /** Bytes, as GitHub states them. Zero when it does not say. */
+  size: number;
+  published: string;
+  installed: boolean;
+}
 
 /** A program Orbit starts at the same time as the game. */
 export interface Companion {
@@ -105,6 +205,8 @@ export interface Game {
   title: string;
   /** True for a game the player means to play but does not have here. */
   planned?: boolean;
+  /** The store or console the player means to get this planned title for. */
+  planPlatform?: PlanPlatform;
   /**
    * On the library's shelf with nothing to start yet.
    *
@@ -194,6 +296,64 @@ export interface GameSuggestion {
   appId: number;
   name: string;
   coverUrl: string | null;
+}
+
+/** A still from the store page, thumbnailed and full. */
+export interface GameFactShot {
+  thumb: string;
+  full: string;
+}
+
+/** A trailer, with the playable file the store page publishes. */
+export interface GameFactMovie {
+  name: string;
+  thumbnail: string;
+  mp4: string | null;
+  webm: string | null;
+}
+
+/** How players received the game, in the store's own words and numbers. */
+export interface GameFactReviews {
+  summary: string;
+  percent: number;
+  total: number;
+}
+
+/**
+ * Everything the store can say about a game before it is anyone's.
+ *
+ * Shown by the planning sheet that opens from a search suggestion: what the
+ * game is, who made it, what it costs, how it was received, and the pictures
+ * that make a decision. Filled from Bonker's cache of the Steam catalogue with
+ * the store page filling the gaps; how long it takes arrives separately, from
+ * HowLongToBeat, because the store does not know it.
+ */
+export interface GameFacts {
+  appId: number;
+  name: string;
+  summary: string;
+  /** The longer store text, plain and trimmed to a page. */
+  description: string;
+  genres: string[];
+  releaseYear: number | null;
+  /** The date as the store writes it, "Aug 21, 2012". */
+  releaseDate: string | null;
+  comingSoon: boolean;
+  isFree: boolean;
+  /** What the store asks, already in the reader's currency. */
+  priceText: string | null;
+  developer: string | null;
+  publisher: string | null;
+  homepage: string | null;
+  headerUrl: string | null;
+  heroUrl: string | null;
+  portraitUrl: string | null;
+  logoUrl: string | null;
+  screenshots: GameFactShot[];
+  movies: GameFactMovie[];
+  reviews: GameFactReviews | null;
+  /** The low end of what runs it, in the store's own words. */
+  pcMinimum: string | null;
 }
 
 /** A program found while looking through a folder, for the import dialog. */
@@ -341,7 +501,23 @@ export const OVERLAY_BOXES = [
 
 export type OverlayBoxId = (typeof OVERLAY_BOXES)[number]['id'];
 
+export interface Theme {
+  id: string;
+  name: string;
+  bg: string;
+  panel: string;
+  panel2: string;
+  border: string;
+  text: string;
+  muted: string;
+  accent: string;
+  accent2: string;
+  onAccent?: string;
+}
+
 export interface Settings {
+  /** Player-created palettes, managed in their own window. */
+  customThemes?: Theme[];
   theme: string;
   /** The system font stack used throughout the interface. */
   fontFamily?: FontChoice;
@@ -448,6 +624,8 @@ export interface Settings {
    * buy, not a list of things to play.
    */
   syncBacklog?: boolean;
+  /** One-time snapshot so new-add-only sync preserves entries from older versions. */
+  syncMembershipSeeded?: boolean;
   /**
    * Games put on the Backlog by hand, even when they would otherwise stay in
    * the Library only.
@@ -457,6 +635,16 @@ export interface Settings {
    * Games taken off the Backlog without being removed from the Library.
    */
   backlogOff?: string[];
+  /** Whether games are automatically listed in the Journal; on by default for existing libraries. */
+  syncJournal?: boolean;
+  /** Games manually included in the Journal when synchronization is off. */
+  journalOn?: string[];
+  /** Games manually removed from the Journal while synchronization is on. */
+  journalOff?: string[];
+  /** Root folder or drive to check for new game programs. */
+  scanPath?: string;
+  /** Whether to review new programs found there whenever Orbit starts. */
+  scanOnLaunch?: boolean;
   /**
    * Whether the interface fades in when the app opens. On by default: it is
    * forty-five hundredths of a second, and it covers the moment the library is
@@ -535,7 +723,7 @@ export interface Settings {
   /** The wine binary to use when a game does not name one. */
   winePath?: string;
   /**
-   * The panel opened with Alt+X or Start+Select.
+   * The panel opened with the configured keyboard shortcut or Start+Select.
    *
    * On unless it has been turned off. The replay length is seconds, from 5 to
    * 300, and is what "save the last few seconds" keeps while a game is playing.
@@ -586,6 +774,17 @@ export interface Settings {
     replayDirectory?: string;
     /** Empty means the built-in recorder. A path is only a fallback. */
     ffmpeg?: string;
+    /**
+     * Keyboard shortcut that opens or closes the overlay. Missing means Alt+X;
+     * an empty string disables the keyboard shortcut while Start+Select remains.
+     */
+    openShortcut?: string;
+    /** Require an active Orbit game session before opening the overlay. */
+    gameOnly?: boolean;
+    /** The capture shortcuts for the pad and keyboard. */
+    shortcuts?: OverlayShortcuts;
+    /** Let capture shortcuts run while the panel is closed; off by default. */
+    captureShortcutsOutsideOverlay?: boolean;
   };
   /**
    * Which games back themselves up, and a folder to copy when Orbit cannot

@@ -1,21 +1,5 @@
-export interface Theme {
-  id: string;
-  name: string;
-  bg: string;
-  panel: string;
-  panel2: string;
-  border: string;
-  text: string;
-  muted: string;
-  accent: string;
-  accent2: string;
-  /**
-   * White on a light accent is hard to read, so a theme that is light behind
-   * the accent says so here and buttons use a dark foreground. Everything else
-   * keeps white.
-   */
-  onAccent?: string;
-}
+import type { Theme } from '../types';
+export type { Theme } from '../types';
 
 // Orbit themes - named after celestial bodies
 export const THEMES: Theme[] = [
@@ -41,9 +25,14 @@ export const FONTS = [
   { id: 'book', name: 'Book', stack: '"Palatino Linotype", "Book Antiqua", Palatino, serif', sample: 'A little more character' },
 ] as const;
 
+/** Built-in and saved player themes, with built-ins kept first. */
+export function themesFor(custom: Theme[] = []): Theme[] {
+  return [...THEMES, ...custom.filter((theme) => !THEMES.some((builtIn) => builtIn.id === theme.id))];
+}
+
 /** The theme, by id, with Nebula as the answer for anything unknown. */
-export function themeById(id: string): Theme {
-  return THEMES.find((item) => item.id === id) ?? THEMES[0];
+export function themeById(id: string, custom: Theme[] = []): Theme {
+  return themesFor(custom).find((item) => item.id === id) ?? THEMES[0];
 }
 
 /**
@@ -51,13 +40,13 @@ export function themeById(id: string): Theme {
  * drawn by Rust, which cannot read a CSS variable, so it is handed the same
  * palette the page uses.
  */
-export function nativePalette(id: string): { panel: string; text: string; muted: string; accent: string } {
-  const theme = themeById(id);
+export function nativePalette(id: string, custom: Theme[] = []): { panel: string; text: string; muted: string; accent: string } {
+  const theme = themeById(id, custom);
   return { panel: theme.panel, text: theme.text, muted: theme.muted, accent: theme.accent };
 }
 
-export function applyTheme(id: string) {
-  const t = THEMES.find((x) => x.id === id) ?? THEMES[0];
+export function applyTheme(id: string, custom: Theme[] = []) {
+  const t = themeById(id, custom);
   const r = document.documentElement.style;
   r.setProperty('--c-bg', t.bg);
   r.setProperty('--c-panel', t.panel);

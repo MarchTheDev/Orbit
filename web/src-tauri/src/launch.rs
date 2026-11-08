@@ -705,15 +705,35 @@ pub fn parse_args(input: &str) -> Vec<String> {
     out
 }
 
-/// True when the path looks like something Windows can run directly.
+/// True when the path is a runnable game program on this desktop.
+///
+/// Windows games are identified by their executable extensions. On Unix, native
+/// games are commonly ELF binaries with no extension, AppImages, or executable
+/// shell scripts, so the file's execute bit is the reliable signal. Windows
+/// programs remain candidates on Linux too, where Orbit can run them through
+/// Wine after the player chooses them.
 pub fn is_executable(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .as_deref(),
-        Some("exe" | "bat" | "cmd")
-    )
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+    if matches!(extension.as_deref(), Some("exe" | "bat" | "cmd")) {
+        return true;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return path
+            .metadata()
+            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+    }
+
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 /// Executables that are never the game itself.
@@ -787,7 +807,9 @@ pub fn scan_folder(root: &Path, max_depth: usize) -> Vec<FoundGame> {
             };
             let path = entry.path();
             if kind.is_dir() {
-                subdirs.push(path);
+                if !is_system_root_child(root, depth, &path) {
+                    subdirs.push(path);
+                }
             } else if kind.is_file() && is_executable(&path) && !is_boring(&path) {
                 executables.push(path);
             }
@@ -831,7 +853,7 @@ pub struct FolderProgram {
     pub title: String,
     pub exe_path: String,
     pub size_bytes: u64,
-    /// Everything in that folder, so the biggest one can be ranked first.
+    /// Bytes observed in the single bounded scan, without a second recursive walk.
     pub folder_bytes: u64,
     /// Depth below the folder that was scanned, so a shallow hit wins.
     pub depth: usize,
@@ -846,6 +868,7 @@ pub struct FolderProgram {
 /// likely one is already selected.
 pub fn folder_programs(root: &Path, max_depth: usize) -> Vec<FolderProgram> {
     let mut found: Vec<FolderProgram> = Vec::new();
+    let mut folder_sizes: HashMap<PathBuf, u64> = HashMap::new();
     let mut queue = vec![(root.to_path_buf(), 0usize)];
 
     while let Some((dir, depth)) = queue.pop() {
@@ -861,11 +884,27 @@ pub fn folder_programs(root: &Path, max_depth: usize) -> Vec<FolderProgram> {
             };
             let path = entry.path();
             if kind.is_dir() {
-                if !is_junk_dir(&path) {
+                if !is_junk_dir(&path) && !is_system_root_child(root, depth, &path) {
                     subdirs.push(path);
                 }
-            } else if kind.is_file() && is_executable(&path) && !is_boring(&path) {
-                executables.push(path);
+            } else if kind.is_file() {
+                // One walk supplies both candidate discovery and a bounded,
+                // approximate folder size. Re-walking every candidate folder
+                // recursively made a drive scan quadratic in the number of
+                // installed games and could stall the desktop.
+                let bytes = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+                let mut ancestor = dir.as_path();
+                loop {
+                    *folder_sizes.entry(ancestor.to_path_buf()).or_default() += bytes;
+                    if ancestor == root {
+                        break;
+                    }
+                    let Some(parent) = ancestor.parent() else { break };
+                    ancestor = parent;
+                }
+                if is_executable(&path) && !is_boring(&path) {
+                    executables.push(path);
+                }
             }
         }
 
@@ -875,7 +914,7 @@ pub fn folder_programs(root: &Path, max_depth: usize) -> Vec<FolderProgram> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Unknown")
                 .to_string();
-            let folder_bytes = crate::storage::dir_size(&dir);
+            let folder_bytes = folder_sizes.get(&dir).copied().unwrap_or(0);
             for exe in executables {
                 found.push(FolderProgram {
                     folder: dir.to_string_lossy().to_string(),
@@ -903,6 +942,39 @@ pub fn folder_programs(root: &Path, max_depth: usize) -> Vec<FolderProgram> {
             .then(b.size_bytes.cmp(&a.size_bytes))
     });
     found
+}
+
+/// Whether `path` is a top-level operating-system folder under a drive root.
+///
+/// A player may point a scan at `C:\\` or `/`; walking Windows system files or
+/// `/usr/bin` would produce thousands of false positives. These exclusions are
+/// only applied at the volume root, so a game's own `bin` folder remains valid.
+fn is_system_root_child(root: &Path, depth: usize, path: &Path) -> bool {
+    if depth != 0 {
+        return false;
+    }
+    #[cfg(windows)]
+    let is_volume_root = root.components().count() <= 2;
+    #[cfg(unix)]
+    let is_volume_root = root.parent().is_none();
+    #[cfg(not(any(windows, unix)))]
+    let is_volume_root = false;
+    if !is_volume_root {
+        return false;
+    }
+    let name = path.file_name().and_then(|part| part.to_str()).unwrap_or_default().to_lowercase();
+    #[cfg(windows)]
+    {
+        matches!(name.as_str(), "windows" | "programdata" | "$recycle.bin" | "system volume information" | "recovery" | "perflogs")
+    }
+    #[cfg(unix)]
+    {
+        matches!(name.as_str(), "bin" | "sbin" | "usr" | "etc" | "dev" | "proc" | "sys" | "run" | "var" | "lib" | "lib64" | "lost+found" | "boot")
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        false
+    }
 }
 
 /// Folders that hold somebody else's installer rather than a game.
@@ -942,6 +1014,26 @@ mod tests {
     /// thing.
     fn win(parts: &[&str]) -> PathBuf {
         parts.iter().collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_filesystem_root_scan_skips_system_directories_but_keeps_home_and_opt() {
+        assert!(is_system_root_child(Path::new("/"), 0, Path::new("/usr")));
+        assert!(is_system_root_child(Path::new("/"), 0, Path::new("/bin")));
+        assert!(!is_system_root_child(Path::new("/"), 0, Path::new("/home")));
+        assert!(!is_system_root_child(Path::new("/"), 0, Path::new("/opt")));
+        assert!(!is_system_root_child(Path::new("/home/player/Games"), 0, Path::new("/home/player/Games/bin")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_root_scan_skips_windows_system_folders() {
+        let root = win(&["C:\\"]);
+        assert!(is_system_root_child(&root, 0, &win(&["C:\\", "Windows"])));
+        assert!(is_system_root_child(&root, 0, &win(&["C:\\", "ProgramData"])));
+        assert!(!is_system_root_child(&root, 0, &win(&["C:\\", "Program Files"])));
+        assert!(!is_system_root_child(&win(&["C:\\", "Games"]), 0, &win(&["C:\\", "Games", "bin"])));
     }
 
     #[test]
@@ -990,6 +1082,30 @@ mod tests {
         assert!(is_boring(&win(&["C:", "Games", "Hades", "unins000.exe"])));
         assert!(is_boring(&win(&["C:", "Games", "Hades", "vcredist_x64.exe"])));
         assert!(!is_boring(&win(&["C:", "Games", "Hades", "Hades.exe"])));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_mode_finds_native_linux_programs_without_extensions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join("orbit-linux-executable-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("game-bin");
+        let script = dir.join("start.sh");
+        let readme = dir.join("readme.txt");
+        std::fs::write(&binary, b"ELF").unwrap();
+        std::fs::write(&script, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&readme, b"notes").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&readme, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(is_executable(&binary));
+        assert!(is_executable(&script));
+        assert!(!is_executable(&readme));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
