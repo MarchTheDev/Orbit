@@ -5,7 +5,8 @@ import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
 import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
-import { SaveButton } from '../ui/SaveButton';
+import { WineSettings } from './WineSettings';
+import { buildName } from '../../utils/proton';
 import { say } from '../../utils/toast';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
@@ -17,7 +18,7 @@ const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: ty
   {
     kind: 'wine',
     label: 'Wine',
-    hint: 'A Windows .exe, started through Wine. Name a prefix if the game has one.',
+    hint: 'A Windows .exe, through Wine or a Proton build. Name a prefix if the game has one.',
     icon: Wine,
   },
   { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
@@ -43,8 +44,12 @@ function summarise(t: LaunchTarget, companions: Companion[]): string {
       // Chosen but not yet pointed at anything: say so rather than show a
       // blank line where the program should be.
       return t.path.trim() ? `${t.path}${extra}` : `No program chosen yet${extra}`;
-    case 'wine':
-      return t.path.trim() ? `Wine · ${t.path}${extra}` : `Wine, no program chosen yet${extra}`;
+    case 'wine': {
+      // Which build it runs on matters as much as which program it is.
+      const build = buildName(t.proton);
+      const through = build ? `Proton ${build}` : 'Wine';
+      return t.path.trim() ? `${through} · ${t.path}${extra}` : `${through}, no program chosen yet${extra}`;
+    }
     case 'steam':
       return `Steam app ${t.appId}${extra}`;
     case 'lutris':
@@ -165,6 +170,14 @@ export function LaunchEditor({
   dirtyRef.current = dirty;
   const saveRef = useRef(save);
   saveRef.current = save;
+  // Typing saves itself: a change that settles for a blink is written, with no
+  // button to remember and no toast to shout over every pause. A switch of
+  // kind or a picked file is written on the spot, above.
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = window.setTimeout(() => saveRef.current(false), 400);
+    return () => window.clearTimeout(timer);
+  }, [dirty, target, args, companions]);
   useEffect(() => {
     if (!saveOnClose) return;
     return () => {
@@ -196,8 +209,8 @@ export function LaunchEditor({
 
         {target.kind === 'executable' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <label className="block flex-1">
+            <div className="flex min-w-0 gap-2">
+              <label className="block min-w-0 flex-1">
                 <span className={labelCls}>Program</span>
                 <input
                   className={inputCls}
@@ -229,8 +242,8 @@ export function LaunchEditor({
 
         {target.kind === 'wine' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <label className="block flex-1">
+            <div className="flex min-w-0 gap-2">
+              <label className="block min-w-0 flex-1">
                 <span className={labelCls}>Windows program</span>
                 <input
                   className={inputCls}
@@ -259,7 +272,7 @@ export function LaunchEditor({
                 className={inputCls}
                 value={target.prefix ?? ''}
                 onChange={(e) => setTarget({ ...target, prefix: e.target.value || null })}
-                placeholder="Leave empty for Wine's default prefix"
+                placeholder="Leave empty for Wine's default prefix, or this game's own Proton bottle"
                 spellCheck={false}
               />
             </label>
@@ -277,6 +290,12 @@ export function LaunchEditor({
               <span className={labelCls}>Arguments</span>
               <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
             </label>
+            <WineSettings
+              proton={target.proton ?? null}
+              tweaks={target.tweaks}
+              onProton={(path) => setTarget({ ...target, proton: path })}
+              onTweaks={(next) => setTarget({ ...target, tweaks: next })}
+            />
           </div>
         )}
 
@@ -327,8 +346,8 @@ export function LaunchEditor({
           <div className="space-y-2">
             {companions.map((c, i) => (
               <div key={i} className="rounded-lg border border-line bg-panel p-2.5">
-                <div className="flex gap-2">
-                  <label className="block flex-1">
+                <div className="flex min-w-0 gap-2">
+                  <label className="block min-w-0 flex-1">
                     <span className={labelCls}>Program</span>
                     <input
                       className={inputCls}
@@ -377,15 +396,7 @@ export function LaunchEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
-        {!saveOnClose && (
-          <SaveButton
-            onSave={() => save()}
-            label="Save launch settings"
-            savedLabel="Launch settings saved"
-            className="!px-3 !py-1.5 !text-xs"
-          />
-        )}
-        {!saveOnClose && !dirty && <span className="text-[11px] text-muted">Nothing to change</span>}
+        <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
         <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>
     </section>

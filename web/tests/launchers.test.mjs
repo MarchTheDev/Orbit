@@ -69,8 +69,8 @@ check(
 );
 console.log('which desktop sees which launcher');
 check(
-  'Windows does not offer Lutris or Heroic',
-  !launcherOn('Lutris', 'windows') && !launcherOn('Heroic Games Library', 'windows'),
+  'Windows excludes Linux-only Lutris and keeps cross-platform Heroic',
+  !launcherOn('Lutris', 'windows') && launcherOn('Heroic Games Library', 'windows'),
 );
 check(
   'Linux keeps Heroic and Lutris, and drops the Windows-only clients',

@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./index.css";
 import App from "./App";
 import { OverlayView } from "./components/OverlayView";
+import { ThemeManagerWindow } from "./components/ThemeManagerWindow";
 import { isNative } from "./services/native";
 
 function overlayWindow(): boolean {
@@ -16,7 +17,17 @@ function overlayWindow(): boolean {
   }
 }
 
-const Root = overlayWindow() ? OverlayView : App;
+function themeManagerWindow(): boolean {
+  if (new URLSearchParams(window.location.search).has('theme-manager')) return true;
+  if (!isNative()) return false;
+  try {
+    return getCurrentWindow().label === "theme-manager";
+  } catch {
+    return false;
+  }
+}
+
+const Root = overlayWindow() ? OverlayView : themeManagerWindow() ? ThemeManagerWindow : App;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -18,6 +18,7 @@ import {
   overlayHold,
   overlayLengths,
   overlayMode,
+  isLinux,
   overlayOpen,
   overlayOpenKind,
   overlayPins,
@@ -37,6 +38,7 @@ import {
 } from '../services/native';
 import { OVERLAY_BOXES, type OverlayBoxId, type Settings } from '../types';
 import { padNearest } from '../utils/gamepad';
+import { defaultSpots, fitsWindow } from '../utils/overlayLayout';
 import { cn } from '../utils/cn';
 import { Logo } from './ui/Logo';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
@@ -60,7 +62,10 @@ const READY_TITLE = 'Overlay deployed in Orbit';
 const FPS_ARM_MS = 3000;
 type OverlayToast = { title: string; detail: string; kind: OverlayToastKind };
 const PAGE_SIZE = 4;
-const LAYOUT_REVISION = 4;
+let PLATFORM_LINUX = false;
+// 7: Linux's default arrangement no longer reserves space for an FPS card.
+// Unchanged old default positions are migrated upward; custom positions stay put.
+const LAYOUT_REVISION = 7;
 const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> = {
   fps: { w: 176, h: 112, minW: 120, minH: 88 },
   clock: { w: 176, h: 112, minW: 120, minH: 88 },
@@ -203,49 +208,16 @@ function mixId(node: Element | null): string | null {
   return node?.closest('[data-mix]')?.getAttribute('data-mix') ?? null;
 }
 
-function defaults(width: number, height: number): Record<BoxId, Place> {
-  const edge = 24;
-  const gap = 16;
-  const fps = { x: edge, y: edge, w: BOX.fps.w, h: BOX.fps.h };
-  const clock = { x: edge, y: fps.y + BOX.fps.h + gap, w: BOX.clock.w, h: BOX.clock.h };
-  const audioY = clock.y + BOX.clock.h + gap;
-  const audio = {
-    x: edge,
-    y: audioY,
-    w: BOX.audio.w,
-    h: Math.max(BOX.audio.minH, Math.min(BOX.audio.h, height - audioY - edge)),
-  };
-  const performance = {
-    x: edge + BOX.audio.w + gap,
-    y: edge,
-    w: BOX.performance.w,
-    h: BOX.performance.h,
-  };
-  const gallery = {
-    x: Math.max(edge, width - BOX.gallery.w - edge),
-    y: edge,
-    w: BOX.gallery.w,
-    h: BOX.gallery.h,
-  };
-  const player = {
-    x: Math.max(edge, width - BOX.player.w - edge),
-    y: Math.max(edge, Math.min(height - BOX.player.h - edge, gallery.y + BOX.gallery.h + gap)),
-    w: BOX.player.w,
-    h: BOX.player.h,
-  };
-  const notes = {
-    x: performance.x,
-    y: performance.y + BOX.performance.h + gap,
-    w: BOX.notes.w,
-    h: BOX.notes.h,
-  };
-  const capture = {
-    x: Math.max(edge, Math.round((width - BOX.capture.w) / 2)),
-    y: Math.max(edge, height - BOX.capture.h - edge),
-    w: BOX.capture.w,
-    h: BOX.capture.h,
-  };
-  return { fps, clock, audio, performance, gallery, player, notes, capture };
+/**
+ * Where the boxes start out.
+ *
+ * Two stacks: what the machine is doing down the left - the frame rate, the
+ * clock, the mixer, and what the game costs - and what the player is holding
+ * down the right: the gallery, what is playing, and the notes on it. Every one
+ * of them can be dragged anywhere; this is only the first arrangement.
+ */
+function defaults(width: number, height: number, omitFps = PLATFORM_LINUX): Record<BoxId, Place> {
+  return defaultSpots(BOX, width, height, omitFps);
 }
 
 function placeOf(layout: NonNullable<Settings['overlay']>['layout'], id: BoxId, fallback: Place): Place {
@@ -267,31 +239,6 @@ function gigabytes(bytes: number, roundTotal = false): string {
   return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
-/**
- * Where the open panel has something to click, in physical screen pixels.
- *
- * The panel covers the whole screen, so on Windows it also takes every click
- * on it. A player who opens the overlay over a game - or over the desktop -
- * then cannot click anything else until it is closed. Only the places with
- * something to click are handed to the native side, which lets the rest of
- * the screen through to whatever is behind the panel.
- */
-function openHits(): { x: number; y: number; w: number; h: number }[] {
-  const scale = window.devicePixelRatio || 1;
-  // A few pixels of slack, so the edge of a box does not flicker between
-  // taking the pointer and letting it go.
-  const slack = 6;
-  return Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-hit="1"]')).map((node) => {
-    const rect = node.getBoundingClientRect();
-    return {
-      x: rect.left * scale - slack,
-      y: rect.top * scale - slack,
-      w: rect.width * scale + slack * 2,
-      h: rect.height * scale + slack * 2,
-    };
-  });
-}
-
 function physicalHits(): { x: number; y: number; w: number; h: number }[] {
   const scale = window.devicePixelRatio || 1;
   return Array.from(document.querySelectorAll<HTMLElement>('[data-pin="1"]')).map((node) => {
@@ -306,7 +253,7 @@ function physicalHits(): { x: number; y: number; w: number; h: number }[] {
 }
 
 /**
- * The panel opened with Alt+X or Start+Select.
+ * The panel opened with the configured keyboard shortcut or Start+Select.
  *
  * It is its own window, so it does not load the library. A controller moves
  * these buttons from the desktop reader. The browser pad is not asked.
@@ -319,9 +266,14 @@ export function OverlayView() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [tab, setTab] = useState<GalleryItem['kind']>('screenshot');
   const [ready, setReady] = useState(false);
+  const [linux, setLinux] = useState(false);
   const [resting, setResting] = useState(false);
   const [awake, setAwake] = useState(true);
   const [places, setPlaces] = useState<Record<BoxId, Place>>(() => defaults(1280, 720));
+  /** Whether this page has been told the panel is up. */
+  const shownSeen = useRef(false);
+  /** The arrangement the player made, if any: preferred whenever it fits. */
+  const savedPlaces = useRef<Record<BoxId, Place> | null>(null);
   const [hidden, setHidden] = useState<BoxId[]>([]);
   const [shutterOn, setShutterOn] = useState(true);
   const [shutterVolume, setShutterVolume] = useState(40);
@@ -395,11 +347,32 @@ export function OverlayView() {
   };
 
   const rememberLayout = async (next: Record<BoxId, Place>) => {
+    savedPlaces.current = next;
     setPlaces(next);
     patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
     await overlayPins(anyPinned(next, hiddenRef.current));
     window.setTimeout(() => void overlayHits(physicalHits()), 40);
   };
+
+  // Settings can discard a damaged saved arrangement without resetting any
+  // other overlay preferences. If this window is alive, apply the new layout
+  // immediately; otherwise the version-zero setting makes startup regenerate it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen('overlay-layout-reset', () => {
+      const next = defaults(window.innerWidth || 1280, window.innerHeight || 720, linux);
+      savedPlaces.current = next;
+      setPlaces(next);
+      const current = settingsRef.current;
+      if (current) {
+        settingsRef.current = { ...current, overlay: { ...current.overlay, layout: next, layoutRevision: LAYOUT_REVISION } };
+      }
+      void emit('overlay-settings', { layout: next, layoutRevision: LAYOUT_REVISION });
+      void overlayPins(false);
+      window.setTimeout(() => void overlayHits(physicalHits()), 40);
+    }).then((stop) => { unlisten = stop; }).catch(() => undefined);
+    return () => unlisten?.();
+  }, [linux]);
 
   const flash = (title: string, detail: string, kind: OverlayToastKind = 'screenshot') => {
     // A save the player only learns about from a passing note is bad enough;
@@ -519,14 +492,21 @@ export function OverlayView() {
   };
 
   useEffect(() => {
+    let disposed = false;
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
-    const size = () => defaults(window.innerWidth, window.innerHeight);
-    void Promise.all([loadSettings(), overlayMode()]).then(([settings, mode]) => {
-      applyTheme(settings.theme);
+    void Promise.all([loadSettings(), overlayMode(), isLinux()]).then(([settings, mode, linuxPlatform]) => {
+      if (disposed) return;
+      PLATFORM_LINUX = linuxPlatform;
+      setLinux(linuxPlatform);
+      // OverlayView is mounted in its own WebView, not inside App, so it must
+      // opt into the Linux rendering safeguards independently.
+      document.documentElement.classList.toggle('orbit-linux', linuxPlatform);
+      applyTheme(settings.theme, settings.customThemes ?? []);
       applyFont(settings.fontFamily ?? 'system');
       settingsRef.current = settings;
-      const base = size();
+      const base = defaults(window.innerWidth, window.innerHeight, linuxPlatform);
+      const oldBase = defaults(window.innerWidth, window.innerHeight, false);
       const layout = settings.overlay?.layout;
       const revision = settings.overlay?.layoutRevision ?? 0;
       const savedAudio = placeOf(layout, 'audio', base.audio);
@@ -544,7 +524,30 @@ export function OverlayView() {
             gallery: placeOf(layout, 'gallery', base.gallery),
             capture: placeOf(layout, 'capture', base.capture),
           }
-        : revision === 3
+        : revision === 6
+          ? (() => {
+              const next = {
+                fps: placeOf(layout, 'fps', base.fps),
+                performance: placeOf(layout, 'performance', base.performance),
+                clock: placeOf(layout, 'clock', base.clock),
+                notes: placeOf(layout, 'notes', base.notes),
+                audio,
+                player: placeOf(layout, 'player', base.player),
+                gallery: placeOf(layout, 'gallery', base.gallery),
+                capture: placeOf(layout, 'capture', base.capture),
+              };
+              if (linuxPlatform) {
+                (['clock', 'audio', 'performance'] as const).forEach((id) => {
+                  const saved = layout?.[id];
+                  const previous = oldBase[id];
+                  if (saved && saved.x === previous.x && saved.y === previous.y) {
+                    next[id] = { ...base[id], pinned: !!saved.pinned };
+                  }
+                });
+              }
+              return next;
+            })()
+          : revision === 3
           ? {
               fps: placeOf(layout, 'fps', base.fps),
               performance: placeOf(layout, 'performance', base.performance),
@@ -572,13 +575,26 @@ export function OverlayView() {
         patchOverlay({ layout: next, layoutRevision: LAYOUT_REVISION });
       }
       const hiddenBoxes = (settings.overlay?.hidden ?? []).filter((id): id is BoxId => OVERLAY_BOXES.some((box) => box.id === id));
-      setPlaces(next);
+      // The saved arrangement is used when it is the current one and this
+      // window can hold it. A layout made on a bigger screen is not clamped
+      // into a smaller one - clamping three columns into a narrower window is
+      // exactly the heap of overlapping boxes - it waits until there is room
+      // for it again, and the arrangement designed for this window is used
+      // meanwhile.
+      if (revision >= LAYOUT_REVISION) savedPlaces.current = next;
+      const usable = savedPlaces.current && fitsWindow(savedPlaces.current, window.innerWidth, window.innerHeight);
+      setPlaces(usable ? savedPlaces.current! : base);
       setHidden(hiddenBoxes);
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
       setLiveStats(settings.overlay?.liveStats !== false);
-      setResting(mode.resting && !mode.open);
-      setAwake(mode.open || mode.resting);
+      // `overlay-shown` is the panel's own word, and it can arrive before this
+      // read comes back. A page that has already been told it is up must not
+      // be told again by a slower answer that it is not: on a slow machine
+      // that is a panel which draws for one frame and then hides itself.
+      const open = shownSeen.current || mode.open;
+      setResting(!shownSeen.current && mode.resting && !mode.open);
+      setAwake(open || mode.resting);
       void overlayPins(anyPinned(next, hiddenBoxes));
       setReady(true);
     }).catch(() => setReady(true));
@@ -586,14 +602,18 @@ export function OverlayView() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         void overlayHide('Escape');
+        return;
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
         event.preventDefault();
+        event.stopPropagation();
         move(1, false);
       }
       if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
         event.preventDefault();
+        event.stopPropagation();
         move(-1, false);
       }
     };
@@ -609,6 +629,7 @@ export function OverlayView() {
     let stopRest = () => {};
     let stopPad = () => {};
     void listen('overlay-shown', () => {
+      shownSeen.current = true;
       setAwake(true);
       setResting(false);
       refresh();
@@ -796,6 +817,8 @@ export function OverlayView() {
       stopAxes = unlisten;
     }).catch(() => undefined);
     return () => {
+      disposed = true;
+      document.documentElement.classList.remove('orbit-linux');
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('pointerdown', onPointer, true);
       stopShown();
@@ -846,7 +869,7 @@ export function OverlayView() {
   useEffect(() => {
     const title = status?.readyNotice;
     if (!title) return;
-    // The title says it. A second line explaining Alt+X was noise on a toast
+    // The title says it. A second line explaining the opening shortcut was noise on a toast
     // that is already gone by the time the game's own intro finishes.
     setToast({ title: status?.readyNotice || READY_TITLE, detail: '', kind: 'ready' });
     window.clearTimeout(toastTimer.current);
@@ -861,6 +884,43 @@ export function OverlayView() {
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 
+  // A capture a shortcut took while this panel was up. The desktop side does
+  // the work - that is what makes a shortcut work with a game in front - so it
+  // is the one that says what happened, and this is where the toast goes,
+  // because a card behind the panel would be a second confirmation the player
+  // cannot see through.
+  useEffect(() => {
+    let stop = () => {};
+    void listen<{ kind: string; ok: boolean; message: string }>('overlay-captured', (event) => {
+      const { kind, ok, message } = event.payload;
+      if (!ok) {
+        flash('Capture failed', message, 'error');
+        refresh();
+        return;
+      }
+      const current = settingsRef.current;
+      const on = current ? current.overlay?.shutter !== false : shutterOn;
+      const volume = current?.overlay?.shutterVolume ?? shutterVolume;
+      if (on) void playShutter(volume);
+      const stoppedRecording = kind === 'recording' && /^Saved the recording/i.test(message);
+      if (kind === 'recording' && !stoppedRecording) {
+        flash('Recording started', 'Your recording is underway', 'recording');
+      } else {
+        const title = kind === 'replay' ? 'Replay saved' : kind === 'recording' ? 'Recording saved' : 'Screenshot saved';
+        flash(title, 'Saved to Gallery · copied to clipboard', kind === 'replay' ? 'replay' : kind === 'recording' ? 'recording' : 'screenshot');
+      }
+      refresh();
+    })
+      .then((unlisten) => {
+        stop = unlisten;
+      })
+      .catch(() => undefined);
+    return () => stop();
+    // The toast helpers read settings through a ref, so the listener is made
+    // once rather than rebuilt whenever one of them changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // A page that is still drawn says so once a second. The native side uses
   // this to tell "the overlay closed" from "the window is there but empty",
   // and rebuilds the window in the second case instead of leaving a hole.
@@ -872,16 +932,56 @@ export function OverlayView() {
     return () => window.clearInterval(timer);
   }, [ready, awake]);
 
-  // Where the panel has something to click, told to the native side.
-  //
-  // The panel covers the whole screen, so on Windows it also takes every click
-  // on it. Open, that is the wrong bargain: a player who opens the overlay
-  // cannot click anything else until it is closed. Only the boxes and the
-  // floating menus are reported, and the rest of the screen is let through to
-  // whatever is behind the panel. A resting panel reports its pins the same way.
+  // The pile check. If every box is standing in the same corner, whatever got
+  // them there was not a screen they were ever arranged on: stand them out the
+  // way this window was designed to start instead.
   useEffect(() => {
     if (!ready || !awake) return;
-    const send = () => void overlayHits(resting ? physicalHits() : openHits());
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => {
+        const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-overlay-box]'))
+          .map((node) => node.getBoundingClientRect())
+          .filter((rect) => rect.width > 4 && rect.height > 4);
+        if (rects.length < 2) return;
+        const piled = rects.every(
+          (rect) => Math.abs(rect.left - rects[0].left) < 4 && Math.abs(rect.top - rects[0].top) < 4,
+        );
+        if (piled) setPlaces(defaults(window.innerWidth, window.innerHeight));
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      if (second) window.cancelAnimationFrame(second);
+    };
+  }, [ready, awake, places]);
+
+  // A screen that changes size, or a panel opened on a different one, gets an
+  // arrangement that fits it: the player's own if it has come back into room,
+  // the designed one otherwise. Nothing is written back, so going back to the
+  // bigger screen gives the player their arrangement again.
+  useEffect(() => {
+    if (!ready) return;
+    const fit = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      setPlaces((current) => {
+        const saved = savedPlaces.current;
+        if (saved && fitsWindow(saved, width, height)) return saved;
+        return fitsWindow(current, width, height) ? current : defaults(width, height);
+      });
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [ready, linux]);
+
+  // Resting pins are the only native hit regions. While open, the full window
+  // receives pointer input; sending stale box rectangles must never put it back
+  // into platform click-through mode after a click or a rerender.
+  useEffect(() => {
+    if (!ready || !awake) return;
+    const send = () => void overlayHits(resting ? physicalHits() : []);
     send();
     const timer = window.setInterval(send, 250);
     window.addEventListener('resize', send);
@@ -965,6 +1065,7 @@ export function OverlayView() {
       screenshotDirectory: overlay?.screenshotDirectory ?? '',
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
+      gameOnly: overlay?.gameOnly === true,
     });
     setStatus((current) => (current ? { ...current, seconds } : current));
   };
@@ -1046,7 +1147,7 @@ export function OverlayView() {
 
   const resetSize = (id: BoxId) => {
     const current = placesRef.current;
-    const base = defaults(window.innerWidth, window.innerHeight)[id];
+    const base = defaults(window.innerWidth, window.innerHeight, linux)[id];
     const next = { ...current, [id]: { ...current[id], w: base.w, h: base.h } };
     placesRef.current = next;
     void rememberLayout(next);
@@ -1072,7 +1173,7 @@ export function OverlayView() {
     setNoteError('');
   }, [status]);
 
-  const wantFps = liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
+  const wantFps = !linux && liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
   const wantPerformance = liveStats && awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
   const wantStats = wantFps || wantPerformance;
   // Opening the panel is the moment the game is most likely to be redrawing
@@ -1135,7 +1236,7 @@ export function OverlayView() {
   const pages = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageItems = shownItems.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  const visible = (id: BoxId) => awake && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
+  const visible = (id: BoxId) => awake && !(linux && id === 'fps') && !hidden.includes(id) && (!resting || !!places[id]?.pinned);
   const padOn = (id: BoxId) => padFocus?.level === 'box' && padFocus.id === id;
   const toggleBox = (id: BoxId) => {
     const next = hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id];
@@ -1166,12 +1267,10 @@ export function OverlayView() {
 
   return (
     <div className="relative h-full text-white">
-      {/* The dim only dims. It used to close the panel on any click, which
-          meant a click meant for the game quietly shut the overlay the player
-          had just opened. The whole screen outside the boxes is the game's now
-          - the native side lets those clicks through - so the dim answers
-          nothing at all. Escape, the pad's B, or a box's own close button end
-          the panel. */}
+      {/* When open, the native window receives clicks across the screen so the
+          boxes remain interactive. Empty glass does not dismiss the panel;
+          Escape, the pad's B, the close buttons, and the hotkey are deliberate
+          ways out. */}
       {!resting && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
       {toast && ToastIcon && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-[100] flex justify-center px-4">
@@ -1439,7 +1538,7 @@ export function OverlayView() {
           {boxesOpen && (
             <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="flex flex-wrap gap-1.5">
-                {OVERLAY_BOXES.map((box) => {
+                {OVERLAY_BOXES.filter((box) => !linux || box.id !== 'fps').map((box) => {
                   const shown = !hidden.includes(box.id);
                   return (
                     <button
@@ -1530,17 +1629,24 @@ function Box({
   scroll?: boolean;
   children: ReactNode;
 }) {
+  // A place that comes to the screen with a hole in it (a damaged save, a
+  // paint race, a number that was never one) must not drag the whole grid into
+  // the corner it defaults to: the answer designed for this window stands in.
+  const p =
+    Number.isFinite(place.x) && Number.isFinite(place.y)
+      ? place
+      : defaults(window.innerWidth || 1280, window.innerHeight || 720)[id];
   return (
     <aside
       data-overlay-section={section}
       data-overlay-box={id}
       data-overlay-hit="1"
-      data-pin={place.pinned ? '1' : '0'}
+      data-pin={p.pinned ? '1' : '0'}
       className={cn(
         'pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
         padSelected && 'orbit-box-focus',
       )}
-      style={{ left: place.x, top: place.y, width: place.w ?? BOX[id].w, height: place.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
+      style={{ left: p.x, top: p.y, width: p.w ?? BOX[id].w, height: p.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
         className="flex cursor-grab items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"

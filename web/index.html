@@ -20,7 +20,12 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main style="box-sizing:border-box;display:grid;place-content:center;gap:12px;min-height:100vh;padding:32px;color:#f3f1fa;font:15px/1.5 system-ui,sans-serif;text-align:center">
+        <strong style="font-size:24px">Orbit is starting…</strong>
+        <span>If this message stays here, Orbit’s interface did not load. Launch <code>orbit</code> from a terminal and share the errors it prints.</span>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

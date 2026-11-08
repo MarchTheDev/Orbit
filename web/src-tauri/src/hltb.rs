@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +63,7 @@ struct SearchReply {
 /// The session a search is allowed through with. Older builds also expected a
 /// honeypot pair; the current one hands back a token on its own, so the pair is
 /// optional and only sent when it is actually there.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 struct Session {
     #[serde(default)]
     token: String,
@@ -82,6 +82,45 @@ fn cache() -> &'static Mutex<HashMap<String, HltbData>> {
 fn working_endpoint() -> &'static Mutex<Option<String>> {
     static FOUND: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     FOUND.get_or_init(|| Mutex::new(None))
+}
+
+/// How long a session handed out by the site is trusted for.
+///
+/// The site mints one for a browsing session and its own front end keeps it for
+/// many searches, so a few minutes is well inside what it expects. Forgetting
+/// it sooner than it expires is free - the next lookup mints another one - and
+/// forgetting it later would turn a stale token into a lookup that could not
+/// answer, which is why the clock is there at all.
+const SESSION_TTL: Duration = Duration::from_secs(600);
+
+/// The session last handed out, the endpoint that gave it, and when.
+///
+/// Minting one is a round trip of its own, and a search is two round trips
+/// without it. Keeping it is simply what the site's own front end does.
+fn session_store() -> &'static Mutex<Option<(String, Session, Instant)>> {
+    static SESSION: OnceLock<Mutex<Option<(String, Session, Instant)>>> = OnceLock::new();
+    SESSION.get_or_init(|| Mutex::new(None))
+}
+
+/// A session good for this endpoint, if one was handed out recently enough.
+fn remembered_session(endpoint: &str) -> Option<Session> {
+    let kept = session_store().lock().ok()?;
+    match kept.as_ref() {
+        Some((from, session, at)) if from == endpoint && at.elapsed() < SESSION_TTL => Some(session.clone()),
+        _ => None,
+    }
+}
+
+fn keep_session(endpoint: &str, session: &Session) {
+    if let Ok(mut kept) = session_store().lock() {
+        *kept = Some((endpoint.to_string(), session.clone(), Instant::now()));
+    }
+}
+
+fn forget_session() {
+    if let Ok(mut kept) = session_store().lock() {
+        *kept = None;
+    }
 }
 
 /// Search for a game by title and return completion estimates.
@@ -152,14 +191,53 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
     Err(last_error)
 }
 
-/// One search against one endpoint: mint a session, then ask.
+/// One search against one endpoint, with a session reused where possible.
+///
+/// A search is a handshake and then a question. The handshake is skipped when a
+/// session from this endpoint is still in hand, which is half the round trips a
+/// lookup costs - the difference a plan makes on the first page it opens. A
+/// session the site has stopped honouring is the one refusal worth asking
+/// again for; every other failure is an answer of its own.
 async fn search(
     client: &reqwest::Client,
     endpoint: &str,
     title: &str,
 ) -> Result<Option<HltbData>, String> {
-    let session = handshake(client, endpoint).await?;
+    if let Some(session) = remembered_session(endpoint) {
+        match ask(client, endpoint, title, &session).await {
+            Ok(found) => return Ok(found),
+            Err(Refusal::Stale) => forget_session(),
+            Err(Refusal::Failed(message)) => return Err(message),
+        }
+    }
 
+    let session = handshake(client, endpoint).await?;
+    match ask(client, endpoint, title, &session).await {
+        Ok(found) => {
+            keep_session(endpoint, &session);
+            Ok(found)
+        }
+        Err(Refusal::Stale) => Err(format!("HowLongToBeat would not open a session for {endpoint}.")),
+        Err(Refusal::Failed(message)) => Err(message),
+    }
+}
+
+/// Why a search went unanswered.
+enum Refusal {
+    /// The session is no longer good, so the question is worth asking once
+    /// more with a fresh one.
+    Stale,
+    /// Anything else, which asking again would only repeat.
+    Failed(String),
+}
+
+/// One search with a session already in hand.
+async fn ask(
+    client: &reqwest::Client,
+    endpoint: &str,
+    title: &str,
+    session: &Session,
+) -> Result<Option<HltbData>, Refusal> {
     // The same query the site's own search box builds.
     let body = serde_json::json!({
         "searchType": "games",
@@ -198,20 +276,24 @@ async fn search(
     let reply = req
         .send()
         .await
-        .map_err(|e| format!("HowLongToBeat is unreachable: {e}"))?;
+        .map_err(|e| Refusal::Failed(format!("HowLongToBeat is unreachable: {e}")))?;
     let status = reply.status();
     let text = reply
         .text()
         .await
-        .map_err(|e| format!("Could not read the HowLongToBeat reply: {e}"))?;
+        .map_err(|e| Refusal::Failed(format!("Could not read the HowLongToBeat reply: {e}")))?;
+    // A session that has aged out is refused rather than explained.
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(Refusal::Stale);
+    }
     if !status.is_success() {
-        return Err(format!(
+        return Err(Refusal::Failed(format!(
             "HowLongToBeat answered {status} for {endpoint}."
-        ));
+        )));
     }
 
     let reply: SearchReply = serde_json::from_str(&text)
-        .map_err(|e| format!("Unexpected HowLongToBeat reply: {e}"))?;
+        .map_err(|e| Refusal::Failed(format!("Unexpected HowLongToBeat reply: {e}")))?;
 
     Ok(pick_best(&reply.data, title).map(|best| {
         log::debug!(
@@ -489,6 +571,21 @@ mod tests {
     fn a_path_without_init_is_not_a_search_endpoint() {
         let js = r#"fetch("/api/search/site");fetch("/api/stats")"#;
         assert!(endpoints_in(js).is_empty());
+    }
+
+    #[test]
+    fn a_session_is_only_kept_for_the_endpoint_that_gave_it() {
+        forget_session();
+        let session = Session {
+            token: "abc".to_string(),
+            hp_key: None,
+            hp_val: None,
+        };
+        keep_session("/api/search/site", &session);
+        assert!(remembered_session("/api/search/site").is_some());
+        assert!(remembered_session("/api/find").is_none());
+        forget_session();
+        assert!(remembered_session("/api/search/site").is_none());
     }
 
     #[test]

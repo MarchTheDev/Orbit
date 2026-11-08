@@ -5,6 +5,11 @@ export function inLibraryShelf(game: Game): boolean {
   return !game.planned && (game.inLibrary || onDisk(game));
 }
 
+/** The Library total, excluding planned-only Backlog entries. */
+export function libraryCount(games: readonly Game[]): number {
+  return games.filter(inLibraryShelf).length;
+}
+
 /**
  * Whether the Backlog page lists this game.
  *
@@ -15,7 +20,16 @@ export function onBacklogPage(game: Game, syncLibrary: boolean, on: readonly str
   if (game.planned) return false;
   if (off.includes(game.id)) return false;
   if (on.includes(game.id)) return true;
-  return onDisk(game) || !game.inLibrary || syncLibrary;
+  // Sync controls every Library game, whether it has a path or was added by
+  // title for a console. Backlog-only owned games stay here independently.
+  return !inLibraryShelf(game) || syncLibrary;
+}
+
+/** Whether a game belongs in the Journal list, including explicit overrides. */
+export function onJournalPage(id: string, syncLibrary: boolean, on: readonly string[] = [], off: readonly string[] = []): boolean {
+  if (off.includes(id)) return false;
+  if (on.includes(id)) return true;
+  return syncLibrary;
 }
 
 /**

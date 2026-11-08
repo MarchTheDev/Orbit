@@ -10,6 +10,7 @@ import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
 import { isSteamGame } from '../utils/steam';
+import { ArtworkThumb } from './ui/ArtworkThumb';
 
 /**
  * Bring games over from the Steam library installed on this PC.
@@ -315,6 +316,7 @@ export function SteamImportModal({
                       disabled={known}
                       title={known ? 'Already in the library' : r.name}
                     />
+                    <ArtworkThumb title={r.name} appId={r.appId} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{r.name}</p>
                       <p className="truncate font-mono text-[11px] text-muted">

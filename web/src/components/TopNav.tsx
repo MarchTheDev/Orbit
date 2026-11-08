@@ -1,4 +1,4 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon } from 'lucide-react';
+import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
@@ -63,6 +63,7 @@ export function TopNav({
   showMusic,
   showBars,
   onOpenSettings,
+  onTv,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -82,6 +83,8 @@ export function TopNav({
   showMusic: boolean;
   /** Whether the controls dance while the music plays. */
   showBars: boolean;
+  /** Fills the screen with TV mode, the library as a couch sees it. */
+  onTv: () => void;
 }) {
   const tabs = orderedTabs(order);
   const tabKey = tabs.map((tab) => tab.id).join('|');
@@ -157,6 +160,18 @@ export function TopNav({
         </nav>
 
         <div className="flex-1" />
+        {/* Beside the sound, because both are about the room rather than the
+            library: one is what you hear and the other is what you sit back
+            for. A plain television, drawn like the icons around it: the full
+            screen it opens is the loud thing, not the button. */}
+        <button
+          onClick={onTv}
+          aria-label="TV mode"
+          title="TV mode"
+          className="rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg"
+        >
+          <Tv className="size-5" strokeWidth={1.8} />
+        </button>
         {showMusic && (
           <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
         )}

@@ -1,5 +1,6 @@
 import { RefreshCw, Timer } from 'lucide-react';
 import type { Game } from '../../types';
+import { HltbExtraEstimate } from './HltbExtraEstimate';
 
 /**
  * How far the player has got, as a colour.
@@ -114,6 +115,8 @@ export function HltbCard({
               </div>
             );
           })}
+
+          <HltbExtraEstimate hours={h.mainExtra} className="border-t border-line pt-2" />
 
           {/* A game played past every estimate is worth saying plainly: the
               numbers are other people's averages, not a rule. */}

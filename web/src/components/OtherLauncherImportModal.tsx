@@ -9,6 +9,7 @@ import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { pathPromptFor } from '../data/launchers';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
+import { ArtworkThumb } from './ui/ArtworkThumb';
 
 interface Row extends LauncherGame {
   include: boolean;
@@ -22,9 +23,11 @@ interface Row extends LauncherGame {
  * are added, and they are saved as timer-only games so Orbit never guesses that
  * a game can safely bypass its launcher.
  */
-export function OtherLauncherImportModal({ existing, launcher, path, onPath, onAdd, onClose }: {
+export function OtherLauncherImportModal({ existing, launcher, path, onPath, onAdd, onClose, fetchArtwork = true }: {
   existing: Game[];
   launcher?: OtherLauncher;
+  /** Respect the player's metadata-fetch preference for title-matched art. */
+  fetchArtwork?: boolean;
   /** A folder to search as well as the defaults, kept in settings. */
   path?: string;
   onPath: (path: string) => void;
@@ -286,6 +289,7 @@ export function OtherLauncherImportModal({ existing, launcher, path, onPath, onA
                               disabled={known}
                               title={known ? 'Already in the library' : `Add ${game.name}`}
                             />
+                            <ArtworkThumb title={game.name} lookup={fetchArtwork} />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-fg">{game.name}</p>
                               <p className="mt-0.5 truncate text-[11px] text-muted">

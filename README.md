@@ -41,6 +41,15 @@ story`, written by hand and editable afterwards.
 **Storage** - the games grouped by drive, with how much room every library
 folder takes and a Move button that keeps the library pointing at the game.
 
+**TV mode** - the playable library read from a sofa, laid out the way Playnite's
+fullscreen mode is: the window goes fullscreen, the selected game's own artwork
+fills the screen with its name, its numbers and its Play button over it, and
+everything that can be started sits on one rail of covers along the bottom.
+Nothing is grouped into categories - there is one list, ordered by what you
+played last (or by name, if you switch it) - so the page is decided the moment it
+opens. Arrows walk the rail, Enter plays, Escape leaves; a controller drives the
+same rail. It is the TV button beside the sound controls in the top bar.
+
 ## Starting a game
 
 | Kind | What Orbit does |
@@ -51,6 +60,10 @@ folder takes and a Move button that keeps the library pointing at the game.
 A game can also list programs to start **alongside** it - a frame-rate tool, a
 mod controller. Those start with the game and are never watched, so closing one
 cannot end the session.
+
+The in-game overlay is temporarily disabled in Linux builds while a Linux-native
+implementation is studied for a future version. The rest of Orbit remains
+available, and existing overlay preferences are preserved.
 
 Dropping a program, or a folder holding one, anywhere on the window adds it
 straight away.
@@ -84,12 +97,12 @@ In `\com.orbit.launcher`:
 
 - `orbit.db` - the library, every session and every log note, in SQLite
 - `settings.json` - theme, library folders, and whether to look games up
-- `replay\` - the last few seconds of the game that is running, kept in a
-  temporary file so it costs no memory; removed when the session ends
+- `replay\` - on platforms with overlay capture, the last few seconds of the
+  running game, kept in a temporary file and removed when the session ends
 
-The first two are plain files you can back up or delete, and the replay folder
-never outlives a session. Deleting `orbit.db` empties the library; nothing else
-on the machine is touched.
+The first two are plain files you can back up or delete; where overlay capture
+is available, the replay folder never outlives a session. Deleting `orbit.db`
+empties the library; nothing else on the machine is touched.
 
 ## Layout
 
@@ -98,6 +111,7 @@ web/
   src/                     the interface
     components/            screens and pieces of them
     hooks/                 useLibrary (data), useSession (the running game)
+    components/TvMode.tsx  the fullscreen hub, and how its shelves are chosen
     services/metadata.ts   the store lookup
     services/native.ts     every call into Rust, with browser fallbacks
     services/desktop.ts    the file pickers, links and drag and drop

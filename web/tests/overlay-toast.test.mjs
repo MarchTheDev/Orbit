@@ -212,7 +212,7 @@ check(
     // Only a window that really is above the panel is fought over.
     overlaySource.includes('fn covered_by_game(window: &tauri::WebviewWindow) -> bool') &&
     overlaySource.includes('fills_monitor(monitor, (rect.left, rect.top, rect.right, rect.bottom))') &&
-    /fn guard_panel[\s\S]{0,2600}if !covered_by_game\(&window\) \{\n        return;/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,4200}if !covered_by_game\(&window\) \{\n        return;/.test(overlaySource) &&
     // The part that cannot be refused: the top of the always-on-top group.
     overlaySource.includes('fn topmost(window: &tauri::WebviewWindow)') &&
     overlaySource.includes('SetWindowPos') &&
@@ -227,15 +227,20 @@ check(
     libSource.includes('fn overlay_alive()') &&
     overlaySource.includes('fn revive(app: &AppHandle)') &&
     overlaySource.includes('const PAGE_START: Duration = Duration::from_secs(7)') &&
-    overlaySource.includes('const PAGE_SILENT: Duration = Duration::from_secs(3)') &&
+    /cfg\(target_os = \"linux\"\)\]\nconst PAGE_SILENT: Duration = Duration::from_secs\(30\)/.test(overlaySource) &&
+    /cfg\(not\(target_os = \"linux\"\)\)\]\nconst PAGE_SILENT: Duration = Duration::from_secs\(3\)/.test(overlaySource) &&
+    // A page that has never answered is loading, not dead: rebuilding it threw
+    // away the load it was waiting for, which is the panel that flashed.
+    overlaySource.includes('const PAGE_COLD: Duration = Duration::from_secs(45)') &&
+    /fn guard_panel[\s\S]{0,2400}if quiet\.is_none\(\) \{[\s\S]{0,260}nudge\(&window, since\)/.test(overlaySource) &&
     overlaySource.includes('const REVIVALS: usize = 3') &&
     /fn guard_panel[\s\S]{0,900}let Some\(window\) = app\.get_webview_window\(WINDOW\) else \{[\s\S]{0,200}revive\(app\)/.test(overlaySource) &&
     /fn guard_panel[\s\S]{0,1600}if !window\.is_visible\(\)[\s\S]{0,400}window\.show\(\)/.test(overlaySource) &&
-    /fn guard_panel[\s\S]{0,2600}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,3000}if stale \{[\s\S]{0,220}revive\(app\)/.test(overlaySource) &&
     // A window with no web view in it is an empty frame, not a closed panel.
     overlaySource.includes('fn webview_alive(window: &tauri::WebviewWindow) -> bool') &&
     overlaySource.includes('GetWindow(handle, GW_CHILD)') &&
-    /fn guard_panel[\s\S]{0,2200}if !webview_alive\(&window\) \{[\s\S]{0,160}revive\(app\)/.test(overlaySource) &&
+    /fn guard_panel[\s\S]{0,3000}if !webview_alive\(&window\) \{[\s\S]{0,160}revive\(app\)/.test(overlaySource) &&
     /fn revive[\s\S]{0,1400}show_window\(app\)/.test(overlaySource) &&
     libSource.includes('fn overlay_alive() {') &&
     nativeSource.includes('export function overlayAlive()') &&
@@ -243,7 +248,7 @@ check(
     overlay.includes('window.setInterval(beat, 1000)'),
 );
 check(
-  'the panel writes down what became of it, where Settings can read it',
+  'the panel logs what became of it without a diagnostic panel in Settings',
   overlaySource.includes('static PANEL_DIAG: Mutex<Vec<String>>') &&
     overlaySource.includes('fn note_panel(text: &str)') &&
     overlaySource.includes('fn shown_for() -> String') &&
@@ -256,10 +261,13 @@ check(
     overlaySource.includes('note_panel("its window was hidden while the panel was open; it was shown again")') &&
     overlaySource.includes('note_panel("its window had no web view in it; it was rebuilt")') &&
     nativeSource.includes('diag?: string[]') &&
-    settingsSource2.includes('function PanelDiag()') &&
-    settingsSource2.includes('void overlayStatus().then((status) => {') &&
-    settingsSource2.includes('<PanelDiag />'),
+    !settingsSource2.includes('function PanelDiag()') &&
+    !settingsSource2.includes('<PanelDiag />'),
 );
+check('closing the overlay no longer produces an opened/closed toast',
+  /pub fn close_panel[\s\S]{0,900}note_panel\(&format!\(\"the panel was closed \(\{why\}\)\"\)\)/.test(overlaySource) &&
+    !/pub fn close_panel[\s\S]{0,1200}overlay-toast/.test(overlaySource) &&
+    !overlaySource.includes('fn notify_close(') && !overlaySource.includes('Overlay closed after'));
 check(
   'every native close says who closed the panel',
   // "the panel was closed" with nothing after it was the line that started
@@ -273,25 +281,23 @@ check(
     overlaySource.includes('hide_window(app, &format!("{why} asked again"));') &&
     overlaySource.includes('static TOGGLE_WHY: Mutex<&\'static str>') &&
     /pub fn request_toggle\(why: &'static str\)/.test(overlaySource) &&
-    libSource.includes('overlay::shortcut_toggle();') &&
+    overlaySource.includes('request_toggle("the keyboard shortcut");') &&
     overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
 );
 check(
-  'a held Alt+X opens the panel once instead of opening and closing it',
-  // Windows repeats the hotkey for as long as the keys are down, and the first
-  // repeat is sooner than the debounce. The repeat is what closed the panel a
-  // second after it appeared, with no game anywhere near it.
+  'a held configured keyboard shortcut opens the panel only once',
+  // Press and release events from the registered key, rather than a
+  // hard-coded Alt+X poll, define a fresh keyboard press on every platform.
   overlaySource.includes('static HOTKEY_UP: AtomicBool') &&
-    overlaySource.includes('const OPEN_GRACE: Duration = Duration::from_millis(700)') &&
-    /pub fn shortcut_toggle\(\) \{\n    let fresh = HOTKEY_UP\.swap\(false, Ordering::SeqCst\) \|\| shortcut_keys_up\(\);/.test(overlaySource) &&
-    /fn shortcut_keys_up\(\) -> bool \{[\s\S]{0,400}!\(alt && x\)/.test(overlaySource) &&
-    // The keys are sampled, because the question is what happened in between.
-    /if shortcut_keys_up\(\) \{\n                HOTKEY_UP\.store\(true, Ordering::SeqCst\);/.test(overlaySource) &&
-    libSource.includes('overlay::shortcut_toggle();') &&
-    // Nothing closes in the moment after it opened: that is never a decision.
+    overlaySource.includes('pub fn shortcut_released()') &&
+    /ShortcutState::Pressed => shortcut_toggle\(\),[\s\S]{0,100}ShortcutState::Released => shortcut_released\(\)/.test(overlaySource) &&
+    /pub fn shortcut_toggle\(\) \{\n    if !HOTKEY_UP\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
+    overlaySource.includes('fn install_toggle_shortcut(app: &AppHandle)') &&
+    overlaySource.includes('live.open_shortcut.as_deref().unwrap_or("Alt+X").trim().to_string()') &&
+    overlaySource.includes('The previous shortcut remains active.') &&
     /let just_opened = SHOWN_AT[\s\S]{0,300}at\.elapsed\(\) < OPEN_GRACE/.test(overlaySource) &&
-    overlaySource.includes('note_panel("the panel had only just opened, so the second press was ignored")') &&
-    overlaySource.includes('note_panel("a held-down Alt+X was ignored, so the panel stayed open")'),
+    overlaySource.includes('request_toggle("the keyboard shortcut");') &&
+    overlaySource.includes('request_toggle("the pad\'s Start+Select");'),
 );
 check(
   'a pad the loop has just started reading is not a pressed button',
@@ -326,27 +332,27 @@ check(
     overlay.split("overlayHide('the close button')").length - 1 === 2,
 );
 check(
-  'the open panel lets the screen through where it has nothing to click',
-  // Without this the overlay is a wall: the player opens it and can no longer
-  // click anywhere else on the desk until it is closed again.
-  overlay.includes('function openHits()') &&
-    /function openHits\(\)[\s\S]{0,600}querySelectorAll<HTMLElement>\('\[data-overlay-hit="1"\]'\)/.test(overlay) &&
-    // Every surface with something to click says so: the boxes, the boxes
-    // menu and the two floating layers shared with the library.
+  'clicking empty glass does not dismiss the panel',
+  !overlay.includes('onPointerDown={onBackdrop}') &&
+    !overlay.includes("overlayHide('a click on an empty spot')") &&
+    /if open \{[\s\S]{0,450}set_ignore_cursor_events\(false\)/.test(overlaySource),
+);
+check(
+  'the open panel keeps pointer input; only resting pins use click-through hit regions',
+  !overlay.includes('function openHits()') &&
+    // The boxes and floating menus remain ordinary interactive HTML controls.
     /data-overlay-box=\{id\}\n      data-overlay-hit="1"/.test(overlay) &&
     overlay.includes('data-overlay-hit="1" className="pointer-events-auto absolute left-1/2') &&
     menuSource.includes('data-overlay-hit="1"') &&
     modalSource.includes('data-overlay-hit="1"') &&
-    // Both states report the same way, so the native side always knows.
-    overlay.includes('void overlayHits(resting ? physicalHits() : openHits())') &&
+    overlay.includes('overlayHits(resting ? physicalHits() : [])') &&
     nativeSource.includes('export function overlayHold(on: boolean): Promise<void> {') &&
     overlaySource.includes('pub fn set_hold(on: bool)') &&
     libSource.includes('fn overlay_hold(on: bool)') &&
-    // The press keeps the pointer: half a drag is worse than none.
-    overlaySource.includes('let over = HOLD.load(Ordering::SeqCst) || cursor_over_hits(&window);') &&
-    // Driven in both states, not only while the panel rests against its pins.
+    // A drag that starts on a resting pin remains captured until release.
+    overlaySource.includes('!HOLD.load(Ordering::SeqCst) && !cursor_over_hits(&window)') &&
     /if \(OPEN\.load\(Ordering::SeqCst\) \|\| RESTING\.load\(Ordering::SeqCst\)\)/.test(overlaySource) &&
-    /fn sync_click_through[\s\S]{0,900}let _ = window\.set_ignore_cursor_events\(ignore\);/.test(overlaySource),
+    /guard_panel[\s\S]{0,1700}set_always_on_top\(true\)/.test(overlaySource),
 );
 check(
   'the panel history keeps the reason instead of being overwritten by the close',
@@ -355,12 +361,10 @@ check(
     /fn note_panel[\s\S]{0,600}lines\.push\(line\)/.test(overlaySource) &&
     overlaySource.includes('pub diag: Vec<String>') &&
     nativeSource.includes('diag?: string[]') &&
-    settingsSource2.includes('const [lines, setLines] = useState<string[]>([])') &&
-    settingsSource2.includes('lines.map((line, i) =>') &&
     // Orbit's own destroy is expected; it must not be written down as a reason.
     overlaySource.includes('static CLOSING: AtomicBool') &&
     /fn mark_hidden[\s\S]{0,260}if CLOSING\.swap\(false, Ordering::SeqCst\)/.test(overlaySource) &&
-    /fn close_panel[\s\S]{0,1200}CLOSING\.store\(true, Ordering::SeqCst\);/.test(overlaySource),
+    /fn close_panel[\s\S]{0,2200}CLOSING\.store\(true, Ordering::SeqCst\);/.test(overlaySource),
 );
 check(
   'the game counts as covering the panel only when it is really above it',
@@ -381,7 +385,7 @@ check(
     // The player is told in the main window, since the card is behind the game.
     overlaySource.includes('tell(app, "overlay-covered", &shown_for());') &&
     app.includes("void listen<string>('overlay-covered', () => {") &&
-    app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again."),
+    app.includes("The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again."),
 );
 
 check(
@@ -400,8 +404,9 @@ check(
   // The switch happens before anything is asked for, so "off" means no call at
   // all: no performance counters and no desktop duplication.
   overlay.includes("const [liveStats, setLiveStats] = useState(true);") &&
-    /const wantFps = liveStats && awake/.test(overlay) &&
+    /const wantFps = !linux && liveStats && awake/.test(overlay) &&
     /const wantPerformance = liveStats && awake/.test(overlay) &&
+    overlay.includes("!(linux && id === 'fps')") &&
     statsSource.includes('pub fn install(root: &Path)') &&
     statsSource.includes('let marker = root.join("live-stats-probe");') &&
     statsSource.includes('pub fn suspect() -> bool') &&
@@ -425,7 +430,7 @@ check(
 );
 check(
   'the panel is told it is open even when its page loads after the first event',
-  /fn show_window[\s\S]{0,2200}let again = window\.clone\(\)/.test(overlaySource) &&
+  /fn show_window[\s\S]{0,3000}let again = window\.clone\(\)/.test(overlaySource) &&
     overlaySource.includes('if is_open() && again.is_visible().unwrap_or(false)') &&
     overlaySource.includes('thread::sleep(Duration::from_millis(400))'),
 );
@@ -470,8 +475,8 @@ check(
 check(
   'the card takes the colours of the player theme',
   notice.includes('pub struct Palette') &&
-    settingsSource.includes('nativePalette(loadedSettings.theme)') &&
-    settingsSource.includes('void overlayTheme(nativePalette(resolved.theme))'),
+    settingsSource.includes('nativePalette(loadedSettings.theme, loadedSettings.customThemes ?? [])') &&
+    settingsSource.includes('void overlayTheme(nativePalette(resolved.theme, next.customThemes ?? []))'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

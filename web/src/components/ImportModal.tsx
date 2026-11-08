@@ -2,13 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, PackagePlus, X } from 'lucide-react';
 import type { FolderProgram, Game } from '../types';
 import { exeInfo, folderPrograms, knownExePaths } from '../services/native';
-import { pickFile, pickFolder } from '../services/desktop';
+import { pickAnyFile, pickFile, pickFolder } from '../services/desktop';
 import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
-import { launchForAddedProgram } from '../utils/platform';
+import { desktopOs, launchForAddedProgram } from '../utils/platform';
+import { driveScanDepth } from '../utils/driveScan';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
+import { ArtworkThumb } from './ui/ArtworkThumb';
 
 /** One game Orbit found, with every program it could be started from. */
 interface Candidate {
@@ -67,7 +69,7 @@ export function ImportModal({
       setBusy(true);
       setFolder(path);
       try {
-        const [programs, known] = await Promise.all([folderPrograms(path, 3), knownExePaths()]);
+        const [programs, known] = await Promise.all([folderPrograms(path, driveScanDepth(path)), knownExePaths()]);
         const already = new Set(known.map((p) => p.toLowerCase()));
         const chosen = new Set(existing.map((g) => g.exePath?.toLowerCase() ?? ''));
 
@@ -103,7 +105,9 @@ export function ImportModal({
             coverPath: info?.coverPath ?? null,
             programs: ordered,
             exePath: top.exePath,
-            include: true,
+            // A path scan can return helper programs as well as games. Nothing
+            // is selected until the player reviews the candidates and chooses.
+            include: false,
           });
         }
 
@@ -128,7 +132,9 @@ export function ImportModal({
 
   /** Swap one candidate's program for another file the player picks. */
   const changeProgram = async (key: string, current: string) => {
-    const picked = await pickFile('Choose the program to run', ['exe', 'bat', 'cmd'], current || undefined);
+    const picked = desktopOs() === 'linux'
+      ? await pickAnyFile('Choose the program to run', current || undefined)
+      : await pickFile('Choose the program to run', ['exe', 'bat', 'cmd'], current || undefined);
     if (!picked) return;
     setScanning(true);
     try {
@@ -205,14 +211,16 @@ export function ImportModal({
 
   const toggle = (key: string) =>
     setRows((current) => current.map((r) => (r.key === key ? { ...r, include: !r.include } : r)));
+  const allSelected = rows.length > 0 && rows.every((row) => row.include);
+  const toggleAll = () => setRows((current) => current.map((row) => ({ ...row, include: !allSelected })));
 
   const included = rows.filter((r) => r.include && r.exePath);
   const total = useMemo(() => included.reduce((s, r) => s + r.sizeBytes, 0), [included]);
 
   return (
     <Modal
-      title="Scan a folder for games"
-      subtitle="Orbit reads folders and never changes them. Pick the program to run for each game it finds."
+      title="Scan a drive or folder for games"
+      subtitle="Orbit reads folders and never changes them. Review the candidates and choose which programs to add."
       size="xl"
       onClose={onClose}
       footer={
@@ -248,6 +256,9 @@ export function ImportModal({
             spellCheck={false}
             readOnly
           />
+          <button className={btnGhost} onClick={toggleAll} disabled={rows.length === 0 || busy}>
+            {allSelected ? 'Clear selection' : 'Select all'}
+          </button>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void browse()}>
             <FolderOpen className="size-4" />
             Browse…
@@ -259,12 +270,11 @@ export function ImportModal({
           )}
         </div>
 
-        {busy && <p className="text-sm text-muted">Looking through the folder, three levels deep…</p>}
+        {busy && <p className="text-sm text-muted">Looking for runnable programs… whole-drive scans go deeper than selected game folders.</p>}
 
         {!busy && folder && rows.length === 0 && (
           <p className="rounded-lg border border-line bg-panel2/50 px-3 py-2 text-sm text-muted">
-            Nothing in there looks like a game. Orbit looks three folders deep for a program it can run, and skips
-            redistributables and installers.
+            Nothing in there looks like a game. Orbit skips operating-system folders at a drive root, installers and common redistributables.
           </p>
         )}
 
@@ -275,6 +285,7 @@ export function ImportModal({
                 <div className="rounded-xl border border-line bg-panel2/40 px-3 py-2.5">
                   <div className="flex items-center gap-3">
                     <CheckboxBox checked={r.include} onChange={() => toggle(r.key)} title={r.title} />
+                    <ArtworkThumb title={r.title} lookup={fetchMetadata} />
                     <span className="min-w-0 flex-1">
                       <input
                         value={r.title}

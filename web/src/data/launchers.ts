@@ -54,13 +54,12 @@ export function pathPromptFor(launcherId: LauncherId): string | undefined {
  *
  * The official Epic, GOG Galaxy, Ubisoft, EA and Xbox apps are Windows programs.
  * They are not ported to Linux, so a scan there would be looking in a registry
- * that does not exist. Heroic is the Linux client for Epic and GOG, and Lutris
- * is Linux-only, so those two stay on Linux and stay out of the Windows list.
- * Steam and Amazon's client exist on both.
+ * that does not exist. Lutris is Linux-only. Heroic and the other portable
+ * clients have records on both desktops, so they stay available on both.
  */
 export function launcherOn(id: LauncherId, os: 'windows' | 'linux' | 'other'): boolean {
   const windowsClient = id === 'Epic Games' || id === 'Ubisoft Connect' || id === 'GOG Galaxy' || id === 'EA app' || id === 'Xbox';
-  const linuxClient = id === 'Lutris' || id === 'Heroic Games Library';
+  const linuxClient = id === 'Lutris';
   if (os === 'windows') return !linuxClient;
   if (os === 'linux') return !windowsClient;
   return true;

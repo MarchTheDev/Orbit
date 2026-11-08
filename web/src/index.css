@@ -156,8 +156,13 @@ body::before {
    depend on the mouse. */
 html.orbit-linux .glass,
 html.orbit-linux .backdrop-blur,
+html.orbit-linux .backdrop-blur-2xl,
+html.orbit-linux .backdrop-blur-3xl,
+html.orbit-linux .backdrop-blur-lg,
+html.orbit-linux .backdrop-blur-md,
+html.orbit-linux .backdrop-blur-sm,
 html.orbit-linux .backdrop-blur-xl,
-html.orbit-linux .backdrop-blur-sm {
+html.orbit-linux .backdrop-blur-xs {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -448,7 +453,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-startup-out {
-  animation: orbit-startup-out 0.5s ease forwards;
+  animation: orbit-startup-out 0.3s ease forwards;
 }
 
 @keyframes orbit-startup-out {
@@ -478,7 +483,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-startup-name {
-  animation: orbit-startup-name 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+  animation: orbit-startup-name 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
 }
 
 @keyframes orbit-startup-name {
@@ -500,11 +505,11 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   height: 9rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
-  animation: orbit-ring 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: orbit-ring 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .orbit-ring-late {
-  animation-delay: 0.35s;
+  animation-delay: 0.12s;
 }
 
 @keyframes orbit-ring {
@@ -791,4 +796,167 @@ input[type='number']::-webkit-outer-spin-button {
 
 @media (prefers-reduced-motion: reduce) {
   .orbit-toast { animation: none; }
+}
+
+/* ------------------------------------------------------------------ TV mode */
+
+/* The hub is the window, so the page has nothing behind it to show through.
+   The room is darker than the app: a couch is further from the screen than a
+   chair, and the selected game's artwork does the lighting. */
+html.orbit-tv,
+html.orbit-tv body {
+  background: #05040d;
+}
+.tv-root {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% -15%, color-mix(in srgb, var(--c-accent) 12%, transparent), transparent),
+    #05040d;
+}
+
+/* TV mode is an instant cut in and out. Keep every child still too: the
+   changing game artwork is swapped at a fixed size, never zoomed or faded. */
+.tv-root,
+.tv-root *,
+.tv-root *::before,
+.tv-root *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* The rail scrolls sideways, and a scrollbar under a row of covers is a line
+   the eye keeps landing on. The masks fade the covers themselves at both ends,
+   so the row reads as continuing past the screen rather than stopping at it;
+   the fade is small enough that the selected cover - which is kept centred - is
+   never the one being faded. */
+.tv-rail {
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* The rail snaps to its covers; the compositor then owns the animation of
+     a move, and no frame of it is paid for out of the page's budget. */
+  scroll-snap-type: x proximity;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+}
+.tv-rail::-webkit-scrollbar {
+  display: none;
+}
+/* Off-screen covers cost nothing to see and something to paint: engines new
+   enough to know content-visibility skip drawing them until the rail moves;
+   ones too old simply ignore this and paint as they always did. */
+.tv-rail > li {
+  scroll-snap-align: center;
+  content-visibility: auto;
+  contain-intrinsic-size: 150px 280px;
+}
+
+/* The lite hub: every animation and transition becomes its first and last
+   frame. On a runtime that repaints slowly, motion is the whole payroll; the
+   room stands still instead, and answers at once. */
+.tv-lite *,
+.tv-lite *::before,
+.tv-lite *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* The backdrop has one fixed viewport-sized frame. Do not let intrinsic image
+   dimensions or a global image rule introduce a zoom while the source changes. */
+.tv-root [data-tv-backdrop] .tv-backdrop-image {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  transform: none !important;
+  animation: none !important;
+  transition: none !important;
+  object-fit: cover !important;
+  object-position: center center !important;
+}
+
+/* TV mode is still: the music visualizer is the one intentional exception. */
+@media (prefers-reduced-motion: no-preference) {
+  .tv-root .orbit-bars-active i:nth-child(1) {
+    animation: orbit-bar-1 1.05s ease-in-out infinite !important;
+  }
+  .tv-root .orbit-bars-active i:nth-child(2) {
+    animation: orbit-bar-2 .68s ease-in-out infinite -0.22s !important;
+  }
+  .tv-root .orbit-bars-active i:nth-child(3) {
+    animation: orbit-bar-3 1.42s ease-in-out infinite -0.58s !important;
+  }
+  .tv-root .orbit-bars-active i:nth-child(4) {
+    animation: orbit-bar-4 .84s ease-in-out infinite -0.36s !important;
+  }
+}
+
+/* The mark around a cover is drawn on the artwork and nowhere else: the name
+   underneath is not part of the thing you pick, and a box around it made the
+   rail look like a table of buttons. One accent - the theme's, whatever it is
+   set to - means hovering, the selection and the controller ring are the same
+   colour, so the rail never shows two highlights that disagree.
+
+   The border and the glow live here rather than in the markup so the three
+   states are written once, in one place, against `--c-accent`. */
+.tv-cover > span:first-child {
+  border: 1px solid color-mix(in srgb, #fff 10%, transparent);
+  opacity: 0.55;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+.tv-cover:hover > span:first-child,
+.tv-cover:focus > span:first-child {
+  border-color: var(--c-accent);
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px var(--c-accent),
+    0 18px 45px rgba(0, 0, 0, 0.6);
+}
+.tv-cover[aria-current='true'] > span:first-child {
+  border-color: var(--c-accent);
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px var(--c-accent),
+    0 0 30px -6px color-mix(in srgb, var(--c-accent) 70%, transparent),
+    0 18px 45px rgba(0, 0, 0, 0.6);
+}
+/* The browser's own outline would be a second, thinner box around the button -
+   which includes the title. Focus is the artwork's ring instead. */
+.tv-cover:focus,
+.tv-cover:focus-visible {
+  outline: none;
+}
+/* The pad's shared ring goes round the whole control it focused. Here the
+   control is the cover *and* its name, and the name is not the thing being
+   chosen: the mark belongs on the artwork, so the button's own ring is removed
+   and only the artwork underneath keeps one. */
+html.orbit-pad .tv-root .tv-cover.orbit-pad-focus,
+html.orbit-pad .tv-root .tv-cover:focus {
+  outline: none;
+  box-shadow: none;
+}
+html.orbit-pad .tv-root .tv-cover.orbit-pad-focus > span:first-child,
+html.orbit-pad .tv-root .tv-cover:focus > span:first-child {
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 85%, transparent);
+  outline-offset: 3px;
+}
+/* A direction from a pad is sent as the arrow key the keyboard would send, so
+   both arrive at the same `focus()` call - which means the ring has to be drawn
+   from `:focus` too, not only from the class the generic nav adds. Covers are
+   left out: their ring belongs to the artwork, never to the name under it. */
+html.orbit-pad .tv-root button:not(.tv-cover):focus,
+html.orbit-pad .tv-root [data-tv-action].orbit-pad-focus {
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 85%, transparent);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-rail { scroll-behavior: auto; }
+  .tv-cover > span:first-child { transition: none; }
 }
