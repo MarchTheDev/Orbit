@@ -56,6 +56,12 @@ export interface HltbSuggestion {
   hltb: HltbData;
 }
 
+/** HLTB's own description and platform list from its game page. */
+export interface HltbGameDetails {
+  description: string;
+  platforms: string[];
+}
+
 /**
  * What a store knows about a game.
  *

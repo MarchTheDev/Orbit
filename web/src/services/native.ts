@@ -23,6 +23,7 @@ import type {
   FolderProgram,
   Achievement,
   GameSuggestion,
+  HltbGameDetails,
   HltbSuggestion,
   LauncherGame,
   OtherLauncher,
@@ -528,6 +529,11 @@ export function metadataSuggest(title: string): Promise<string[]> {
 /** Full title, artwork and playtime results from HowLongToBeat. */
 export function hltbSuggestions(title: string): Promise<HltbSuggestion[]> {
   return call('hltb_suggestions', { title }, async () => []);
+}
+
+/** Read the description and supported platforms from one HLTB game page. */
+export function hltbGameDetails(gameId: number): Promise<HltbGameDetails> {
+  return call('hltb_game_details', { gameId }, async () => ({ description: '', platforms: [] }));
 }
 
 /**

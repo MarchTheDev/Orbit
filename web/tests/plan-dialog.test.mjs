@@ -131,6 +131,51 @@ check('the game is handed over with the store details it fetched',
 check('and with the times it fetched', (added[0]?.hltb?.main ?? 0) > 0, JSON.stringify(added[0]?.hltb ?? null));
 check('and adding it closes the panel', closed === 1);
 
+console.log('a non-Steam HLTB result opens its description before it is added');
+const nonSteamTitle = 'Non-Steam Odyssey';
+const hltbPick = {
+  id: 4242,
+  name: nonSteamTitle,
+  coverUrl: 'https://howlongtobeat.com/games/non-steam.jpg',
+  hltb: { gameName: nonSteamTitle, main: 14, mainExtra: 22, completionist: 36, source: 'hltb' },
+};
+dom.window.__TAURI__ = {
+  core: {
+    invoke: async (command) => {
+      if (command === 'hltb_suggestions') return [hltbPick];
+      if (command === 'metadata_cards') return [];
+      if (command === 'hltb_game_details') return {
+        description: 'A lost explorer uncovers an ancient city and its secrets.',
+        platforms: ['PC', 'Nintendo Switch'],
+      };
+      return null;
+    },
+  },
+  event: { listen: async () => () => {} },
+};
+await open(nonSteamTitle);
+await act(async () => settle());
+const hltbRow = rows().find((row) => row.textContent.includes(nonSteamTitle));
+check('the non-Steam HLTB entry is offered as a details page, not an instant add',
+  !!hltbRow && hltbRow.textContent.includes('Details'));
+await act(async () => hltbRow?.querySelector('button')?.click());
+await act(async () => settle(80));
+check('the HLTB description is shown on the opened page',
+  dialog()?.textContent?.includes('A lost explorer uncovers an ancient city and its secrets.'));
+check('the selected entry shows its HLTB completion times',
+  dialog()?.textContent?.includes('14h') && dialog()?.textContent?.includes('36h'));
+check('the player can go back without adding the non-Steam game', !!buttonWith('Not yet') && added.length === 1);
+await act(async () => buttonWith('Not yet')?.click());
+check('Not yet returns to the search and leaves the Backlog unchanged', rows().some((row) => row.textContent.includes(nonSteamTitle)) && added.length === 1);
+await act(async () => rows().find((row) => row.textContent.includes(nonSteamTitle))?.querySelector('button')?.click());
+await act(async () => settle(50));
+await act(async () => buttonWith('Add to backlog')?.click());
+await act(async () => settle(50));
+check('adding from the HLTB page keeps its non-Steam platform and HLTB times',
+  added[1]?.name === nonSteamTitle && added[1]?.platform === 'Other' && added[1]?.hltb?.main === 14);
+check('the HLTB decision page closes only after the player adds it', closed === 2);
+delete dom.window.__TAURI__;
+
 console.log('a game can be written down as it is typed');
 
 const unknown = 'A Game Nobody Has Heard Of';
@@ -143,9 +188,9 @@ await act(async () => {
 });
 await act(async () => settle(50));
 check('it goes on the list exactly as it was typed',
-  added[1]?.name === unknown,
+  added[2]?.name === unknown,
   JSON.stringify(added.map((pick) => pick.name)));
-check('and adding it closes the panel', closed === 2);
+check('and adding it closes the panel', closed === 3);
 
 // The one state this document cannot reach on its own: in the desktop app the
 // store can answer with nothing at all, and the panel has to say so rather than

@@ -1294,6 +1294,12 @@ async fn hltb_suggestions(title: String) -> Result<Vec<hltb::HltbSuggestion>, St
     hltb::suggestions(&title).await
 }
 
+/// The description and platform list from one HowLongToBeat game page.
+#[tauri::command]
+async fn hltb_game_details(game_id: i64) -> Result<hltb::HltbGameDetails, String> {
+    hltb::game_details(game_id).await
+}
+
 /// The factsheet the planning sheet shows for a store app id.
 ///
 /// Bonker's cache of the Steam catalogue carries it, with Steam's own page
@@ -2626,6 +2632,7 @@ pub fn run() {
             update::forget_update,
             hltb_search,
             hltb_suggestions,
+            hltb_game_details,
             metadata_lookup,
             metadata_suggest,
             metadata_cards,

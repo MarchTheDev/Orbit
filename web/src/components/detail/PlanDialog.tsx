@@ -12,8 +12,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Game, GameFacts, GameSuggestion, HltbData, HltbSuggestion, PlanPlatform } from '../../types';
 import { fetchFacts, knownGames, searchGames } from '../../services/metadata';
-import { fetchHltb, searchHltbGames } from '../../services/hltb';
+import { fetchHltb, fetchHltbDetails, searchHltbGames } from '../../services/hltb';
 import { cn } from '../../utils/cn';
+import { HltbPlanPage } from './HltbPlanPage';
 import { PlanPage } from './PlanPage';
 
 /** What the dialog hands back when a game is put on the list. */
@@ -47,6 +48,10 @@ const titleKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '')
 type PlanSearchResult =
   | { key: string; source: 'steam'; name: string; suggestion: GameSuggestion }
   | { key: string; source: 'hltb'; name: string; suggestion: HltbSuggestion };
+
+type ChosenResult =
+  | { source: 'steam'; suggestion: GameSuggestion }
+  | { source: 'hltb'; suggestion: HltbSuggestion };
 
 /**
  * Planning a game, as one place in the middle of the window.
@@ -88,7 +93,7 @@ export function PlanDialog({
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [looking, setLooking] = useState(false);
   /** The suggestion whose own page is open, if one is. */
-  const [chosen, setChosen] = useState<GameSuggestion | null>(null);
+  const [chosen, setChosen] = useState<ChosenResult | null>(null);
   /** The row the keyboard is on, as a number in the results. */
   const [at, setAt] = useState(0);
   const [adding, setAdding] = useState(false);
@@ -254,15 +259,11 @@ export function PlanDialog({
   const selectSearchResult = (result: PlanSearchResult) => {
     if (result.source === 'steam') {
       warm(result.suggestion);
-      setChosen(result.suggestion);
-      return;
+      setChosen({ source: 'steam', suggestion: result.suggestion });
+    } else {
+      void fetchHltbDetails(result.suggestion.id).catch(() => undefined);
+      setChosen({ source: 'hltb', suggestion: result.suggestion });
     }
-    void add({
-      name: result.name,
-      platform: 'Other',
-      coverUrl: result.suggestion.coverUrl,
-      hltb: result.suggestion.hltb,
-    });
   };
 
   useEffect(() => {
@@ -281,7 +282,7 @@ export function PlanDialog({
     >
       <div
         role="dialog"
-        aria-label={chosen ? `About ${chosen.name}` : 'Plan a game'}
+        aria-label={chosen ? `About ${chosen.suggestion.name}` : 'Plan a game'}
         className="modal-panel-enter relative flex h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-line bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
@@ -289,14 +290,29 @@ export function PlanDialog({
             gets, so the panel reads as lit from above rather than flat. */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent" />
 
-        {chosen ? (
+        {chosen ? chosen.source === 'steam' ? (
           <PlanPage
-            key={chosen.appId}
-            suggestion={chosen}
+            key={`steam-${chosen.suggestion.appId}`}
+            suggestion={chosen.suggestion}
             adding={adding}
             onAdd={(pick) => void add(pick)}
             onClose={onClose}
             onBack={() => setChosen(null)}
+          />
+        ) : (
+          <HltbPlanPage
+            key={`hltb-${chosen.suggestion.id}`}
+            suggestion={chosen.suggestion}
+            adding={adding}
+            alreadyAdded={isHeld(chosen.suggestion.name)}
+            onAdd={() => void add({
+              name: chosen.suggestion.name,
+              platform: 'Other',
+              coverUrl: chosen.suggestion.coverUrl,
+              hltb: chosen.suggestion.hltb,
+            })}
+            onBack={() => setChosen(null)}
+            onClose={onClose}
           />
         ) : (
           <>
@@ -428,6 +444,7 @@ export function PlanDialog({
                         onMouseEnter={() => {
                           setAt(index);
                           if (suggestion) warm(suggestion);
+                          else if (result.source === 'hltb') void fetchHltbDetails(result.suggestion.id).catch(() => undefined);
                         }}
                         className={cn(
                           'group flex items-center gap-2 rounded-xl pr-2 transition',
@@ -438,7 +455,7 @@ export function PlanDialog({
                           type="button"
                           onClick={() => selectSearchResult(result)}
                           onFocus={() => setAt(index)}
-                          disabled={!steam && (adding || isHeld(result.name))}
+                          disabled={adding}
                           className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left outline-none disabled:opacity-50"
                         >
                           <span className={cn(
@@ -486,8 +503,8 @@ export function PlanDialog({
                           </button>
                         ) : (
                           <span className="flex shrink-0 items-center gap-1 text-xs text-accent">
-                            {isHeld(result.name) ? 'Already added' : 'Add'}
-                            <Plus className="size-3.5" />
+                            {isHeld(result.name) ? 'Already added' : 'Details'}
+                            <ArrowRight className="size-3.5" />
                           </span>
                         )}
                       </li>

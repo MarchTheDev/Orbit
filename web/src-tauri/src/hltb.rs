@@ -50,6 +50,14 @@ pub struct HltbSuggestion {
     pub hltb: HltbData,
 }
 
+/// The description and platforms HLTB publishes on a game's own page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HltbGameDetails {
+    pub description: String,
+    pub platforms: Vec<String>,
+}
+
 /// One entry as HLTB returns it: times arrive in seconds, ids as numbers.
 #[derive(Debug, Clone, Deserialize)]
 struct HltbGame {
@@ -95,6 +103,11 @@ fn cache() -> &'static Mutex<HashMap<String, HltbData>> {
 
 fn suggestions_cache() -> &'static Mutex<HashMap<String, Vec<HltbSuggestion>>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Vec<HltbSuggestion>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn details_cache() -> &'static Mutex<HashMap<i64, HltbGameDetails>> {
+    static CACHE: OnceLock<Mutex<HashMap<i64, HltbGameDetails>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -192,6 +205,108 @@ pub async fn suggestions(title: &str) -> Result<Vec<HltbSuggestion>, String> {
         kept.insert(key, found.clone());
     }
     Ok(found)
+}
+
+/// Read the summary and platform list for a chosen result from its HLTB page.
+/// The detail page publishes its data as `__NEXT_DATA__`, without a search token.
+pub async fn game_details(game_id: i64) -> Result<HltbGameDetails, String> {
+    if game_id <= 0 {
+        return Err("That HowLongToBeat game id is invalid.".into());
+    }
+    if let Ok(kept) = details_cache().lock() {
+        if let Some(found) = kept.get(&game_id) {
+            return Ok(found.clone());
+        }
+    }
+
+    let client = client()?;
+    let url = format!("{SITE}/game/{game_id}");
+    let response = client
+        .get(&url)
+        .header(reqwest::header::REFERER, format!("{SITE}/"))
+        .header(reqwest::header::ACCEPT, "text/html")
+        .send()
+        .await
+        .map_err(|error| format!("HowLongToBeat is unreachable: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HowLongToBeat answered {status} for that game page."));
+    }
+    let html = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read the HowLongToBeat game page: {error}"))?;
+    let found = parse_game_details(&html)?;
+    if let Ok(mut kept) = details_cache().lock() {
+        if kept.len() >= 100 {
+            kept.clear();
+        }
+        kept.insert(game_id, found.clone());
+    }
+    Ok(found)
+}
+
+fn parse_game_details(html: &str) -> Result<HltbGameDetails, String> {
+    let marker = html
+        .find("__NEXT_DATA__")
+        .ok_or_else(|| "HowLongToBeat did not include game details.".to_string())?;
+    let script = &html[marker..];
+    let body_start = script
+        .find('>')
+        .map(|index| index + 1)
+        .ok_or_else(|| "HowLongToBeat returned an incomplete game page.".to_string())?;
+    let body_end = script[body_start..]
+        .find("</script>")
+        .map(|index| body_start + index)
+        .ok_or_else(|| "HowLongToBeat returned an incomplete game page.".to_string())?;
+    let page: serde_json::Value = serde_json::from_str(&script[body_start..body_end])
+        .map_err(|error| format!("HowLongToBeat game details were unreadable: {error}"))?;
+    let game = page
+        .pointer("/props/pageProps/game/data/game/0")
+        .ok_or_else(|| "HowLongToBeat did not include this game's details.".to_string())?;
+    let description = game
+        .get("profile_summary")
+        .and_then(serde_json::Value::as_str)
+        .map(plain_summary)
+        .unwrap_or_default();
+    let platforms = game
+        .get("profile_platform")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|platform| !platform.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(HltbGameDetails { description, platforms })
+}
+
+/// HLTB summaries may contain simple markup or entities; show readable text.
+fn plain_summary(summary: &str) -> String {
+    let mut plain = String::with_capacity(summary.len());
+    let mut inside_tag = false;
+    for character in summary.chars() {
+        match character {
+            '<' => {
+                inside_tag = true;
+                plain.push(' ');
+            }
+            '>' => inside_tag = false,
+            _ if !inside_tag => plain.push(character),
+            _ => {}
+        }
+    }
+    plain
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Search the written title and useful expansions, retrying with a simpler query
@@ -713,6 +828,14 @@ mod tests {
         assert_eq!(results[0].name, "Palia 2");
         assert_eq!(results[0].cover_url.as_deref(), Some("https://howlongtobeat.com/games/2_Palia_2.jpg"));
         assert_eq!(results[0].hltb.main, 0.0);
+    }
+
+    #[test]
+    fn hltb_detail_page_summary_is_plain_text_and_keeps_platforms() {
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"game":{"data":{"game":[{"profile_summary":"<p>Save the <b>king</b> &amp; his world.</p>","profile_platform":"PC, Nintendo Switch"}]}}}}}</script>"#;
+        let details = parse_game_details(html).expect("valid HLTB game page");
+        assert_eq!(details.description, "Save the king & his world.");
+        assert_eq!(details.platforms, vec!["PC", "Nintendo Switch"]);
     }
 
     #[test]
