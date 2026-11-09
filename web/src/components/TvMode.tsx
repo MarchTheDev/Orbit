@@ -22,6 +22,7 @@ import { TvDetails } from './TvDetails';
 import { MusicButton } from './MusicButton';
 import { padJustActivated } from '../hooks/useGamepad';
 import { tvLite } from '../services/tv';
+import { findTvBackdrop, isNative } from '../services/native';
 
 const lite = tvLite;
 
@@ -101,8 +102,39 @@ export function backdropsFor(game: Game): string[] {
 function Backdrop({ game }: { game: Game }) {
   const [failure, setFailure] = useState<{ gameId: string; step: number }>({ gameId: game.id, step: 0 });
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const [sgdbBackdrop, setSgdbBackdrop] = useState<{ gameId: string; url: string | null }>({ gameId: '', url: null });
   const shown = useRef<HTMLImageElement>(null);
-  const list = backdropsFor(game);
+  const localBackdrops = backdropsFor(game);
+  const communityUrl = sgdbBackdrop.gameId === game.id ? sgdbBackdrop.url : null;
+  // Steam's library hero remains first. SteamGridDB's wide hero is tried next,
+  // then the metadata background and header keep their existing fallback order.
+  const list = communityUrl && !localBackdrops.includes(communityUrl)
+    ? [...localBackdrops.slice(0, 1), communityUrl, ...localBackdrops.slice(1)]
+    : localBackdrops;
+
+  useEffect(() => {
+    if (!isNative()) return;
+    let current = true;
+    // Moving quickly along the rail should not turn each transient selection
+    // into a separate community-art request.
+    const timer = window.setTimeout(() => {
+      void findTvBackdrop(game.id).then((url) => {
+        if (!current) return;
+        setSgdbBackdrop({ gameId: game.id, url });
+        // If a local fallback already failed while SGDB was answering, step
+        // back to its newly inserted slot instead of accidentally skipping it.
+        if (url && !backdropsFor(game).includes(url)) {
+          setFailure((failed) => failed.gameId === game.id && failed.step > 0
+            ? { gameId: game.id, step: 1 }
+            : failed);
+        }
+      });
+    }, 250);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [game.id]);
   // A selection change takes the first attempt synchronously. Waiting for an
   // effect to reset `step` showed the previous game's lower-quality fallback
   // for one frame when that image had failed.

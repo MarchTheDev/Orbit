@@ -61,20 +61,24 @@ function paletteFromColors(
       muted = mix('#5f6470', primary, 0.14);
       break;
     case 'light':
-      bg = mix('#f0f2f6', secondary, 0.045);
-      panel = mix('#ffffff', secondary, 0.035);
-      panel2 = mix('#e9ebf0', secondary, 0.075);
-      border = mix('#d2d6df', secondary, 0.12);
+      // Lunar-like clean surfaces, with enough of the second colour in the
+      // page, raised cards and dividers to make the palette feel intentional.
+      bg = mix('#f0f2f6', secondary, 0.09);
+      panel = mix('#ffffff', secondary, 0.065);
+      panel2 = mix('#e9ebf0', secondary, 0.15);
+      border = mix('#d2d6df', secondary, 0.24);
       text = '#171923';
-      muted = mix('#5f6470', secondary, 0.1);
+      muted = mix('#5f6470', secondary, 0.18);
       break;
     default:
-      bg = mix('#090a0d', secondary, 0.08);
-      panel = mix('#13151a', secondary, 0.15);
-      panel2 = mix('#1d2028', secondary, 0.22);
-      border = mix('#30343e', secondary, 0.28);
+      // Eclipse-like neutral darkness, visibly tinted by the second colour
+      // across all the surfaces rather than only in the accent controls.
+      bg = mix('#090a0d', secondary, 0.16);
+      panel = mix('#13151a', secondary, 0.24);
+      panel2 = mix('#1d2028', secondary, 0.34);
+      border = mix('#30343e', secondary, 0.42);
       text = '#f4f5f7';
-      muted = mix('#a1a4ac', secondary, 0.12);
+      muted = mix('#a1a4ac', secondary, 0.2);
       break;
   }
 

@@ -633,6 +633,21 @@ export function findArtwork(gameId: string, page = 0): Promise<ArtworkFound> {
   );
 }
 
+/** Best-effort wide SteamGridDB art for a TV backdrop, when a key is configured. */
+const tvBackdropCache = new Map<string, Promise<string | null>>();
+export function findTvBackdrop(gameId: string): Promise<string | null> {
+  const cached = tvBackdropCache.get(gameId);
+  if (cached) return cached;
+  const pending = call('tv_backdrop', { gameId }, () => null).catch(() => null).then((url) => {
+    // Cache real artwork for this app session; a miss might become available
+    // after an API key is added or the catalogue gains new artwork.
+    if (!url) tvBackdropCache.delete(gameId);
+    return url;
+  });
+  tvBackdropCache.set(gameId, pending);
+  return pending;
+}
+
 /**
  * One picture the store has, and what sort of picture it is.
  *

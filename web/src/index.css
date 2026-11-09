@@ -632,7 +632,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   width: 2px;
   height: 100%;
   border-radius: 2px;
-  background: currentColor;
+  background: linear-gradient(to top, var(--c-accent), var(--c-accent2));
   transform: scaleY(0.06);
   transform-origin: bottom;
   opacity: 0.28;

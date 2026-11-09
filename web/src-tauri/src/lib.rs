@@ -1389,6 +1389,31 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String, page: Opti
     artwork_for(&orbit, &game.title, steam_app_id(&game), page.unwrap_or(0)).await
 }
 
+/// Best-effort SteamGridDB hero art for the TV backdrop. A missing key, game,
+/// or artwork is normal; the TV view has its own Steam and metadata fallbacks.
+#[tauri::command]
+async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Option<String> {
+    let game = match orbit.db.game(&game_id) {
+        Ok(Some(game)) => game,
+        Ok(None) => return None,
+        Err(error) => {
+            log::debug!("TV backdrop game lookup failed: {error}");
+            return None;
+        }
+    };
+    let settings = orbit.store.load_settings();
+    let Some(key) = setting_text(&settings, "sgdbApiKey") else {
+        return None;
+    };
+    match sgdb::hero(steam_app_id(&game), &game.title, &key).await {
+        Ok(url) => url,
+        Err(error) => {
+            log::debug!("SteamGridDB TV backdrop lookup failed: {error}");
+            None
+        }
+    }
+}
+
 /// Pictures for a game that has not been saved yet, so Add Game can offer
 /// another cover than the one the catalogue picked first.
 #[tauri::command]
@@ -2608,6 +2633,7 @@ pub fn run() {
             achievements_fetch,
             artwork_candidates,
             artwork_choices,
+            tv_backdrop,
             reorder_game_logs,
             steam_library,
             launcher_games,

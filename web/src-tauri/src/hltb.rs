@@ -51,7 +51,7 @@ pub struct HltbSuggestion {
 }
 
 /// One entry as HLTB returns it: times arrive in seconds, ids as numbers.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct HltbGame {
     #[serde(default)]
     game_id: i64,
@@ -545,11 +545,13 @@ fn ranked_suggestions(games: Vec<HltbGame>, title: &str) -> Vec<HltbSuggestion> 
     scored.sort_by(|a, b| b.0.cmp(&a.0));
 
     let mut ids = HashSet::new();
-    let mut names = HashSet::new();
     scored
         .into_iter()
         .filter_map(|(_, game)| {
-            if !ids.insert(game.game_id) || !names.insert(normalize(&game.game_name)) {
+            // HLTB can contain separate releases with identical display names
+            // (remasters, platform editions, regional releases). Their IDs are
+            // the identity; only repeated copies of the same result are noise.
+            if !ids.insert(game.game_id) {
                 return None;
             }
             Some(HltbSuggestion {
@@ -714,14 +716,17 @@ mod tests {
     }
 
     #[test]
-    fn hltb_suggestions_skip_dlc_and_duplicate_names() {
+    fn hltb_suggestions_keep_same_name_releases_but_skip_duplicate_ids_and_dlc() {
         let mut dlc = game("Hades DLC", 3_600.0);
         dlc.game_type = "dlc".to_string();
-        let mut duplicate = game("Hades", 3_600.0);
-        duplicate.game_id = 2;
-        let results = ranked_suggestions(vec![game("Hades", 3_600.0), duplicate, dlc], "Hades");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "Hades");
+        let first = game("Hades", 3_600.0);
+        let mut remake = game("Hades", 3_600.0);
+        remake.game_id = 2;
+        let duplicate_id = first.clone();
+        let results = ranked_suggestions(vec![first, remake, duplicate_id, dlc], "Hades");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|suggestion| suggestion.id == 1));
+        assert!(results.iter().any(|suggestion| suggestion.id == 2));
     }
 
     #[test]
