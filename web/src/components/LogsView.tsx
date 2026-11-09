@@ -285,9 +285,6 @@ export function LogsView({
             {gamesWithLogs === 1 ? 'game' : 'games'}
             {games.length === allGames.length && total > logs.length && ` · the latest ${logs.length} of ${total}`}
           </p>
-          <button type="button" className={`${btnGhost} flex items-center gap-2`} onClick={() => setShowAddGames(true)}>
-            <Plus className="size-4" /> Add games
-          </button>
         </div>
       </header>
 
@@ -406,7 +403,7 @@ export function LogsView({
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">
               <NotebookPen className="size-8 opacity-60" />
-              <p className="text-sm">Add a game to the Journal with the button above.</p>
+              <p className="text-sm">Use + beside the game search to add games to the Journal.</p>
             </div>
           )}
         </section>

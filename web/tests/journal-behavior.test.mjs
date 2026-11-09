@@ -26,5 +26,9 @@ check('starting a game writes a Started playing entry with the actual session st
 check('the Journal and Logs list refresh after an automatic start entry is saved',
   journal.includes("addEventListener('orbit-journal-changed'") &&
     logs.includes("addEventListener('orbit-journal-changed'"));
+check('the Journal uses one add-games control: the plus beside search',
+  logs.includes('aria-label="Add games to the Journal"') &&
+    logs.includes('Use + beside the game search to add games to the Journal.') &&
+    !logs.includes('> Add games</button>'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;
