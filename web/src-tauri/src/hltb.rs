@@ -238,6 +238,11 @@ fn query_variants(title: &str) -> Vec<String> {
     {
         queries.push(format!("GTA {}", words[3..].join(" ")));
     }
+    let lower = title.to_lowercase();
+    if lower.contains("ocarina") && lower.contains("time") {
+        queries.push("Ocarina of Time".to_string());
+        queries.push("The Legend of Zelda: Ocarina of Time".to_string());
+    }
 
     let mut seen = HashSet::new();
     queries.retain(|query| seen.insert(query.to_lowercase()));
@@ -753,7 +758,9 @@ mod tests {
     fn ocarina_year_and_remake_notes_do_not_hide_the_underlying_game_match() {
         let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0)];
         assert!(pick_best(&games, "Ocarina of Time (2026 remake)").is_some());
-        assert!(query_variants("Ocarina of Time (2026 remake)").contains(&"Ocarina of Time".to_string()));
+        let queries = query_variants("Ocarina of Time (2026 remake)");
+        assert!(queries.contains(&"Ocarina of Time".to_string()));
+        assert!(queries.contains(&"The Legend of Zelda: Ocarina of Time".to_string()));
     }
 
     #[test]

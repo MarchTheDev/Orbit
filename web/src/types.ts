@@ -525,6 +525,10 @@ export interface Theme {
   baseThemeId?: string;
   /** The single chosen colour used to tint a custom palette. */
   themeColor?: string;
+  /** Color generation style for simple two-colour custom palettes. */
+  themeMode?: 'graded' | 'dark' | 'light-graded' | 'light';
+  primaryColor?: string;
+  secondaryColor?: string;
 }
 
 export interface Settings {

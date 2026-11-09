@@ -156,8 +156,9 @@ export function DateTimePicker({
   }, [open]);
 
   const showPicker = () => {
-    const initial = parseValue(value) ?? new Date();
-    const hasTime = initial.getHours() !== 0 || initial.getMinutes() !== 0;
+    const selectedDate = parseValue(value);
+    const initial = selectedDate ?? new Date();
+    const hasTime = Boolean(selectedDate && (selectedDate.getHours() !== 0 || selectedDate.getMinutes() !== 0));
     if (optionalTime && !hasTime) initial.setHours(0, 0, 0, 0);
     setClockEnabled(optionalTime ? hasTime : true);
     setPickerDate(initial);

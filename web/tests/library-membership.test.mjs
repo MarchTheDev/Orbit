@@ -44,9 +44,15 @@ check('Backlog covers fill the same thumbnail frame as the 1.2 layout', backlogV
 check('removing a plan has a visible rose danger treatment', backlogView.includes('border-rose-500/30 bg-rose-500/10') && backlogView.includes('hover:bg-rose-500/20'));
 const logsView = readFileSync(new URL('../src/components/LogsView.tsx', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const gameDetail = readFileSync(new URL('../src/components/detail/GameDetail.tsx', import.meta.url), 'utf8');
 const gameEditor = readFileSync(new URL('../src/components/detail/GameEditDialog.tsx', import.meta.url), 'utf8');
 check('removing a game from the Journal uses the in-app confirmation and preserves logs and sessions', logsView.includes('<ConfirmDialog') && logsView.includes('title={`Remove ${membershipTarget.title} from the Journal?`') && logsView.includes('Its logs, notes, sessions and Library record stay intact.') && !logsView.includes('confirm(`Remove ${menuGame.title} from the Journal?'));
 check('removing a game from the Backlog uses the in-app confirmation and preserves its Library record', app.includes('<ConfirmDialog') && app.includes('title={`Remove ${backlogRemovalTarget.title} from the Backlog?`}') && app.includes('remain in your Library with its files, sessions and notes') && !app.includes('confirm(`Remove ${game.title} from the Backlog?'));
+check('Backlog details use the Status dropdown without duplicate move-to-status actions',
+  gameDetail.includes('ariaLabel="Where this game sits"') &&
+    gameDetail.includes('<div className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg bg-panel2 px-3 py-2">') &&
+    gameDetail.includes('value={game.status}') &&
+    !gameDetail.includes('Move to playing now') && !gameDetail.includes('Move to Backlog'));
 check('the Remove from Backlog editor action uses destructive rose styling', gameEditor.includes('border-rose-500/40 bg-rose-500/10'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

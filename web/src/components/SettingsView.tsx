@@ -1380,6 +1380,7 @@ export function SettingsView({
                     </span>
                     <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
                   </button>
+                  <div className="border-t border-line/70 px-3 py-2.5" aria-hidden="true" />
                 </div>
               )}
               </Fragment>

@@ -441,13 +441,16 @@ export function PlanDialog({
                           disabled={!steam && (adding || isHeld(result.name))}
                           className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left outline-none disabled:opacity-50"
                         >
-                          <span className="grid h-12 w-28 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-panel2">
+                          <span className={cn(
+                            'grid shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-panel2',
+                            steam ? 'h-12 w-28' : 'h-14 w-10 bg-black/20 p-0.5',
+                          )}>
                             {coverUrl ? (
                               <img
                                 src={coverUrl}
                                 alt=""
                                 loading="lazy"
-                                className="h-full w-full object-cover"
+                                className={cn('h-full w-full', steam ? 'object-cover' : 'object-contain')}
                               />
                             ) : result.source === 'hltb' ? (
                               <Sparkles className="size-4 text-accent" />

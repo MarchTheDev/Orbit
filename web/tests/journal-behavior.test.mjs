@@ -19,7 +19,7 @@ check('the single calendar requires a day and makes clock time and play duration
     journal.includes("if (!draft.at.trim())") && journal.includes('fromLocalInput(draft.at)') &&
     journal.includes("draft.secs.trim() === '' ? 0 : parseDuration(draft.secs)") &&
     journal.includes("row.at > 0 ? toLocalInput(row.at) : ''") &&
-    datePicker.includes('--:--') && datePicker.includes('Clear time') && journal.includes("return 'No date'"));
+    datePicker.includes('--:--') && datePicker.includes('Clear time') && datePicker.includes('const selectedDate = parseValue(value)') && datePicker.includes('const hasTime = Boolean(selectedDate') && journal.includes("return 'No date'"));
 check('starting a game writes a Started playing entry with the actual session start time',
   app.includes("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") &&
     app.indexOf("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") > app.indexOf('const started = await play(g.id);'));

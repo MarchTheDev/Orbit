@@ -191,7 +191,6 @@ export default function App() {
   const move = useGameMove((gameId, paths) => updateGame(gameId, paths));
   /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
-  const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
   /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -909,15 +908,13 @@ export default function App() {
     setShowSteam(false);
     setShowOtherLaunchers(null);
     setMenu(null);
-    setDetailReadOnlyMoves(false);
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
-  const openDetail = (id: string, readOnlyMoves = false) => {
-    setDetailReadOnlyMoves(readOnlyMoves);
+  const openDetail = (id: string) => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
   };
@@ -986,7 +983,7 @@ export default function App() {
     : page === 'backlog'
       ? [
           { kind: 'label', label: menuGame.title },
-          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id, menuReadOnlyMoves) },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
           ...(menuReadOnlyMoves ? [] : [
             { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
             { kind: 'sep' as const },
@@ -1691,7 +1688,6 @@ export default function App() {
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
           context={page === 'backlog' ? 'backlog' : 'library'}
-          readOnlyMoves={detailReadOnlyMoves}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
