@@ -670,6 +670,7 @@ fn overlay_configure(
     recording_directory: String,
     replay_directory: String,
     game_only: bool,
+    capture_shortcuts_outside_overlay: bool,
 ) {
     overlay::configure(
         Some(&app),
@@ -684,6 +685,7 @@ fn overlay_configure(
         &recording_directory,
         &replay_directory,
         game_only,
+        capture_shortcuts_outside_overlay,
     );
 }
 
@@ -1286,6 +1288,18 @@ async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
     hltb::lookup(&title).await
 }
 
+/// Search HowLongToBeat's game catalogue with titles, covers and playtimes.
+#[tauri::command]
+async fn hltb_suggestions(title: String) -> Result<Vec<hltb::HltbSuggestion>, String> {
+    hltb::suggestions(&title).await
+}
+
+/// The description and platform list from one HowLongToBeat game page.
+#[tauri::command]
+async fn hltb_game_details(game_id: i64) -> Result<hltb::HltbGameDetails, String> {
+    hltb::game_details(game_id).await
+}
+
 /// The factsheet the planning sheet shows for a store app id.
 ///
 /// Bonker's cache of the Steam catalogue carries it, with Steam's own page
@@ -1321,8 +1335,11 @@ async fn metadata_lookup(
 
 /// Every program in a folder, so an import can ask which one is the game.
 #[tauri::command]
-fn folder_programs(path: String, max_depth: Option<usize>) -> Vec<launch::FolderProgram> {
-    launch::folder_programs(Path::new(&path), max_depth.unwrap_or(3))
+async fn folder_programs(path: String, max_depth: Option<usize>) -> Result<Vec<launch::FolderProgram>, String> {
+    let depth = max_depth.unwrap_or(3).min(6);
+    tokio::task::spawn_blocking(move || launch::folder_programs(Path::new(&path), depth))
+        .await
+        .map_err(|error| format!("Could not scan that folder: {error}"))
 }
 
 /// A partial title, as the games the store suggests for it, with pictures.
@@ -1376,6 +1393,31 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String, page: Opti
     // A game added from a folder has no store id of its own, so the title is
     // asked about. That is also the moment the id becomes worth keeping.
     artwork_for(&orbit, &game.title, steam_app_id(&game), page.unwrap_or(0)).await
+}
+
+/// Best-effort SteamGridDB hero art for the TV backdrop. A missing key, game,
+/// or artwork is normal; the TV view has its own Steam and metadata fallbacks.
+#[tauri::command]
+async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<String>, String> {
+    let game = match orbit.db.game(&game_id) {
+        Ok(Some(game)) => game,
+        Ok(None) => return Ok(None),
+        Err(error) => {
+            log::debug!("TV backdrop game lookup failed: {error}");
+            return Ok(None);
+        }
+    };
+    let settings = orbit.store.load_settings();
+    let Some(key) = setting_text(&settings, "sgdbApiKey") else {
+        return Ok(None);
+    };
+    match sgdb::hero(steam_app_id(&game), &game.title, &key).await {
+        Ok(url) => Ok(url),
+        Err(error) => {
+            log::debug!("SteamGridDB TV backdrop lookup failed: {error}");
+            Ok(None)
+        }
+    }
 }
 
 /// Pictures for a game that has not been saved yet, so Add Game can offer
@@ -2589,6 +2631,8 @@ pub fn run() {
             update::run_update,
             update::forget_update,
             hltb_search,
+            hltb_suggestions,
+            hltb_game_details,
             metadata_lookup,
             metadata_suggest,
             metadata_cards,
@@ -2596,6 +2640,7 @@ pub fn run() {
             achievements_fetch,
             artwork_candidates,
             artwork_choices,
+            tv_backdrop,
             reorder_game_logs,
             steam_library,
             launcher_games,

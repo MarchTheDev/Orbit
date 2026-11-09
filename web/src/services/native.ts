@@ -23,6 +23,8 @@ import type {
   FolderProgram,
   Achievement,
   GameSuggestion,
+  HltbGameDetails,
+  HltbSuggestion,
   LauncherGame,
   OtherLauncher,
 } from '../types';
@@ -524,6 +526,16 @@ export function metadataSuggest(title: string): Promise<string[]> {
   return call('metadata_suggest', { title }, async () => []);
 }
 
+/** Full title, artwork and playtime results from HowLongToBeat. */
+export function hltbSuggestions(title: string): Promise<HltbSuggestion[]> {
+  return call('hltb_suggestions', { title }, async () => []);
+}
+
+/** Read the description and supported platforms from one HLTB game page. */
+export function hltbGameDetails(gameId: number): Promise<HltbGameDetails> {
+  return call('hltb_game_details', { gameId }, async () => ({ description: '', platforms: [] }));
+}
+
 /**
  * The games a partial title suggests, with the store's own little capsule.
  *
@@ -625,6 +637,21 @@ export function findArtwork(gameId: string, page = 0): Promise<ArtworkFound> {
       return { appId: null, picks: [] } satisfies ArtworkFound;
     },
   );
+}
+
+/** Best-effort wide SteamGridDB art for a TV backdrop, when a key is configured. */
+const tvBackdropCache = new Map<string, Promise<string | null>>();
+export function findTvBackdrop(gameId: string): Promise<string | null> {
+  const cached = tvBackdropCache.get(gameId);
+  if (cached) return cached;
+  const pending = call('tv_backdrop', { gameId }, () => null).catch(() => null).then((url) => {
+    // Cache real artwork for this app session; a miss might become available
+    // after an API key is added or the catalogue gains new artwork.
+    if (!url) tvBackdropCache.delete(gameId);
+    return url;
+  });
+  tvBackdropCache.set(gameId, pending);
+  return pending;
 }
 
 /**
@@ -1423,6 +1450,7 @@ export function overlayConfigure(options: {
   recordingDirectory: string;
   replayDirectory: string;
   gameOnly: boolean;
+  captureShortcutsOutsideOverlay: boolean;
 }): Promise<void> {
   return call('overlay_configure', options, () => undefined);
 }

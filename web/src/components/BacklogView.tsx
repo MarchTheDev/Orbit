@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Check,
   CircleCheck,
@@ -29,6 +29,7 @@ import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { cn } from '../utils/cn';
 import { Modal } from './ui/Modal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { btnAccent } from './ui/buttons';
 
 /**
@@ -114,6 +115,7 @@ export function BacklogView({
   const [order, setOrder] = useState<Order>('mine');
   /** True while the page for planning a game is open. */
   const [planning, setPlanning] = useState(false);
+  const [planRemovalTarget, setPlanRemovalTarget] = useState<Game | null>(null);
   const [picking, setPicking] = useState(false);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
@@ -152,7 +154,7 @@ export function BacklogView({
    * and those arrive afterwards: a game that is written down is already
    * written down, whatever the store says about it later.
    */
-  const plan = ({ name, appId, coverUrl, facts, hltb: times }: PlanPick) => {
+  const plan = ({ name, appId, coverUrl, facts, hltb: times, platform }: PlanPick) => {
     const title = name.trim();
     if (!title) return;
     const meta: MetaData | undefined = facts
@@ -201,6 +203,7 @@ export function BacklogView({
       hue: hashHue(title),
       coverPath: null,
       planned: true,
+      planPlatform: platform ?? 'Steam',
       ...(meta ? { meta } : {}),
       ...(times ? { hltb: times } : {}),
       sessionCount: 0,
@@ -424,6 +427,20 @@ export function BacklogView({
         />
       )}
 
+      {planRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${planRemovalTarget.title} from the Backlog?`}
+          description="This removes only the planned entry. It does not delete or change any game in your Library."
+          confirmLabel="Remove planned game"
+          onCancel={() => setPlanRemovalTarget(null)}
+          onConfirm={() => {
+            const target = planRemovalTarget;
+            setPlanRemovalTarget(null);
+            onRemove(target.id);
+          }}
+        />
+      )}
+
       <Section
         title="Playing now"
         icon={Play}
@@ -466,7 +483,7 @@ export function BacklogView({
           onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
           onRemove={(id) => {
             const game = games.find((g) => g.id === id);
-            if (game && confirm(`Take ${game.title} off the list?`)) onRemove(id);
+            if (game) setPlanRemovalTarget(game);
           }}
         />
       )}
@@ -556,9 +573,13 @@ function Section({
   /** Comparing times: each card says how long it takes, three ways. */
   showTimes?: boolean;
 }) {
-  // The same pointer-based reordering the library uses: a webview that keeps
-  // file drags for itself never delivers a browser drag here either.
-  const { bind, dragging, over } = useDragReorder(movable && onMove ? onMove : undefined);
+  // A grid needs its own measured drop targets: elementFromPoint alone can lose
+  // the gesture in card gaps or after the pointer leaves the original card.
+  const list = useRef<HTMLUListElement>(null);
+  const { bind, dragging, over } = useDragReorder(
+    movable && onMove ? onMove : undefined,
+    { container: list, grid: true },
+  );
 
   return (
     <section>
@@ -569,7 +590,7 @@ function Section({
       {games.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{empty}</p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <ul ref={list} className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {games.map((g) => {
             const main = g.hltb?.main ?? 0;
             const left = Math.max(0, main - g.playSecs / 3600);
@@ -584,9 +605,23 @@ function Section({
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
-                {movable && <GripVertical className="size-4 shrink-0 text-muted" />}
+                {movable ? (
+                  <button
+                    type="button"
+                    data-orbit-drag-handle=""
+                    aria-label={`Drag ${g.title} to rearrange`}
+                    title="Drag to rearrange"
+                    className="grid size-8 shrink-0 touch-none cursor-grab place-items-center rounded-lg border border-accent/35 bg-accent/10 text-accent shadow-sm transition hover:border-accent hover:bg-accent/20 active:cursor-grabbing"
+                  >
+                    <GripVertical className="size-4" />
+                  </button>
+                ) : (
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-transparent text-muted/45" aria-hidden="true">
+                    <GripVertical className="size-4" />
+                  </span>
+                )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button
@@ -596,7 +631,10 @@ function Section({
                     {g.title}
                   </button>
                   {isNotOwned ? (
-                    <p className="mt-0.5 text-xs text-muted">{g.planned ? 'not owned yet' : 'not installed here'}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                      <span>{g.planned ? 'not owned yet' : 'not installed here'}</span>
+                      {g.planPlatform && <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px]">{g.planPlatform}</span>}
+                    </p>
                   ) : (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
                       <span>{fmtMinutes(g.playSecs / 60)} played</span>
@@ -684,7 +722,7 @@ function Section({
                         onClick={() => onRemove?.(g.id)}
                         title="Take this off the list"
                         aria-label={`Take ${g.title} off the list`}
-                        className="rounded-md border border-line bg-panel p-1 text-muted hover:border-rose-400 hover:text-rose-400"
+                        className="rounded-md border border-rose-500/30 bg-rose-500/10 p-1 text-rose-300 transition hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200"
                       >
                         <X className="size-3" />
                       </button>

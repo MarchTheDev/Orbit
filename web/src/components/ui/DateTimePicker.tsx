@@ -11,6 +11,8 @@ interface Props {
   placeholder?: string;
   title?: string;
   clearable?: boolean;
+  /** Keep the day while allowing the clock time to remain unset. */
+  optionalTime?: boolean;
   className?: string;
 }
 
@@ -89,12 +91,14 @@ export function DateTimePicker({
   placeholder = 'Choose date and time',
   title,
   clearable = false,
+  optionalTime = false,
   className,
 }: Props) {
   const selected = parseValue(value);
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => monthStart(selected ?? new Date()));
   const [pickerDate, setPickerDate] = useState(() => selected ?? new Date());
+  const [clockEnabled, setClockEnabled] = useState(() => Boolean(selected && (selected.getHours() !== 0 || selected.getMinutes() !== 0)));
   const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -105,13 +109,18 @@ export function DateTimePicker({
     new Date(firstVisible.getFullYear(), firstVisible.getMonth(), firstVisible.getDate() + index),
   );
   const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const selectedHasTime = Boolean(selected && (selected.getHours() !== 0 || selected.getMinutes() !== 0));
+  const timeSet = !optionalTime || clockEnabled || selectedHasTime;
   const shownValue = selected?.toLocaleString(undefined, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    ...(timeSet ? { hour: '2-digit' as const, minute: '2-digit' as const } : {}),
   });
+
+  useEffect(() => {
+    setClockEnabled(optionalTime ? selectedHasTime : true);
+  }, [value, optionalTime, selectedHasTime]);
 
   useEffect(() => {
     if (!open) return;
@@ -147,19 +156,24 @@ export function DateTimePicker({
   }, [open]);
 
   const showPicker = () => {
-    const initial = parseValue(value) ?? new Date();
+    const selectedDate = parseValue(value);
+    const initial = selectedDate ?? new Date();
+    const hasTime = Boolean(selectedDate && (selectedDate.getHours() !== 0 || selectedDate.getMinutes() !== 0));
+    if (optionalTime && !hasTime) initial.setHours(0, 0, 0, 0);
+    setClockEnabled(optionalTime ? hasTime : true);
     setPickerDate(initial);
     setMonth(monthStart(initial));
     setOpen((current) => !current);
   };
 
   const chooseDay = (day: Date) => {
+    const keepTime = !optionalTime || timeSet;
     const next = new Date(
       day.getFullYear(),
       day.getMonth(),
       day.getDate(),
-      pickerDate.getHours(),
-      pickerDate.getMinutes(),
+      keepTime ? pickerDate.getHours() : 0,
+      keepTime ? pickerDate.getMinutes() : 0,
       0,
       0,
     );
@@ -175,6 +189,7 @@ export function DateTimePicker({
     const next = new Date(pickerDate);
     next.setHours(hours, minutes, 0, 0);
     setPickerDate(next);
+    setClockEnabled(true);
     if (selected) onChange(asLocalValue(next));
   };
 
@@ -194,8 +209,8 @@ export function DateTimePicker({
         onClick={showPicker}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={shownValue ? `Date and time: ${shownValue}` : placeholder}
-        title={title ?? 'Choose a date and time'}
+        aria-label={shownValue ? `${timeSet ? 'Date and time' : 'Date'}: ${shownValue}` : placeholder}
+        title={title ?? (optionalTime ? 'Choose a day; time is optional' : 'Choose a date and time')}
         className={cn(inputCls, 'flex min-h-10 items-center justify-between gap-3 text-left', !shownValue && 'text-muted', className)}
       >
         <span className="min-w-0 truncate">{shownValue ?? placeholder}</span>
@@ -277,19 +292,32 @@ export function DateTimePicker({
           <div className="mt-3 flex items-center gap-2 border-t border-line/70 pt-3">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-line bg-panel2 px-2 py-1 text-fg">
               <Clock3 className="size-3.5 shrink-0 text-accent" aria-hidden />
-              <TimeStep
-                label="Hour"
-                value={pickerDate.getHours()}
-                max={23}
-                onChange={(hours) => chooseTime(`${pad(hours)}:${pad(pickerDate.getMinutes())}`)}
-              />
-              <span className="text-muted" aria-hidden>:</span>
-              <TimeStep
-                label="Minute"
-                value={pickerDate.getMinutes()}
-                max={59}
-                onChange={(minutes) => chooseTime(`${pad(pickerDate.getHours())}:${pad(minutes)}`)}
-              />
+              {optionalTime && !timeSet ? (
+                <button
+                  type="button"
+                  aria-label="Set optional time"
+                  onClick={() => chooseTime('00:00')}
+                  className="rounded px-1 font-mono text-sm tabular-nums text-muted hover:bg-panel hover:text-fg"
+                >
+                  --:--
+                </button>
+              ) : (
+                <>
+                  <TimeStep
+                    label="Hour"
+                    value={pickerDate.getHours()}
+                    max={23}
+                    onChange={(hours) => chooseTime(`${pad(hours)}:${pad(pickerDate.getMinutes())}`)}
+                  />
+                  <span className="text-muted" aria-hidden>:</span>
+                  <TimeStep
+                    label="Minute"
+                    value={pickerDate.getMinutes()}
+                    max={59}
+                    onChange={(minutes) => chooseTime(`${pad(pickerDate.getHours())}:${pad(minutes)}`)}
+                  />
+                </>
+              )}
             </div>
             <button
               type="button"
@@ -301,21 +329,39 @@ export function DateTimePicker({
           </div>
 
           <div className="mt-3 flex items-center justify-between border-t border-line/70 pt-2">
-            {clearable ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onChange('');
-                  setOpen(false);
-                }}
-                disabled={!value}
-                className="rounded-lg px-2 py-1.5 text-xs text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Clear date
-              </button>
-            ) : (
-              <span />
-            )}
+            <div className="flex items-center gap-1">
+              {optionalTime && timeSet && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClockEnabled(false);
+                    if (selected) {
+                      const next = new Date(selected);
+                      next.setHours(0, 0, 0, 0);
+                      setPickerDate(next);
+                      onChange(asLocalValue(next));
+                    }
+                  }}
+                  className="rounded-lg px-2 py-1.5 text-xs text-muted transition hover:text-fg"
+                >
+                  Clear time
+                </button>
+              )}
+              {clearable && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange('');
+                    setClockEnabled(false);
+                    setOpen(false);
+                  }}
+                  disabled={!value}
+                  className="rounded-lg px-2 py-1.5 text-xs text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Clear date
+                </button>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setOpen(false)}

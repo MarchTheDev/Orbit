@@ -46,6 +46,7 @@ import {
   overlayQuality,
   overlayShowPins,
   setClockOffset,
+  addGameLog,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -80,10 +81,11 @@ import { MoveProgressOrb } from './components/MoveProgressOrb';
 import { CloudTransferOrb } from './components/CloudTransferOrb';
 import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
+import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, onDisk } from './utils/library';
+import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -98,6 +100,19 @@ interface Toast extends ToastMessage {
 
 function FilledStar({ className }: { className?: string }) {
   return <Star className={className} fill="currentColor" strokeWidth={0} />;
+}
+
+const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
+const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
+
+function savedSort(): SortKey {
+  const value = localStorage.getItem('orbit.sort');
+  return SORT_KEYS.includes(value as SortKey) ? value as SortKey : 'title';
+}
+
+function savedFilter(): Filter {
+  const value = localStorage.getItem('orbit.filter');
+  return LIBRARY_FILTER_KEYS.includes(value as Filter) ? value as Filter : 'all';
 }
 
 export default function App() {
@@ -142,10 +157,10 @@ export default function App() {
     setTv(false);
     void leaveFullscreen();
   }, []);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
-  const [sort, setSort] = useState<SortKey>('title');
+  const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
@@ -153,7 +168,11 @@ export default function App() {
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
+  const [backlogRemovalTarget, setBacklogRemovalTarget] = useState<Game | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showThemeManager, setShowThemeManager] = useState(false);
+  /** True while a launcher/drive picker was opened from the Add Game form. */
+  const addTabImport = useRef(false);
   /** Whether the opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
@@ -172,7 +191,6 @@ export default function App() {
   const move = useGameMove((gameId, paths) => updateGame(gameId, paths));
   /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
-  const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
   /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -204,6 +222,8 @@ export default function App() {
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+  useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
+  useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
   useEffect(() => {
     if (!isNative()) return;
@@ -692,6 +712,7 @@ export default function App() {
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
       gameOnly: overlay?.gameOnly === true,
+      captureShortcutsOutsideOverlay: overlay?.captureShortcutsOutsideOverlay === true,
     });
   }, [settings]);
 
@@ -887,15 +908,13 @@ export default function App() {
     setShowSteam(false);
     setShowOtherLaunchers(null);
     setMenu(null);
-    setDetailReadOnlyMoves(false);
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
-  const openDetail = (id: string, readOnlyMoves = false) => {
-    setDetailReadOnlyMoves(readOnlyMoves);
+  const openDetail = (id: string) => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
   };
@@ -912,6 +931,45 @@ export default function App() {
     if (game) updateGame(id, { favorite: !game.favorite });
   };
 
+  const setBacklogMembership = (id: string, on: boolean) => {
+    setSettings((current) => {
+      const currentOn = current.backlogOn ?? [];
+      const currentOff = current.backlogOff ?? [];
+      return {
+        backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  const setJournalMembership = (id: string, on: boolean) => {
+    const game = games.find((item) => item.id === id);
+    if (on && (!game || game.planned || !inLibraryShelf(game))) return;
+    setSettings((current) => {
+      const currentOn = current.journalOn ?? [];
+      const currentOff = current.journalOff ?? [];
+      return {
+        journalOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        journalOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  /** Remove only this game's Backlog membership, or its planned-only record. */
+  const removeFromBacklog = (game: Game, confirmed = false): boolean => {
+    if (!confirmed) {
+      setBacklogRemovalTarget(game);
+      return false;
+    }
+    if (inLibraryShelf(game)) {
+      setBacklogMembership(game.id, false);
+      return true;
+    }
+    removeGame(game.id);
+    setSelectedId((current) => (current === game.id ? null : current));
+    return true;
+  };
+
   /**
    * What can be done to a game from the library, without opening it.
    *
@@ -925,7 +983,7 @@ export default function App() {
     : page === 'backlog'
       ? [
           { kind: 'label', label: menuGame.title },
-          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id, menuReadOnlyMoves) },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
           ...(menuReadOnlyMoves ? [] : [
             { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
             { kind: 'sep' as const },
@@ -954,10 +1012,10 @@ export default function App() {
           },
           { kind: 'sep' },
           {
-            label: 'Delete from Orbit…',
+            label: 'Remove from Backlog',
             icon: Trash2,
             danger: true,
-            onSelect: () => setRemoveConfirmId(menuGame.id),
+            onSelect: () => removeFromBacklog(menuGame),
           },
         ]
       : [
@@ -1021,6 +1079,14 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
+    // A playthrough start is worth a Journal entry even if the game is not in
+    // the Journal yet. Its session timestamp is the moment the game started,
+    // not when the player later adds it to the Journal.
+    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
+      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
+      .catch(() => {
+        toast({ text: `Could not save the Journal entry for ${g.title}.` });
+      });
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
     if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
@@ -1040,6 +1106,13 @@ export default function App() {
    * title the store does not know still gets its HowLongToBeat time, and the
    * other way round.
    */
+  const closeAddTabAfterLibraryImport = () => {
+    if (!addTabImport.current) return;
+    addTabImport.current = false;
+    setShowAdd(false);
+    setDroppedPaths(null);
+  };
+
   const handleAdd = async (g: Game, fetchMeta: boolean) => {
     addGame(g);
     setSelectedId(g.id);
@@ -1170,6 +1243,7 @@ export default function App() {
   }, [page, settingsJump]);
 
   const openSettings = useCallback((at?: string) => {
+    setShowThemeManager(false);
     setSettingsJump(at ? { id: at, token: ++settingsJumpToken.current } : null);
     setPage('settings');
   }, []);
@@ -1301,7 +1375,10 @@ export default function App() {
       >
       <TopNav
         page={page}
-        setPage={setPage}
+        setPage={(next) => {
+          setShowThemeManager(false);
+          setPage(next);
+        }}
         onOpenSettings={openSettings}
         order={settings?.tabOrder}
         sound={settings.sound}
@@ -1322,7 +1399,13 @@ export default function App() {
       )}
 
       <main key={page} className="orbit-tab-enter pb-24">
-        {!settings ? null : page === 'settings' ? (
+        {!settings ? null : showThemeManager ? (
+          <ThemeManagerPage
+            settings={settings}
+            setSettings={setSettings}
+            onBack={() => setShowThemeManager(false)}
+          />
+        ) : page === 'settings' ? (
           <div className="glass mx-6 mt-5 rounded-3xl">
             <SettingsView
               settings={settings}
@@ -1331,6 +1414,11 @@ export default function App() {
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);
+              }}
+              onOpenThemeManager={() => setShowThemeManager(true)}
+              onScanDrive={() => {
+                setImportFolder(settings.scanPath?.trim() || null);
+                setShowImport(true);
               }}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
@@ -1356,16 +1444,7 @@ export default function App() {
             syncLibrary={settings.syncBacklog === true}
             backlogOn={settings.backlogOn ?? []}
             backlogOff={settings.backlogOff ?? []}
-            onBacklogMembership={(id, on) => {
-              setSettings((current) => {
-                const currentOn = current.backlogOn ?? [];
-                const currentOff = current.backlogOff ?? [];
-                return {
-                  backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
-                  backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
-                };
-              });
-            }}
+            onBacklogMembership={setBacklogMembership}
             myOrder={settings.backlogOrder}
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
           />
@@ -1377,7 +1456,9 @@ export default function App() {
           />
         ) : page === 'logs' ? (
           <LogsView
-            games={games}
+            games={games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? []))}
+            allGames={games}
+            onJournalMembership={setJournalMembership}
             onUpdate={(id, patch) => updateGame(id, patch)}
             onEditGame={openGameEditor}
             // The Journal is read for the game being written about, so it can be
@@ -1411,7 +1492,7 @@ export default function App() {
             )}
             <Toolbar
               count={visible.length}
-              total={games.length}
+              total={libraryCount(games)}
               filter={activeFilter}
               setFilter={setFilter}
               query={query}
@@ -1569,6 +1650,22 @@ export default function App() {
         />
       )}
 
+      {backlogRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${backlogRemovalTarget.title} from the Backlog?`}
+          description={inLibraryShelf(backlogRemovalTarget)
+            ? 'The game will leave the Backlog but remain in your Library with its files, sessions and notes.'
+            : 'This deletes only the planned Backlog entry. It does not affect any Library game.'}
+          confirmLabel="Remove from Backlog"
+          onCancel={() => setBacklogRemovalTarget(null)}
+          onConfirm={() => {
+            const target = backlogRemovalTarget;
+            setBacklogRemovalTarget(null);
+            removeFromBacklog(target, true);
+          }}
+        />
+      )}
+
       {removeSteamConfirm && steamRemovalIds.length > 0 && (
         <ConfirmDialog
           title={`Remove ${steamRemovalIds.length} Steam ${steamRemovalIds.length === 1 ? 'game' : 'games'}?`}
@@ -1591,7 +1688,6 @@ export default function App() {
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
           context={page === 'backlog' ? 'backlog' : 'library'}
-          readOnlyMoves={detailReadOnlyMoves}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
@@ -1628,6 +1724,11 @@ export default function App() {
           game={editingGame}
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
           hideLaunchSettings={editingHideLaunchSettings}
+          onRemoveFromBacklog={editingHideLaunchSettings ? () => {
+            removeFromBacklog(editingGame, true);
+            setEditingGameId(null);
+            setEditingHideLaunchSettings(false);
+          } : undefined}
           onClose={() => {
             setEditingGameId(null);
             setEditingHideLaunchSettings(false);
@@ -1640,10 +1741,17 @@ export default function App() {
           initialPaths={droppedPaths}
           // The selected library opens over this form; closing it returns here.
           onImportLauncher={(launcher) => {
+            addTabImport.current = true;
             if (launcher === 'Steam') setShowSteam(true);
             else setShowOtherLaunchers(launcher);
           }}
+          onScanFolder={() => {
+            addTabImport.current = true;
+            setImportFolder(settings.scanPath?.trim() || null);
+            setShowImport(true);
+          }}
           onClose={() => {
+            addTabImport.current = false;
             setShowAdd(false);
             setDroppedPaths(null);
           }}
@@ -1655,9 +1763,15 @@ export default function App() {
           existing={games}
           initialFolder={importFolder}
           fetchMetadata={settings.fetchMetadata}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
-          onClose={() => setShowImport(false)}
+          onClose={() => {
+            setShowImport(false);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showOtherLaunchers && (
@@ -1665,13 +1779,20 @@ export default function App() {
           existing={games}
           launcher={showOtherLaunchers}
           path={settings?.launcherPaths?.[showOtherLaunchers]}
+          fetchArtwork={settings?.fetchMetadata !== false}
           onPath={(picked) =>
             setSettings({
               launcherPaths: { ...settings?.launcherPaths, [showOtherLaunchers]: picked },
             })
           }
-          onAdd={addGames}
-          onClose={() => setShowOtherLaunchers(null)}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
+          onClose={() => {
+            setShowOtherLaunchers(null);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showSteam && settings && (
@@ -1679,10 +1800,16 @@ export default function App() {
           existing={games}
           fetchMeta={settings.fetchMetadata}
           from={page === 'backlog' ? 'backlog' : 'library'}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
-          onClose={() => setShowSteam(false)}
+          onClose={() => {
+            setShowSteam(false);
+            addTabImport.current = false;
+          }}
           steamPath={settings.steamPath}
           onSteamPath={(steamPath) => setSettings({ steamPath })}
         />

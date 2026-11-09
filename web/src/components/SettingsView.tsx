@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FolderOpen,
+  HardDrive,
   Library as LibraryIcon,
   Ghost,
   GitBranch,
@@ -327,6 +328,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
   { label: 'rclone', section: 'orbit-backups', keywords: 'rclone get update folder path check backups' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
+  { label: 'Drive or folder scan', section: 'orbit-libraries', keywords: 'drive folder executable scan review import path' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
@@ -600,6 +602,17 @@ function OverlaySettings({
         openShortcut={overlay?.openShortcut ?? 'Alt+X'}
         onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
       />
+      <Checkbox
+        checked={overlay?.captureShortcutsOutsideOverlay === true}
+        onChange={(on) => setOverlay({ captureShortcutsOutsideOverlay: on })}
+        label="Allow capture shortcuts while the overlay is closed"
+        hint="Off by default: screenshot, recording, and replay shortcuts only work while the overlay is open. Turn this on to allow them over the game without opening the panel."
+      />
+      <p className="text-xs leading-relaxed text-muted">
+        The overlay takes focus and routes Orbit’s controls to its own UI. Some games can still read
+        controller input directly while it is open; blocking that device-level input requires an
+        operating-system driver, which Orbit does not install.
+      </p>
       <div className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3">
         <div>
           <p className="text-sm font-medium">Capture folders</p>
@@ -717,6 +730,8 @@ export function SettingsView({
   setSettings,
   replaceSettings,
   onImportLauncher,
+  onScanDrive,
+  onOpenThemeManager,
   onClearLibrary,
   onReset,
   onLibraryChanged,
@@ -730,6 +745,10 @@ export function SettingsView({
   replaceSettings: (settings: Partial<Settings>) => void;
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
+  /** Opens the review-first scan for the saved drive or folder path. */
+  onScanDrive?: () => void;
+  /** Open the in-app custom-theme editor page. */
+  onOpenThemeManager?: () => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -872,6 +891,8 @@ export function SettingsView({
     window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
   };
 
+  const featuredCustomTheme = settings.customThemes?.find((theme) => theme.id === settings.theme) ?? settings.customThemes?.[0] ?? null;
+
   const searchResults = settingsQuery.trim()
     ? searchItems.filter(
         (item) =>
@@ -956,10 +977,13 @@ export function SettingsView({
         title="Appearance"
         lead="Choose a theme, tune the library's look, and decide what happens when Orbit opens."
       >
+        <SubHead>Orbit themes</SubHead>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
             <button
               key={t.id}
+              type="button"
+              aria-pressed={settings.theme === t.id}
               onClick={() => setSettings({ theme: t.id })}
               className={cn(
                 'overflow-hidden rounded-xl border-2 text-left transition',
@@ -973,8 +997,33 @@ export function SettingsView({
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
             </button>
           ))}
+          {featuredCustomTheme ? (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="overflow-hidden rounded-xl border-2 border-accent/45 text-left transition hover:border-accent hover:shadow-[0_0_0_1px_var(--c-accent)]"
+              aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
+            >
+              <div className="flex h-16 items-center justify-center gap-2" style={{ background: featuredCustomTheme.bg }}>
+                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${featuredCustomTheme.accent}, ${featuredCustomTheme.accent2})` }} />
+                <span className="h-3 w-16 rounded" style={{ background: featuredCustomTheme.panel2 }} />
+              </div>
+              <div className="bg-panel px-3 py-2">
+                <span className="block truncate text-sm font-medium">{featuredCustomTheme.name}</span>
+                <span className="block text-[10px] text-muted">Edit custom themes</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent/40 bg-accent/5 px-3 text-sm font-semibold text-fg transition hover:border-accent hover:bg-accent/10"
+            >
+              <Wand2 className="size-5 text-accent" />
+              Create a custom theme
+            </button>
+          )}
         </div>
-
         <SubHead>Typeface</SubHead>
         <div className="grid gap-2 sm:grid-cols-2">
           {FONTS.map((font) => (
@@ -1066,8 +1115,14 @@ export function SettingsView({
         <Checkbox
           checked={settings.syncBacklog === true}
           onChange={(v) => setSettings({ syncBacklog: v })}
-          label="Also add new games to the Backlog"
-          hint="Also put title-only games on the Backlog. Off keeps them in the Library only."
+          label="Backlog sync"
+          hint="When on, newly added Library games also join the Backlog. Turning it off never removes games already there; you can still add or remove individual games."
+        />
+        <Checkbox
+          checked={settings.syncJournal !== false}
+          onChange={(v) => setSettings({ syncJournal: v })}
+          label="Journal sync"
+          hint="When on, newly added Library games also join the Journal. Turning it off never removes existing entries; you can still add or remove games manually. Backlog-only plans are never included."
         />
 
         <SubHead>Jump back in</SubHead>
@@ -1265,9 +1320,9 @@ export function SettingsView({
         id="orbit-libraries"
         icon={LibraryIcon}
         title="Libraries"
-        lead="Scan one launcher and choose games to add. Rescans on Orbit launch are off by default."
+        lead="Scan launchers or a drive and review the games Orbit finds before adding anything."
       >
-        {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
+        {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
           {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
@@ -1275,7 +1330,8 @@ export function SettingsView({
               ? settings.steamOnLaunch
               : (settings.launcherScanOnLaunch ?? []).includes(launcher.id);
             return (
-              <div key={launcher.id} className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+              <Fragment key={launcher.id}>
+              <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
                 <button
                   type="button"
                   onClick={() => onImportLauncher(launcher.id)}
@@ -1307,6 +1363,27 @@ export function SettingsView({
                   />
                 </div>
               </div>
+              {launcher.id === 'Steam' && (
+                <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+                  <button
+                    type="button"
+                    onClick={onScanDrive}
+                    disabled={!native || !onScanDrive}
+                    className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+                      <HardDrive className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-fg">Drive or folder</span>
+                      <span className="block text-[11px] text-muted">Scan manually</span>
+                    </span>
+                    <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                  </button>
+                  <div className="border-t border-line/70 px-3 py-2.5" aria-hidden="true" />
+                </div>
+              )}
+              </Fragment>
             );
           })}
         </div>

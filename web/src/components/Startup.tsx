@@ -10,11 +10,10 @@ import { Logo } from './ui/Logo';
  * sweeps out past it the way the panel's own highlight does, and the name
  * arrives under it. Then the whole thing lifts away and the library is there.
  *
- * It is deliberately short: about a second and a half, which is roughly the
- * moment the library and the covers take to arrive anyway, so it covers the wait
- * rather than adding to it. Turned off in Settings for anybody who would rather
- * the app simply be there, and cut to a plain fade when the system asks for less
- * movement.
+ * It is deliberately brief: the opening gives the saved library a moment to
+ * arrive without holding the interface behind a long splash screen. Turned off
+ * in Settings for anybody who would rather the app simply be there, and cut to
+ * a plain fade when the system asks for less movement.
  */
 export function Startup({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
@@ -25,8 +24,8 @@ export function Startup({ onDone }: { onDone: () => void }) {
     let done = 0;
     const start = () => {
       if (!alive) return;
-      fade = window.setTimeout(() => setLeaving(true), 1150);
-      done = window.setTimeout(onDone, 1650);
+      fade = window.setTimeout(() => setLeaving(true), 320);
+      done = window.setTimeout(onDone, 620);
     };
     // On Linux the window stays hidden until this page asks for it. Starting
     // the clock before that means the opening has already finished by the time

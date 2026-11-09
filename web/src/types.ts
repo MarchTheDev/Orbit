@@ -24,6 +24,7 @@ export interface OverlayShortcuts {
 }
 
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
+export type PlanPlatform = 'Steam' | 'Epic Games' | 'Nintendo' | 'Other';
 /** The Library has an Unplayed filter; Backlog is its own page. */
 export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
 export type OtherLauncher =
@@ -39,10 +40,26 @@ export type LauncherId = 'Steam' | OtherLauncher;
 export type FontChoice = 'system' | 'rounded' | 'serif' | 'mono' | 'humanist' | 'book';
 
 export interface HltbData {
+  /** Canonical title from the broad HLTB catalogue search, when available. */
+  gameName?: string;
   main: number; // hours
   mainExtra: number;
   completionist: number;
   source: 'hltb' | 'estimate';
+}
+
+/** A full HLTB catalogue result, with its cover and available playtime data. */
+export interface HltbSuggestion {
+  id: number;
+  name: string;
+  coverUrl: string | null;
+  hltb: HltbData;
+}
+
+/** HLTB's own description and platform list from its game page. */
+export interface HltbGameDetails {
+  description: string;
+  platforms: string[];
 }
 
 /**
@@ -202,6 +219,8 @@ export interface Game {
   title: string;
   /** True for a game the player means to play but does not have here. */
   planned?: boolean;
+  /** The store or console the player means to get this planned title for. */
+  planPlatform?: PlanPlatform;
   /**
    * On the library's shelf with nothing to start yet.
    *
@@ -496,7 +515,31 @@ export const OVERLAY_BOXES = [
 
 export type OverlayBoxId = (typeof OVERLAY_BOXES)[number]['id'];
 
+export interface Theme {
+  id: string;
+  name: string;
+  bg: string;
+  panel: string;
+  panel2: string;
+  border: string;
+  text: string;
+  muted: string;
+  accent: string;
+  accent2: string;
+  onAccent?: string;
+  /** Built-in palette used as the source for a one-colour custom theme. */
+  baseThemeId?: string;
+  /** The single chosen colour used to tint a custom palette. */
+  themeColor?: string;
+  /** Color generation style for simple two-colour custom palettes. */
+  themeMode?: 'graded' | 'dark' | 'light-graded' | 'light';
+  primaryColor?: string;
+  secondaryColor?: string;
+}
+
 export interface Settings {
+  /** Player-created palettes, managed on the in-app Custom themes page. */
+  customThemes?: Theme[];
   theme: string;
   /** The system font stack used throughout the interface. */
   fontFamily?: FontChoice;
@@ -603,6 +646,8 @@ export interface Settings {
    * buy, not a list of things to play.
    */
   syncBacklog?: boolean;
+  /** One-time snapshot so new-add-only sync preserves entries from older versions. */
+  syncMembershipSeeded?: boolean;
   /**
    * Games put on the Backlog by hand, even when they would otherwise stay in
    * the Library only.
@@ -612,6 +657,14 @@ export interface Settings {
    * Games taken off the Backlog without being removed from the Library.
    */
   backlogOff?: string[];
+  /** Whether games are automatically listed in the Journal; on by default for existing libraries. */
+  syncJournal?: boolean;
+  /** Games manually included in the Journal when synchronization is off. */
+  journalOn?: string[];
+  /** Games manually removed from the Journal while synchronization is on. */
+  journalOff?: string[];
+  /** Root folder or drive to check for new game programs. */
+  scanPath?: string;
   /**
    * Whether the interface fades in when the app opens. On by default: it is
    * forty-five hundredths of a second, and it covers the moment the library is
@@ -750,6 +803,8 @@ export interface Settings {
     gameOnly?: boolean;
     /** The capture shortcuts for the pad and keyboard. */
     shortcuts?: OverlayShortcuts;
+    /** Let capture shortcuts run while the panel is closed; off by default. */
+    captureShortcutsOutsideOverlay?: boolean;
   };
   /**
    * Which games back themselves up, and a folder to copy when Orbit cannot

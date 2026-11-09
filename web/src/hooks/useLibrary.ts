@@ -7,6 +7,7 @@ import { loadSettings, normalizeSettings, saveSettings } from '../services/stora
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyFont, applyTheme, nativePalette } from '../data/themes';
 import { desktopOs } from '../utils/platform';
+import { inLibraryShelf } from '../utils/library';
 
 /**
  * Fields a person fills in, as opposed to anything Orbit works out.
@@ -58,18 +59,39 @@ export function useLibrary() {
       try {
         const [loaded, savedSettings] = await Promise.all([listGames(), loadSettings()]);
         if (!alive) return;
-        const loadedSettings = savedSettings.theme === 'aurora'
+        let loadedSettings: Settings = savedSettings.theme === 'aurora'
           ? { ...savedSettings, theme: 'rubellite' }
           : savedSettings;
-        if (loadedSettings !== savedSettings) void saveSettings(loadedSettings);
+        if (loadedSettings.syncMembershipSeeded !== true) {
+          // Older builds derived list membership from the sync booleans, so
+          // disabling sync made existing rows disappear. Snapshot the legacy
+          // Journal once (also restores rows lost by that old behaviour), then
+          // let the sync controls affect only future additions.
+          const journal = new Set(loadedSettings.journalOn ?? []);
+          const backlog = new Set(loadedSettings.backlogOn ?? []);
+          for (const game of loaded) {
+            if (!inLibraryShelf(game) || game.planned) continue;
+            if (!loadedSettings.journalOff?.includes(game.id)) journal.add(game.id);
+            if (loadedSettings.syncBacklog === true && !loadedSettings.backlogOff?.includes(game.id)) backlog.add(game.id);
+          }
+          loadedSettings = {
+            ...loadedSettings,
+            journalOn: [...journal],
+            backlogOn: [...backlog],
+            syncMembershipSeeded: true,
+          };
+          void saveSettings(loadedSettings);
+        } else if (loadedSettings !== savedSettings) {
+          void saveSettings(loadedSettings);
+        }
         gamesRef.current = loaded;
         setGames(loaded);
         setSettingsState(loadedSettings);
-        applyTheme(loadedSettings.theme);
+        applyTheme(loadedSettings.theme, loadedSettings.customThemes ?? []);
         applyFont(loadedSettings.fontFamily ?? 'system');
         // The native cards are drawn outside the page, so they get the same
         // colours the theme just put on the page.
-        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(loadedSettings.theme));
+        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(loadedSettings.theme, loadedSettings.customThemes ?? []));
         setReady(true);
       } catch (error) {
         if (!alive) return;
@@ -144,23 +166,54 @@ export function useLibrary() {
     [save],
   );
 
+  /** Sync controls are for new Library entries only; existing membership is durable. */
+  const syncNewEntries = useCallback((incoming: Game[]) => {
+    if (!settings) return;
+    const ids = incoming.filter((game) => !game.planned && inLibraryShelf(game)).map((game) => game.id);
+    if (ids.length === 0) return;
+    const next: Settings = { ...settings };
+    let changed = false;
+    if (next.syncJournal !== false) {
+      const journal = new Set(next.journalOn ?? []);
+      for (const id of ids) journal.add(id);
+      if (journal.size !== (next.journalOn ?? []).length) {
+        next.journalOn = [...journal];
+        changed = true;
+      }
+    }
+    if (next.syncBacklog === true) {
+      const backlog = new Set(next.backlogOn ?? []);
+      for (const id of ids) backlog.add(id);
+      if (backlog.size !== (next.backlogOn ?? []).length) {
+        next.backlogOn = [...backlog];
+        changed = true;
+      }
+    }
+    if (changed) {
+      setSettingsState(next);
+      queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
+    }
+  }, [settings]);
+
   const addGame = useCallback(
     (game: Game) => {
       save(game);
+      syncNewEntries([game]);
       gamesRef.current = [...gamesRef.current, game];
       setGames(gamesRef.current);
     },
-    [save],
+    [save, syncNewEntries],
   );
 
   const addGames = useCallback(
     (incoming: Game[]) => {
       if (incoming.length === 0) return;
       for (const game of incoming) save(game);
+      syncNewEntries(incoming);
       gamesRef.current = [...gamesRef.current, ...incoming];
       setGames(gamesRef.current);
     },
-    [save],
+    [save, syncNewEntries],
   );
 
   /**
@@ -186,8 +239,8 @@ export function useLibrary() {
       const resolved = typeof patch === 'function' ? patch(current) : patch;
       const next = { ...current, ...resolved };
       if (resolved.theme) {
-        applyTheme(resolved.theme);
-        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(resolved.theme));
+        applyTheme(resolved.theme, next.customThemes ?? []);
+        if (desktopOs() !== 'linux') void overlayTheme(nativePalette(resolved.theme, next.customThemes ?? []));
       }
       if (resolved.fontFamily) applyFont(resolved.fontFamily);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
@@ -199,9 +252,19 @@ export function useLibrary() {
   const replaceSettings = useCallback((incoming: Partial<Settings>) => {
     setSettingsState((current) => {
       if (!current) return current;
-      const next = normalizeSettings(incoming);
-      applyTheme(next.theme);
-      if (desktopOs() !== 'linux') void overlayTheme(nativePalette(next.theme));
+      let next = normalizeSettings(incoming);
+      if (next.syncMembershipSeeded !== true) {
+        const journal = new Set(next.journalOn ?? []);
+        const backlog = new Set(next.backlogOn ?? []);
+        for (const game of gamesRef.current) {
+          if (!inLibraryShelf(game) || game.planned) continue;
+          if (!next.journalOff?.includes(game.id)) journal.add(game.id);
+          if (next.syncBacklog === true && !next.backlogOff?.includes(game.id)) backlog.add(game.id);
+        }
+        next = { ...next, journalOn: [...journal], backlogOn: [...backlog], syncMembershipSeeded: true };
+      }
+      applyTheme(next.theme, next.customThemes ?? []);
+      if (desktopOs() !== 'linux') void overlayTheme(nativePalette(next.theme, next.customThemes ?? []));
       applyFont(next.fontFamily ?? 'system');
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;

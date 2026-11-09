@@ -475,8 +475,8 @@ check(
 check(
   'the card takes the colours of the player theme',
   notice.includes('pub struct Palette') &&
-    settingsSource.includes('nativePalette(loadedSettings.theme)') &&
-    settingsSource.includes('void overlayTheme(nativePalette(resolved.theme))'),
+    settingsSource.includes('nativePalette(loadedSettings.theme, loadedSettings.customThemes ?? [])') &&
+    settingsSource.includes('void overlayTheme(nativePalette(resolved.theme, next.customThemes ?? []))'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

@@ -11,7 +11,7 @@
 //! Nothing in the app depends on this succeeding, so every failure turns into a
 //! sentence a player can read rather than a panic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -33,19 +33,42 @@ const ENDPOINTS: [&str; 4] = [
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HltbData {
+    pub game_name: String,
     pub main: f64,
     pub main_extra: f64,
     pub completionist: f64,
     pub source: &'static str,
 }
 
+/// One HLTB search result, including the cover art shown on the website.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HltbSuggestion {
+    pub id: i64,
+    pub name: String,
+    pub cover_url: Option<String>,
+    pub hltb: HltbData,
+}
+
+/// The description and platforms HLTB publishes on a game's own page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HltbGameDetails {
+    pub description: String,
+    pub platforms: Vec<String>,
+}
+
 /// One entry as HLTB returns it: times arrive in seconds, ids as numbers.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct HltbGame {
     #[serde(default)]
     game_id: i64,
     #[serde(default)]
     game_name: String,
+    #[serde(default)]
+    game_image: String,
+    #[serde(default)]
+    game_type: String,
     #[serde(default)]
     comp_main: f64,
     #[serde(default)]
@@ -75,6 +98,16 @@ struct Session {
 
 fn cache() -> &'static Mutex<HashMap<String, HltbData>> {
     static CACHE: OnceLock<Mutex<HashMap<String, HltbData>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn suggestions_cache() -> &'static Mutex<HashMap<String, Vec<HltbSuggestion>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Vec<HltbSuggestion>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn details_cache() -> &'static Mutex<HashMap<i64, HltbGameDetails>> {
+    static CACHE: OnceLock<Mutex<HashMap<i64, HltbGameDetails>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -139,9 +172,201 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
     }
 
     let client = client()?;
+    let games = search_candidates(&client, title).await?;
+    let Some(best) = pick_best(&games, title) else {
+        return Err(format!("HowLongToBeat has no match for \"{title}\"."));
+    };
+    let hit = data_for(best);
+    Ok(remember_hit(key, hit))
+}
 
-    // The remembered endpoint first, then the known names, then whatever the
-    // site's JavaScript says its endpoint is called now.
+/// Search HLTB's full title list, including entries without playtime reports.
+///
+/// The website includes image filenames in each search row, so this serves the
+/// same cover art as HLTB for console, upcoming, and other non-Steam titles.
+pub async fn suggestions(title: &str) -> Result<Vec<HltbSuggestion>, String> {
+    let key = title.trim().to_lowercase();
+    if key.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    if let Ok(kept) = suggestions_cache().lock() {
+        if let Some(found) = kept.get(&key) {
+            return Ok(found.clone());
+        }
+    }
+
+    let client = client()?;
+    let games = search_candidates(&client, title).await?;
+    let found = ranked_suggestions(games, title);
+    if let Ok(mut kept) = suggestions_cache().lock() {
+        if kept.len() >= 100 {
+            kept.clear();
+        }
+        kept.insert(key, found.clone());
+    }
+    Ok(found)
+}
+
+/// Read the summary and platform list for a chosen result from its HLTB page.
+/// The detail page publishes its data as `__NEXT_DATA__`, without a search token.
+pub async fn game_details(game_id: i64) -> Result<HltbGameDetails, String> {
+    if game_id <= 0 {
+        return Err("That HowLongToBeat game id is invalid.".into());
+    }
+    if let Ok(kept) = details_cache().lock() {
+        if let Some(found) = kept.get(&game_id) {
+            return Ok(found.clone());
+        }
+    }
+
+    let client = client()?;
+    let url = format!("{SITE}/game/{game_id}");
+    let response = client
+        .get(&url)
+        .header(reqwest::header::REFERER, format!("{SITE}/"))
+        .header(reqwest::header::ACCEPT, "text/html")
+        .send()
+        .await
+        .map_err(|error| format!("HowLongToBeat is unreachable: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HowLongToBeat answered {status} for that game page."));
+    }
+    let html = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read the HowLongToBeat game page: {error}"))?;
+    let found = parse_game_details(&html)?;
+    if let Ok(mut kept) = details_cache().lock() {
+        if kept.len() >= 100 {
+            kept.clear();
+        }
+        kept.insert(game_id, found.clone());
+    }
+    Ok(found)
+}
+
+fn parse_game_details(html: &str) -> Result<HltbGameDetails, String> {
+    let marker = html
+        .find("__NEXT_DATA__")
+        .ok_or_else(|| "HowLongToBeat did not include game details.".to_string())?;
+    let script = &html[marker..];
+    let body_start = script
+        .find('>')
+        .map(|index| index + 1)
+        .ok_or_else(|| "HowLongToBeat returned an incomplete game page.".to_string())?;
+    let body_end = script[body_start..]
+        .find("</script>")
+        .map(|index| body_start + index)
+        .ok_or_else(|| "HowLongToBeat returned an incomplete game page.".to_string())?;
+    let page: serde_json::Value = serde_json::from_str(&script[body_start..body_end])
+        .map_err(|error| format!("HowLongToBeat game details were unreadable: {error}"))?;
+    let game = page
+        .pointer("/props/pageProps/game/data/game/0")
+        .ok_or_else(|| "HowLongToBeat did not include this game's details.".to_string())?;
+    let description = game
+        .get("profile_summary")
+        .and_then(serde_json::Value::as_str)
+        .map(plain_summary)
+        .unwrap_or_default();
+    let platforms = game
+        .get("profile_platform")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|platform| !platform.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(HltbGameDetails { description, platforms })
+}
+
+/// HLTB summaries may contain simple markup or entities; show readable text.
+fn plain_summary(summary: &str) -> String {
+    let mut plain = String::with_capacity(summary.len());
+    let mut inside_tag = false;
+    for character in summary.chars() {
+        match character {
+            '<' => {
+                inside_tag = true;
+                plain.push(' ');
+            }
+            '>' => inside_tag = false,
+            _ if !inside_tag => plain.push(character),
+            _ => {}
+        }
+    }
+    plain
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Search the written title and useful expansions, retrying with a simpler query
+/// only when the first answer has no plausible title match.
+async fn search_candidates(client: &reqwest::Client, title: &str) -> Result<Vec<HltbGame>, String> {
+    let mut successful = None;
+    let mut last_error = None;
+    for query in query_variants(title) {
+        match search_results(client, &query).await {
+            Ok(games) => {
+                if games.iter().any(|game| title_score(game, title).is_some()) {
+                    return Ok(games);
+                }
+                if successful.is_none() {
+                    successful = Some(games);
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(games) = successful {
+        Ok(games)
+    } else {
+        Err(last_error.unwrap_or_else(|| "HowLongToBeat has no matching games.".to_string()))
+    }
+}
+
+/// Alternative search phrases for common abbreviations and version notes.
+fn query_variants(title: &str) -> Vec<String> {
+    let title = title.trim();
+    let mut queries = vec![title.to_string()];
+    let without_note = title.split(['(', '[']).next().unwrap_or(title).trim();
+    if !without_note.is_empty() && without_note != title {
+        queries.push(without_note.to_string());
+    }
+
+    let words: Vec<&str> = title.split_whitespace().collect();
+    if words.first().is_some_and(|word| word.eq_ignore_ascii_case("gta")) && words.len() > 1 {
+        queries.push(format!("Grand Theft Auto {}", words[1..].join(" ")));
+    } else if words.len() >= 4
+        && words[0].eq_ignore_ascii_case("grand")
+        && words[1].eq_ignore_ascii_case("theft")
+        && words[2].eq_ignore_ascii_case("auto")
+    {
+        queries.push(format!("GTA {}", words[3..].join(" ")));
+    }
+    let lower = title.to_lowercase();
+    if lower.contains("ocarina") && lower.contains("time") {
+        queries.push("Ocarina of Time".to_string());
+        queries.push("The Legend of Zelda: Ocarina of Time".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    queries.retain(|query| seen.insert(query.to_lowercase()));
+    queries
+}
+
+/// The endpoint that worked last time, known names, and then the name read from
+/// the site's JavaScript. A successful empty search is still a valid answer.
+async fn search_results(client: &reqwest::Client, title: &str) -> Result<Vec<HltbGame>, String> {
     let mut candidates: Vec<String> = Vec::new();
     if let Ok(found) = working_endpoint().lock() {
         if let Some(current) = found.as_ref() {
@@ -149,60 +374,43 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
         }
     }
     for known in ENDPOINTS {
-        if !candidates.iter().any(|c| c == known) {
+        if !candidates.iter().any(|candidate| candidate == known) {
             candidates.push(known.to_string());
         }
     }
 
     let mut last_error = String::from("HowLongToBeat did not answer.");
     for endpoint in &candidates {
-        match search(&client, endpoint, title).await {
-            Ok(Some(hit)) => {
+        match search(client, endpoint, title).await {
+            Ok(games) => {
                 remember(endpoint);
-                return Ok(remember_hit(key, hit));
+                return Ok(games);
             }
-            // The search itself went through and simply has no such game, which
-            // is the answer: there is nothing to gain by asking elsewhere.
-            Ok(None) => {
-                remember(endpoint);
-                return Err(format!("HowLongToBeat has no match for \"{title}\"."));
-            }
-            Err(e) => last_error = e,
+            Err(error) => last_error = error,
         }
     }
 
-    for found in discover(&client).await {
-        if candidates.iter().any(|c| c == &found) {
+    for endpoint in discover(client).await {
+        if candidates.iter().any(|candidate| candidate == &endpoint) {
             continue;
         }
-        match search(&client, &found, title).await {
-            Ok(Some(hit)) => {
-                remember(&found);
-                return Ok(remember_hit(key, hit));
+        match search(client, &endpoint, title).await {
+            Ok(games) => {
+                remember(&endpoint);
+                return Ok(games);
             }
-            Ok(None) => {
-                remember(&found);
-                return Err(format!("HowLongToBeat has no match for \"{title}\"."));
-            }
-            Err(e) => last_error = e,
+            Err(error) => last_error = error,
         }
     }
-
     Err(last_error)
 }
 
 /// One search against one endpoint, with a session reused where possible.
 ///
 /// A search is a handshake and then a question. The handshake is skipped when a
-/// session from this endpoint is still in hand, which is half the round trips a
-/// lookup costs - the difference a plan makes on the first page it opens. A
-/// session the site has stopped honouring is the one refusal worth asking
-/// again for; every other failure is an answer of its own.
-async fn search(
-    client: &reqwest::Client,
-    endpoint: &str,
-    title: &str,
-) -> Result<Option<HltbData>, String> {
+/// session from this endpoint is still in hand. A stale session is refreshed
+/// once, then the search is retried.
+async fn search(client: &reqwest::Client, endpoint: &str, title: &str) -> Result<Vec<HltbGame>, String> {
     if let Some(session) = remembered_session(endpoint) {
         match ask(client, endpoint, title, &session).await {
             Ok(found) => return Ok(found),
@@ -237,7 +445,7 @@ async fn ask(
     endpoint: &str,
     title: &str,
     session: &Session,
-) -> Result<Option<HltbData>, Refusal> {
+) -> Result<Vec<HltbGame>, Refusal> {
     // The same query the site's own search box builds.
     let body = serde_json::json!({
         "searchType": "games",
@@ -295,19 +503,7 @@ async fn ask(
     let reply: SearchReply = serde_json::from_str(&text)
         .map_err(|e| Refusal::Failed(format!("Unexpected HowLongToBeat reply: {e}")))?;
 
-    Ok(pick_best(&reply.data, title).map(|best| {
-        log::debug!(
-            "HowLongToBeat matched \"{}\" ({}) to \"{title}\"",
-            best.game_name,
-            best.game_id
-        );
-        HltbData {
-            main: to_hours(best.comp_main),
-            main_extra: to_hours(best.comp_plus),
-            completionist: to_hours(best.comp_100),
-            source: "hltb",
-        }
-    }))
+    Ok(reply.data)
 }
 
 /// Ask the site for a session token.
@@ -441,6 +637,65 @@ fn remember_hit(key: String, hit: HltbData) -> HltbData {
     hit
 }
 
+fn data_for(game: &HltbGame) -> HltbData {
+    HltbData {
+        game_name: game.game_name.clone(),
+        main: to_hours(game.comp_main),
+        main_extra: to_hours(game.comp_plus),
+        completionist: to_hours(game.comp_100),
+        source: "hltb",
+    }
+}
+
+fn ranked_suggestions(games: Vec<HltbGame>, title: &str) -> Vec<HltbSuggestion> {
+    let mut scored: Vec<(i64, HltbGame)> = games
+        .into_iter()
+        .filter(|game| {
+            game.game_id > 0
+                && !game.game_name.trim().is_empty()
+                && !game.game_type.eq_ignore_ascii_case("dlc")
+        })
+        .filter_map(|game| title_score(&game, title).map(|score| (score, game)))
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut ids = HashSet::new();
+    scored
+        .into_iter()
+        .filter_map(|(_, game)| {
+            // HLTB can contain separate releases with identical display names
+            // (remasters, platform editions, regional releases). Their IDs are
+            // the identity; only repeated copies of the same result are noise.
+            if !ids.insert(game.game_id) {
+                return None;
+            }
+            Some(HltbSuggestion {
+                id: game.game_id,
+                name: game.game_name.clone(),
+                cover_url: image_url(&game.game_image),
+                hltb: data_for(&game),
+            })
+        })
+        .take(20)
+        .collect()
+}
+
+fn image_url(image: &str) -> Option<String> {
+    let image = image.trim();
+    if image.is_empty() {
+        return None;
+    }
+    if image.starts_with("https://") || image.starts_with("http://") {
+        return Some(image.to_string());
+    }
+    let path = image.trim_start_matches('/');
+    Some(if path.starts_with("games/") {
+        format!("{SITE}/{path}")
+    } else {
+        format!("{SITE}/games/{path}")
+    })
+}
+
 /// HLTB reports seconds; the front end wants hours.
 ///
 /// A reply shape from long ago carried hours directly, so a number too small to
@@ -466,47 +721,85 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Score a candidate against the requested title, preferring exact-ish matches
-/// and penalising common suffixes like "(Remastered)" or platform tags.
+/// Score a candidate against the requested title. Search results often add a
+/// series prefix ("The Legend of Zelda: Ocarina of Time") or a subtitle, so
+/// contained titles and shared words matter more than identical prefixes.
 fn pick_best<'a>(games: &'a [HltbGame], title: &str) -> Option<&'a HltbGame> {
-    if games.is_empty() {
-        return None;
-    }
-    let want = normalize(title);
     games
         .iter()
-        .map(|g| {
-            let got = normalize(&g.game_name);
-            let score: i64 = if got == want {
-                1000
-            } else if got.starts_with(&want) || want.starts_with(&got) {
-                500
-            } else {
-                // Count shared leading characters as a weak signal.
-                want.chars()
-                    .zip(got.chars())
-                    .take_while(|(a, b)| a == b)
-                    .count() as i64
-            };
-            // An entry with no times at all is no use, however good the title
-            // match is: a near match with real numbers beats an exact one that
-            // would report 0h.
-            let has_data = if g.comp_main > 0.0 || g.comp_plus > 0.0 || g.comp_100 > 0.0 {
-                50
-            } else {
-                -500
-            };
-            (score + has_data, g)
+        .filter_map(|game| title_score(game, title).map(|score| (score, game)))
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, game)| game)
+}
+
+fn title_score(game: &HltbGame, title: &str) -> Option<i64> {
+    let want = normalize(title);
+    let got = normalize(&game.game_name);
+    let want_words = title_words(title);
+    if want_words.is_empty() {
+        return None;
+    }
+    let got_words = title_words(&game.game_name);
+    let requested_numbers: Vec<&str> = want_words
+        .iter()
+        .filter(|word| word.chars().all(char::is_numeric))
+        .map(String::as_str)
+        .collect();
+    let candidate_numbers: Vec<&str> = got_words
+        .iter()
+        .filter(|word| word.chars().all(char::is_numeric))
+        .map(String::as_str)
+        .collect();
+    if !requested_numbers.is_empty() && !candidate_numbers.is_empty() && requested_numbers != candidate_numbers {
+        return None;
+    }
+    let shared = want_words.iter().filter(|word| got_words.contains(word)).count();
+    let required = if want_words.len() < 2 { 1 } else { 2 };
+    if shared < required {
+        return None;
+    }
+    let name_score = if got == want {
+        100_000
+    } else if got.contains(want.as_str()) {
+        80_000 - (got.len().saturating_sub(want.len()) as i64)
+    } else if want.contains(got.as_str()) {
+        70_000 - (want.len().saturating_sub(got.len()) as i64)
+    } else {
+        1_000 + (shared as i64 * 1_000) + (shared as i64 * 500 / want_words.len() as i64)
+    };
+    let has_data = if game.comp_main > 0.0 || game.comp_plus > 0.0 || game.comp_100 > 0.0 { 1 } else { 0 };
+    Some(name_score + has_data)
+}
+
+fn title_words(s: &str) -> Vec<String> {
+    s.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .flat_map(|word| {
+            let lowered = word.to_lowercase();
+            match lowered.as_str() {
+                // HLTB spells Grand Theft Auto out, while players commonly type GTA.
+                "gta" => vec!["grand".into(), "theft".into(), "auto".into()],
+                // Normalize common sequel numerals so "GTA 6" matches "GTA VI".
+                "i" => vec!["1".into()],
+                "ii" => vec!["2".into()],
+                "iii" => vec!["3".into()],
+                "iv" => vec!["4".into()],
+                "v" => vec!["5".into()],
+                "vi" => vec!["6".into()],
+                "vii" => vec!["7".into()],
+                "viii" => vec!["8".into()],
+                "ix" => vec!["9".into()],
+                "x" => vec!["10".into()],
+                "xi" => vec!["11".into()],
+                "xii" => vec!["12".into()],
+                _ => vec![lowered],
+            }
         })
-        .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, g)| g)
+        .collect()
 }
 
 fn normalize(s: &str) -> String {
-    s.to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+    title_words(s).join("")
 }
 
 #[cfg(test)]
@@ -517,10 +810,46 @@ mod tests {
         HltbGame {
             game_id: 1,
             game_name: name.to_string(),
+            game_image: "cover.jpg".to_string(),
+            game_type: "game".to_string(),
             comp_main: main,
             comp_plus: main * 1.5,
             comp_100: main * 2.5,
         }
+    }
+
+    #[test]
+    fn hltb_suggestions_keep_upcoming_games_and_use_the_site_cover_url() {
+        let mut upcoming = game("Palia 2", 0.0);
+        upcoming.game_id = 2;
+        upcoming.game_image = "2_Palia_2.jpg".to_string();
+        let results = ranked_suggestions(vec![upcoming], "Palia");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Palia 2");
+        assert_eq!(results[0].cover_url.as_deref(), Some("https://howlongtobeat.com/games/2_Palia_2.jpg"));
+        assert_eq!(results[0].hltb.main, 0.0);
+    }
+
+    #[test]
+    fn hltb_detail_page_summary_is_plain_text_and_keeps_platforms() {
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"game":{"data":{"game":[{"profile_summary":"<p>Save the <b>king</b> &amp; his world.</p>","profile_platform":"PC, Nintendo Switch"}]}}}}}</script>"#;
+        let details = parse_game_details(html).expect("valid HLTB game page");
+        assert_eq!(details.description, "Save the king & his world.");
+        assert_eq!(details.platforms, vec!["PC", "Nintendo Switch"]);
+    }
+
+    #[test]
+    fn hltb_suggestions_keep_same_name_releases_but_skip_duplicate_ids_and_dlc() {
+        let mut dlc = game("Hades DLC", 3_600.0);
+        dlc.game_type = "dlc".to_string();
+        let first = game("Hades", 3_600.0);
+        let mut remake = game("Hades", 3_600.0);
+        remake.game_id = 2;
+        let duplicate_id = first.clone();
+        let results = ranked_suggestions(vec![first, remake, duplicate_id, dlc], "Hades");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|suggestion| suggestion.id == 1));
+        assert!(results.iter().any(|suggestion| suggestion.id == 2));
     }
 
     #[test]
@@ -531,10 +860,41 @@ mod tests {
     }
 
     #[test]
-    fn a_match_with_no_times_loses_to_one_with_times() {
+    fn the_exact_title_wins_even_when_it_has_no_times() {
         let games = vec![game("Hades", 0.0), game("Hades Remastered", 22.0)];
         let best = pick_best(&games, "Hades").expect("a match");
-        assert_eq!(best.game_name, "Hades Remastered");
+        assert_eq!(best.game_name, "Hades");
+    }
+
+    #[test]
+    fn a_subtitle_search_finds_the_console_game_inside_its_series_name() {
+        let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0), game("Mario Kart 8 Deluxe", 35.0)];
+        let best = pick_best(&games, "Ocarina of Time").expect("a match");
+        assert_eq!(best.game_name, "The Legend of Zelda: Ocarina of Time");
+    }
+
+    #[test]
+    fn gta_arabic_number_matches_hltb_roman_numeral_title() {
+        let games = vec![game("Grand Theft Auto V", 35.0), game("Grand Theft Auto VI", 0.0)];
+        assert_eq!(normalize("GTA 6"), normalize("Grand Theft Auto VI"));
+        assert_eq!(pick_best(&games, "gta 6").unwrap().game_name, "Grand Theft Auto VI");
+        assert!(title_score(&games[0], "gta 6").is_none());
+        assert!(query_variants("GTA 6").contains(&"Grand Theft Auto 6".to_string()));
+    }
+
+    #[test]
+    fn ocarina_year_and_remake_notes_do_not_hide_the_underlying_game_match() {
+        let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0)];
+        assert!(pick_best(&games, "Ocarina of Time (2026 remake)").is_some());
+        let queries = query_variants("Ocarina of Time (2026 remake)");
+        assert!(queries.contains(&"Ocarina of Time".to_string()));
+        assert!(queries.contains(&"The Legend of Zelda: Ocarina of Time".to_string()));
+    }
+
+    #[test]
+    fn unrelated_search_results_are_not_returned_as_catalogue_matches() {
+        let games = vec![game("Mario Kart 8 Deluxe", 35.0)];
+        assert!(pick_best(&games, "Ocarina of Time").is_none());
     }
 
     #[test]

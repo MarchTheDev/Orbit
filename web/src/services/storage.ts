@@ -8,7 +8,11 @@ export { DEFAULT_SETTINGS };
  * is no longer where a game lives, only how the app is set up.
  */
 export function normalizeSettings(stored: Partial<Settings>): Settings {
-  return dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  const normalized = dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  if (!['system', 'rounded', 'serif', 'mono', 'humanist', 'book'].includes(String(normalized.fontFamily ?? 'system'))) {
+    normalized.fontFamily = 'system';
+  }
+  return normalized;
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -25,11 +29,18 @@ export async function loadSettings(): Promise<Settings> {
   }
 }
 
-/** IGDB and the old rsync destination are gone. Drop them so a later save does not keep the secrets. */
+/** Retired providers and launch-time scans are removed so later saves cannot revive them. */
 function dropRetired(settings: Settings): Settings {
-  const next = { ...settings } as Settings & { igdbClientId?: string; igdbClientSecret?: string };
+  const next = { ...settings } as Settings & {
+    igdbClientId?: string;
+    igdbClientSecret?: string;
+    theGamesDbApiKey?: string;
+    scanOnLaunch?: boolean;
+  };
   delete next.igdbClientId;
   delete next.igdbClientSecret;
+  delete next.theGamesDbApiKey;
+  delete next.scanOnLaunch;
   if (next.saves) {
     const saves = { ...next.saves } as NonNullable<Settings['saves']> & { syncTo?: string };
     delete saves.syncTo;

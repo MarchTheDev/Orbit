@@ -71,6 +71,59 @@ pub async fn portraits(
     Ok(Page { picks: Vec::new(), has_more: false })
 }
 
+/// A wide SteamGridDB hero for the TV backdrop, if the configured API key has one.
+/// Steam ids are preferred; title lookup covers games added outside Steam.
+pub async fn hero(
+    app_id: Option<u64>,
+    title: &str,
+    api_key: &str,
+) -> Result<Option<String>, String> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Ok(None);
+    }
+
+    if let Some(app_id) = app_id {
+        if let Some(url) = heroes(&format!("{API}/heroes/steam/{app_id}"), key).await? {
+            return Ok(Some(url));
+        }
+    }
+    if let Some(id) = find_game(title, key).await? {
+        return heroes(&format!("{API}/heroes/game/{id}"), key).await;
+    }
+    Ok(None)
+}
+
+async fn heroes(base: &str, key: &str) -> Result<Option<String>, String> {
+    let fetched = get_json(key, base).await?;
+    if fetched.status == 401 || fetched.status == 403 {
+        return Err("SteamGridDB refused that key. Check it in Settings → Artwork.".into());
+    }
+    if fetched.status == 429 {
+        return Err("SteamGridDB asked for a pause. Try again in a moment.".into());
+    }
+    if !(200..300).contains(&fetched.status) {
+        return Ok(None);
+    }
+
+    let parsed: Answer = match serde_json::from_str(&fetched.body) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(None),
+    };
+    if !parsed.success {
+        return Ok(None);
+    }
+    let mut assets: Vec<Asset> = parsed
+        .data
+        .into_iter()
+        .filter(|asset| is_wide(asset.width, asset.height))
+        .collect();
+    assets.sort_by(|a, b| {
+        b.score.cmp(&a.score).then_with(|| (b.width * b.height).cmp(&(a.width * a.height)))
+    });
+    Ok(assets.into_iter().next().map(|asset| asset.url))
+}
+
 async fn grids(base: &str, key: &str, page: u32) -> Result<Page, String> {
     let paged = format!("{base}?dimensions={PORTRAITS}&limit={PAGE_SIZE}&page={page}");
     let mut fetched = get_json(key, &paged).await?;
@@ -149,6 +202,11 @@ fn is_portrait(width: u32, height: u32) -> bool {
     height.saturating_mul(10) >= width.saturating_mul(13)
 }
 
+/// Hero endpoints are wide backdrops, not square grids or portrait covers.
+fn is_wide(width: u32, height: u32) -> bool {
+    width == 0 || height == 0 || width > height
+}
+
 #[derive(Debug, Deserialize)]
 struct Hit {
     id: u64,
@@ -215,7 +273,7 @@ fn path_term(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_portrait, path_term};
+    use super::{is_portrait, is_wide, path_term};
 
     #[test]
     fn a_title_with_punctuation_is_safe_in_a_path() {
@@ -233,5 +291,9 @@ mod tests {
         assert!(!is_portrait(512, 512));
         assert!(!is_portrait(1024, 1024));
         assert!(is_portrait(0, 0));
+        assert!(is_wide(1920, 1080));
+        assert!(!is_wide(600, 900));
+        assert!(!is_wide(1024, 1024));
+        assert!(is_wide(0, 0));
     }
 }

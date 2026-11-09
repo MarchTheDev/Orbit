@@ -41,7 +41,7 @@ check('the Linux native install does not start the overlay watcher',
   /#\[cfg\(target_os = "linux"\)\]\s*pub fn install\(_app: &AppHandle\)[\s\S]{0,500}Ok\(\(\)\)\s*}\s*#\[cfg\(not\(target_os = "linux"\)\)\]\s*pub fn install/.test(rust));
 check('Linux ignores overlay configuration and settings application',
   /#\[cfg\(target_os = "linux"\)\]\s*pub fn apply_settings\(_value: &Value\) \{\}/.test(rust) &&
-    /#\[cfg\(target_os = "linux"\)\]\s*pub fn configure\([\s\S]{0,500}_game_only: bool,[\s\S]{0,40}\) \{\}/.test(rust));
+    /#\[cfg\(target_os = "linux"\)\]\s*pub fn configure\([\s\S]{0,500}_game_only: bool,[\s\S]{0,80}_capture_shortcuts_outside_overlay: bool,[\s\S]{0,40}\) \{\}/.test(rust));
 check('a game start cannot launch Linux replay capture',
   /#\[cfg\(target_os = "linux"\)\]\s*pub fn game_started\(_title: &str\) \{\}/.test(rust));
 check('the Linux overlay is not warmed or registered from controller input',

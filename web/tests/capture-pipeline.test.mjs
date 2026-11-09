@@ -7,6 +7,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const capture = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'capture.rs'), 'utf8');
 const audio = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'audio.rs'), 'utf8');
 const overlay = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
+const overlayView = readFileSync(path.join(root, 'web', 'src', 'components', 'OverlayView.tsx'), 'utf8');
+const mainPad = readFileSync(path.join(root, 'web', 'src', 'hooks', 'useGamepad.ts'), 'utf8');
 const settings = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
 const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
 const stats = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
@@ -119,9 +121,13 @@ check('Wayland recordings use the PipeWire-aware helper and explain the missing 
 check('replay encoding combines buffered video and audio into one MP4', replayEncoder.includes('write_audio_wav') && replayEncoder.includes('"1:a:0"') && replayEncoder.includes('"aac"'));
 check('Windows recording interleaves loopback packets against the video timeline', capture.includes('queue_pending_audio(&mut pending_audio') && capture.includes('flush_audio_samples(') && capture.includes('audio_time >= video_end_ticks'));
 check('Windows replay interleaves MP4 samples in presentation-time order', capture.includes('if video_time <= audio_time'));
+check('overlay keyboard navigation consumes its handled key events',
+  /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*move\(1, false\)/.test(overlayView) && /event\.stopPropagation\(\);\s*void overlayHide\('Escape'\)/.test(overlayView));
+check('the main Orbit pad stays idle while the overlay owns controller input',
+  /mayHandleGamepadInput\([\s\S]{0,80}overlayOpen/.test(mainPad) && mainPad.includes("listen('overlay-visible'"));
 check(
-  'Windows capture protection stays enabled without blacking out Wayland captures',
-  overlay.includes('.content_protected(cfg!(windows))') &&
+  'Windows and macOS capture protection stays enabled without blacking out Linux captures',
+  overlay.includes('.content_protected(cfg!(any(windows, target_os = "macos")))') &&
     notice.includes('WDA_EXCLUDEFROMCAPTURE') &&
     !overlay.includes('exclude_from_capture('),
 );
@@ -207,18 +213,13 @@ check(
     overlay.includes('"capture-replay"'),
 );
 check(
-  'a capture chord works with the panel closed, and is taken on the desktop side',
-  // The panel is not built until Alt+X is pressed, and a screenshot of the
-  // game is taken while the game is in front - so the chord cannot wait for a
-  // panel that will never open. Nor can it be handed to the library window:
-  // with a game in front that window is minimised, and a minimised web view
-  // does not run. The capture happens here.
-  /if !is_open\(\) \{[\s\S]{0,200}capture_from_shortcut\(app, capture\);/.test(overlay) &&
+  'capture shortcuts require the panel by default and can be allowed outside it in Settings',
+  overlay.includes('capture_shortcuts_outside_overlay: false') &&
+    /if !is_open\(\) && !lock\(\)\.capture_shortcuts_outside_overlay\s*\{\s*return;/.test(overlay) &&
+    overlay.includes('captureShortcutsOutsideOverlay') &&
     overlay.includes('fn capture_from_shortcut(') &&
     !overlay.includes('fn spawn_capture(') &&
     !overlay.includes('orbit-pad-capture') &&
-    // Start+Select still opens and closes the panel with it closed; the toggle
-    // is answered before that gate.
     /if step\.toggle \{\s*request_toggle\("the pad's Start\+Select"\);\s*return;\s*\}[\s\S]*?if !is_open\(\)/.test(overlay),
 );
 check(

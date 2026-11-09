@@ -453,7 +453,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-startup-out {
-  animation: orbit-startup-out 0.5s ease forwards;
+  animation: orbit-startup-out 0.3s ease forwards;
 }
 
 @keyframes orbit-startup-out {
@@ -483,7 +483,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-startup-name {
-  animation: orbit-startup-name 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+  animation: orbit-startup-name 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
 }
 
 @keyframes orbit-startup-name {
@@ -505,11 +505,11 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   height: 9rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
-  animation: orbit-ring 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: orbit-ring 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .orbit-ring-late {
-  animation-delay: 0.35s;
+  animation-delay: 0.12s;
 }
 
 @keyframes orbit-ring {
@@ -632,7 +632,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   width: 2px;
   height: 100%;
   border-radius: 2px;
-  background: currentColor;
+  background: linear-gradient(to top, var(--c-accent), var(--c-accent2));
   transform: scaleY(0.06);
   transform-origin: bottom;
   opacity: 0.28;

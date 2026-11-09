@@ -502,7 +502,7 @@ export function OverlayView() {
       // OverlayView is mounted in its own WebView, not inside App, so it must
       // opt into the Linux rendering safeguards independently.
       document.documentElement.classList.toggle('orbit-linux', linuxPlatform);
-      applyTheme(settings.theme);
+      applyTheme(settings.theme, settings.customThemes ?? []);
       applyFont(settings.fontFamily ?? 'system');
       settingsRef.current = settings;
       const base = defaults(window.innerWidth, window.innerHeight, linuxPlatform);
@@ -602,14 +602,18 @@ export function OverlayView() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         void overlayHide('Escape');
+        return;
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
         event.preventDefault();
+        event.stopPropagation();
         move(1, false);
       }
       if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
         event.preventDefault();
+        event.stopPropagation();
         move(-1, false);
       }
     };
@@ -1062,6 +1066,7 @@ export function OverlayView() {
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
       gameOnly: overlay?.gameOnly === true,
+      captureShortcutsOutsideOverlay: overlay?.captureShortcutsOutsideOverlay === true,
     });
     setStatus((current) => (current ? { ...current, seconds } : current));
   };

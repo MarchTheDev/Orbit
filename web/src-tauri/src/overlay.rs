@@ -263,6 +263,8 @@ struct Live {
     game_only: bool,
     /// The capture shortcuts, as the settings page last wrote them.
     shortcuts: Shortcuts,
+    /// Whether those shortcuts may capture while the panel is hidden.
+    capture_shortcuts_outside_overlay: bool,
     /// The colours of the player's theme, for the native card.
     palette: Palette,
     /// The chime, for a capture that finishes after the panel is gone. The
@@ -324,6 +326,7 @@ struct Step {
 
 static LIVE: Mutex<Live> = Mutex::new(Live {
     shortcuts: Shortcuts::shipped(),
+    capture_shortcuts_outside_overlay: false,
     open_shortcut: None,
     game_only: false,
     enabled: true,
@@ -645,11 +648,16 @@ pub fn apply_settings(value: &Value) {
         .and_then(|item| item.get("gameOnly"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let capture_shortcuts_outside_overlay = overlay
+        .and_then(|item| item.get("captureShortcutsOutsideOverlay"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     {
         let mut live = lock();
         live.shortcuts = shortcuts;
         live.open_shortcut = Some(open_shortcut);
         live.game_only = game_only;
+        live.capture_shortcuts_outside_overlay = capture_shortcuts_outside_overlay;
     }
     let enabled = overlay
         .and_then(|item| item.get("enabled"))
@@ -691,7 +699,7 @@ pub fn apply_settings(value: &Value) {
     let screenshot_directory = overlay.and_then(|item| item.get("screenshotDirectory")).and_then(Value::as_str).unwrap_or("");
     let recording_directory = overlay.and_then(|item| item.get("recordingDirectory")).and_then(Value::as_str).unwrap_or("");
     let replay_directory = overlay.and_then(|item| item.get("replayDirectory")).and_then(Value::as_str).unwrap_or("");
-    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory, game_only);
+    configure(None, enabled, replay, seconds, Some(&lengths), quality, fps, ffmpeg, screenshot_directory, recording_directory, replay_directory, game_only, capture_shortcuts_outside_overlay);
     // `configure` had no app handle. The saved shortcuts are registered here,
     // after `configure` has set whether the overlay is enabled. At first run,
     // `install` registers them once the app handle exists.
@@ -715,6 +723,7 @@ pub fn configure(
     _recording_directory: &str,
     _replay_directory: &str,
     _game_only: bool,
+    _capture_shortcuts_outside_overlay: bool,
 ) {}
 
 #[cfg(not(target_os = "linux"))]
@@ -731,6 +740,7 @@ pub fn configure(
     recording_directory: &str,
     replay_directory: &str,
     game_only: bool,
+    capture_shortcuts_outside_overlay: bool,
 ) {
     let seconds = clamp_seconds(seconds);
     let lengths = lengths.map(|items| {
@@ -772,6 +782,7 @@ pub fn configure(
         live.fps = fps;
         live.ffmpeg = ffmpeg.to_string();
         live.game_only = game_only;
+        live.capture_shortcuts_outside_overlay = capture_shortcuts_outside_overlay;
         let stop = live.playing && (!replay || !enabled);
         let restart = must_restart && live.playing && replay && enabled && !recording;
         (changed, stop, restart, hide)
@@ -1021,9 +1032,9 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     }
     install_keys(app);
     install_toggle_shortcut(app);
-    // The keyboard is watched from here on, for as long as Orbit runs: a
-    // capture shortcut has to work with a game in front, which is exactly when
-    // Orbit's own window cannot be typed into.
+    // The keyboard is watched from here on, for as long as Orbit runs. The
+    // capture handler decides whether the panel must be open or the player's
+    // allow-while-closed setting permits a capture over the game.
     #[cfg(windows)]
     {
         if !KEYS_WATCHED.swap(true, Ordering::SeqCst) {
@@ -1049,9 +1060,8 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
 /// Start+Select and the capture shortcuts, from the pad thread.
 ///
 /// The panel's own buttons - A, B, the ring, the menu - are only sent while the
-/// panel is open. A capture shortcut is not one of those: it is the same three
-/// things a keyboard shortcut does, and it works with the panel closed, which is
-/// how a player takes a picture of the game they are playing.
+/// panel is open. Capture shortcuts are handled by the same desktop path as the
+/// keyboard and are gated by the player's allow-while-closed setting.
 #[cfg(target_os = "linux")]
 pub fn on_pad(_app: &AppHandle, _buttons: &[bool], _axes: &[f32]) {}
 
@@ -1143,6 +1153,9 @@ struct ShortcutCapture {
 /// whole capture happens on this side. Off the calling thread, because a
 /// picture of the screen takes a moment and a pressed key must not wait for it.
 fn capture_from_shortcut(app: &AppHandle, capture: Capture) {
+    if !is_open() && !lock().capture_shortcuts_outside_overlay {
+        return;
+    }
     let handle = app.clone();
     let _ = thread::Builder::new()
         .name("orbit-shortcut-capture".to_string())
@@ -1980,10 +1993,11 @@ fn ensure_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        // Keep Windows capture APIs from including the overlay. On Linux this
+        // Ask the desktop capture APIs to exclude the overlay itself, so the
+        // game remains visible in screenshots, recordings, and replays. Linux
         // must stay false: KWin can black out the whole output for a protected
         // transparent fullscreen surface, including the game behind it.
-        .content_protected(cfg!(windows))
+        .content_protected(cfg!(any(windows, target_os = "macos")))
         .visible(false)
         .focused(false)
         .center()

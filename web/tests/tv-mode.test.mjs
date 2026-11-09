@@ -110,6 +110,10 @@ check('the library’s own pictures are the fallbacks', art.slice(1).join() === 
 check('a game from Steam by its launch target still gets it',
   backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'steam', appId: 220 } })[0].includes('/220/'));
 check('a game with no store id has nothing to guess at', backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'none' } }).length === 0);
+check('the native TV backdrop asks for optional SteamGridDB hero art after Steam but before metadata fallbacks',
+  tvSource.includes('findTvBackdrop, isNative') &&
+    backdropSource.includes('findTvBackdrop(game.id)') &&
+    backdropSource.includes('[...localBackdrops.slice(0, 1), communityUrl, ...localBackdrops.slice(1)]'));
 
 console.log('the hub: one rail, and the selected game all over the screen');
 

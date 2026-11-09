@@ -1,4 +1,4 @@
-import { gameFolderFromExecutable, gameTitleFromExecutable, gameTitleFromPath } from '../src/utils/gameTitle.ts';
+import { gameFolderFromExecutable, gameFolderFromScan, gameTitleFromExecutable, gameTitleFromPath, gameTitleFromScannedProgram } from '../src/utils/gameTitle.ts';
 
 let failures = 0;
 
@@ -28,6 +28,21 @@ check(
   gameTitleFromPath('C:\\Games\\Hades v1.382-win'),
 );
 check(
+  'drops a known release suffix from a scanned game folder',
+  gameTitleFromPath('D:\\Games\\Red-Dead-Redemption-2-Anker') === 'Red Dead Redemption 2',
+  gameTitleFromPath('D:\\Games\\Red-Dead-Redemption-2-Anker'),
+);
+check(
+  'strips the AnkerGames suffix without a separator',
+  gameTitleFromPath('D:\\Games\\Red Dead Redemption 2 AnkerGames') === 'Red Dead Redemption 2',
+  gameTitleFromPath('D:\\Games\\Red Dead Redemption 2 AnkerGames'),
+);
+check(
+  'uses a recognizable executable name to trim an arbitrary extra folder word',
+  gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection') === 'Red Dead Redemption 2',
+  gameTitleFromScannedProgram('D:\\Games\\Red Dead Redemption 2 Collection\\RedDeadRedemption2.exe', 'D:\\Games\\Red Dead Redemption 2 Collection'),
+);
+check(
   'falls back to the executable name for a generic library folder',
   gameTitleFromExecutable('C:\\Games\\Control.exe') === 'Control',
   gameTitleFromExecutable('C:\\Games\\Control.exe'),
@@ -36,6 +51,21 @@ check(
   "finds the game's install root above bin",
   gameFolderFromExecutable('C:\\Games\\Hades\\bin\\Hades.exe') === 'C:\\Games\\Hades',
   gameFolderFromExecutable('C:\\Games\\Hades\\bin\\Hades.exe'),
+);
+check(
+  'groups a whole-drive scan beneath a Games folder by the actual game folder',
+  gameFolderFromScan('D:\\Games\\Red Dead Redemption 2\\Binaries\\x64\\RDR2.exe', 'D:\\') === 'D:\\Games\\Red Dead Redemption 2',
+  gameFolderFromScan('D:\\Games\\Red Dead Redemption 2\\Binaries\\x64\\RDR2.exe', 'D:\\'),
+);
+check(
+  'groups Steam executables beneath the game after library containers',
+  gameFolderFromScan('D:\\SteamLibrary\\steamapps\\common\\Ocarina of Time\\bin\\game.exe', 'D:\\') === 'D:\\SteamLibrary\\steamapps\\common\\Ocarina of Time',
+  gameFolderFromScan('D:\\SteamLibrary\\steamapps\\common\\Ocarina of Time\\bin\\game.exe', 'D:\\'),
+);
+check(
+  'uses slash separators when scanning a selected folder on Unix',
+  gameFolderFromScan('/mnt/Games/Another Game/bin/game', '/mnt/Games') === '/mnt/Games/Another Game',
+  gameFolderFromScan('/mnt/Games/Another Game/bin/game', '/mnt/Games'),
 );
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;
