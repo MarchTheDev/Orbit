@@ -521,6 +521,10 @@ export interface Theme {
   accent: string;
   accent2: string;
   onAccent?: string;
+  /** Built-in palette used as the source for a one-colour custom theme. */
+  baseThemeId?: string;
+  /** The single chosen colour used to tint a custom palette. */
+  themeColor?: string;
 }
 
 export interface Settings {

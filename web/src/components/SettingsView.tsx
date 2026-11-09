@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
@@ -1324,25 +1324,14 @@ export function SettingsView({
       >
         {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={onScanDrive}
-            disabled={!native || !onScanDrive}
-            className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
-              <HardDrive className="size-5" />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold">Drive or folder</span>
-            <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
-          </button>
           {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
               ? settings.steamOnLaunch
               : (settings.launcherScanOnLaunch ?? []).includes(launcher.id);
             return (
-              <div key={launcher.id} className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+              <Fragment key={launcher.id}>
+              <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
                 <button
                   type="button"
                   onClick={() => onImportLauncher(launcher.id)}
@@ -1374,6 +1363,26 @@ export function SettingsView({
                   />
                 </div>
               </div>
+              {launcher.id === 'Steam' && (
+                <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+                  <button
+                    type="button"
+                    onClick={onScanDrive}
+                    disabled={!native || !onScanDrive}
+                    className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+                      <HardDrive className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-fg">Drive or folder</span>
+                      <span className="block text-[11px] text-muted">Scan manually</span>
+                    </span>
+                    <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                  </button>
+                </div>
+              )}
+              </Fragment>
             );
           })}
         </div>

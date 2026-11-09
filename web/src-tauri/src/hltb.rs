@@ -159,7 +159,7 @@ pub async fn lookup(title: &str) -> Result<HltbData, String> {
     }
 
     let client = client()?;
-    let games = search_results(&client, title).await?;
+    let games = search_candidates(&client, title).await?;
     let Some(best) = pick_best(&games, title) else {
         return Err(format!("HowLongToBeat has no match for \"{title}\"."));
     };
@@ -183,7 +183,7 @@ pub async fn suggestions(title: &str) -> Result<Vec<HltbSuggestion>, String> {
     }
 
     let client = client()?;
-    let games = search_results(&client, title).await?;
+    let games = search_candidates(&client, title).await?;
     let found = ranked_suggestions(games, title);
     if let Ok(mut kept) = suggestions_cache().lock() {
         if kept.len() >= 100 {
@@ -192,6 +192,56 @@ pub async fn suggestions(title: &str) -> Result<Vec<HltbSuggestion>, String> {
         kept.insert(key, found.clone());
     }
     Ok(found)
+}
+
+/// Search the written title and useful expansions, retrying with a simpler query
+/// only when the first answer has no plausible title match.
+async fn search_candidates(client: &reqwest::Client, title: &str) -> Result<Vec<HltbGame>, String> {
+    let mut successful = None;
+    let mut last_error = None;
+    for query in query_variants(title) {
+        match search_results(client, &query).await {
+            Ok(games) => {
+                if games.iter().any(|game| title_score(game, title).is_some()) {
+                    return Ok(games);
+                }
+                if successful.is_none() {
+                    successful = Some(games);
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(games) = successful {
+        Ok(games)
+    } else {
+        Err(last_error.unwrap_or_else(|| "HowLongToBeat has no matching games.".to_string()))
+    }
+}
+
+/// Alternative search phrases for common abbreviations and version notes.
+fn query_variants(title: &str) -> Vec<String> {
+    let title = title.trim();
+    let mut queries = vec![title.to_string()];
+    let without_note = title.split(['(', '[']).next().unwrap_or(title).trim();
+    if !without_note.is_empty() && without_note != title {
+        queries.push(without_note.to_string());
+    }
+
+    let words: Vec<&str> = title.split_whitespace().collect();
+    if words.first().is_some_and(|word| word.eq_ignore_ascii_case("gta")) && words.len() > 1 {
+        queries.push(format!("Grand Theft Auto {}", words[1..].join(" ")));
+    } else if words.len() >= 4
+        && words[0].eq_ignore_ascii_case("grand")
+        && words[1].eq_ignore_ascii_case("theft")
+        && words[2].eq_ignore_ascii_case("auto")
+    {
+        queries.push(format!("GTA {}", words[3..].join(" ")));
+    }
+
+    let mut seen = HashSet::new();
+    queries.retain(|query| seen.insert(query.to_lowercase()));
+    queries
 }
 
 /// The endpoint that worked last time, known names, and then the name read from
@@ -568,6 +618,19 @@ fn title_score(game: &HltbGame, title: &str) -> Option<i64> {
         return None;
     }
     let got_words = title_words(&game.game_name);
+    let requested_numbers: Vec<&str> = want_words
+        .iter()
+        .filter(|word| word.chars().all(char::is_numeric))
+        .map(String::as_str)
+        .collect();
+    let candidate_numbers: Vec<&str> = got_words
+        .iter()
+        .filter(|word| word.chars().all(char::is_numeric))
+        .map(String::as_str)
+        .collect();
+    if !requested_numbers.is_empty() && !candidate_numbers.is_empty() && requested_numbers != candidate_numbers {
+        return None;
+    }
     let shared = want_words.iter().filter(|word| got_words.contains(word)).count();
     let required = if want_words.len() < 2 { 1 } else { 2 };
     if shared < required {
@@ -589,15 +652,32 @@ fn title_score(game: &HltbGame, title: &str) -> Option<i64> {
 fn title_words(s: &str) -> Vec<String> {
     s.split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
+        .flat_map(|word| {
+            let lowered = word.to_lowercase();
+            match lowered.as_str() {
+                // HLTB spells Grand Theft Auto out, while players commonly type GTA.
+                "gta" => vec!["grand".into(), "theft".into(), "auto".into()],
+                // Normalize common sequel numerals so "GTA 6" matches "GTA VI".
+                "i" => vec!["1".into()],
+                "ii" => vec!["2".into()],
+                "iii" => vec!["3".into()],
+                "iv" => vec!["4".into()],
+                "v" => vec!["5".into()],
+                "vi" => vec!["6".into()],
+                "vii" => vec!["7".into()],
+                "viii" => vec!["8".into()],
+                "ix" => vec!["9".into()],
+                "x" => vec!["10".into()],
+                "xi" => vec!["11".into()],
+                "xii" => vec!["12".into()],
+                _ => vec![lowered],
+            }
+        })
         .collect()
 }
 
 fn normalize(s: &str) -> String {
-    s.to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+    title_words(s).join("")
 }
 
 #[cfg(test)]
@@ -658,6 +738,22 @@ mod tests {
         let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0), game("Mario Kart 8 Deluxe", 35.0)];
         let best = pick_best(&games, "Ocarina of Time").expect("a match");
         assert_eq!(best.game_name, "The Legend of Zelda: Ocarina of Time");
+    }
+
+    #[test]
+    fn gta_arabic_number_matches_hltb_roman_numeral_title() {
+        let games = vec![game("Grand Theft Auto V", 35.0), game("Grand Theft Auto VI", 0.0)];
+        assert_eq!(normalize("GTA 6"), normalize("Grand Theft Auto VI"));
+        assert_eq!(pick_best(&games, "gta 6").unwrap().game_name, "Grand Theft Auto VI");
+        assert!(title_score(&games[0], "gta 6").is_none());
+        assert!(query_variants("GTA 6").contains(&"Grand Theft Auto 6".to_string()));
+    }
+
+    #[test]
+    fn ocarina_year_and_remake_notes_do_not_hide_the_underlying_game_match() {
+        let games = vec![game("The Legend of Zelda: Ocarina of Time", 26.0)];
+        assert!(pick_best(&games, "Ocarina of Time (2026 remake)").is_some());
+        assert!(query_variants("Ocarina of Time (2026 remake)").contains(&"Ocarina of Time".to_string()));
     }
 
     #[test]

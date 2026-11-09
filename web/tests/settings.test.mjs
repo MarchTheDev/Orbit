@@ -61,11 +61,14 @@ check('overlay, sound, backlog, Journal, drive-scan, theme, and system settings 
     imported.futureSetting?.nested === true);
 check('retired startup-scan and TheGamesDB settings are removed from saved settings',
   !('scanOnLaunch' in imported) && !('theGamesDbApiKey' in imported));
-check('drive scans live in Libraries and use the same card as Add Game',
-  settingsView.includes("id=\"orbit-libraries\"") && settingsView.includes('onClick={onScanDrive}') &&
-    settingsView.includes('<HardDrive className="size-5" />') && addGameModal.includes('<HardDrive className="size-5" />') &&
-    settingsView.includes('bg-panel/75 px-3 py-3') && addGameModal.includes('bg-panel/75 px-3 py-3') &&
-    !settingsView.includes('Choose path') && app.includes('onScanDrive={() => {') && !app.includes('driveScanChecked'));
+const libraries = settingsView.slice(settingsView.indexOf('id="orbit-libraries"'), settingsView.indexOf('id="orbit-details"'));
+const driveCardAt = libraries.indexOf('Drive or folder');
+check('Steam is followed by a manually-scanned Drive or folder card styled like the launcher cards',
+  driveCardAt > libraries.indexOf("launcher.id === 'Steam'") && libraries.includes('onClick={onScanDrive}') &&
+    libraries.includes('block text-sm font-semibold text-fg">Drive or folder') &&
+    libraries.includes('block text-[11px] text-muted">Scan manually') &&
+    !libraries.slice(driveCardAt, libraries.indexOf('</button>', driveCardAt)).includes('Rescan on Orbit launch') &&
+    addGameModal.includes('<HardDrive className="size-5" />') && app.includes('onScanDrive={() => {') && !app.includes('driveScanChecked'));
 check('drive scans do not run automatically on Orbit launch',
   !settingsView.includes('Review new programs at startup') && !app.includes('settings.scanOnLaunch'));
 const oldImport = normalizeSettings({ theme: 'nebula' });

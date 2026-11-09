@@ -13,10 +13,12 @@ check('Linux excludes Windows-only libraries', !launcherOn('Epic Games', 'linux'
 check('Steam remains available on both desktops', launcherOn('Steam', 'windows') && launcherOn('Steam', 'linux'));
 const addGame = readFileSync(new URL('../src/components/modals/AddGameModal.tsx', import.meta.url), 'utf8');
 const plan = readFileSync(new URL('../src/components/detail/PlanDialog.tsx', import.meta.url), 'utf8');
+const hltb = readFileSync(new URL('../src-tauri/src/hltb.rs', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 check('the Add Game picker filters its launcher rows by the current desktop OS', addGame.includes('LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs()))'));
 check('drive scanning is a library card in the same picker rather than a separate header button', addGame.includes('Game libraries') && addGame.includes('Drive or folder') && addGame.includes('<HardDrive') && !addGame.includes('Scan a drive or folder</button>'));
 check('planning uses one platform-agnostic search with no platform selector', plan.includes('Search all games') && !plan.includes('setPlatform') && !plan.includes('<select'));
+check('HLTB search understands GTA 6 / GTA VI and strips remake-year notes for Ocarina', hltb.includes('gta_arabic_number_matches_hltb_roman_numeral_title') && hltb.includes('ocarina_year_and_remake_notes_do_not_hide_the_underlying_game_match') && hltb.includes('search_candidates'));
 check('the planning search consults HowLongToBeat for console-only and upcoming titles', plan.includes('searchHltbGames(text)') && plan.includes('HltbSuggestion') && plan.includes("platform: 'Other'"));
 check('HowLongToBeat is primary, with its titles and covers blended ahead of Steam results', plan.includes('searchHltbGames(text)') && plan.includes('hltbRows') && plan.includes('displayResults.map') && plan.includes('HowLongToBeat ·') && plan.includes('coverUrl: result.suggestion.coverUrl') && plan.includes("a.source === 'hltb' ? -1 : 1"));
 check('search spinner and keyboard hints reflect both blended result sources', plan.includes('(looking || hltbLooking)') && plan.includes('!looking && !hltbLooking && displayResults.length > 0') && plan.includes('adds the selected game to your Backlog'));
