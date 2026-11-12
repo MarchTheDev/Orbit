@@ -38,7 +38,7 @@ export function SearchField({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={cn(
-            'w-56 rounded-full border border-line bg-panel py-2 pl-4 pr-9 text-sm outline-none transition placeholder:text-muted/70 hover:border-muted focus:border-accent',
+            'w-56 rounded-xl border border-line bg-panel py-2 pl-4 pr-9 text-sm outline-none transition placeholder:text-muted/70 hover:border-muted focus:border-accent',
             inputClassName,
           )}
         />

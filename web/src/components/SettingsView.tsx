@@ -296,6 +296,13 @@ const SECTIONS = [
   { id: 'orbit-about', label: 'About' },
 ];
 
+/** Every card grouped into the three rooms the page is read in. */
+const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
+  { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-overlay', 'orbit-sound'] },
+  { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-details', 'orbit-tabs', 'orbit-backups'] },
+  { label: 'System', ids: ['orbit-copy', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
+];
+
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
   { label: 'Fonts and typeface', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
@@ -897,74 +904,102 @@ export function SettingsView({
       )
     : [];
 
-  return (
-    <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
-      <header className="orbit-panel relative overflow-hidden p-5 sm:p-6">
-        <div className="flex items-start gap-4">
-          <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-accent/30 bg-accent/10 text-accent">
-            <SlidersHorizontal className="size-5" strokeWidth={1.8} />
-          </span>
-          <div>
-            <p className="orbit-kicker text-accent">Your Orbit</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight">Settings</h1>
-            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
-              Make Orbit feel right for you. Changes save as you make them - there is no Save button to hunt for.
-            </p>
+  const settingsSearch = (
+    <div className="relative z-20">
+      <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+      <input
+        value={settingsQuery}
+        onChange={(event) => setSettingsQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setSettingsQuery('');
+          if (event.key === 'Enter' && searchResults[0]) {
+            jump(searchResults[0].section);
+            setSettingsQuery('');
+          }
+        }}
+        placeholder="Search settings…"
+        aria-label="Search settings"
+        className="w-full rounded-xl border border-line bg-panel py-2.5 pl-10 pr-3 text-sm text-fg outline-none transition placeholder:text-muted hover:border-muted/60 focus:border-accent"
+      />
+      {settingsQuery.trim() && (
+        <div className="absolute inset-x-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
+          {searchResults.length === 0 ? (
+            <p className="px-3 py-3 text-sm text-muted">No matching settings. Try a shorter search.</p>
+          ) : (
+            searchResults.map((item) => (
+              <button
+                key={item.label}
+                onClick={() => {
+                  jump(item.section);
+                  setSettingsQuery('');
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-panel2"
+              >
+                <span className="font-medium text-fg">{item.label}</span>
+                <span className="shrink-0 text-xs text-muted">{SECTIONS.find((section) => section.id === item.section)?.label}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const settingsNav = (compact: boolean) => (
+    <nav className={compact ? 'flex gap-1 overflow-x-auto pb-1' : 'space-y-5'} aria-label="Settings sections">
+      {SETTINGS_GROUPS.map((group) => (
+        <div key={group.label}>
+          {!compact && <p className="orbit-kicker mb-2 px-2.5">{group.label}</p>}
+          <div className={compact ? 'flex gap-1' : 'space-y-0.5'}>
+            {group.ids.map((id) => {
+              const section = SECTIONS.find((item) => item.id === id);
+              if (!section) return null;
+              return (
+                <button
+                  key={id}
+                  onClick={() => jump(id)}
+                  className={compact
+                    ? 'shrink-0 rounded-lg border border-line/70 px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:text-fg'
+                    : 'orbit-nav-item !py-2'}
+                >
+                  {section.label}
+                </button>
+              );
+            })}
           </div>
+        </div>
+      ))}
+    </nav>
+  );
+
+  return (
+    <div className="mx-auto max-w-6xl px-5 py-6 sm:px-7">
+      <header className="flex items-start gap-4">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-line bg-panel text-accent">
+          <SlidersHorizontal className="size-5" strokeWidth={1.8} />
+        </span>
+        <div>
+          <p className="orbit-kicker">System</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight">Settings</h1>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">
+            Make Orbit feel right for you. Changes save as you make them — there is no Save button to hunt for.
+          </p>
         </div>
       </header>
 
-      <div className="relative z-20">
-        <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
-        <input
-          value={settingsQuery}
-          onChange={(event) => setSettingsQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') setSettingsQuery('');
-            if (event.key === 'Enter' && searchResults[0]) {
-              jump(searchResults[0].section);
-              setSettingsQuery('');
-            }
-          }}
-          placeholder="Search settings, e.g. sound, Steam, folders…"
-          aria-label="Search settings"
-          className="w-full rounded-xl border border-line bg-panel py-3 pl-11 pr-4 text-sm text-fg outline-none transition placeholder:text-muted hover:border-muted/60 focus:border-accent"
-        />
-        {settingsQuery.trim() && (
-          <div className="absolute inset-x-0 top-full mt-2 max-h-64 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
-            {searchResults.length === 0 ? (
-              <p className="px-3 py-3 text-sm text-muted">No matching settings. Try a shorter search.</p>
-            ) : (
-              searchResults.map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => {
-                    jump(item.section);
-                    setSettingsQuery('');
-                  }}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-panel2"
-                >
-                  <span className="font-medium text-fg">{item.label}</span>
-                  <span className="shrink-0 text-xs text-muted">{SECTIONS.find((section) => section.id === item.section)?.label}</span>
-                </button>
-              ))
-            )}
+      <div className="mt-7 grid items-start gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden lg:block">
+          <div className="sticky top-24 space-y-5">
+            {settingsSearch}
+            {settingsNav(false)}
           </div>
-        )}
-      </div>
+        </aside>
 
-      {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1 rounded-xl border border-line bg-panel p-1.5">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => jump(s.id)}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-panel2 hover:text-fg"
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
+        <div className="min-w-0 space-y-5">
+          <div className="space-y-3 lg:hidden">
+            {settingsSearch}
+            {settingsNav(true)}
+          </div>
 
       <Section
         id="orbit-appearance"
@@ -1701,6 +1736,8 @@ export function SettingsView({
           </button>
         </div>
       </footer>
+        </div>
+      </div>
     </div>
   );
 }

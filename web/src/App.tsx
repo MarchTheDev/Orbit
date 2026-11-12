@@ -55,8 +55,7 @@ import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
-import { TopNav, orderedTabs, isStatsPage } from './components/TopNav';
-import { StatisticsNav } from './components/StatisticsNav';
+import { TopNav, Sidebar, orderedTabs } from './components/TopNav';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
@@ -186,8 +185,6 @@ export default function App() {
   const [booted, setBooted] = useState(false);
   /** Ctrl K: one field over every page, game and action. */
   const [palette, setPalette] = useState(false);
-  /** The Statistics tab last read, so the header reopens where the player was. */
-  const [statsPage, setStatsPage] = useState<Page>('sessions');
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
   const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
   const settingsJumpToken = useRef(0);
@@ -1261,14 +1258,8 @@ export default function App() {
     setPage('settings');
   }, []);
 
-  // The Statistics entry in the bar is one button for five pages, so remember
-  // which one was last read and take the player back there.
-  useEffect(() => {
-    if (isStatsPage(page)) setStatsPage(page);
-  }, [page]);
-
-  // A new page starts at its top. Without this, opening Statistics from a long
-  // library lands halfway down the sessions and the change reads as a glitch.
+  // A new page starts at its top. Without this, opening a long page from a
+  // scrolled library lands halfway down it and the change reads as a glitch.
   useEffect(() => {
     const scroller = document.querySelector('.orbit-scroll');
     if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 });
@@ -1411,16 +1402,29 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
+      <Sidebar
+        page={page}
+        setPage={(next) => {
+          setShowThemeManager(false);
+          setPage(next);
+        }}
+        order={settings.tabOrder}
+        gameCount={libraryCount(games)}
+        runningTitle={session && runningGame ? runningGame.title : null}
+        version={APP_VERSION}
+        onTv={enterTv}
+        onOpenSettings={() => openSettings()}
+      />
+
+      <div className="min-h-full lg:pl-[232px]">
       <TopNav
         page={page}
         setPage={(next) => {
           setShowThemeManager(false);
           setPage(next);
         }}
-        onOpenStatistics={() => {
-          setShowThemeManager(false);
-          setPage(statsPage);
-        }}
+        view={view}
+        setView={setView}
         onOpenPalette={() => setPalette(true)}
         onOpenSettings={openSettings}
         sound={settings.sound}
@@ -1431,24 +1435,13 @@ export default function App() {
       />
 
       {dragOver && !showAdd && (
-        <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
+        <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-bg/80 backdrop-blur-sm">
           <div className="rounded-2xl border border-dashed border-accent/70 px-12 py-10 text-center">
             <Logo className="mx-auto size-16 text-accent" animated />
             <p className="mt-3 text-lg font-semibold">Drop to add</p>
             <p className="mt-1 text-sm text-muted">A game program, or a folder full of them</p>
           </div>
         </div>
-      )}
-
-      {!showThemeManager && settings && isStatsPage(page) && (
-        <StatisticsNav
-          page={page}
-          setPage={(next) => {
-            setShowThemeManager(false);
-            setPage(next);
-          }}
-          order={settings.tabOrder}
-        />
       )}
 
       <main key={page} className="orbit-tab-enter pb-24">
@@ -1459,7 +1452,7 @@ export default function App() {
             onBack={() => setShowThemeManager(false)}
           />
         ) : page === 'settings' ? (
-          <div className="mx-6 mt-5">
+          <div>
             <SettingsView
               settings={settings}
               setSettings={setSettings}
@@ -1551,7 +1544,6 @@ export default function App() {
               query={query}
               setQuery={setQuery}
               view={view}
-              setView={setView}
               sort={sort}
               setSort={setSort}
               onAdd={() => setShowAdd(true)}
@@ -1610,6 +1602,7 @@ export default function App() {
           </>
         )}
       </main>
+      </div>
 
       {session && runningGame && (
         <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full border border-line bg-panel py-2 pl-5 pr-2 text-sm shadow-2xl">
@@ -1933,7 +1926,7 @@ export default function App() {
       )}
 
       {!isNative() && (
-        <p className="pointer-events-none fixed bottom-2 left-2 rounded-full bg-panel/80 px-3 py-1 text-[10px] text-muted">
+        <p className="pointer-events-none fixed bottom-2 right-2 z-20 rounded-full bg-panel/80 px-3 py-1 text-[10px] text-muted">
           Browser preview · run <span className="font-mono">npm run tauri dev</span> for files, launching and sessions
         </p>
       )}

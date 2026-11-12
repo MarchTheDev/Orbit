@@ -13,9 +13,9 @@
 }
 
 :root {
-  --c-bg: #08090c; --c-panel: #111318; --c-panel2: #181b21; --c-border: #272b33;
-  --c-text: #f3f4f6; --c-muted: #8e96a3; --c-accent: #ff6b3d; --c-accent2: #7aa2ff;
-  --c-on-accent: #1c0a04;
+  --c-bg: #0a0b0d; --c-panel: #14161a; --c-panel2: #1d2026; --c-border: #2b2f36;
+  --c-text: #f2f3f5; --c-muted: #8b929e; --c-accent: #d3f36b; --c-accent2: #8fb5ff;
+  --c-on-accent: #141708;
   /* One clock for the whole interface. Short enough that a click feels like it
      was answered, not animated at. */
   --ease-snap: cubic-bezier(.2, .8, .2, 1);
@@ -46,14 +46,11 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--c-text) 22%, transparent); background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* The room: a graphite field with one warm signal above the fold and one cool
-   reflection below it. The library itself is lit by the selected game's art,
-   so this stays quiet enough to sit under a blurred backdrop. */
+/* The room is flat graphite. The library lights itself with the selected
+   game's artwork, so the shell has no tint of its own to argue with it. */
 body {
   background-color: var(--c-bg);
-  background-image:
-    radial-gradient(ellipse 70% 50% at 82% -18%, color-mix(in srgb, var(--c-accent) 5%, transparent), transparent 70%),
-    radial-gradient(ellipse 60% 45% at -8% 108%, color-mix(in srgb, var(--c-accent2) 4%, transparent), transparent 70%);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--c-text) 2%, transparent), transparent 30rem);
   background-attachment: fixed;
   background-repeat: no-repeat;
 }
@@ -65,28 +62,38 @@ body {
 
 /* ------------------------------------------------------- the orbital language */
 
-/* Panels are soft slabs, not framed cards: a near-invisible edge and one
-   radius, so artwork and type do the talking. */
+/* A panel is a solid slab with one quiet edge. Nothing glows and nothing
+   floats: the artwork and the type carry the page. */
 .orbit-panel {
-  background: color-mix(in srgb, var(--c-panel) 90%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  border-radius: 16px;
+  background: color-mix(in srgb, var(--c-panel) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 7%, transparent);
+  border-radius: 18px;
 }
 
 /* A label above a value, quiet enough to sit beside a headline. */
 .orbit-kicker {
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .14em;
+  font-weight: 650;
+  letter-spacing: .16em;
   text-transform: uppercase;
   color: var(--c-muted);
+}
+
+/* The heading of a section inside a panel. Heronite's sections are named the
+   same way: small, solid, and unmistakable. */
+.orbit-section-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--c-text);
 }
 
 /* Display type: heavy, tight, set close. */
 .orbit-display {
   font-weight: 800;
-  letter-spacing: -.042em;
-  line-height: .94;
+  letter-spacing: -.035em;
+  line-height: .96;
 }
 
 /* Numerals line up in every table, list and counter. */
@@ -121,9 +128,9 @@ body {
   align-items: center;
   gap: 6px;
   border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
-  background: color-mix(in srgb, var(--c-panel) 62%, transparent);
-  border-radius: 999px;
-  padding: 5px 12px;
+  background: color-mix(in srgb, var(--c-text) 3%, transparent);
+  border-radius: 9px;
+  padding: 5px 11px;
   font-size: 12px;
   font-weight: 500;
   color: var(--c-muted);
@@ -784,22 +791,20 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 .btn-accent {
   background-color: var(--c-accent);
   border: 1px solid var(--c-accent);
-  border-radius: 999px;
+  border-radius: 12px;
   color: var(--c-on-accent);
   font-weight: 650;
-  transition: background-color 0.12s var(--ease-snap), border-color 0.12s var(--ease-snap), color 0.12s var(--ease-snap), transform 0.1s var(--ease-snap), box-shadow 0.12s var(--ease-snap);
-  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--c-accent) 70%, transparent);
+  transition: background-color 0.12s var(--ease-snap), border-color 0.12s var(--ease-snap), color 0.12s var(--ease-snap), transform 0.1s var(--ease-snap);
 }
 .btn-accent:hover {
   background-color: color-mix(in srgb, var(--c-accent) 88%, #fff);
   border-color: color-mix(in srgb, var(--c-accent) 88%, #fff);
   color: var(--c-on-accent);
-  box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--c-accent) 78%, transparent);
 }
 .btn-accent:active {
   background-color: color-mix(in srgb, var(--c-accent) 86%, #000);
   border-color: color-mix(in srgb, var(--c-accent) 86%, #000);
-  transform: scale(.98);
+  transform: scale(.985);
   box-shadow: none;
 }
 .btn-accent:disabled,
@@ -819,9 +824,9 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 /* The same button, having just done what it said it would. */
 /* The secondary action: a soft pill on the surface, never a second filled block. */
 .btn-quiet {
-  background-color: color-mix(in srgb, var(--c-panel) 70%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
-  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--c-text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  border-radius: 12px;
   color: var(--c-text);
   font-weight: 550;
   transition: background-color 0.12s var(--ease-snap), border-color 0.12s var(--ease-snap), color 0.12s var(--ease-snap), transform 0.1s var(--ease-snap);
@@ -1059,6 +1064,131 @@ input[type='number']::-webkit-outer-spin-button {
 
 @media (prefers-reduced-motion: reduce) {
   .orbit-toast { animation: none; }
+}
+
+/* ------------------------------------------------------------------ the shell */
+
+/* The app is a window with two rooms: a fixed shelf on the left that says
+   where you are, and a scrolling page beside it. The shelf is quieter than the
+   page, so the artwork in the library is the first thing that speaks. */
+.orbit-sidebar {
+  background: color-mix(in srgb, var(--c-panel) 46%, var(--c-bg));
+  border-right: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+
+.orbit-nav-group + .orbit-nav-group {
+  margin-top: 22px;
+}
+
+.orbit-nav-item {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-muted);
+  transition: background-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-nav-item:hover {
+  background: color-mix(in srgb, var(--c-text) 5%, transparent);
+  color: var(--c-text);
+}
+.orbit-nav-item:active { transform: scale(.99); }
+.orbit-nav-item[aria-current='page'] {
+  background: var(--c-panel2);
+  color: var(--c-text);
+  font-weight: 600;
+}
+.orbit-nav-item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 3px;
+  height: 15px;
+  border-radius: 0 3px 3px 0;
+  background: var(--c-accent);
+  transform: translateY(-50%);
+}
+.orbit-nav-item svg { color: var(--c-muted); }
+.orbit-nav-item[aria-current='page'] svg { color: var(--c-accent); }
+.orbit-count {
+  margin-left: auto;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--c-text) 7%, transparent);
+  color: var(--c-muted);
+}
+
+/* The library is lit by the selected game: one oversized copy of its wide art,
+   blurred past recognition and scrimmed back to the room colour. Fixed, so
+   browsing the rail never drags the light with it. */
+.orbit-backdrop {
+  position: fixed;
+  inset: -8%;
+  width: 116%;
+  height: 116%;
+  object-fit: cover;
+  object-position: center 22%;
+  filter: blur(72px) saturate(1.25);
+  opacity: .42;
+  transform: scale(1.04);
+}
+.orbit-backdrop-scrim {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--c-bg) 58%, transparent) 0%, color-mix(in srgb, var(--c-bg) 84%, transparent) 46%, var(--c-bg) 94%),
+    radial-gradient(ellipse 72% 60% at 18% -5%, transparent, color-mix(in srgb, var(--c-bg) 42%, transparent));
+}
+html.orbit-linux .orbit-backdrop {
+  filter: none;
+  opacity: .3;
+  transform: none;
+}
+
+/* A tile in the library rail: artwork first, name under it, one marker for the
+   selected game. */
+.orbit-rail-tile { min-width: 0; text-align: left; }
+.orbit-rail-tile .orbit-rail-cover {
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 8%, transparent);
+  transition: outline-color .12s var(--ease-snap), transform .12s var(--ease-snap);
+}
+.orbit-rail-tile:hover .orbit-rail-cover { transform: translateY(-1px); }
+.orbit-rail-tile[aria-current='true'] .orbit-rail-cover {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+.orbit-rail-tile[aria-current='true'] .orbit-rail-name { color: var(--c-text); font-weight: 600; }
+
+/* The game's own page: flat sections separated by hairlines, never a wall of
+   nested cards. */
+.orbit-fact-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 0;
+  font-size: 12.5px;
+}
+.orbit-fact-row dt { color: var(--c-muted); white-space: nowrap; }
+.orbit-fact-row dd {
+  color: var(--c-text);
+  font-weight: 550;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* ------------------------------------------------------------------ TV mode */

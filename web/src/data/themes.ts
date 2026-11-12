@@ -5,7 +5,7 @@ export type { Theme } from '../types';
 // keeps its id so a saved choice survives upgrades; only its palette moved to
 // the graphite room and solar signal the rest of the interface is drawn in.
 export const THEMES: Theme[] = [
-  { id: 'nebula', name: 'Orbital', bg: '#08090c', panel: '#111318', panel2: '#181b21', border: '#272b33', text: '#f3f4f6', muted: '#8e96a3', accent: '#ff6b3d', accent2: '#7aa2ff', onAccent: '#1c0a04' },
+  { id: 'nebula', name: 'Orbital', bg: '#0a0b0d', panel: '#14161a', panel2: '#1d2026', border: '#2b2f36', text: '#f2f3f5', muted: '#8b929e', accent: '#d3f36b', accent2: '#8fb5ff', onAccent: '#141708' },
   { id: 'eclipse', name: 'Eclipse', bg: '#09090b', panel: '#131316', panel2: '#1c1c21', border: '#2a2a31', text: '#f4f4f5', muted: '#a1a1aa', accent: '#f59e0b', accent2: '#ef4444' },
   // Rubellite follows Eclipse's dark, restrained surfaces with a ruby-pink accent.
   { id: 'rubellite', name: 'Rubellite', bg: '#100a11', panel: '#191019', panel2: '#241722', border: '#3c2938', text: '#f8edf5', muted: '#ad93a7', accent: '#d85b83', accent2: '#9f5baf' },
