@@ -41,9 +41,9 @@ const LAUNCHER_TEXT: Record<string, string> = {
   wine: 'Wine',
 };
 
-/** The wide art of a game, which is what lights the room. */
+/** The art that lights the room: wide art when a game has it, its cover when it does not. */
 function wideArt(game: Game) {
-  return game.meta?.backgroundUrl ?? game.meta?.headerUrl ?? null;
+  return game.meta?.backgroundUrl ?? game.meta?.headerUrl ?? game.meta?.coverUrl ?? null;
 }
 
 const dayKey = (unix: number) => {

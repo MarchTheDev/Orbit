@@ -161,10 +161,12 @@ export default function App() {
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  // Focus is the front door for a new library. A saved choice from an older
-  // version is one of the other two views, and it wins; anything unexpected is
-  // treated as no choice at all rather than rendering an empty page.
+  // Focus is the front door for a new library. A saved choice from the older
+  // launcher wins after the first look at this redesign, so somebody who had
+  // left it on Grid sees the new game page instead of a library that still
+  // looks like the one they replaced.
   const [view, setView] = useState<ViewMode>(() => {
+    if (!localStorage.getItem('orbit.view.redesign')) return 'focus';
     const saved = localStorage.getItem('orbit.view');
     return saved === 'grid' || saved === 'list' || saved === 'focus' ? saved : 'focus';
   });
@@ -231,7 +233,10 @@ export default function App() {
   /** The newer release, if one has been found. Settings shows and installs it. */
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
-  useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+  useEffect(() => {
+    localStorage.setItem('orbit.view', view);
+    localStorage.setItem('orbit.view.redesign', '1');
+  }, [view]);
   useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
   useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
