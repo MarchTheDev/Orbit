@@ -65,6 +65,7 @@ import { Toolbar, type Filter } from './components/Toolbar';
 import { Logo } from './components/ui/Logo';
 import { GameGrid } from './components/GameGrid';
 import { GameList } from './components/GameList';
+import { FocusView } from './components/FocusView';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
@@ -159,7 +160,13 @@ export default function App() {
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
+  // Focus is the front door for a new library. A saved choice from an older
+  // version is one of the other two views, and it wins; anything unexpected is
+  // treated as no choice at all rather than rendering an empty page.
+  const [view, setView] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('orbit.view');
+    return saved === 'grid' || saved === 'list' || saved === 'focus' ? saved : 'focus';
+  });
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
@@ -1294,7 +1301,7 @@ export default function App() {
   if (startupError) {
     return (
       <main className="grid h-full place-items-center overflow-auto bg-bg p-6 text-fg">
-        <section role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-panel p-7 shadow-2xl">
+        <section role="alert" className="w-full max-w-xl rounded-2xl border border-line bg-panel p-7 shadow-2xl">
           <div className="mb-5 flex items-center gap-3">
             <Logo className="size-9 shrink-0" animated={false} />
             <h1 className="text-2xl font-semibold">Orbit couldn’t finish starting</h1>
@@ -1302,11 +1309,11 @@ export default function App() {
           <p className="text-sm leading-relaxed text-muted">
             The library or settings request failed. The details below can help identify why this installation opened without its interface.
           </p>
-          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-red-200">{startupError}</pre>
+          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-line bg-panel2 p-3 text-xs text-rose-300">{startupError}</pre>
           <button
             type="button"
             onClick={retryStartup}
-            className="mt-5 rounded-xl bg-accent px-5 py-2.5 font-semibold text-white hover:brightness-110"
+            className="btn-accent mt-5 rounded-xl px-5 py-2.5 font-semibold"
           >
             Retry startup
           </button>
@@ -1390,7 +1397,7 @@ export default function App() {
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
-          <div className="rounded-3xl border-2 border-dashed border-accent px-12 py-10 text-center">
+          <div className="rounded-2xl border border-dashed border-accent/70 px-12 py-10 text-center">
             <Logo className="mx-auto size-16 text-accent" animated />
             <p className="mt-3 text-lg font-semibold">Drop to add</p>
             <p className="mt-1 text-sm text-muted">A game program, or a folder full of them</p>
@@ -1406,7 +1413,7 @@ export default function App() {
             onBack={() => setShowThemeManager(false)}
           />
         ) : page === 'settings' ? (
-          <div className="glass mx-6 mt-5 rounded-3xl">
+          <div className="mx-6 mt-5">
             <SettingsView
               settings={settings}
               setSettings={setSettings}
@@ -1482,7 +1489,7 @@ export default function App() {
           <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
-            {showHome && settings.showHero !== false && heroGame && (
+            {showHome && view !== 'focus' && settings.showHero !== false && heroGame && (
               <Hero
                 game={heroGame}
                 running={runningGame?.id === heroGame.id}
@@ -1518,6 +1525,17 @@ export default function App() {
                     <p className="text-xs">Drop a game program on the window, or use Add game.</p>
                   )}
                 </div>
+              ) : view === 'focus' ? (
+                <FocusView
+                  games={visible}
+                  heroGame={heroGame ?? null}
+                  runningId={runningGame?.id ?? null}
+                  onPlay={(g) => void startGame(g)}
+                  onStop={() => void stop()}
+                  onDetails={setSelectedId}
+                  onEdit={openGameEditor}
+                  onToggleFavorite={toggleFavorite}
+                />
               ) : view === 'grid' ? (
                 <GameGrid
                   games={visible}
@@ -1548,7 +1566,7 @@ export default function App() {
       </main>
 
       {session && runningGame && (
-        <div className="glass fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-5 pr-2 text-sm shadow-2xl">
+        <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full border border-line bg-panel py-2 pl-5 pr-2 text-sm shadow-2xl">
           <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
           <span>
             Playing <b>{runningGame.title}</b>

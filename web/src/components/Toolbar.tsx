@@ -1,4 +1,4 @@
-import { ArrowDownUp, Eye, EyeOff, LayoutGrid, List, Plus, Rows3 } from 'lucide-react';
+import { ArrowDownUp, Eye, EyeOff, LayoutGrid, List, Orbit, Plus, Rows3 } from 'lucide-react';
 import type { LibraryFilter, SortKey, ViewMode } from '../types';
 import { cn } from '../utils/cn';
 import { SearchField } from './ui/SearchField';
@@ -82,29 +82,34 @@ export function Toolbar({
   const categories = visibleFilters.length > 0 ? visibleFilters : [LIBRARY_FILTERS[0]];
 
   return (
-    <div className="mt-8 space-y-3 px-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="mr-auto text-xs font-bold uppercase tracking-[0.25em] text-muted">
-          Library · {count}
-          {count !== total && <span className="text-muted/60"> of {total}</span>}
+    <div className="mt-6 space-y-3 px-6">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <h2 className="mr-auto flex items-baseline gap-2.5">
+          <span className="text-sm font-semibold tracking-tight">Library</span>
+          <span className="orbit-num text-xs text-muted">
+            {count}
+            {count !== total && <span className="text-muted/60"> / {total}</span>}
+          </span>
         </h2>
 
-        <SearchField value={query} onChange={setQuery} />
+        <SearchField value={query} onChange={setQuery} placeholder="Search games" />
 
-        <button
-          onClick={onToggleHero}
-          aria-pressed={showHero}
-          title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
-          className="flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-2 text-xs font-medium text-muted transition hover:border-accent/60 hover:text-fg"
-        >
-          {showHero ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-          <span className="hidden xl:inline">{showHero ? 'Hide' : 'Show'} Jump back in</span>
-        </button>
+        {view !== 'focus' && (
+          <button
+            onClick={onToggleHero}
+            aria-pressed={showHero}
+            title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
+            className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-medium text-muted transition hover:text-fg"
+          >
+            {showHero ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+            <span className="hidden xl:inline">{showHero ? 'Hide' : 'Show'} Jump back in</span>
+          </button>
+        )}
 
         <Select
           value={sort}
           onChange={setSort}
-          className="!rounded-full !px-4 !py-2 text-sm"
+          className="!rounded-lg !px-3 !py-2 text-sm"
           ariaLabel="How the library is ordered"
           options={[
             { value: 'title', label: 'A-Z' },
@@ -116,10 +121,10 @@ export function Toolbar({
           ]}
         />
 
-        {/* How big the covers are drawn. Two views share it, so the library
+        {/* How big the covers are drawn. Every view shares it, so the library
             looks the same size whichever way it is read. */}
         <label
-          className="glass flex items-center gap-2 rounded-full py-1.5 pl-3.5 pr-4 text-muted"
+          className="flex items-center gap-2.5 rounded-lg border border-line py-1.5 pl-3 pr-4 text-muted"
           title="Cover size"
         >
           <Rows3 className="size-4" />
@@ -130,15 +135,16 @@ export function Toolbar({
             step={5}
             value={scale}
             onChange={(e) => setScale(Number(e.target.value))}
-            className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-line accent-[var(--c-accent)]"
+            className="orbit-range w-20 cursor-pointer"
             aria-label="Cover size"
           />
         </label>
 
-        <div className="glass flex rounded-full p-1">
+        <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="How the library is drawn">
           {(
             [
-              ['grid', LayoutGrid, 'Catalog'],
+              ['focus', Orbit, 'Focus'],
+              ['grid', LayoutGrid, 'Catalogue'],
               ['list', List, 'List'],
             ] as const
           ).map(([v, Icon, label]) => (
@@ -148,7 +154,10 @@ export function Toolbar({
               title={label}
               aria-label={label}
               aria-pressed={view === v}
-              className={cn('grid size-8 place-items-center rounded-full', view === v ? 'bg-fg text-bg' : 'text-muted hover:text-fg')}
+              className={cn(
+                'grid size-8 place-items-center rounded-md transition',
+                view === v ? 'bg-panel2 text-accent' : 'text-muted hover:text-fg',
+              )}
             >
               <Icon className="size-4" />
             </button>
@@ -157,7 +166,7 @@ export function Toolbar({
 
         <button
           onClick={onAdd}
-          className="btn-accent grid size-10 place-items-center rounded-full"
+          className="btn-accent grid size-10 place-items-center rounded-lg"
           title="Add game"
           aria-label="Add game"
         >
@@ -165,22 +174,19 @@ export function Toolbar({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         {categories.map((f) => (
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
             aria-pressed={filter === f.id}
-            className={cn(
-              'rounded-full border px-3 py-1 text-xs transition',
-              filter === f.id ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60',
-            )}
+            className="chip"
           >
             {f.label}
           </button>
         ))}
-        {sort === 'manual' && (
-          <span className="ml-1 flex items-center gap-1.5 text-[11px] text-muted">
+        {sort === 'manual' && view !== 'focus' && (
+          <span className="ml-2 flex items-center gap-1.5 text-[11px] text-muted">
             <ArrowDownUp className="size-3.5" />
             Drag a game to move it in your order
           </span>

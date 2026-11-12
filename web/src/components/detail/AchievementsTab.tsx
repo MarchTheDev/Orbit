@@ -105,11 +105,8 @@ export function AchievementsTab({
                 }`}
           </p>
           {rows.length > 0 && (
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-bg">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]"
-                style={{ width: `${pct}%` }}
-              />
+            <div className="orbit-rail mt-2">
+              <span className="transition-[width]" style={{ width: `${pct}%` }} />
             </div>
           )}
         </div>
@@ -128,7 +125,7 @@ export function AchievementsTab({
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <SearchField value={query} onChange={setQuery} placeholder="Find an achievement" inputClassName="w-56" />
-          <div className="glass flex rounded-full p-1">
+          <div className="flex rounded-lg border border-line p-0.5">
             {(
               [
                 ['all', `All ${rows.length}`],
@@ -140,7 +137,7 @@ export function AchievementsTab({
                 key={id}
                 onClick={() => setShow(id)}
                 className={cn(
-                  'rounded-full px-3 py-1 text-[11px]',
+                  'rounded-md px-2.5 py-1 text-[11px] transition',
                   show === id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg',
                 )}
               >

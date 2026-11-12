@@ -596,7 +596,7 @@ export function TvMode({
           />
         ) : !active ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
-            <span className="grid size-20 place-items-center rounded-3xl border border-dashed border-line text-muted">
+            <span className="grid size-20 place-items-center rounded-2xl border border-dashed border-line text-muted">
               <Gamepad2 className="size-9" />
             </span>
             <div>
@@ -676,7 +676,7 @@ export function TvMode({
                       <button
                         data-tv-action="play"
                         onClick={start}
-                        className="flex items-center gap-2.5 rounded-full bg-white px-9 py-3.5 text-[15px] font-bold text-black shadow-[0_10px_40px_rgba(255,255,255,.22)] transition hover:scale-[1.03] hover:bg-white focus-visible:ring-4 focus-visible:ring-white/35"
+                        className="flex items-center gap-2.5 rounded-full bg-accent px-9 py-3.5 text-[15px] font-bold text-[var(--c-on-accent)] shadow-lg transition hover:scale-[1.03] hover:brightness-110 focus-visible:ring-4 focus-visible:ring-accent/40"
                       >
                         <Play className="size-4" fill="currentColor" strokeWidth={0} />
                         Play

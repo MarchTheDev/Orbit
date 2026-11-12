@@ -1,8 +1,8 @@
 import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
+import { cn } from '../utils/cn';
 
 // Sessions follows the library, with Journal before Backlog in the default
 // order. The theme button is gone: themes live in Settings.
@@ -87,88 +87,67 @@ export function TopNav({
   onTv: () => void;
 }) {
   const tabs = orderedTabs(order);
-  const tabKey = tabs.map((tab) => tab.id).join('|');
-  const navRef = useRef<HTMLElement>(null);
-  const [indicator, setIndicator] = useState({ x: 0, y: 0, width: 0, height: 0, visible: false });
-  const activeTab = tabs.some((tab) => tab.id === page) ? page : null;
-
-  useLayoutEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const update = () => {
-      const button = activeTab ? nav.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`) : null;
-      if (!button) {
-        setIndicator((current) => ({ ...current, visible: false }));
-        return;
-      }
-      const bounds = button.getBoundingClientRect();
-      const navBounds = nav.getBoundingClientRect();
-      setIndicator({
-        x: bounds.left - navBounds.left,
-        y: bounds.top - navBounds.top,
-        width: bounds.width,
-        height: bounds.height,
-        visible: true,
-      });
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [activeTab, tabKey]);
 
   return (
     <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
       {/* The bar is the one thing that spans the whole window rather than sitting
-          in a column: on a wide screen the logo belongs at the left edge and the
+          in a column: on a wide screen the mark belongs at the left edge and the
           settings button at the right, not both of them a hand's width in. */}
-      <div className="flex w-full items-center gap-5 px-6 py-3">
+      <div className="flex h-16 w-full items-center gap-5 px-6">
         <button
           onClick={() => setPage('library')}
-          className="orbit-logo flex items-center gap-2.5 rounded-full px-2 py-1"
+          className="orbit-logo flex shrink-0 items-center gap-3 rounded-lg py-1 pr-1 text-left"
           title="Orbit"
           aria-label="Orbit"
         >
-          <Logo className="size-7 drop-shadow-[0_2px_8px_var(--c-accent)]" animated />
-          <span className="text-lg font-bold tracking-tight">Orbit</span>
+          <Logo className="size-7 text-accent" animated />
+          <span className="flex flex-col leading-none">
+            <span className="text-[15px] font-extrabold tracking-[0.24em]">ORBIT</span>
+            <span className="mt-1 hidden text-[9px] font-medium uppercase tracking-[0.18em] text-muted sm:block">
+              game observatory
+            </span>
+          </span>
         </button>
 
-        <nav ref={navRef} className="relative flex items-center gap-1">
-          <span
-            aria-hidden
-            className="topnav-indicator pointer-events-none absolute left-0 top-0 rounded-full border border-accent/35 bg-panel2 shadow-sm"
-            style={{
-              width: indicator.width,
-              height: indicator.height,
-              opacity: indicator.visible ? 1 : 0,
-              transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0)`,
-            }}
-          />
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              data-tab-id={t.id}
-              aria-current={page === t.id ? 'page' : undefined}
-              onClick={() => setPage(t.id)}
-              className={`relative z-10 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                page === t.id ? 'text-fg' : 'text-muted hover:bg-panel/70 hover:text-fg'
-              }`}
-            >
-              <t.Icon className="size-4" strokeWidth={1.8} />
-              {t.label}
-            </button>
-          ))}
+        <span aria-hidden className="hidden h-7 w-px shrink-0 bg-line md:block" />
+
+        <nav className="relative flex items-stretch gap-0.5 self-stretch overflow-x-auto">
+          {tabs.map((t) => {
+            const active = page === t.id;
+            return (
+              <button
+                key={t.id}
+                data-tab-id={t.id}
+                aria-current={active ? 'page' : undefined}
+                onClick={() => setPage(t.id)}
+                className={cn(
+                  'relative flex shrink-0 items-center gap-2 px-3 text-[13px] font-medium transition-colors',
+                  active ? 'text-fg' : 'text-muted hover:text-fg',
+                )}
+              >
+                <t.Icon className={cn('size-4', active ? 'text-accent' : '')} strokeWidth={1.7} />
+                {t.label}
+                <span
+                  aria-hidden
+                  className={cn(
+                    'absolute inset-x-2 bottom-0 h-[2px] rounded-full transition-opacity',
+                    active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0',
+                  )}
+                />
+              </button>
+            );
+          })}
         </nav>
 
         <div className="flex-1" />
         {/* Beside the sound, because both are about the room rather than the
             library: one is what you hear and the other is what you sit back
-            for. A plain television, drawn like the icons around it: the full
-            screen it opens is the loud thing, not the button. */}
+            for. */}
         <button
           onClick={onTv}
           aria-label="TV mode"
           title="TV mode"
-          className="rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg"
+          className="rounded-lg p-2 text-muted transition hover:bg-panel hover:text-fg"
         >
           <Tv className="size-5" strokeWidth={1.8} />
         </button>
@@ -179,9 +158,10 @@ export function TopNav({
           onClick={() => setPage('settings')}
           aria-label="Settings"
           title="Settings"
-          className={`rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg ${
-            page === 'settings' ? 'text-fg ring-1 ring-accent/40' : ''
-          }`}
+          className={cn(
+            'rounded-lg p-2 transition hover:bg-panel hover:text-fg',
+            page === 'settings' ? 'bg-panel text-accent' : 'text-muted',
+          )}
         >
           <SettingsIcon className="size-5" strokeWidth={1.8} />
         </button>

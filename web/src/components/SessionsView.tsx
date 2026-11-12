@@ -32,10 +32,10 @@ const PAGE = 25;
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="glass rounded-2xl px-4 py-3">
-      <p className="text-[10px] uppercase tracking-widest text-muted">{label}</p>
-      <p className="mt-0.5 text-xl font-bold">{value}</p>
-      {hint && <p className="text-[11px] text-muted">{hint}</p>}
+    <div className="orbit-panel px-4 py-3">
+      <p className="orbit-kicker">{label}</p>
+      <p className="orbit-num mt-1 text-xl font-bold">{value}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
     </div>
   );
 }
@@ -184,8 +184,9 @@ export function SessionsView({
     <div className="mx-auto max-w-[1500px] space-y-5 px-6 py-6">
       <header className="flex flex-wrap items-center gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight">Sessions</h1>
-          <p className="mt-0.5 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
+          <p className="orbit-kicker">Playtime</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Sessions</h1>
+          <p className="mt-1 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
         </div>
         <button
           className={`${btnPrimary} ml-auto flex shrink-0 items-center gap-2`}
@@ -210,7 +211,7 @@ export function SessionsView({
         </div>
       )}
 
-      <section className="glass rounded-3xl p-4 sm:p-5">
+      <section className="orbit-panel p-5">
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div className="mr-auto">
             <h2 className="text-lg font-semibold">Session history</h2>
@@ -308,7 +309,7 @@ export function SessionsView({
       </section>
 
       {played.length > 0 && (
-        <section className="glass rounded-3xl p-4 sm:p-5">
+        <section className="orbit-panel p-5">
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Most played</h2>
@@ -347,8 +348,8 @@ export function SessionsView({
                       <span className="truncate text-sm font-medium">{game.title}</span>
                       <span className="font-mono text-xs text-muted">{fmtClock(game.playSecs)}</span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-panel2">
-                      <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]" style={{ width: `${fraction}%` }} />
+                    <div className="orbit-rail">
+                      <span className="transition-[width]" style={{ width: `${fraction}%` }} />
                     </div>
                     <p className="mt-1 text-[10px] text-muted">{game.sessionCount > 0 ? `${game.sessionCount} sessions recorded` : 'Manually tracked playtime'}</p>
                   </div>

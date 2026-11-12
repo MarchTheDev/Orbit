@@ -304,15 +304,15 @@ export function ThemeManagerPage({
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-2 rounded-lg text-sm text-muted hover:text-fg"><ArrowLeft className="size-4" /> Back to appearance</button>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">Orbit appearance</p>
-            <h1 className="mt-1 text-2xl font-bold">Custom themes</h1>
+            <p className="orbit-kicker text-accent">Orbit appearance</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">Custom themes</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted">Choose two colours and a style. Orbit generates the rest of the palette.</p>
           </div>
         </header>
 
         <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
           <aside className="space-y-3">
-            <button type="button" onClick={startNew} className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2.5 text-sm font-semibold text-fg hover:bg-accent/20"><CopyPlus className="size-4" /> Create a theme</button>
+            <button type="button" onClick={startNew} className="btn-accent flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm"><CopyPlus className="size-4" /> Create a theme</button>
             <div className="space-y-1 rounded-2xl border border-line bg-panel/60 p-2">
               {custom.map((theme) => (
                 <div key={theme.id} className={cn('flex items-center gap-2 rounded-xl border px-2 py-2', activeId === theme.id ? 'border-accent/60 bg-accent/10' : 'border-transparent hover:bg-panel2/60')}>
@@ -327,7 +327,7 @@ export function ThemeManagerPage({
             </div>
           </aside>
 
-          <section className="space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
+          <section className="orbit-panel space-y-4 p-4 sm:p-6">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-muted">Theme name</span>

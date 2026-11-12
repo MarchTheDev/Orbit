@@ -275,7 +275,7 @@ export function PlanDialog({
       // A dialog is modal even over the in-game overlay, which is what this
       // marker is for elsewhere; being a page of the app does not exempt it.
       data-overlay-hit="1"
-      className="modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-6"
+      className="modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -283,7 +283,7 @@ export function PlanDialog({
       <div
         role="dialog"
         aria-label={chosen ? `About ${chosen.suggestion.name}` : 'Plan a game'}
-        className="modal-panel-enter relative flex h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-line bg-panel shadow-2xl"
+        className="modal-panel-enter relative flex h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         {/* A hairline of the accent across the top: the one flourish the frame

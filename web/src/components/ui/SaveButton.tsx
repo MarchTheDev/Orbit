@@ -56,9 +56,6 @@ export function SaveButton({
         className,
       )}
     >
-      {/* A highlight that sweeps across on hover, so the surface reads as a
-          thing with a top, rather than as a flat block of colour. */}
-      <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
       {state === 'busy' ? (
         <LoaderCircle className="relative size-4 animate-spin" />
       ) : (

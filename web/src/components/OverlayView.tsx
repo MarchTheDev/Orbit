@@ -1537,7 +1537,7 @@ export function OverlayView() {
             Boxes
           </button>
           {boxesOpen && (
-            <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-3xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
+            <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-2xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="flex flex-wrap gap-1.5">
                 {OVERLAY_BOXES.filter((box) => !linux || box.id !== 'fps').map((box) => {
                   const shown = !hidden.includes(box.id);
@@ -1644,7 +1644,7 @@ function Box({
       data-overlay-hit="1"
       data-pin={p.pinned ? '1' : '0'}
       className={cn(
-        'pointer-events-auto absolute flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
+        'pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
         padSelected && 'orbit-box-focus',
       )}
       style={{ left: p.x, top: p.y, width: p.w ?? BOX[id].w, height: p.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
@@ -1684,7 +1684,10 @@ function Box({
         title="Resize · double-click to restore default size"
         aria-label={`Resize ${title}; double-click to restore its default size`}
         onPointerDown={(event) => onResize(id, event)}
-        className="absolute bottom-1.5 right-1.5 size-3.5 cursor-nwse-resize rounded-sm border-b-2 border-r-2 border-white/40 hover:border-white"
+        className={
+          // impeccable-disable-next-line side-tab border-accent-on-rounded: the two hairlines are the corner grip of the resize handle, not a card edge
+          'absolute bottom-1.5 right-1.5 size-3.5 cursor-nwse-resize rounded-sm border-b-2 border-r-2 border-white/40 hover:border-white'
+        }
       />
     </aside>
   );

@@ -267,11 +267,12 @@ export function LogsView({
     <div className="mx-auto max-w-[1400px] p-6">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <NotebookPen className="size-6 text-accent" />
-            Logs
-          </h1>
-          <p className="mt-1 text-sm text-muted">
+          <p className="orbit-kicker flex items-center gap-1.5">
+            <NotebookPen className="size-3 text-accent" />
+            Field notes
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Logs</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
             Everything you have written down, game by game. Orbit also writes the first entry itself: the moment a game
             is played for the first time, a line saying so appears here.
           </p>
@@ -333,7 +334,7 @@ export function LogsView({
                     data-orbit-journal-game={g.id}
                     {...bind(g.id)}
                     className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
-                      active ? 'border-accent bg-accent/10' : 'border-line hover:border-accent/60'
+                      active ? 'border-accent/45 bg-panel2' : 'border-line hover:border-accent/50'
                     } ${dragging === g.id ? 'opacity-50' : ''} ${
                       over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
                     }`}

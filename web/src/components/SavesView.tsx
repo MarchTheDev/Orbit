@@ -422,7 +422,8 @@ export function SavesView({
     <div className="mx-auto max-w-4xl px-6 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Saves</h1>
+          <p className="orbit-kicker">Safe copies</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Saves</h1>
           <p className="mt-1 max-w-xl text-sm text-muted">
             A copy of each game's save files, made here. Turn auto on and Orbit takes one when a
             session ends. Nothing else has to be installed.
@@ -577,13 +578,13 @@ export function SavesView({
               <button
                 onClick={() => setOpenId((current) => (current === game.id ? null : game.id))}
                 {...bind(game.id)}
-                className="flex min-w-0 flex-1 cursor-grab items-center justify-between gap-3 px-4 py-3 text-left active:cursor-grabbing"
+                className="flex min-w-0 flex-1 cursor-grab items-center justify-between gap-3 px-4 py-2.5 text-left active:cursor-grabbing"
               >
                 <span className="flex min-w-0 items-center gap-3">
                   <GripVertical className="size-4 shrink-0 text-muted" aria-hidden />
-                  <Cover game={game} className="h-28 w-20 shrink-0 overflow-hidden rounded-xl shadow-sm [&_span]:text-sm" />
+                  <Cover game={game} className="h-20 w-14 shrink-0 overflow-hidden rounded-lg [&_span]:text-[11px]" />
                   <span className="min-w-0">
-                  <span className="block truncate font-medium">{game.title}</span>
+                  <span className="block truncate text-sm font-semibold">{game.title}</span>
                   <span className="block text-xs text-muted">
                     {hidden.has(game.id) ? 'Hidden from Saves · ' : ''}
                     {auto.includes(game.id) ? 'Backs up when a session ends' : 'Manual only'}

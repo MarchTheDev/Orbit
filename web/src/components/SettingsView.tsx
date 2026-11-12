@@ -139,12 +139,9 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section
-      id={id}
-      className="scroll-mt-28 rounded-3xl border border-line/65 bg-panel/25 p-5 transition-colors sm:p-6"
-    >
+    <section id={id} className="orbit-panel scroll-mt-28 p-5 transition-colors sm:p-6">
       <div className="flex items-start gap-3.5">
-        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-gradient-to-br from-accent/20 to-accent2/10 text-accent shadow-inner">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-panel2 text-accent">
           <Icon className="size-[18px]" strokeWidth={1.9} />
         </span>
         <div className="min-w-0 pt-0.5">
@@ -169,7 +166,7 @@ function SubHead({ children }: { children: ReactNode }) {
 
 /** A box inside a card, for the settings that belong closer together. */
 function Group({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('space-y-3 rounded-2xl border border-line/50 bg-bg/20 p-4', className)}>{children}</div>;
+  return <div className={cn('space-y-3 rounded-xl border border-line/70 bg-panel2/40 p-4', className)}>{children}</div>;
 }
 
 /**
@@ -903,14 +900,13 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
-      <header className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-panel via-panel/95 to-panel2/75 p-5 shadow-lg sm:p-6">
-        <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
-        <div className="relative flex items-start gap-4">
-          <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
+      <header className="orbit-panel relative overflow-hidden p-5 sm:p-6">
+        <div className="flex items-start gap-4">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-accent/30 bg-accent/10 text-accent">
             <SlidersHorizontal className="size-5" strokeWidth={1.8} />
           </span>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">Your Orbit</p>
+            <p className="orbit-kicker text-accent">Your Orbit</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight">Settings</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
               Make Orbit feel right for you. Changes save as you make them - there is no Save button to hunt for.
@@ -933,10 +929,10 @@ export function SettingsView({
           }}
           placeholder="Search settings, e.g. sound, Steam, folders…"
           aria-label="Search settings"
-          className="w-full rounded-2xl border border-line bg-bg/80 py-3 pl-11 pr-4 text-sm text-fg shadow-inner outline-none transition placeholder:text-muted focus:border-accent"
+          className="w-full rounded-xl border border-line bg-panel py-3 pl-11 pr-4 text-sm text-fg outline-none transition placeholder:text-muted hover:border-muted/60 focus:border-accent"
         />
         {settingsQuery.trim() && (
-          <div className="absolute inset-x-0 top-full mt-2 max-h-64 overflow-y-auto rounded-2xl border border-line bg-panel p-1.5 shadow-2xl">
+          <div className="absolute inset-x-0 top-full mt-2 max-h-64 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
             {searchResults.length === 0 ? (
               <p className="px-3 py-3 text-sm text-muted">No matching settings. Try a shorter search.</p>
             ) : (
@@ -959,12 +955,12 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel p-2 shadow-lg backdrop-blur-xl">
+      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1 rounded-xl border border-line bg-panel p-1.5">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => jump(s.id)}
-            className="rounded-full border border-line/70 bg-bg/45 px-3 py-1.5 text-xs font-medium text-muted shadow-sm transition hover:border-accent/50 hover:bg-accent/10 hover:text-fg"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-panel2 hover:text-fg"
           >
             {s.label}
           </button>

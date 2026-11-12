@@ -278,7 +278,7 @@ export interface Game {
   running: boolean;
 }
 
-export type ViewMode = 'grid' | 'list';
+export type ViewMode = 'focus' | 'grid' | 'list';
 export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | 'manual';
 
 /** The three top-level screens; Settings is reached from the gear. */

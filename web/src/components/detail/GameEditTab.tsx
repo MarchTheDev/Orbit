@@ -161,7 +161,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
 
   return (
     <section className="space-y-4">
-      <div className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+      <div className="space-y-3 rounded-xl border border-accent/25 bg-panel2/50 p-4">
         <div className="flex items-start gap-3">
           <PortraitFrame
             src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
@@ -313,7 +313,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
             right most of the time; this is for the times it is not. */}
         <div>
           <span className={labelCls}>How the cover sits in its frame</span>
-          <div className="glass flex w-fit rounded-full p-1">
+          <div className="flex w-fit rounded-lg border border-line p-0.5">
             {(
               [
                 ['auto', 'Automatic'],
@@ -325,7 +325,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
                 key={id}
                 type="button"
                 onClick={() => setFit(id)}
-                className={`rounded-full px-3 py-1 text-[11px] ${
+                className={`rounded-md px-2.5 py-1 text-[11px] transition ${
                   fit === id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
                 }`}
               >

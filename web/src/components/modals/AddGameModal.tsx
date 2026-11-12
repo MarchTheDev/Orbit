@@ -357,13 +357,13 @@ export function AddGameModal({
         {/* What Orbit made of the drop, before anything is saved. The title is
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
-          <section className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+          <section className="space-y-3 rounded-xl border border-accent/25 bg-panel2/50 p-4">
             <div className="flex items-start gap-3">
               <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
                 <span
-                  className="grid size-full place-items-center text-sm font-black text-white/90"
+                  className="grid size-full place-items-center text-sm font-semibold text-fg/85"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `radial-gradient(circle at 32% 16%, hsl(${hashHue(title || 'Orbit')} 38% 38% / .42), transparent 64%), linear-gradient(165deg, var(--c-panel2), var(--c-panel))`,
                   }}
                 >
                   {initials(title || 'Orbit')}
@@ -596,9 +596,9 @@ export function AddGameModal({
                 <img src={storeCover} alt="" className="h-12 w-9 shrink-0 rounded bg-black object-cover" />
               ) : (
                 <div
-                  className="grid h-12 w-9 shrink-0 place-items-center rounded text-xs font-black text-white/90"
+                  className="grid h-12 w-9 shrink-0 place-items-center rounded border border-line text-[10px] font-semibold text-fg/85"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(d.title || 'Orbit')} 80% 55%), hsl(${(hashHue(d.title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `radial-gradient(circle at 32% 16%, hsl(${hashHue(d.title || 'Orbit')} 38% 38% / .42), transparent 64%), linear-gradient(165deg, var(--c-panel2), var(--c-panel))`,
                   }}
                   title="The placeholder used until artwork is found"
                 >

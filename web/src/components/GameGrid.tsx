@@ -49,7 +49,7 @@ export function GameGrid({
 
   return (
     <div
-      className="grid gap-6 p-6"
+      className="grid gap-x-5 gap-y-7 p-6"
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${Math.round(170 * (scale / 100))}px, 1fr))` }}
     >
       {games.map((g) => (
@@ -159,11 +159,11 @@ function Tile({
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover. The pad ring lives on this element, not on the
           // title underneath.
-          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
-          selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
+          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-200 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
+          selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
           // The same rounded cover ring as a selected tile. A square ring on the
           // outer box sat around the title and looked like a stock overlay.
-          over && !selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
+          over && !selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
         )}
       >
         <Cover game={game} className="size-full" />
@@ -211,15 +211,15 @@ function Tile({
           }}
           data-orbit-pad-skip=""
           aria-label={`Play ${game.title}`}
-          className="absolute bottom-3 right-3 grid size-11 translate-y-3 place-items-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
+          className="absolute bottom-3 right-3 grid size-10 translate-y-2 place-items-center rounded-lg bg-accent text-[var(--c-on-accent)] opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
         >
-          <Play className="size-5" fill="currentColor" strokeWidth={0} />
+          <Play className="size-4" fill="currentColor" strokeWidth={0} />
         </button>
       </div>
-      <p className="mt-3 truncate font-semibold" style={{ fontSize: `${Math.max(12, Math.round(14 * (scale / 100)))}px` }}>
+      <p className="mt-2.5 truncate font-medium" style={{ fontSize: `${Math.max(12, Math.round(13 * (scale / 100)))}px` }}>
         {game.title}
       </p>
-      <p className="text-xs text-muted">
+      <p className="orbit-num mt-0.5 text-[11px] text-muted">
         {fmtMinutes(game.playSecs / 60)}
         {game.drive && ` · ${driveLabel(game.drive)}`}
       </p>

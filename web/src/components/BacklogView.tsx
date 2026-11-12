@@ -280,10 +280,11 @@ export function BacklogView({
   const unknown = backlog.filter((g) => !g.hltb?.main).length;
 
   return (
-    <div className="space-y-8 px-6 pb-10">
+    <div className="space-y-8 px-6 pb-10 pt-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Backlog</h1>
+          <p className="orbit-kicker">On the horizon</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Backlog</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
             <span>{backlog.length} on the Backlog</span>
             {backlogHours > 0 && (
@@ -313,21 +314,19 @@ export function BacklogView({
           onClick={() => setShowTimes((v) => !v)}
           title="Show how long each game takes, to compare them"
           aria-pressed={showTimes}
-          className={`glass flex items-center gap-1.5 rounded-full px-3 py-2 text-xs ${
-            showTimes ? 'text-accent' : 'text-muted hover:text-fg'
-          }`}
+          className={`chip h-[34px] px-3 ${showTimes ? 'is-active' : ''}`}
         >
           <Timer className="size-3.5" />
           Times
         </button>
 
-        <div className="glass flex rounded-full p-1">
+        <div className="flex rounded-lg border border-line p-0.5">
           {ORDERS.map((o) => (
             <button
               key={o.id}
               onClick={() => setOrder(o.id)}
               title={o.label}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition ${
                 order === o.id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
               }`}
             >
@@ -340,7 +339,7 @@ export function BacklogView({
         <button
           type="button"
           onClick={() => setPicking(true)}
-          className="flex items-center gap-2 rounded-full border border-line py-2 pl-3 pr-4 text-sm text-fg hover:border-accent"
+          className="btn-quiet flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
           title="Put a library game on this page, including one taken off it"
         >
           <Plus className="size-4" />
@@ -348,7 +347,7 @@ export function BacklogView({
         </button>
         <button
           onClick={() => setPlanning(true)}
-          className={cn(btnAccent, 'flex items-center gap-2 rounded-full py-2 pl-3 pr-4 text-sm')}
+          className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-4 py-2 text-sm')}
           title="Add something you plan to play, even if you do not own it yet"
         >
           <Plus className="size-4" />
@@ -388,7 +387,7 @@ export function BacklogView({
           weekend" without opening anything: the shortest, the longest, and how
           much is left of all of it together. */}
       {showTimes && backlog.length > 0 && (
-        <section className="glass flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl px-4 py-3 text-sm">
+        <section className="orbit-panel flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
           {(() => {
             const measured = backlog.filter((g) => (g.hltb?.main ?? 0) > 0);
             const hours = measured.map((g) => g.hltb!.main);
@@ -601,7 +600,7 @@ function Section({
                 data-orbit-game={g.id}
                 data-orbit-no-move={readOnlyMoves ? '' : undefined}
                 {...bind(g.id)}
-                className={`glass group flex items-center gap-3 rounded-2xl p-3 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
+                className={`group flex items-center gap-3 rounded-xl border border-line bg-panel p-3 transition hover:border-muted/50 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
@@ -656,13 +655,10 @@ function Section({
                   )}
                   {main > 0 && !isNotOwned && (
                     <div
-                      className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
+                      className="orbit-rail mt-2"
                       title={`${Math.round((g.playSecs / 3600 / main) * 100)}% of the main story`}
                     >
-                      <div
-                        className="h-full bg-accent"
-                        style={{ width: `${Math.min(100, (g.playSecs / 3600 / main) * 100)}%` }}
-                      />
+                      <span style={{ width: `${Math.min(100, (g.playSecs / 3600 / main) * 100)}%` }} />
                     </div>
                   )}
 
@@ -672,9 +668,9 @@ function Section({
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {(
                         [
-                          ['Main', g.hltb?.main ?? 0, '#38bdf8'],
-                          ['+ Extras', g.hltb?.mainExtra ?? 0, '#a78bfa'],
-                          ['100%', g.hltb?.completionist ?? 0, '#f472b6'],
+                          ['Main', g.hltb?.main ?? 0, 'var(--c-accent2)'],
+                          ['+ Extras', g.hltb?.mainExtra ?? 0, 'var(--c-accent)'],
+                          ['100%', g.hltb?.completionist ?? 0, '#e0855f'],
                         ] as const
                       ).map(([label, hours, colour]) => (
                         <span

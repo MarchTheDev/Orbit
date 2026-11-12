@@ -78,7 +78,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
 
   return (
     <div className="p-6">
-      <div className="grid grid-cols-[1fr_110px_100px_120px_70px_110px] gap-3 px-3 pb-2 text-[11px] font-semibold uppercase tracking-widest text-muted">
+      <div className="grid grid-cols-[1fr_110px_100px_120px_70px_110px] gap-3 border-b border-line px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">
         <span>Name</span><span>Status</span><span>Playtime</span><span>Last played</span><span>Drive</span><span />
       </div>
       <div className="space-y-1">
@@ -100,8 +100,8 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
             data-orbit-game={g.id}
             {...bind(g.id)}
             className={cn(
-              'group grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
-              selectedId === g.id ? 'glass !border-accent' : 'border-transparent hover:bg-panel/60',
+              'group grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-lg border px-3 py-2 transition',
+              selectedId === g.id ? 'border-accent/55 bg-panel2' : 'border-transparent hover:bg-panel',
               onReorder && 'cursor-grab active:cursor-grabbing',
               over === g.id && 'ring-2 ring-accent',
               dragging === g.id && 'opacity-60',
@@ -128,11 +128,11 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                     aria-pressed={g.favorite}
                     title={g.favorite ? 'Remove from favorites' : 'Add to favorites'}
                     className={cn(
-                      'absolute left-1 top-1 z-10 grid size-6 place-items-center rounded-full border border-white/20 bg-black/70 text-yellow-300 shadow backdrop-blur transition',
+                      'absolute -left-1 -top-1 z-10 grid size-5 place-items-center rounded-md border border-line bg-bg text-amber-300 transition',
                       g.favorite ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100',
                     )}
                   >
-                    <Star className="size-3.5" fill={g.favorite ? 'currentColor' : 'none'} />
+                    <Star className="size-2.5" fill={g.favorite ? 'currentColor' : 'none'} />
                   </button>
                 )}
               </span>
@@ -141,9 +141,9 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
               </span>
             </div>
             <StatusBadge status={g.status} />
-            <span className="text-muted">{fmtMinutes(g.playSecs / 60)}</span>
-            <span className="text-muted">{fmtDate(g.lastPlayed)}</span>
-            <span className="text-muted">{driveLabel(g.drive) || '-'}</span>
+            <span className="orbit-num text-[13px] text-muted">{fmtMinutes(g.playSecs / 60)}</span>
+            <span className="orbit-num text-[13px] text-muted">{fmtDate(g.lastPlayed)}</span>
+            <span className="orbit-num text-[13px] text-muted">{driveLabel(g.drive) || '-'}</span>
             <div className="flex items-center justify-end gap-2">
               <button
                 onClick={(e) => {
@@ -164,9 +164,9 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
                 }}
                 data-orbit-pad-skip=""
                 title={`Play ${g.title}`}
-                className="btn-accent flex items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm"
+                className="btn-quiet flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
               >
-                <Play className="size-4" fill="currentColor" strokeWidth={0} />
+                <Play className="size-3.5" fill="currentColor" strokeWidth={0} />
                 Play
               </button>
             </div>
