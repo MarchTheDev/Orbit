@@ -13,8 +13,8 @@
 }
 
 :root {
-  --c-bg: #0b0a16; --c-panel: #14122a; --c-panel2: #1d1a3a; --c-border: #2c2852;
-  --c-text: #ecebff; --c-muted: #9a96c4; --c-accent: #8b5cf6; --c-accent2: #ec4899;
+  --c-bg: #101416; --c-panel: #181f21; --c-panel2: #232d2f; --c-border: #334144;
+  --c-text: #e9f0ee; --c-muted: #a0aeaa; --c-accent: #277958; --c-accent2: #8ba981;
 }
 
 html, body, #root { height: 100%; }
@@ -485,7 +485,6 @@ body::before { content: none; }
 .orbit-main-scroll .bg-panel\/35,
 .orbit-main-scroll .bg-panel\/60,
 .orbit-main-scroll .bg-panel\/70 { background-color: var(--c-panel); }
-.orbit-main-scroll [class*=bg-gradient-to] { background-image: none !important; background-color: var(--c-accent); }
 .page-backlog > .space-y-8 > header h1,
 .page-sessions > .mx-auto > header h1,
 .page-logs > .mx-auto > header h1,
@@ -493,9 +492,9 @@ body::before { content: none; }
 .page-saves > .mx-auto > div > div:first-child h1 { display: none; }
 .page-backlog > .space-y-8 > header { min-height: 20px; }
 .page-backlog > .space-y-8 > header p { margin: 0; font-size: 10px; }
-.page-sessions > .mx-auto > header p,
-.page-logs > .mx-auto > header p,
-.page-storage > .mx-auto > header p,
+.page-sessions > .mx-auto > header > div:first-child > p,
+.page-logs > .mx-auto > header > div:first-child > p,
+.page-storage > .mx-auto > header > div:first-child > p,
 .page-saves > .mx-auto > div > div:first-child p { display: none; }
 .page-sessions > .mx-auto > header { min-height: 32px; }
 .page-logs > .mx-auto > header { min-height: 24px; margin: 0; }
@@ -939,7 +938,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   width: 8rem;
   height: 8rem;
   border-radius: 999px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--c-accent) 32%, transparent), transparent 68%);
+  background: color-mix(in srgb, var(--c-accent) 22%, transparent);
   transform: translateX(-50%);
   pointer-events: none;
 }
@@ -1094,7 +1093,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
   width: 2px;
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(to top, var(--c-accent), var(--c-accent2));
+  background: var(--c-accent);
   transform: scaleY(0.06);
   transform-origin: bottom;
   opacity: 0.28;
@@ -1270,9 +1269,7 @@ html.orbit-tv body {
   background: #05040d;
 }
 .tv-root {
-  background:
-    radial-gradient(ellipse 70% 55% at 50% -15%, color-mix(in srgb, var(--c-accent) 12%, transparent), transparent),
-    #05040d;
+  background: #05040d;
 }
 
 /* TV mode is an instant cut in and out. Keep every child still too: the
@@ -1298,8 +1295,8 @@ html.orbit-tv body {
   /* The rail snaps to its covers; the compositor then owns the animation of
      a move, and no frame of it is paid for out of the page's budget. */
   scroll-snap-type: x proximity;
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
-  mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .tv-rail::-webkit-scrollbar {
   display: none;

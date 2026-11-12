@@ -271,7 +271,7 @@ export interface Game {
   hltb?: HltbData;
   /** Programs started alongside the game, such as a frame-rate tool. */
   companions: Companion[];
-  hue: number; // fallback cover gradient
+  hue: number; // flat fallback cover colour
   sessionCount: number;
   longestSecs: number;
   /** True while a session for this game is open. */

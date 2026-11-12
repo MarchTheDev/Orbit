@@ -252,12 +252,12 @@ export function PlanPage({
             className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-panel2 via-panel to-panel2" />
+          <div className="absolute inset-0 bg-panel2" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-panel via-black/55 to-black/5" />
+        <div className="absolute inset-0 bg-black/35" />
         <div
           className="absolute inset-x-0 top-0 h-24"
-          style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,.55), transparent)' }}
+          style={{ background: 'rgba(0,0,0,.30)' }}
         />
         <div className="absolute left-4 top-4 flex items-center gap-2">
           {onBack && (

@@ -348,7 +348,7 @@ export function SessionsView({
                       <span className="font-mono text-xs text-muted">{fmtClock(game.playSecs)}</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-panel2">
-                      <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]" style={{ width: `${fraction}%` }} />
+                      <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${fraction}%` }} />
                     </div>
                     <p className="mt-1 text-[10px] text-muted">{game.sessionCount > 0 ? `${game.sessionCount} sessions recorded` : 'Manually tracked playtime'}</p>
                   </div>

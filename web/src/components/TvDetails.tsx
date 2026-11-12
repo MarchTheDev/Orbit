@@ -269,7 +269,7 @@ export function TvDetails({
       <div
         aria-hidden
         className={cn(
-          'pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#05040d] to-transparent transition-opacity',
+          'pointer-events-none absolute inset-x-0 top-0 h-10 bg-[#05040d]/70 transition-opacity',
           atTop ? 'opacity-0' : 'opacity-100',
         )}
       />

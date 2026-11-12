@@ -120,7 +120,7 @@ function ThemeColor({
     <div className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel2/50 p-3 transition hover:border-accent/50 focus-within:border-accent">
       <label className="relative grid size-10 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-lg border border-line shadow-inner" title={`Choose ${label.toLowerCase()}`}>
         <span className="absolute inset-0" style={{ background: safe }} />
-        <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 to-transparent" />
+        <span className="pointer-events-none absolute inset-0 bg-white/5" />
         <input
           type="color"
           value={safe}
@@ -317,7 +317,7 @@ export function ThemeManagerPage({
               {custom.map((theme) => (
                 <div key={theme.id} className={cn('flex items-center gap-2 rounded-xl border px-2 py-2', activeId === theme.id ? 'border-accent/60 bg-accent/10' : 'border-transparent hover:bg-panel2/60')}>
                   <button type="button" onClick={() => edit(theme)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                    <span className="size-7 shrink-0 rounded-lg border border-line" style={{ background: `linear-gradient(135deg, ${theme.bg} 25%, ${theme.accent} 100%)` }} />
+                    <span className="size-7 shrink-0 rounded-lg border border-line" style={{ background: theme.accent }} />
                     <span className="truncate text-sm">{theme.name}</span>
                   </button>
                   <button type="button" onClick={() => void remove(theme)} aria-label={`Delete ${theme.name}`} className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="size-3.5" /></button>

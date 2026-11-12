@@ -357,13 +357,13 @@ export function AddGameModal({
         {/* What Orbit made of the drop, before anything is saved. The title is
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
-          <section className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+          <section className="space-y-3 rounded-2xl border border-accent/20 bg-panel2 p-4">
             <div className="flex items-start gap-3">
               <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
                 <span
                   className="grid size-full place-items-center text-sm font-black text-white/90"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `hsl(${hashHue(title || 'Orbit')} 24% 31%)`,
                   }}
                 >
                   {initials(title || 'Orbit')}
@@ -598,7 +598,7 @@ export function AddGameModal({
                 <div
                   className="grid h-12 w-9 shrink-0 place-items-center rounded text-xs font-black text-white/90"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(d.title || 'Orbit')} 80% 55%), hsl(${(hashHue(d.title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `hsl(${hashHue(d.title || 'Orbit')} 24% 31%)`,
                   }}
                   title="The placeholder used until artwork is found"
                 >

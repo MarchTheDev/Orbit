@@ -16,7 +16,7 @@ function Bar({ used, total }: { used: number; total: number | null }) {
   return (
     <div className="h-2 overflow-hidden rounded-full bg-panel2">
       <div
-        className={pct > 90 ? 'h-full rounded-full bg-rose-500' : 'h-full rounded-full bg-gradient-to-r from-accent to-accent2'}
+        className={pct > 90 ? 'h-full rounded-full bg-rose-500' : 'h-full rounded-full bg-accent'}
         style={{ width: `${pct}%` }}
       />
     </div>

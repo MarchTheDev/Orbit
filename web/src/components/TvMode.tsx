@@ -180,15 +180,15 @@ function Backdrop({ game }: { game: Game }) {
           aria-hidden="true"
           className="absolute inset-0"
           style={{
-            background: `radial-gradient(circle at 28% 28%, hsl(${game.hue} 55% 24%), #05040d 72%)`,
+            background: `hsl(${game.hue} 20% 14%)`,
           }}
         />
       )}
       {/* The scrims. Everything over the picture is read against the darkest
           corner of it, and the picture fades into the rail rather than ending
           at a line above it. */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[#05040d] via-[#05040d]/55 to-[#05040d]/10" />
-      <div className="absolute inset-0 bg-gradient-to-r from-[#05040d] via-[#05040d]/45 to-transparent" />
+      <div className="absolute inset-0 bg-[#05040d]/65" />
+      <div className="absolute inset-0 bg-[#05040d]/30" />
     </div>
   );
 }
@@ -529,7 +529,7 @@ export function TvMode({
 
       {/* A wash under the top bar, so its few words stay readable over a game
           whose artwork happens to be bright exactly there. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-black/45" />
 
       {/* The top panel: where you are, and the room's small facts. It floats on
           the artwork rather than sitting in a bar of its own. */}

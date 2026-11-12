@@ -286,10 +286,6 @@ export function PlanDialog({
         className="modal-panel-enter relative flex h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-line bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        {/* A hairline of the accent across the top: the one flourish the frame
-            gets, so the panel reads as lit from above rather than flat. */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent" />
-
         {chosen ? chosen.source === 'steam' ? (
           <PlanPage
             key={`steam-${chosen.suggestion.appId}`}

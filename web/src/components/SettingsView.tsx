@@ -144,7 +144,7 @@ function Section({
       className="scroll-mt-28 rounded-3xl border border-line/65 bg-panel/25 p-5 transition-colors sm:p-6"
     >
       <div className="flex items-start gap-3.5">
-        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-gradient-to-br from-accent/20 to-accent2/10 text-accent shadow-inner">
+        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent shadow-inner">
           <Icon className="size-[18px]" strokeWidth={1.9} />
         </span>
         <div className="min-w-0 pt-0.5">
@@ -903,7 +903,7 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
-      <header className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-panel via-panel/95 to-panel2/75 p-5 shadow-lg sm:p-6">
+      <header className="relative overflow-hidden rounded-3xl border border-line bg-panel p-5 shadow-lg sm:p-6">
         <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
         <div className="relative flex items-start gap-4">
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
@@ -991,7 +991,7 @@ export function SettingsView({
               )}
             >
               <div className="flex h-16 items-center justify-center gap-2" style={{ background: t.bg }}>
-                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent2})` }} />
+                <span className="size-7 rounded-full" style={{ background: t.accent }} />
                 <span className="h-3 w-16 rounded" style={{ background: t.panel2 }} />
               </div>
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
@@ -1005,7 +1005,7 @@ export function SettingsView({
               aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
             >
               <div className="flex h-16 items-center justify-center gap-2" style={{ background: featuredCustomTheme.bg }}>
-                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${featuredCustomTheme.accent}, ${featuredCustomTheme.accent2})` }} />
+                <span className="size-7 rounded-full" style={{ background: featuredCustomTheme.accent }} />
                 <span className="h-3 w-16 rounded" style={{ background: featuredCustomTheme.panel2 }} />
               </div>
               <div className="bg-panel px-3 py-2">

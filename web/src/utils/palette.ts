@@ -11,7 +11,7 @@ import { fileSrc } from '../services/desktop';
  * object, or Orbit's theme, which makes the whole library look like one object.
  *
  * With the picture's colours, it is *only* the picture's colours. There used to
- * be a theme-coloured gradient underneath as a fallback, which meant every tile
+ * be a theme-coloured overlay underneath as a fallback, which meant every tile
  * showed a little of the theme no matter what it was set to; now a picture that
  * cannot be measured gets a plain dark fade, which reads as shadow rather than
  * as somebody else's colour.
@@ -28,14 +28,11 @@ import { fileSrc } from '../services/desktop';
  */
 
 /** A plain dark fade, for a picture whose colours could not be read. */
-const SHADOW = 'linear-gradient(to top, rgb(0 0 0 / 0.82), rgb(0 0 0 / 0.35) 55%, transparent 88%)';
+const SHADOW = 'rgb(0 0 0 / 0.42)';
 
-/** Themes' two colours, mixed the way a sampled pair is. */
+/** A restrained solid tint from the active theme. */
 function themeTint(): string {
-  return (
-    'linear-gradient(to top, color-mix(in srgb, var(--c-accent) 88%, transparent), ' +
-    'color-mix(in srgb, var(--c-accent2) 45%, transparent) 55%, transparent 88%)'
-  );
+  return 'color-mix(in srgb, var(--c-accent) 32%, transparent)';
 }
 
 /** Sampled colours, so a cover already measured is never measured twice. */
@@ -51,25 +48,19 @@ function coverArt(game: Game): string | null {
 }
 
 /**
- * The gradient, from one hue and one lightness.
+ * A solid overlay, from one hue and one lightness.
  *
- * One colour, not two. A second colour was picked from the next biggest patch
- * of the picture, and on real cover art that patch is often a highlight, a sky
- * or a logo, so the gradient came out with a colour that had nothing to do with
- * the game. The same hue, darker at the bottom and lighter where it fades,
- * always looks like the picture it came from.
+ * One colour, not two. The tile provides the image; the overlay merely darkens
+ * it enough for text and actions to stay readable.
  */
 function tintOf(hue: number | null, light: number): string {
   if (hue === null) return SHADOW;
-  const top = Math.round(Math.min(46, light + 12));
-  return (
-    `linear-gradient(to top, hsl(${hue} 44% ${Math.round(light)}% / 0.95), ` +
-    `hsl(${hue} 40% ${top}% / 0.42) 55%, transparent 88%)`
-  );
+  const shade = Math.round(Math.min(46, light + 8));
+  return `hsl(${hue} 38% ${shade}% / 0.68)`;
 }
 
 /**
- * The gradient to draw behind a tile's Play button.
+ * The solid tint to draw over a tile's artwork.
  *
  * `fromCover` is the player's setting; `active` is whether the pointer is over
  * the tile, which is what starts the measuring.

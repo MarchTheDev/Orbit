@@ -72,7 +72,7 @@ export function HltbPlanPage({
         ) : (
           <div className="absolute inset-0 grid place-items-center text-accent/60"><Sparkles className="size-12" /></div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-panel via-black/35 to-black/10" />
+        <div className="absolute inset-0 bg-black/25" />
         <button
           type="button"
           onClick={onBack}

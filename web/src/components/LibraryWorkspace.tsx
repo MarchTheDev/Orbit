@@ -97,8 +97,9 @@ export function LibraryWorkspace({
   showArtwork,
   onReorder,
 }: Props) {
-  const filters = orderedLibraryFilters(settings.libraryFilterOrder)
+  const configuredFilters = orderedLibraryFilters(settings.libraryFilterOrder)
     .filter(({ id }) => !(settings.hiddenLibraryFilters ?? []).includes(id));
+  const filters = configuredFilters.length ? configuredFilters : [{ id: 'all' as LibraryFilter, label: 'All games' }];
   const counts = useMemo(() => {
     const result: Partial<Record<LibraryFilter, number>> = {};
     for (const item of filters) {
