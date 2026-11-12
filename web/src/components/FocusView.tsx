@@ -86,7 +86,7 @@ export function FocusView({
   const meta = game.meta;
 
   return (
-    <div className="mx-6 mt-6 grid items-start gap-6 pb-10 lg:grid-cols-[minmax(250px,290px)_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+    <div className="mx-6 mt-6 grid items-start gap-6 pb-10 lg:grid-cols-[minmax(250px,290px)_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)_320px]">
       {/* ------------------------------------------------------------ bodies */}
       <aside className="order-2 flex max-h-[48vh] flex-col overflow-y-auto pr-1 lg:sticky lg:top-24 lg:order-1 lg:max-h-[calc(100vh-8rem)]">
         {groups.map((group) => (
@@ -253,7 +253,10 @@ export function FocusView({
       </section>
 
       {/* --------------------------------------------------------- telemetry */}
-      <aside className="order-3 hidden min-w-0 flex-col gap-4 xl:flex">
+      {/* One panel, not four stacked cards: on a very wide screen the record is
+          a single quiet column. Below 2xl the stage keeps its stats strip and
+          the full record lives behind Details, so the library stays calm. */}
+      <aside className="order-3 hidden min-w-0 flex-col gap-4 2xl:flex">
         <div className="orbit-panel p-5">
           <div className="flex items-center justify-between">
             <h2 className="orbit-kicker">Telemetry</h2>
@@ -266,21 +269,19 @@ export function FocusView({
             <div className="telemetry-row"><dt>Last session</dt><dd>{game.lastPlayed ? fmtDate(game.lastPlayed) : 'Never'}</dd></div>
             <div className="telemetry-row"><dt>Longest</dt><dd>{game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '—'}</dd></div>
           </dl>
-        </div>
 
-        {game.hltb && (
-          <div className="orbit-panel p-5">
-            <h2 className="orbit-kicker">Completion</h2>
-            <dl className="mt-2 divide-y divide-line/60">
-              <div className="telemetry-row"><dt>Main story</dt><dd>{game.hltb.main}h</dd></div>
-              <div className="telemetry-row"><dt>Main + extras</dt><dd>{game.hltb.mainExtra}h</dd></div>
-              <div className="telemetry-row"><dt>Completionist</dt><dd>{game.hltb.completionist}h</dd></div>
-            </dl>
-          </div>
-        )}
+          {game.hltb && (
+            <>
+              <h3 className="orbit-kicker mt-5">Completion</h3>
+              <dl className="mt-2 divide-y divide-line/60">
+                <div className="telemetry-row"><dt>Main story</dt><dd>{game.hltb.main}h</dd></div>
+                <div className="telemetry-row"><dt>Main + extras</dt><dd>{game.hltb.mainExtra}h</dd></div>
+                <div className="telemetry-row"><dt>Completionist</dt><dd>{game.hltb.completionist}h</dd></div>
+              </dl>
+            </>
+          )}
 
-        <div className="orbit-panel p-5">
-          <h2 className="orbit-kicker">On disk</h2>
+          <h3 className="orbit-kicker mt-5">On disk</h3>
           <dl className="mt-2 divide-y divide-line/60">
             <div className="telemetry-row"><dt>Size</dt><dd>{game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : 'Not measured'}</dd></div>
             <div className="telemetry-row"><dt>Drive</dt><dd>{driveLabel(game.drive) || '—'}</dd></div>
@@ -297,18 +298,18 @@ export function FocusView({
               </dd>
             </div>
           </dl>
-        </div>
 
-        {!!meta?.genres.length && (
-          <div className="orbit-panel p-5">
-            <h2 className="orbit-kicker">Genres</h2>
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {meta.genres.map((genre) => (
-                <span key={genre} className="chip">{genre}</span>
-              ))}
-            </div>
-          </div>
-        )}
+          {!!meta?.genres.length && (
+            <>
+              <h3 className="orbit-kicker mt-5">Genres</h3>
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {meta.genres.map((genre) => (
+                  <span key={genre} className="chip">{genre}</span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
 
         <button onClick={() => onDetails(game.id)} className="btn-quiet flex items-center justify-between rounded-lg px-4 py-3 text-sm">
           Full details

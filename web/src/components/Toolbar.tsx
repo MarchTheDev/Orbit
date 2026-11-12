@@ -121,24 +121,26 @@ export function Toolbar({
           ]}
         />
 
-        {/* How big the covers are drawn. Every view shares it, so the library
-            looks the same size whichever way it is read. */}
-        <label
-          className="flex items-center gap-2.5 rounded-lg border border-line py-1.5 pl-3 pr-4 text-muted"
-          title="Cover size"
-        >
-          <Rows3 className="size-4" />
-          <input
-            type="range"
-            min={70}
-            max={170}
-            step={5}
-            value={scale}
-            onChange={(e) => setScale(Number(e.target.value))}
-            className="orbit-range w-20 cursor-pointer"
-            aria-label="Cover size"
-          />
-        </label>
+        {/* How big the covers are drawn. Focus sizes its own stage, so the
+            control only appears where the covers are actually in a grid. */}
+        {view !== 'focus' && (
+          <label
+            className="flex items-center gap-2.5 rounded-lg border border-line py-1.5 pl-3 pr-4 text-muted"
+            title="Cover size"
+          >
+            <Rows3 className="size-4" />
+            <input
+              type="range"
+              min={70}
+              max={170}
+              step={5}
+              value={scale}
+              onChange={(e) => setScale(Number(e.target.value))}
+              className="orbit-range w-20 cursor-pointer"
+              aria-label="Cover size"
+            />
+          </label>
+        )}
 
         <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="How the library is drawn">
           {(

@@ -55,7 +55,9 @@ import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
-import { TopNav, orderedTabs } from './components/TopNav';
+import { TopNav, orderedTabs, isStatsPage } from './components/TopNav';
+import { StatisticsNav } from './components/StatisticsNav';
+import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
@@ -180,8 +182,12 @@ export default function App() {
   const [showThemeManager, setShowThemeManager] = useState(false);
   /** True while a launcher/drive picker was opened from the Add Game form. */
   const addTabImport = useRef(false);
-  /** Whether the opening has finished and taken itself off the screen. */
+  /** The opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
+  /** Ctrl K: one field over every page, game and action. */
+  const [palette, setPalette] = useState(false);
+  /** The Statistics tab last read, so the header reopens where the player was. */
+  const [statsPage, setStatsPage] = useState<Page>('sessions');
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
   const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
   const settingsJumpToken = useRef(0);
@@ -1255,6 +1261,31 @@ export default function App() {
     setPage('settings');
   }, []);
 
+  // The Statistics entry in the bar is one button for five pages, so remember
+  // which one was last read and take the player back there.
+  useEffect(() => {
+    if (isStatsPage(page)) setStatsPage(page);
+  }, [page]);
+
+  // A new page starts at its top. Without this, opening Statistics from a long
+  // library lands halfway down the sessions and the change reads as a glitch.
+  useEffect(() => {
+    const scroller = document.querySelector('.orbit-scroll');
+    if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 });
+  }, [page]);
+
+  // Ctrl K, from anywhere. The modifier makes it safe even while typing, and
+  // the palette itself takes Escape and Enter once it is open.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      setPalette((open) => !open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     if (!isNative() || !overlayAvailable) return;
     let stop = () => {};
@@ -1386,8 +1417,12 @@ export default function App() {
           setShowThemeManager(false);
           setPage(next);
         }}
+        onOpenStatistics={() => {
+          setShowThemeManager(false);
+          setPage(statsPage);
+        }}
+        onOpenPalette={() => setPalette(true)}
         onOpenSettings={openSettings}
-        order={settings?.tabOrder}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
@@ -1403,6 +1438,17 @@ export default function App() {
             <p className="mt-1 text-sm text-muted">A game program, or a folder full of them</p>
           </div>
         </div>
+      )}
+
+      {!showThemeManager && settings && isStatsPage(page) && (
+        <StatisticsNav
+          page={page}
+          setPage={(next) => {
+            setShowThemeManager(false);
+            setPage(next);
+          }}
+          order={settings.tabOrder}
+        />
       )}
 
       <main key={page} className="orbit-tab-enter pb-24">
@@ -1868,6 +1914,22 @@ export default function App() {
       )}
       {cloudJob && (
         <CloudTransferOrb job={cloudJob} lift={!!move.job && moveId !== move.job.gameId} />
+      )}
+
+      {settings && (
+        <CommandPalette
+          open={palette}
+          games={games}
+          onClose={() => setPalette(false)}
+          onPage={(next) => {
+            setShowThemeManager(false);
+            setPage(next);
+          }}
+          onGame={openDetail}
+          onSettings={() => openSettings()}
+          onAdd={() => setShowAdd(true)}
+          onTv={enterTv}
+        />
       )}
 
       {!isNative() && (

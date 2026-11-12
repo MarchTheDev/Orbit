@@ -1,4 +1,4 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
+import { BarChart3, Command, HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
@@ -8,7 +8,7 @@ import { cn } from '../utils/cn';
 // order. The theme button is gone: themes live in Settings.
 //
 // The order can be rearranged in Settings, so this list is the default and the
-// place every tab is defined; `orderedTabs` turns it into whatever order the
+// place every page is defined; `orderedTabs` turns it into whatever order the
 // player arranged.
 export type Tab = { id: Page; label: string; Icon: typeof Library };
 
@@ -20,6 +20,13 @@ export const TABS: Tab[] = [
   { id: 'saves', label: 'Saves', Icon: Save },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
+
+/** The pages that live inside Statistics rather than beside the library. */
+export const STATS_PAGES: Page[] = ['sessions', 'logs', 'backlog', 'saves', 'storage'];
+
+export function isStatsPage(page: Page): boolean {
+  return STATS_PAGES.includes(page);
+}
 
 /**
  * The tabs, in the order the player put them.
@@ -57,7 +64,8 @@ export function orderedTabs(order: Page[] | undefined): Tab[] {
 export function TopNav({
   page,
   setPage,
-  order,
+  onOpenStatistics,
+  onOpenPalette,
   sound,
   setSound,
   showMusic,
@@ -67,6 +75,10 @@ export function TopNav({
 }: {
   page: Page;
   setPage: (p: Page) => void;
+  /** Opens Statistics at the page it was last read on. */
+  onOpenStatistics: () => void;
+  /** Opens the command palette. */
+  onOpenPalette: () => void;
   /**
    * Opens Settings, optionally at one of its cards.
    *
@@ -74,8 +86,6 @@ export function TopNav({
    * wants to arrive at the music rather than at the top of everything.
    */
   onOpenSettings: (at?: string) => void;
-  /** The player's own tab order from Settings; the default when absent. */
-  order?: Page[];
   /** The background music, so the bar can play it, hush it and set its level. */
   sound: Settings['sound'];
   setSound: (next: Settings['sound']) => void;
@@ -86,7 +96,7 @@ export function TopNav({
   /** Fills the screen with TV mode, the library as a couch sees it. */
   onTv: () => void;
 }) {
-  const tabs = orderedTabs(order);
+  const statsActive = isStatsPage(page);
 
   return (
     <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
@@ -111,35 +121,44 @@ export function TopNav({
 
         <span aria-hidden className="hidden h-7 w-px shrink-0 bg-line md:block" />
 
-        <nav className="relative flex items-stretch gap-0.5 self-stretch overflow-x-auto">
-          {tabs.map((t) => {
-            const active = page === t.id;
-            return (
-              <button
-                key={t.id}
-                data-tab-id={t.id}
-                aria-current={active ? 'page' : undefined}
-                onClick={() => setPage(t.id)}
+        {/* Two places, not seven: the library and everything read around it. */}
+        <nav className="flex items-stretch gap-0.5 self-stretch">
+          {([
+            { id: 'library' as const, label: 'Library', Icon: Library, active: page === 'library', onClick: () => setPage('library') },
+            { id: 'stats' as const, label: 'Statistics', Icon: BarChart3, active: statsActive, onClick: onOpenStatistics },
+          ]).map((item) => (
+            <button
+              key={item.id}
+              data-tab-id={item.id}
+              aria-current={item.active ? 'page' : undefined}
+              onClick={item.onClick}
+              className={cn(
+                'relative flex shrink-0 items-center gap-2 px-3 text-[13px] font-medium transition-colors',
+                item.active ? 'text-fg' : 'text-muted hover:text-fg',
+              )}
+            >
+              <item.Icon className={cn('size-4', item.active ? 'text-accent' : '')} strokeWidth={1.7} />
+              {item.label}
+              <span
+                aria-hidden
                 className={cn(
-                  'relative flex shrink-0 items-center gap-2 px-3 text-[13px] font-medium transition-colors',
-                  active ? 'text-fg' : 'text-muted hover:text-fg',
+                  'absolute inset-x-2 bottom-0 h-[2px] rounded-full transition-opacity',
+                  item.active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0',
                 )}
-              >
-                <t.Icon className={cn('size-4', active ? 'text-accent' : '')} strokeWidth={1.7} />
-                {t.label}
-                <span
-                  aria-hidden
-                  className={cn(
-                    'absolute inset-x-2 bottom-0 h-[2px] rounded-full transition-opacity',
-                    active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0',
-                  )}
-                />
-              </button>
-            );
-          })}
+              />
+            </button>
+          ))}
         </nav>
 
         <div className="flex-1" />
+        <button
+          onClick={onOpenPalette}
+          aria-label="Command palette"
+          title="Jump to anything · Ctrl K"
+          className="rounded-lg p-2 text-muted transition hover:bg-panel hover:text-fg"
+        >
+          <Command className="size-5" strokeWidth={1.8} />
+        </button>
         {/* Beside the sound, because both are about the room rather than the
             library: one is what you hear and the other is what you sit back
             for. */}

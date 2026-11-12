@@ -16,10 +16,10 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
     <section className="orbit-hero-enter relative mx-6 mt-6 overflow-hidden rounded-2xl border border-line bg-panel">
       <Cover game={game} className="orbit-hero-wash absolute inset-0 size-full opacity-45 [&_span]:hidden" />
       <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/85 to-bg/20" />
-      <div aria-hidden className="pointer-events-none absolute right-16 top-1/2 hidden -translate-y-1/2 lg:block">
-        <div className="relative size-[26rem]">
+      <div aria-hidden className="pointer-events-none absolute right-12 top-1/2 hidden -translate-y-1/2 lg:block">
+        <div className="relative size-[18rem]">
           <div className="orbit-stage-ring orbit-stage-ring--outer inset-0" />
-          <div className="orbit-stage-ring orbit-stage-ring--inner inset-[4.5rem]" />
+          <div className="orbit-stage-ring orbit-stage-ring--inner inset-[3rem]" />
         </div>
       </div>
       <div className="relative flex items-center gap-8 p-8">

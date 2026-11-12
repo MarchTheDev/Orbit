@@ -64,13 +64,21 @@ Rules:
 ### Shell
 
 64 px header, full width, bottom hairline, background = `--c-bg` at 96% with
-blur only where the platform allows it. Left: mark + ORBIT wordmark, then tabs.
-Right: TV, sound, settings. Active tab gets a gold 2 px underline and a small
-orbital dot; no sliding pill.
+blur only where the platform allows it. Left: mark + ORBIT wordmark, then two
+places: **Library** and **Statistics**. Right: command palette, TV, sound,
+settings. Active entry gets a gold 2 px underline; no sliding pill.
+
+Statistics is a place, not a tab strip: below the header, a second sticky bar
+holds Sessions, Journal, Backlog, Saves and Storage as underline tabs, in the
+order the player arranged in Settings. The library's toolbar keeps only what
+belongs to the library, so neither bar ever fills up.
+
+Ctrl K opens the command palette over any page: pages, actions and games in one
+field, arrow keys and Enter.
 
 ### Library — Orbital Focus (default)
 
-Three columns on wide screens:
+Two columns with a third only on very wide screens:
 
 1. **Bodies rail** (280–320 px): scrollable, grouped by state — *In orbit*
    (playing), *Next up* (backlog/unplayed), *Archived* (completed/dropped).
@@ -80,12 +88,13 @@ Three columns on wide screens:
    elliptical orbit lines, portrait cover, kicker, display title, meta line,
    summary, primary Play + Details, completion rail, and a strip of factual
    telemetry under it.
-3. **Telemetry** (300–340 px): status, rating, playtime, last played, main-story
-   estimate, size, drive, store, developer, publisher, genres as chips.
+3. **Telemetry** (300–340 px, 2xl and up only): one panel with grouped rows —
+   status, rating, playtime, last played, longest, completion estimates, disk,
+   launcher and genres as chips. Below 2xl the stage strip and Details carry the
+   same facts, keeping the library calm.
 
-Below 1280 px: rail + stage. Below 1024 px: stage first, the rail moves beneath
-it as a scrollable list. Below 768 px: single column, telemetry collapses into
-the stage footer.
+Below 1536 px: rail + stage. Below 1024 px: stage first, the rail moves beneath
+it as a scrollable list. Below 768 px: single column.
 
 The existing Grid and List views remain available from the toolbar. Focus is the
 new default for first-time users; a saved choice wins.

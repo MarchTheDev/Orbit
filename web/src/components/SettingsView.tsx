@@ -207,7 +207,6 @@ function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[])
             <GripVertical className="size-4 shrink-0 cursor-grab text-muted" />
             <tab.Icon className="size-4 shrink-0 text-accent" strokeWidth={1.8} />
             <span className="font-medium">{tab.label}</span>
-            {id === 'library' && <span className="text-[11px] text-muted">the page Orbit opens on</span>}
           </div>
         );
       })}
@@ -1443,9 +1442,9 @@ export function SettingsView({
         />
       </Section>
 
-      <Section id="orbit-tabs" icon={GripVertical} title="Tabs along the top" lead="Put the pages you use most first. Settings is always last, wherever it would have been.">
+      <Section id="orbit-tabs" icon={GripVertical} title="Statistics pages" lead="Choose the order of the tabs inside Statistics. The library and the bar itself stay where they are, so a page can never be lost.">
         <TabOrder
-          order={orderedTabs(settings.tabOrder).map((t) => t.id)}
+          order={orderedTabs(settings.tabOrder).map((t) => t.id).filter((id) => id !== 'library')}
           onChange={(next) => setSettings({ tabOrder: next })}
         />
       </Section>
