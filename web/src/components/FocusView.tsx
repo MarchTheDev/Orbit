@@ -86,9 +86,9 @@ export function FocusView({
   const meta = game.meta;
 
   return (
-    <div className="mx-6 mt-6 grid items-start gap-6 pb-10 lg:grid-cols-[minmax(250px,290px)_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+    <div className="mx-6 mt-6 grid items-start gap-6 pb-10 lg:grid-cols-[minmax(250px,290px)_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)_300px]">
       {/* ------------------------------------------------------------ bodies */}
-      <aside className="order-2 flex max-h-[48vh] flex-col overflow-y-auto pr-1 lg:sticky lg:top-24 lg:order-1 lg:max-h-[calc(100vh-8rem)]">
+      <aside className="orbit-rail-scroll order-2 flex max-h-[48vh] flex-col overflow-y-auto pr-1 lg:sticky lg:top-24 lg:order-1 lg:max-h-[calc(100vh-8rem)]">
         {groups.map((group) => (
           <div key={group.id} className="mb-4 last:mb-0">
             <div className="mb-1.5 flex items-center justify-between px-2">
@@ -134,9 +134,12 @@ export function FocusView({
       </aside>
 
       {/* ------------------------------------------------------------- stage */}
-      <section className="relative order-1 min-h-[480px] overflow-hidden rounded-2xl border border-line bg-panel lg:order-2">
-        {art && <img src={art} alt="" aria-hidden draggable={false} className="orbit-stage-art" />}
-        <div className="orbit-stage-scrim" aria-hidden />
+      <section className="relative order-1 min-h-[460px] overflow-hidden rounded-2xl border border-line bg-panel lg:order-2">
+        {/* The art is blurred past recognition and then scrimmed back to the
+            room colour: it lights the stage without competing with the title
+            or the telemetry drawn over it. */}
+        {art && <img src={art} alt="" aria-hidden draggable={false} className="orbit-ambient" />}
+        <div className="orbit-ambient-scrim" aria-hidden />
 
         <div className="absolute right-5 top-5 z-10 flex items-center gap-2">
           <StatusBadge status={game.status} />
@@ -160,18 +163,15 @@ export function FocusView({
           </button>
         </div>
 
-        <div className="relative flex min-h-[480px] flex-col justify-end p-7 sm:p-9">
+        <div className="relative flex min-h-[460px] flex-col justify-end p-7 sm:p-8">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
             <div className="relative shrink-0 self-start sm:self-end">
-              {/* The orbital rings are centred by their wrapper; each ring then
-                  turns about its own middle without losing that position. */}
+              {/* One hairline orbit behind the cover, centred by its wrapper so
+                  the ring turns about its own middle. */}
               <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-                <div className="relative size-[20rem]">
+                <div className="relative size-[15rem]">
                   <div className="orbit-stage-ring orbit-stage-ring--outer inset-0" />
                 </div>
-              </div>
-              <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-                <div className="orbit-stage-ring orbit-stage-ring--inner size-[14.5rem]" />
               </div>
               <Cover
                 game={game}
@@ -184,7 +184,7 @@ export function FocusView({
               <p className="orbit-kicker text-accent">
                 {running ? 'Now playing' : STATUS_TEXT[game.status]}
               </p>
-              <h1 className="orbit-display mt-2 line-clamp-2 text-4xl text-fg sm:text-5xl xl:text-6xl">
+              <h1 className="orbit-display mt-2 line-clamp-2 text-4xl text-fg sm:text-5xl">
                 {game.title}
               </h1>
               <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
@@ -204,12 +204,12 @@ export function FocusView({
                     Stop
                   </button>
                 ) : (
-                  <button onClick={() => onPlay(game)} className="btn-accent flex items-center gap-2 rounded-lg px-7 py-2.5">
+                  <button onClick={() => onPlay(game)} className="btn-accent flex items-center gap-2 rounded-full px-7 py-2.5">
                     <Play className="size-4" fill="currentColor" strokeWidth={0} />
                     Play
                   </button>
                 )}
-                <button onClick={() => onDetails(game.id)} className="btn-quiet flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm">
+                <button onClick={() => onDetails(game.id)} className="btn-quiet flex items-center gap-2 rounded-full px-5 py-2.5 text-sm">
                   Details
                   <ArrowUpRight className="size-4 text-muted" />
                 </button>
@@ -231,7 +231,7 @@ export function FocusView({
             </div>
           </div>
 
-          <dl className="relative mt-8 grid grid-cols-2 gap-x-8 gap-y-4 border-t border-line pt-5 sm:grid-cols-4">
+          <dl className="relative mt-8 grid grid-cols-2 gap-x-8 gap-y-4 border-t border-line/70 pt-5 sm:grid-cols-4">
             <div>
               <dt className="orbit-kicker">Played</dt>
               <dd className="orbit-num mt-1 text-lg font-semibold">{fmtMinutes(game.playSecs / 60)}</dd>
@@ -256,7 +256,7 @@ export function FocusView({
       {/* One panel, not four stacked cards: on a very wide screen the record is
           a single quiet column. Below 2xl the stage keeps its stats strip and
           the full record lives behind Details, so the library stays calm. */}
-      <aside className="order-3 hidden min-w-0 flex-col gap-4 2xl:flex">
+      <aside className="order-3 hidden min-w-0 flex-col gap-4 xl:flex">
         <div className="orbit-panel p-5">
           <div className="flex items-center justify-between">
             <h2 className="orbit-kicker">Telemetry</h2>

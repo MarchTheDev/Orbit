@@ -24,13 +24,13 @@ export function StatisticsNav({
   const tabs = orderedTabs(order).filter((tab) => tab.id !== 'library');
 
   return (
-    <div className="sticky top-16 z-20 border-b border-line bg-bg/95 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1500px] items-center gap-5 overflow-x-auto px-6">
+    <div className="sticky top-16 z-20 border-b border-line/70 bg-bg/85 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-[1500px] items-center gap-4 overflow-x-auto px-6 py-2.5">
         <span className="orbit-kicker hidden shrink-0 items-center gap-2 sm:flex">
           <BarChart3 className="size-3.5" strokeWidth={1.9} />
           Statistics
         </span>
-        <nav className="flex items-stretch gap-0.5" aria-label="Statistics pages">
+        <nav className="flex items-center gap-1 rounded-full border border-line/80 bg-panel/50 p-1" aria-label="Statistics pages">
           {tabs.map((tab) => {
             const active = page === tab.id;
             return (
@@ -40,19 +40,12 @@ export function StatisticsNav({
                 aria-current={active ? 'page' : undefined}
                 onClick={() => setPage(tab.id)}
                 className={cn(
-                  'relative flex h-11 shrink-0 items-center gap-2 px-2.5 text-[13px] font-medium transition-colors',
-                  active ? 'text-fg' : 'text-muted hover:text-fg',
+                  'flex h-8 shrink-0 items-center gap-2 rounded-full px-3 text-[12.5px] font-medium transition-colors',
+                  active ? 'bg-panel2 text-fg shadow-sm shadow-black/20' : 'text-muted hover:text-fg',
                 )}
               >
-                <tab.Icon className={cn('size-4', active ? 'text-accent' : '')} strokeWidth={1.7} />
+                <tab.Icon className={cn('size-3.5', active ? 'text-accent' : '')} strokeWidth={1.8} />
                 {tab.label}
-                <span
-                  aria-hidden
-                  className={cn(
-                    'absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-accent transition-opacity',
-                    active ? 'opacity-100' : 'opacity-0',
-                  )}
-                />
               </button>
             );
           })}

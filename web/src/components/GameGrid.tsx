@@ -159,7 +159,7 @@ function Tile({
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover. The pad ring lives on this element, not on the
           // title underneath.
-          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-200 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
+          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-150 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
           // The same rounded cover ring as a selected tile. A square ring on the
           // outer box sat around the title and looked like a stock overlay.
@@ -168,7 +168,7 @@ function Tile({
       >
         <Cover game={game} className="size-full" />
         <div
-          className="absolute inset-0 opacity-0 transition duration-200 group-hover:opacity-100"
+          className="absolute inset-0 opacity-0 transition duration-150 group-hover:opacity-100"
           style={{ background: tint }}
         />
         <button

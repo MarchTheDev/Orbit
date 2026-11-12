@@ -93,7 +93,7 @@ export function Select<T extends string>({
         aria-expanded={open}
         aria-label={ariaLabel}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-left outline-none transition',
+          'flex w-full items-center justify-between gap-2 rounded-full border border-line bg-panel px-2.5 py-1.5 text-left outline-none transition',
           'hover:border-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30',
           open && 'border-accent',
           className,

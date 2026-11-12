@@ -1,4 +1,4 @@
-import { BarChart3, Command, HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
+import { BarChart3, HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Search, Settings as SettingsIcon, Tv } from 'lucide-react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
@@ -99,30 +99,24 @@ export function TopNav({
   const statsActive = isStatsPage(page);
 
   return (
-    <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
+    <header className="orbit-topbar sticky top-0 z-30 border-b border-line/70 bg-bg/85 backdrop-blur-xl">
       {/* The bar is the one thing that spans the whole window rather than sitting
           in a column: on a wide screen the mark belongs at the left edge and the
           settings button at the right, not both of them a hand's width in. */}
-      <div className="flex h-16 w-full items-center gap-5 px-6">
+      <div className="flex h-16 w-full items-center gap-4 px-5">
         <button
           onClick={() => setPage('library')}
-          className="orbit-logo flex shrink-0 items-center gap-3 rounded-lg py-1 pr-1 text-left"
+          className="orbit-logo flex shrink-0 items-center gap-2.5 rounded-xl py-1 pr-1 text-left"
           title="Orbit"
           aria-label="Orbit"
         >
           <Logo className="size-7 text-accent" animated />
-          <span className="flex flex-col leading-none">
-            <span className="text-[15px] font-extrabold tracking-[0.24em]">ORBIT</span>
-            <span className="mt-1 hidden text-[9px] font-medium uppercase tracking-[0.18em] text-muted sm:block">
-              game observatory
-            </span>
-          </span>
+          <span className="text-[15px] font-extrabold tracking-[0.2em]">ORBIT</span>
         </button>
 
-        <span aria-hidden className="hidden h-7 w-px shrink-0 bg-line md:block" />
-
-        {/* Two places, not seven: the library and everything read around it. */}
-        <nav className="flex items-stretch gap-0.5 self-stretch">
+        {/* Two places, not seven: the library and everything read around it.
+            They share one pill, the way a mode switch does. */}
+        <nav className="ml-2 flex items-center gap-1 rounded-full border border-line/80 bg-panel/50 p-1" aria-label="Main">
           {([
             { id: 'library' as const, label: 'Library', Icon: Library, active: page === 'library', onClick: () => setPage('library') },
             { id: 'stats' as const, label: 'Statistics', Icon: BarChart3, active: statsActive, onClick: onOpenStatistics },
@@ -133,31 +127,30 @@ export function TopNav({
               aria-current={item.active ? 'page' : undefined}
               onClick={item.onClick}
               className={cn(
-                'relative flex shrink-0 items-center gap-2 px-3 text-[13px] font-medium transition-colors',
-                item.active ? 'text-fg' : 'text-muted hover:text-fg',
+                'flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+                item.active ? 'bg-panel2 text-fg shadow-sm shadow-black/20' : 'text-muted hover:text-fg',
               )}
             >
-              <item.Icon className={cn('size-4', item.active ? 'text-accent' : '')} strokeWidth={1.7} />
+              <item.Icon className={cn('size-4', item.active ? 'text-accent' : '')} strokeWidth={1.8} />
               {item.label}
-              <span
-                aria-hidden
-                className={cn(
-                  'absolute inset-x-2 bottom-0 h-[2px] rounded-full transition-opacity',
-                  item.active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0',
-                )}
-              />
             </button>
           ))}
         </nav>
 
         <div className="flex-1" />
+
+        {/* Search lives in the bar because it is the fastest way into a library
+            of any size. It opens the palette rather than being a second field
+            with a second set of results. */}
         <button
           onClick={onOpenPalette}
-          aria-label="Command palette"
-          title="Jump to anything · Ctrl K"
-          className="rounded-lg p-2 text-muted transition hover:bg-panel hover:text-fg"
+          aria-label="Search and command palette"
+          title="Search everything · Ctrl K"
+          className="hidden h-9 w-52 items-center gap-2.5 rounded-full border border-line/80 bg-panel/50 pl-3 pr-1.5 text-[12px] text-muted transition hover:border-line hover:text-fg md:flex"
         >
-          <Command className="size-5" strokeWidth={1.8} />
+          <Search className="size-4" strokeWidth={1.9} />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="rounded-full border border-line/80 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-wide text-muted/80">Ctrl K</kbd>
         </button>
         {/* Beside the sound, because both are about the room rather than the
             library: one is what you hear and the other is what you sit back
@@ -166,9 +159,9 @@ export function TopNav({
           onClick={onTv}
           aria-label="TV mode"
           title="TV mode"
-          className="rounded-lg p-2 text-muted transition hover:bg-panel hover:text-fg"
+          className="grid size-9 place-items-center rounded-full text-muted transition hover:bg-panel hover:text-fg"
         >
-          <Tv className="size-5" strokeWidth={1.8} />
+          <Tv className="size-[18px]" strokeWidth={1.8} />
         </button>
         {showMusic && (
           <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
@@ -178,11 +171,11 @@ export function TopNav({
           aria-label="Settings"
           title="Settings"
           className={cn(
-            'rounded-lg p-2 transition hover:bg-panel hover:text-fg',
+            'grid size-9 place-items-center rounded-full transition hover:bg-panel hover:text-fg',
             page === 'settings' ? 'bg-panel text-accent' : 'text-muted',
           )}
         >
-          <SettingsIcon className="size-5" strokeWidth={1.8} />
+          <SettingsIcon className="size-[18px]" strokeWidth={1.8} />
         </button>
       </div>
     </header>

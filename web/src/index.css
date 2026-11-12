@@ -13,9 +13,13 @@
 }
 
 :root {
-  --c-bg: #07090f; --c-panel: #0c1119; --c-panel2: #121a26; --c-border: #1e2938;
-  --c-text: #eef2f7; --c-muted: #8b98ab; --c-accent: #e9a23b; --c-accent2: #63c9d6;
-  --c-on-accent: #160f04;
+  --c-bg: #08090c; --c-panel: #111318; --c-panel2: #181b21; --c-border: #272b33;
+  --c-text: #f3f4f6; --c-muted: #8e96a3; --c-accent: #ff6b3d; --c-accent2: #7aa2ff;
+  --c-on-accent: #1c0a04;
+  /* One clock for the whole interface. Short enough that a click feels like it
+     was answered, not animated at. */
+  --ease-snap: cubic-bezier(.2, .8, .2, 1);
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
 }
 
 html, body, #root { height: 100%; }
@@ -34,36 +38,24 @@ body {
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--c-text) 14%, transparent);
-  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--c-text) 12%, transparent);
+  border: 3px solid transparent;
   background-clip: padding-box;
   border-radius: 8px;
 }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--c-text) 24%, transparent); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--c-text) 22%, transparent); background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* The room: one damped gold wash at the top right, one ion-cyan wash low left,
-   and two enormous orbital arcs drawn as hard-stop radial rings. They are fixed
-   to the window and cost nothing to scroll. Linux gets a flat colour below. */
+/* The room: a graphite field with one warm signal above the fold and one cool
+   reflection below it. The library itself is lit by the selected game's art,
+   so this stays quiet enough to sit under a blurred backdrop. */
 body {
   background-color: var(--c-bg);
   background-image:
-    radial-gradient(circle at 50% 122%, transparent 0 33vmax, color-mix(in srgb, var(--c-accent) 10%, transparent) 33vmax calc(33vmax + 1px), transparent calc(33vmax + 1px)),
-    radial-gradient(circle at 50% 122%, transparent 0 46vmax, color-mix(in srgb, var(--c-accent2) 6%, transparent) 46vmax calc(46vmax + 1px), transparent calc(46vmax + 1px)),
-    radial-gradient(ellipse 70% 55% at 88% -16%, color-mix(in srgb, var(--c-accent) 7%, transparent), transparent 70%),
-    radial-gradient(ellipse 60% 50% at -10% 110%, color-mix(in srgb, var(--c-accent2) 4%, transparent), transparent 70%);
+    radial-gradient(ellipse 70% 50% at 82% -18%, color-mix(in srgb, var(--c-accent) 5%, transparent), transparent 70%),
+    radial-gradient(ellipse 60% 45% at -8% 108%, color-mix(in srgb, var(--c-accent2) 4%, transparent), transparent 70%);
   background-attachment: fixed;
   background-repeat: no-repeat;
-}
-body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .12;
-  background-image:
-    radial-gradient(1px 1px at 20% 30%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 70% 60%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 40% 80%, var(--c-text), transparent),
-    radial-gradient(1.5px 1.5px at 90% 20%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 10% 70%, var(--c-text), transparent);
-  background-size: 440px 440px;
 }
 .glass {
   background: color-mix(in srgb, var(--c-panel) 92%, transparent);
@@ -73,28 +65,28 @@ body::before {
 
 /* ------------------------------------------------------- the orbital language */
 
-/* Panels are flat, edged, and quiet. Elevation is a hairline and a soft shadow,
-   never a halo. */
+/* Panels are soft slabs, not framed cards: a near-invisible edge and one
+   radius, so artwork and type do the talking. */
 .orbit-panel {
-  background: var(--c-panel);
-  border: 1px solid var(--c-border);
+  background: color-mix(in srgb, var(--c-panel) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
   border-radius: 16px;
 }
 
-/* A label above a value, the way the observatory talks. */
+/* A label above a value, quiet enough to sit beside a headline. */
 .orbit-kicker {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: .22em;
+  letter-spacing: .14em;
   text-transform: uppercase;
   color: var(--c-muted);
 }
 
-/* Display type: tight, heavy, set close. */
+/* Display type: heavy, tight, set close. */
 .orbit-display {
   font-weight: 800;
-  letter-spacing: -.035em;
-  line-height: .95;
+  letter-spacing: -.042em;
+  line-height: .94;
 }
 
 /* Numerals line up in every table, list and counter. */
@@ -109,7 +101,7 @@ body::before {
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  padding: 7px 0;
+  padding: 8px 0;
   font-size: 13px;
 }
 .telemetry-row dt {
@@ -123,46 +115,86 @@ body::before {
   font-variant-numeric: tabular-nums;
 }
 
-/* A chip is an outline until it is chosen. */
+/* A chip is a quiet pill until it is chosen, then it becomes a solid marker. */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--c-border);
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 62%, transparent);
   border-radius: 999px;
-  padding: 4px 11px;
+  padding: 5px 12px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--c-muted);
-  transition: color .16s ease, border-color .16s ease, background-color .16s ease;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap), transform .12s var(--ease-snap);
   white-space: nowrap;
 }
 .chip:hover {
-  border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+  border-color: color-mix(in srgb, var(--c-text) 20%, transparent);
   color: var(--c-text);
 }
+.chip:active { transform: scale(.97); }
 .chip[aria-pressed='true'],
 .chip.is-active {
-  border-color: color-mix(in srgb, var(--c-accent) 65%, transparent);
-  background: color-mix(in srgb, var(--c-accent) 13%, transparent);
-  color: var(--c-accent);
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-on-accent);
 }
 
-/* The completion rail: one thin line, one gold fill, no rounded track. */
+/* The completion rail: one slim track, one signal fill. */
 .orbit-rail {
-  height: 2px;
-  background: color-mix(in srgb, var(--c-text) 12%, transparent);
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 10%, transparent);
   overflow: hidden;
 }
 .orbit-rail > span {
   display: block;
   height: 100%;
+  border-radius: inherit;
   background: var(--c-accent);
+  transition: width .22s var(--ease-snap);
 }
 
 /* ------------------------------------------------------------ the focus stage */
 
-/* Wide backdrop art, darkened by the theme rather than by black, so a light
-   theme gets a light room. */
+/* The library is lit by the selected game. One fixed, oversized copy of the
+   wide art is blurred past recognition; the scrim brings it back to the room
+   colour so text keeps its contrast in light themes too. */
+.orbit-ambient {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  object-position: center 30%;
+  filter: blur(70px) saturate(1.2);
+  opacity: .55;
+  transform: scale(1.06);
+  animation: orbit-ambient-in .3s var(--ease-out) both;
+}
+.orbit-ambient-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--c-bg) 58%, transparent), color-mix(in srgb, var(--c-bg) 84%, transparent) 52%, var(--c-bg) 100%),
+    radial-gradient(ellipse 80% 60% at 30% 20%, transparent, color-mix(in srgb, var(--c-bg) 55%, transparent) 100%);
+}
+@keyframes orbit-ambient-in {
+  from { opacity: 0; transform: scale(1.1); }
+  to { opacity: .55; transform: scale(1.06); }
+}
+html.orbit-linux .orbit-ambient {
+  filter: none !important;
+  opacity: .35;
+  transform: none;
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-ambient { animation: none; }
+}
+
 .orbit-stage-art {
   position: absolute;
   inset: 0;
@@ -186,26 +218,26 @@ body::before {
 .orbit-stage-ring {
   position: absolute;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--c-accent) 26%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
   pointer-events: none;
 }
 .orbit-stage-ring--inner {
-  border-color: color-mix(in srgb, var(--c-accent2) 22%, transparent);
+  border-color: color-mix(in srgb, var(--c-accent2) 16%, transparent);
 }
 .orbit-stage-ring::after {
   content: "";
   position: absolute;
-  top: -3px;
+  top: -2.5px;
   left: 50%;
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 999px;
   background: var(--c-accent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--c-accent) 70%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--c-accent) 55%, transparent);
 }
 .orbit-stage-ring--inner::after {
   background: var(--c-accent2);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--c-accent2) 60%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--c-accent2) 45%, transparent);
 }
 .orbit-stage-ring--outer { animation: orbit-stage-spin 60s linear infinite; }
 .orbit-stage-ring--inner { animation: orbit-stage-spin-reverse 88s linear infinite; }
@@ -224,7 +256,7 @@ html.orbit-detail-open .orbit-stage-ring--inner { animation-play-state: paused !
    left edge, not a filled pill. */
 .body-row {
   border-left: 2px solid transparent;
-  transition: background-color .15s ease, border-color .15s ease;
+  transition: background-color .12s var(--ease-snap), border-color .12s var(--ease-snap);
 }
 .body-row:hover { background: color-mix(in srgb, var(--c-text) 4%, transparent); }
 .body-row[aria-current='true'] {
@@ -234,8 +266,15 @@ html.orbit-detail-open .orbit-stage-ring--inner { animation-play-state: paused !
 
 /* A cover keeps a thin light edge so it separates from dark artwork behind it. */
 .orbit-cover {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 9%, transparent), 0 10px 30px -12px rgba(0, 0, 0, .55);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 8%, transparent), 0 14px 38px -16px rgba(0, 0, 0, .7);
 }
+
+/* The cover rail scrolls without drawing a second vertical edge. */
+.orbit-rail-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.orbit-rail-scroll::-webkit-scrollbar { display: none; }
 
 /* Open slides in from the right. Close slides back out that way, left to right.
    The open used to paint the drawer in place and then slide it, which is the
@@ -245,8 +284,8 @@ html.orbit-detail-open .orbit-stage-ring--inner { animation-play-state: paused !
 }
 /* `backwards` only. `both` left a transform on the scrolling panel, and every
    scroll and every controller ring then repainted that layer. */
-.drawer-in { animation: drawer .3s cubic-bezier(.2,.8,.2,1) backwards; }
-.drawer-out { animation: drawer-out .3s cubic-bezier(.2,.8,.2,1) forwards; }
+.drawer-in { animation: drawer .24s var(--ease-snap) backwards; }
+.drawer-out { animation: drawer-out .24s var(--ease-snap) forwards; }
 /* A see-through, blurred, shadowed panel over the library is repainted on every
    scroll and every time the controller ring moves. The drawer is a flat colour.
    The wide-art blur in the header is the same kind of cost, so it stays out. */
@@ -277,18 +316,18 @@ html.orbit-detail-open .orbit-stage-ring--inner { animation-play-state: paused !
   from { transform: none; }
   to { transform: translate3d(100%, 0, 0); }
 }
-.fade-in { animation: fade .25s ease both; }
-.fade-out { animation: fade-out .3s ease forwards; }
+.fade-in { animation: fade .15s ease both; }
+.fade-out { animation: fade-out .18s ease forwards; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes fade-out { to { opacity: 0; } }
 
 /* Shared entrance motions: restrained enough to keep navigation quick, with a
  * reduced-motion fallback for players who prefer an immediate interface. */
-.modal-backdrop-enter { animation: modal-backdrop-enter 0.18s ease-out both; }
-.modal-panel-enter { animation: modal-panel-enter 0.24s cubic-bezier(.2,.8,.2,1) both; }
-.orbit-tab-enter { animation: orbit-tab-enter 0.22s cubic-bezier(.2,.8,.2,1) both; }
-.orbit-hero-enter { animation: orbit-hero-enter 0.36s cubic-bezier(.2,.8,.2,1) both; }
-.palette-enter { animation: modal-panel-enter 0.16s cubic-bezier(.2,.8,.2,1) both; }
+.modal-backdrop-enter { animation: modal-backdrop-enter 0.14s ease-out both; }
+.modal-panel-enter { animation: modal-panel-enter 0.18s var(--ease-snap) both; }
+.orbit-tab-enter { animation: orbit-tab-enter 0.16s var(--ease-snap) both; }
+.orbit-hero-enter { animation: orbit-hero-enter 0.24s var(--ease-snap) both; }
+.palette-enter { animation: modal-panel-enter 0.12s var(--ease-snap) both; }
 
 @keyframes modal-backdrop-enter {
   from { opacity: 0; }
@@ -601,7 +640,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 .orbit-enter {
-  animation: orbit-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: orbit-enter 0.32s var(--ease-out) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -745,19 +784,23 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 .btn-accent {
   background-color: var(--c-accent);
   border: 1px solid var(--c-accent);
+  border-radius: 999px;
   color: var(--c-on-accent);
   font-weight: 650;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+  transition: background-color 0.12s var(--ease-snap), border-color 0.12s var(--ease-snap), color 0.12s var(--ease-snap), transform 0.1s var(--ease-snap), box-shadow 0.12s var(--ease-snap);
+  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--c-accent) 70%, transparent);
 }
 .btn-accent:hover {
-  background-color: color-mix(in srgb, var(--c-accent) 86%, #fff);
-  border-color: color-mix(in srgb, var(--c-accent) 86%, #fff);
+  background-color: color-mix(in srgb, var(--c-accent) 88%, #fff);
+  border-color: color-mix(in srgb, var(--c-accent) 88%, #fff);
   color: var(--c-on-accent);
+  box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--c-accent) 78%, transparent);
 }
 .btn-accent:active {
   background-color: color-mix(in srgb, var(--c-accent) 86%, #000);
   border-color: color-mix(in srgb, var(--c-accent) 86%, #000);
-  transform: translateY(1px);
+  transform: scale(.98);
+  box-shadow: none;
 }
 .btn-accent:disabled,
 .btn-accent[disabled] {
@@ -774,20 +817,22 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
 }
 
 /* The same button, having just done what it said it would. */
-/* The secondary action: a hairline on the surface, never a second filled block. */
+/* The secondary action: a soft pill on the surface, never a second filled block. */
 .btn-quiet {
-  background-color: transparent;
-  border: 1px solid var(--c-border);
+  background-color: color-mix(in srgb, var(--c-panel) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  border-radius: 999px;
   color: var(--c-text);
   font-weight: 550;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.12s var(--ease-snap), border-color 0.12s var(--ease-snap), color 0.12s var(--ease-snap), transform 0.1s var(--ease-snap);
 }
 .btn-quiet:hover {
-  background-color: color-mix(in srgb, var(--c-text) 5%, transparent);
-  border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+  background-color: color-mix(in srgb, var(--c-text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--c-text) 22%, transparent);
 }
 .btn-quiet:active {
   background-color: color-mix(in srgb, var(--c-text) 8%, transparent);
+  transform: scale(.98);
 }
 .btn-quiet:disabled {
   opacity: 0.4;
@@ -830,7 +875,7 @@ input[type='time']::-webkit-calendar-picker-indicator:hover {
  * buttons. Resizing is measured in TopNav, so tabs can be reordered without
  * tying the indicator to a fixed offset. */
 .topnav-indicator {
-  transition: transform 320ms cubic-bezier(.2,.8,.2,1), width 320ms cubic-bezier(.2,.8,.2,1), height 180ms ease, opacity 140ms ease;
+  transition: transform 180ms var(--ease-snap), width 180ms var(--ease-snap), height 140ms ease, opacity 120ms ease;
 }
 @media (prefers-reduced-motion: reduce) {
   .topnav-indicator { transition: none; }

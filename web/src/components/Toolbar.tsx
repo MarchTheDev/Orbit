@@ -99,7 +99,7 @@ export function Toolbar({
             onClick={onToggleHero}
             aria-pressed={showHero}
             title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
-            className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs font-medium text-muted transition hover:text-fg"
+            className="flex items-center gap-2 rounded-full border border-line px-3.5 py-2 text-xs font-medium text-muted transition hover:text-fg"
           >
             {showHero ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
             <span className="hidden xl:inline">{showHero ? 'Hide' : 'Show'} Jump back in</span>
@@ -109,7 +109,7 @@ export function Toolbar({
         <Select
           value={sort}
           onChange={setSort}
-          className="!rounded-lg !px-3 !py-2 text-sm"
+          className="!rounded-full !px-3.5 !py-2 text-sm"
           ariaLabel="How the library is ordered"
           options={[
             { value: 'title', label: 'A-Z' },
@@ -125,7 +125,7 @@ export function Toolbar({
             control only appears where the covers are actually in a grid. */}
         {view !== 'focus' && (
           <label
-            className="flex items-center gap-2.5 rounded-lg border border-line py-1.5 pl-3 pr-4 text-muted"
+            className="flex items-center gap-2.5 rounded-full border border-line py-1.5 pl-3.5 pr-4 text-muted"
             title="Cover size"
           >
             <Rows3 className="size-4" />
@@ -142,7 +142,7 @@ export function Toolbar({
           </label>
         )}
 
-        <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="How the library is drawn">
+        <div className="flex rounded-full border border-line p-1" role="group" aria-label="How the library is drawn">
           {(
             [
               ['focus', Orbit, 'Focus'],
@@ -157,7 +157,7 @@ export function Toolbar({
               aria-label={label}
               aria-pressed={view === v}
               className={cn(
-                'grid size-8 place-items-center rounded-md transition',
+                'grid size-7 place-items-center rounded-full transition duration-150',
                 view === v ? 'bg-panel2 text-accent' : 'text-muted hover:text-fg',
               )}
             >
@@ -168,7 +168,7 @@ export function Toolbar({
 
         <button
           onClick={onAdd}
-          className="btn-accent grid size-10 place-items-center rounded-lg"
+          className="btn-accent grid size-10 place-items-center rounded-full"
           title="Add game"
           aria-label="Add game"
         >

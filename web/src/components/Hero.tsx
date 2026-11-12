@@ -16,10 +16,11 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
     <section className="orbit-hero-enter relative mx-6 mt-6 overflow-hidden rounded-2xl border border-line bg-panel">
       <Cover game={game} className="orbit-hero-wash absolute inset-0 size-full opacity-45 [&_span]:hidden" />
       <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/85 to-bg/20" />
-      <div aria-hidden className="pointer-events-none absolute right-12 top-1/2 hidden -translate-y-1/2 lg:block">
-        <div className="relative size-[18rem]">
+      {/* Cropped by the panel's right edge: the curve reads as part of the
+          room rather than as an empty circle floating in it. */}
+      <div aria-hidden className="pointer-events-none absolute -right-24 top-1/2 hidden -translate-y-1/2 lg:block">
+        <div className="relative size-[26rem]">
           <div className="orbit-stage-ring orbit-stage-ring--outer inset-0" />
-          <div className="orbit-stage-ring orbit-stage-ring--inner inset-[3rem]" />
         </div>
       </div>
       <div className="relative flex items-center gap-8 p-8">
@@ -36,11 +37,11 @@ export function Hero({ game, running, onPlay, onDetails }: Props) {
             {pct !== null && <div><p className="orbit-kicker">Main story</p><p className="orbit-num mt-1 font-semibold">{pct}%</p></div>}
           </div>
           <div className="mt-6 flex gap-2.5">
-            <button onClick={onPlay} className="btn-accent flex items-center gap-2 rounded-lg px-7 py-2.5">
+            <button onClick={onPlay} className="btn-accent flex items-center gap-2 rounded-full px-7 py-2.5">
               {running ? <Square className="size-4" fill="currentColor" strokeWidth={0} /> : <Play className="size-4" fill="currentColor" strokeWidth={0} />}
               {running ? 'Playing…' : 'Play'}
             </button>
-            <button onClick={onDetails} className="btn-quiet flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm">
+            <button onClick={onDetails} className="btn-quiet flex items-center gap-2 rounded-full px-5 py-2.5 text-sm">
               <Info className="size-4 text-muted" />
               Details
             </button>
