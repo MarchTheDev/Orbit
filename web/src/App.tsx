@@ -60,11 +60,9 @@ import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import { Hero } from './components/Hero';
-import { Toolbar, type Filter } from './components/Toolbar';
+import { type Filter } from './components/Toolbar';
+import { LibraryWorkspace } from './components/LibraryWorkspace';
 import { Logo } from './components/ui/Logo';
-import { GameGrid } from './components/GameGrid';
-import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
@@ -172,6 +170,7 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
@@ -921,17 +920,21 @@ export default function App() {
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
+    setDetailOpen(false);
+    setSelectedId(null);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
   const openDetail = (id: string) => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
+    setDetailOpen(true);
   };
 
   /** The pencil opens the full, centered editor rather than an Edit drawer tab. */
   const openGameEditor = (id: string, hideLaunchSettings = false) => {
-    setSelectedId(null);
+    setDetailOpen(false);
+    setSelectedId(id);
     setEditingHideLaunchSettings(hideLaunchSettings);
     setEditingGameId(id);
   };
@@ -1192,8 +1195,9 @@ export default function App() {
       // Back in TV mode is answered by the hub, which knows whether it should
       // step out of a game's page or out of the mode itself.
       if (tv) return;
-      if (selectedId) setDetailClose((n) => n + 1);
+      if (detailOpen) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
+      else setSelectedId(null);
     };
     const onPage = (event: Event) => {
       // The shoulders page the library, which is not what is on screen.
@@ -1220,7 +1224,7 @@ export default function App() {
       window.removeEventListener('orbit-pad-back', onBack);
       window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder, tv]);
+  }, [session, stop, selectedId, detailOpen, games, heroGame, page, settings?.tabOrder, tv]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -1295,8 +1299,6 @@ export default function App() {
     document.addEventListener('visibilitychange', report);
     return () => document.removeEventListener('visibilitychange', report);
   }, []);
-
-  const showHome = page === 'library' && !query;
 
   // A native startup command rejecting used to leave only the dark empty
   // background on screen. Keep its real error visible and give the player a
@@ -1439,7 +1441,7 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-main-scroll orbit-tab-enter pb-24">
+      <main key={page} className={`orbit-main-scroll page-${page} orbit-tab-enter pb-8`}>
         {!settings ? null : showThemeManager ? (
           <ThemeManagerPage
             settings={settings}
@@ -1523,67 +1525,35 @@ export default function App() {
           <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
-            {showHome && settings.showHero !== false && heroGame && (
-              <Hero
-                game={heroGame}
-                running={runningGame?.id === heroGame.id}
-                onPlay={() => void startGame(heroGame)}
-                onDetails={() => setSelectedId(heroGame.id)}
+            {!ready ? null : (
+              <LibraryWorkspace
+                games={visible}
+                collection={played.filter(inLibraryShelf)}
+                settings={settings}
+                filter={activeFilter}
+                setFilter={setFilter}
+                query={query}
+                setQuery={setQuery}
+                sort={sort}
+                setSort={setSort}
+                view={view}
+                setView={setView}
+                scale={scale}
+                setScale={(next) => setSettings({ coverScale: next })}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onDetails={openDetail}
+                onEdit={openGameEditor}
+                onToggleFavorite={toggleFavorite}
+                onPlay={(game) => void startGame(game)}
+                onStop={() => void stop()}
+                onAdd={() => setShowAdd(true)}
+                onUpdate={(id, patch) => updateGame(id, patch)}
+                runningId={runningGame?.id ?? null}
+                showArtwork={settings.showHero !== false}
+                onReorder={sort === 'manual' ? reorder : undefined}
               />
             )}
-            <Toolbar
-              count={visible.length}
-              total={libraryCount(games)}
-              filter={activeFilter}
-              setFilter={setFilter}
-              query={query}
-              setQuery={setQuery}
-              view={view}
-              setView={setView}
-              sort={sort}
-              setSort={setSort}
-              onAdd={() => setShowAdd(true)}
-              showHero={settings.showHero !== false}
-              onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
-              scale={scale}
-              setScale={(n) => setSettings({ coverScale: n })}
-              filterOrder={settings.libraryFilterOrder}
-              hiddenFilters={settings.hiddenLibraryFilters}
-            />
-            <div>
-              {!ready ? null : visible.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted">
-                  <Logo className="size-16 opacity-50" />
-                  <p>{games.length === 0 ? 'Nothing in this orbit yet.' : 'Nothing matches that.'}</p>
-                  {games.length === 0 && (
-                    <p className="text-xs">Drop a game program on the window, or use Add game.</p>
-                  )}
-                </div>
-              ) : view === 'grid' ? (
-                <GameGrid
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                  coverTint={settings.coverTint !== false}
-                />
-              ) : (
-                <GameList
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                />
-              )}
-            </div>
           </>
         )}
       </main>
@@ -1705,7 +1675,7 @@ export default function App() {
         />
       )}
 
-      {selected && (
+      {selected && detailOpen && (
         <GameDetail
           key={`${selected.id}:${detailNonce}`}
           game={selected}
@@ -1739,7 +1709,7 @@ export default function App() {
               : undefined
           }
           closeRequest={detailClose}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setDetailOpen(false)}
         />
       )}
 

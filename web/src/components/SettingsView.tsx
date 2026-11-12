@@ -306,7 +306,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
-  { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
+  { label: 'Library focus artwork', section: 'orbit-library', keywords: 'selected game cover artwork hero recently played' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
   { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing completed dropped favorites unplayed hidden reorder show hide' },
@@ -1125,12 +1125,12 @@ export function SettingsView({
           hint="When on, newly added Library games also join the Journal. Turning it off never removes existing entries; you can still add or remove games manually. Backlog-only plans are never included."
         />
 
-        <SubHead>Jump back in</SubHead>
+        <SubHead>Library focus</SubHead>
         <Checkbox
           checked={settings.showHero !== false}
           onChange={(v) => setSettings({ showHero: v })}
-          label="Show the Jump back in panel"
-          hint="Keep the recently played game and its Play button at the top of the Library."
+          label="Show the selected game's cover"
+          hint="Show large cover artwork beside the game's overview and actions."
         />
 
         <SubHead>Library filters</SubHead>

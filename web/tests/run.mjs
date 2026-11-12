@@ -49,6 +49,7 @@ const checks = [
   'tests/launcher-path.test.mjs',
   'tests/idle-animations.test.mjs',
   'tests/tab-order.test.mjs',
+  'tests/library-workspace.test.mjs',
   'tests/overlay-toast.test.mjs',
   'tests/overlay-layout-reset.test.mjs',
   'tests/capture-pipeline.test.mjs',

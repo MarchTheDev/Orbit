@@ -30,7 +30,7 @@ export function warmCover(game: Game) {
  *
  * 1. a cover already sitting next to the game on disk
  * 2. the store's own artwork
- * 3. initials on a gradient, which always works
+ * 3. initials on a flat colour, which always works
  *
  * Shapes are not assumed. A grid tile is a tall rectangle, and a store banner is
  * a wide one, so pasting a banner into a tile crops most of it away, which is
@@ -105,7 +105,7 @@ export function Cover({
     <div
       className={cn('relative flex items-center justify-center overflow-hidden', className)}
       style={{
-        background: `radial-gradient(circle at 30% 20%, hsl(${game.hue} 80% 55%), hsl(${(game.hue + 60) % 360} 70% 22%) 70%)`,
+        background: `hsl(${game.hue} 24% 31%)`,
         ...style,
       }}
     >
