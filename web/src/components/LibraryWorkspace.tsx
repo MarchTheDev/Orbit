@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Clock3, Disc3, Gamepad2, Grid2X2, Info, List, MapPin, Pencil, Play, Plus, Star, Square } from 'lucide-react';
-import type { Game, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
+import type { Game, GameStatus, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
 import { driveLabel } from '../utils/drive';
-import { inLibraryShelf } from '../utils/library';
 import { listSessions } from '../services/native';
 import { cn } from '../utils/cn';
 import { orderedLibraryFilters } from './Toolbar';
@@ -41,21 +40,21 @@ interface Props {
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
-const STATUS_OPTIONS = [
+const STATUS_OPTIONS: { value: GameStatus; label: string }[] = [
   { value: 'backlog', label: 'Planned' },
   { value: 'playing', label: 'Playing' },
   { value: 'completed', label: 'Completed' },
   { value: 'dropped', label: 'Dropped' },
-] as const;
+];
 
-const SORT_OPTIONS = [
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'title', label: 'Title, A to Z' },
   { value: 'lastPlayed', label: 'Recently played' },
   { value: 'playtime', label: 'Most played' },
   { value: 'added', label: 'Recently added' },
   { value: 'size', label: 'Install size' },
   { value: 'manual', label: 'Custom order' },
-] as const;
+];
 
 function labelFor(filter: LibraryFilter): string {
   return filter === 'all' ? 'Everything' : filter === 'favorites' ? 'Favorites' : filter === 'unplayed' ? 'Not played' : filter === 'hidden' ? 'Hidden' : filter[0].toUpperCase() + filter.slice(1);
