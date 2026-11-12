@@ -1,5 +1,4 @@
 import {
-  HardDrive,
   LayoutGrid,
   Library,
   List,
@@ -11,6 +10,7 @@ import {
   Settings as SettingsIcon,
   ScrollText,
   Tv,
+  HardDrive,
 } from 'lucide-react';
 import type { Page, Settings, ViewMode } from '../types';
 import { Logo } from './ui/Logo';
@@ -31,13 +31,6 @@ export const TABS: Tab[] = [
   { id: 'saves', label: 'Saves', Icon: Save },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
 ];
-
-/** The pages that read around the library rather than being part of it. */
-export const STATS_PAGES: Page[] = ['sessions', 'logs', 'backlog', 'saves', 'storage'];
-
-export function isStatsPage(page: Page): boolean {
-  return STATS_PAGES.includes(page);
-}
 
 /**
  * The tabs, in the order the player put them.
@@ -72,136 +65,18 @@ export function orderedTabs(order: Page[] | undefined): Tab[] {
   return out;
 }
 
-const PAGE_META: Record<Page, { label: string; group: string }> = {
-  library: { label: 'Library', group: 'Collection' },
-  sessions: { label: 'Sessions', group: 'Activity' },
-  logs: { label: 'Journal', group: 'Activity' },
-  backlog: { label: 'Backlog', group: 'Activity' },
-  saves: { label: 'Saves', group: 'Vault' },
-  storage: { label: 'Storage', group: 'Vault' },
-  settings: { label: 'Settings', group: 'System' },
-};
-
 /**
- * The app is split into categories rather than one long bar: what you own,
- * what you have been doing, and what keeps the files safe. The library gets
- * its own room at the top of the shelf because it is the front door.
- */
-const NAV_GROUPS: { label: string; ids: Page[] }[] = [
-  { label: 'Collection', ids: ['library'] },
-  { label: 'Activity', ids: ['sessions', 'logs', 'backlog'] },
-  { label: 'Vault', ids: ['saves', 'storage'] },
-];
-
-function orderedGroup(ids: Page[], order: Page[] | undefined): Tab[] {
-  const tabs = orderedTabs(order);
-  return ids
-    .map((id) => tabs.find((tab) => tab.id === id))
-    .filter((tab): tab is Tab => !!tab);
-}
-
-/**
- * The shelf on the left: where you are, and every other room in the app.
+ * The whole app's bar, at the top of the window.
  *
- * It is fixed rather than part of the page, so the library scrolls under it
- * and a long session list never drags the navigation out of reach.
- */
-export function Sidebar({
-  page,
-  setPage,
-  order,
-  gameCount,
-  runningTitle,
-  version,
-  onTv,
-  onOpenSettings,
-}: {
-  page: Page;
-  setPage: (page: Page) => void;
-  /** The player's order for the pages that read around the library. */
-  order?: Page[];
-  gameCount: number;
-  runningTitle: string | null;
-  /** The app's own version, read from the one VERSION file at build time. */
-  version: string;
-  onTv: () => void;
-  onOpenSettings: () => void;
-}) {
-  return (
-    <aside className="orbit-sidebar fixed inset-y-0 left-0 z-40 hidden w-[232px] flex-col lg:flex">
-      <button
-        onClick={() => setPage('library')}
-        className="orbit-logo flex h-16 shrink-0 items-center gap-2.5 px-5 text-left"
-        title="Orbit"
-        aria-label="Orbit"
-      >
-        <Logo className="size-7 text-accent" animated />
-        <span className="text-[15px] font-extrabold tracking-[0.18em]">ORBIT</span>
-        <span className="orbit-num ml-auto rounded-md border border-line/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-normal text-muted">
-          v{version}
-        </span>
-      </button>
-
-      <nav className="flex-1 overflow-y-auto px-3 py-5" aria-label="Main">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label} className="orbit-nav-group">
-            <p className="orbit-kicker mb-2 px-2.5">{group.label}</p>
-            <div className="space-y-0.5">
-              {orderedGroup(group.ids, order).map((tab) => (
-                <button
-                  key={tab.id}
-                  data-tab-id={tab.id}
-                  aria-current={page === tab.id ? 'page' : undefined}
-                  onClick={() => setPage(tab.id)}
-                  className="orbit-nav-item"
-                >
-                  <tab.Icon className="size-[17px] shrink-0" strokeWidth={1.8} />
-                  <span className="truncate">{tab.label}</span>
-                  {tab.id === 'library' && gameCount > 0 && (
-                    <span className="orbit-count">{gameCount}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </nav>
-
-      <div className="shrink-0 border-t border-line/60 px-3 py-3">
-        {runningTitle && (
-          <div className="mb-2 flex items-center gap-2.5 rounded-lg bg-panel2/70 px-2.5 py-2">
-            <span className="orbit-pulse size-1.5 shrink-0 rounded-full bg-emerald-400" />
-            <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted">{runningTitle}</span>
-          </div>
-        )}
-        <button
-          onClick={onTv}
-          aria-label="TV mode"
-          className="orbit-nav-item"
-        >
-          <Tv className="size-[17px] shrink-0" strokeWidth={1.8} />
-          TV mode
-        </button>
-        <button
-          onClick={onOpenSettings}
-          aria-current={page === 'settings' ? 'page' : undefined}
-          className="orbit-nav-item"
-        >
-          <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
-          Settings
-        </button>
-      </div>
-    </aside>
-  );
-}
-
-/**
- * The page's own bar: which room and page you are reading, the library's view
- * switch, search, TV mode and the sound.
+ * Heronite's room has one bar: the brand, the rooms you can walk into, and the
+ * controls that belong to the room rather than to a page. Orbit keeps that
+ * shape, so the library's artwork can run the full width of the window instead
+ * of stopping at a shelf.
  */
 export function TopNav({
   page,
   setPage,
+  order,
   view,
   setView,
   onOpenPalette,
@@ -214,6 +89,8 @@ export function TopNav({
 }: {
   page: Page;
   setPage: (p: Page) => void;
+  /** The player's order for the pages. */
+  order?: Page[];
   /** How the library is drawn. The switch only exists on that page. */
   view: ViewMode;
   setView: (v: ViewMode) => void;
@@ -236,37 +113,57 @@ export function TopNav({
   /** Fills the screen with TV mode, the library as a couch sees it. */
   onTv: () => void;
 }) {
-  const meta = PAGE_META[page];
+  const tabs = orderedTabs(order);
 
   return (
-    <header className="orbit-topbar sticky top-0 z-30 border-b border-line/60 bg-bg/80 backdrop-blur-xl">
-      <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
+    <header className="orbit-topbar sticky top-0 z-30 border-b border-line/50 bg-bg/55 backdrop-blur-2xl">
+      <div className="flex h-16 items-center gap-1 px-4 sm:gap-2 sm:px-6">
         <button
           onClick={() => setPage('library')}
-          className="orbit-logo grid size-9 shrink-0 place-items-center lg:hidden"
-          aria-label="Orbit"
+          className="orbit-logo mr-1 flex shrink-0 items-center gap-2.5 pr-1 text-left"
           title="Orbit"
+          aria-label="Orbit"
         >
           <Logo className="size-7 text-accent" animated />
+          <span className="hidden text-[14px] font-extrabold tracking-[0.19em] sm:inline">ORBIT</span>
         </button>
 
-        <div className="min-w-0 lg:w-52 lg:shrink-0">
-          <p className="orbit-kicker hidden sm:block">{meta.group}</p>
-          <h1 className="truncate text-[17px] font-semibold tracking-tight">{meta.label}</h1>
-        </div>
+        {/* The rooms, named the way the player named them. A long custom order
+            scrolls rather than pushing the search field off the bar. */}
+        <nav className="hidden min-w-0 flex-1 items-stretch self-stretch overflow-x-auto md:flex" aria-label="Main">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              data-tab-id={tab.id}
+              aria-current={page === tab.id ? 'page' : undefined}
+              aria-label={tab.label}
+              title={tab.label}
+              onClick={() => setPage(tab.id)}
+              className={cn(
+                'orbit-topnav-item flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[13px]',
+                page === tab.id
+                  ? 'border-accent font-semibold text-fg'
+                  : 'border-transparent font-medium text-muted hover:text-fg',
+              )}
+            >
+              <tab.Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
+              <span className="hidden xl:inline">{tab.label}</span>
+            </button>
+          ))}
+        </nav>
 
-        <div className="flex-1" />
+        <div className="flex-1 md:hidden" />
 
         {page === 'library' && (
           <div
-            className="hidden items-center gap-0.5 rounded-xl border border-line/70 bg-panel/60 p-1 sm:flex"
+            className="hidden items-center rounded-xl border border-line/60 bg-panel/40 p-0.5 sm:flex"
             role="group"
             aria-label="How the library is drawn"
           >
             {(
               [
                 ['focus', Orbit, 'Focus'],
-                ['grid', LayoutGrid, 'Catalogue'],
+                ['grid', LayoutGrid, 'Grid'],
                 ['list', List, 'List'],
               ] as const
             ).map(([mode, Icon, label]) => (
@@ -277,11 +174,12 @@ export function TopNav({
                 aria-label={label}
                 aria-pressed={view === mode}
                 className={cn(
-                  'grid size-8 place-items-center rounded-lg transition duration-150',
-                  view === mode ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg',
+                  'flex h-8 items-center gap-1.5 rounded-[10px] px-2.5 text-[11.5px] font-medium transition duration-150',
+                  view === mode ? 'bg-panel2 text-fg shadow-sm' : 'text-muted hover:text-fg',
                 )}
               >
-                <Icon className={cn('size-4', view === mode && 'text-accent')} strokeWidth={1.8} />
+                <Icon className={cn('size-3.5', view === mode && 'text-accent')} strokeWidth={1.8} />
+                <span className="hidden lg:inline">{label}</span>
               </button>
             ))}
           </div>
@@ -294,11 +192,11 @@ export function TopNav({
           onClick={onOpenPalette}
           aria-label="Search and command palette"
           title="Search everything · Ctrl K"
-          className="flex h-9 items-center gap-2.5 rounded-xl border border-line/70 bg-panel/50 px-2.5 text-[12px] text-muted transition hover:border-line hover:text-fg md:w-56 md:pl-3"
+          className="flex h-9 shrink-0 items-center gap-2.5 rounded-full border border-line/60 bg-panel/40 px-3 text-[12px] text-muted transition hover:border-line hover:text-fg lg:w-56 lg:pl-3.5"
         >
           <Search className="size-4" strokeWidth={1.9} />
-          <span className="hidden flex-1 text-left md:inline">Search</span>
-          <kbd className="hidden rounded-md border border-line/70 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-wide text-muted/80 md:inline">
+          <span className="hidden flex-1 text-left lg:inline">Search games</span>
+          <kbd className="hidden rounded-md border border-line/60 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-wide text-muted/80 lg:inline">
             Ctrl K
           </kbd>
         </button>
@@ -310,19 +208,31 @@ export function TopNav({
           onClick={onTv}
           aria-label="TV mode"
           title="TV mode"
-          className="grid size-9 shrink-0 place-items-center rounded-xl text-muted transition hover:bg-panel hover:text-fg"
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted transition hover:bg-panel hover:text-fg"
         >
           <Tv className="size-[18px]" strokeWidth={1.8} />
         </button>
         {showMusic && (
           <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
         )}
+        <button
+          onClick={() => onOpenSettings()}
+          aria-label="Settings"
+          title="Settings"
+          aria-current={page === 'settings' ? 'page' : undefined}
+          className={cn(
+            'grid size-9 shrink-0 place-items-center rounded-full transition hover:bg-panel',
+            page === 'settings' ? 'text-fg' : 'text-muted hover:text-fg',
+          )}
+        >
+          <SettingsIcon className="size-[18px]" strokeWidth={1.8} />
+        </button>
       </div>
 
-      {/* Below the shelf's breakpoint the same categories become one row that
-          can be swiped, so no page and no control is ever out of reach. */}
-      <nav className="flex items-center gap-1 overflow-x-auto border-t border-line/50 px-4 py-2 lg:hidden" aria-label="Pages">
-        {orderedTabs(undefined).map((tab) => (
+      {/* Below the breakpoint the rooms become one row that can be swiped, so
+          no page is ever out of reach. */}
+      <nav className="flex items-center gap-1 overflow-x-auto border-t border-line/40 px-3 py-1.5 md:hidden" aria-label="Pages">
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             aria-current={page === tab.id ? 'page' : undefined}
@@ -336,17 +246,6 @@ export function TopNav({
             {tab.label}
           </button>
         ))}
-        <button
-          aria-current={page === 'settings' ? 'page' : undefined}
-          onClick={() => setPage('settings')}
-          className={cn(
-            'flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition',
-            page === 'settings' ? 'bg-panel2 text-fg' : 'text-muted',
-          )}
-        >
-          <SettingsIcon className={cn('size-3.5', page === 'settings' && 'text-accent')} strokeWidth={1.9} />
-          Settings
-        </button>
       </nav>
     </header>
   );

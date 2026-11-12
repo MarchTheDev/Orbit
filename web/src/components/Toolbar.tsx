@@ -79,7 +79,7 @@ export function Toolbar({
   const categories = visibleFilters.length > 0 ? visibleFilters : [LIBRARY_FILTERS[0]];
 
   return (
-    <div className="mt-6 space-y-3 px-6">
+    <div className="relative z-10 mt-6 space-y-3 px-4 sm:px-6 xl:px-7">
       <div className="flex flex-wrap items-center gap-2.5">
         <h2 className="mr-auto flex items-baseline gap-2.5">
           <span className="orbit-kicker">Browse</span>
@@ -89,7 +89,9 @@ export function Toolbar({
           </span>
         </h2>
 
-        <SearchField value={query} onChange={setQuery} placeholder="Search games" />
+        {/* The bar's search opens the palette; Focus has no second field. In the
+            grid and the list this one filters the visible games as you type. */}
+        {view !== 'focus' && <SearchField value={query} onChange={setQuery} placeholder="Search games" />}
 
         {view !== 'focus' && (
           <button

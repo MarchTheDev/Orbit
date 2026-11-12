@@ -55,7 +55,7 @@ import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
-import { TopNav, Sidebar, orderedTabs } from './components/TopNav';
+import { TopNav, orderedTabs } from './components/TopNav';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
@@ -1402,27 +1402,14 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
-      <Sidebar
-        page={page}
-        setPage={(next) => {
-          setShowThemeManager(false);
-          setPage(next);
-        }}
-        order={settings.tabOrder}
-        gameCount={libraryCount(games)}
-        runningTitle={session && runningGame ? runningGame.title : null}
-        version={APP_VERSION}
-        onTv={enterTv}
-        onOpenSettings={() => openSettings()}
-      />
-
-      <div className="min-h-full lg:pl-[232px]">
+      <div className="min-h-full">
       <TopNav
         page={page}
         setPage={(next) => {
           setShowThemeManager(false);
           setPage(next);
         }}
+        order={settings.tabOrder}
         view={view}
         setView={setView}
         onOpenPalette={() => setPalette(true)}
