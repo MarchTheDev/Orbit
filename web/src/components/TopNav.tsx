@@ -6,13 +6,14 @@ import { MusicButton } from './MusicButton';
 
 export type Tab = { id: Page; label: string; Icon: typeof Library };
 
+/** Kept in the player's chosen order. The sidebar groups these routes below. */
 export const TABS: Tab[] = [
   { id: 'library', label: 'Library', Icon: Library },
+  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
   { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
   { id: 'logs', label: 'Journal', Icon: ScrollText },
-  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
-  { id: 'saves', label: 'Saves', Icon: Save },
   { id: 'storage', label: 'Storage', Icon: HardDrive },
+  { id: 'saves', label: 'Saves', Icon: Save },
 ];
 
 const PREVIOUS_DEFAULTS: Page[][] = [
@@ -36,10 +37,20 @@ export function orderedTabs(order: Page[] | undefined): Tab[] {
   return out;
 }
 
+const GROUP_FOR: Record<Exclude<Page, 'settings'>, string> = {
+  library: 'Collection',
+  backlog: 'Collection',
+  sessions: 'Activity',
+  logs: 'Activity',
+  storage: 'Manage',
+  saves: 'Manage',
+};
+
 export function TopNav({
   page,
   setPage,
   order,
+  counts = {},
   sound,
   setSound,
   showMusic,
@@ -51,6 +62,7 @@ export function TopNav({
   setPage: (page: Page) => void;
   onOpenSettings: (at?: string) => void;
   order?: Page[];
+  counts?: Partial<Record<Page, number>>;
   sound: Settings['sound'];
   setSound: (next: Settings['sound']) => void;
   showMusic: boolean;
@@ -58,6 +70,16 @@ export function TopNav({
   onTv: () => void;
 }) {
   const tabs = useMemo(() => orderedTabs(order), [order]);
+  const sections = useMemo(() => {
+    const result: { label: string; tabs: Tab[] }[] = [];
+    for (const tab of tabs) {
+      const label = GROUP_FOR[tab.id as Exclude<Page, 'settings'>];
+      const current = result[result.length - 1];
+      if (current?.label === label) current.tabs.push(tab);
+      else result.push({ label, tabs: [tab] });
+    }
+    return result;
+  }, [tabs]);
 
   return (
     <aside className="orbit-sidebar" aria-label="Orbit navigation">
@@ -68,28 +90,43 @@ export function TopNav({
         title="Orbit Library"
         aria-label="Orbit Library"
       >
-        <Logo className="size-8 shrink-0 text-fg" animated />
-        <span>Orbit</span>
+        <Logo className="size-9 shrink-0 text-fg" animated />
+        <span className="orbit-brand-copy">
+          <b>Orbit</b>
+          <small>GAME COLLECTION</small>
+        </span>
       </button>
 
       <nav className="orbit-side-nav" aria-label="Pages">
-        <p className="orbit-side-label">Collection</p>
-        {tabs.map(({ id, label, Icon }) => (
-          <button
-            type="button"
-            key={id}
-            onClick={() => setPage(id)}
-            aria-current={page === id ? 'page' : undefined}
-            title={label}
-            className={`orbit-side-link${page === id ? ' is-active' : ''}`}
-          >
-            <Icon className="size-[18px] shrink-0" strokeWidth={1.8} />
-            <span>{label}</span>
-          </button>
+        {sections.map((section, sectionIndex) => (
+          <section className="orbit-nav-group" key={`${section.label}-${sectionIndex}`}>
+            <h2 className="orbit-side-label">{section.label}</h2>
+            <div className="orbit-nav-items">
+              {section.tabs.map(({ id, label, Icon }) => {
+                const count = counts[id];
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    onClick={() => setPage(id)}
+                    aria-current={page === id ? 'page' : undefined}
+                    aria-label={count === undefined ? label : `${label}, ${count}`}
+                    title={label}
+                    className={`orbit-side-link${page === id ? ' is-active' : ''}`}
+                  >
+                    <Icon className="size-[18px] shrink-0" strokeWidth={1.8} />
+                    <span>{label}</span>
+                    {count !== undefined && <small className="orbit-side-count">{count}</small>}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         ))}
       </nav>
 
       <div className="orbit-side-footer">
+        <p className="orbit-side-label">Orbit</p>
         <button type="button" onClick={onTv} aria-label="TV mode" className="orbit-side-link" title="TV mode">
           <Tv className="size-[18px] shrink-0" strokeWidth={1.8} />
           <span>TV mode</span>

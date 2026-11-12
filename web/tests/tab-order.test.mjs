@@ -1,7 +1,6 @@
 /**
- * Journal sits before Backlog in the default tab order.
- *
- * The two previously shipped defaults are migrated, while a genuinely custom
+ * Default navigation keeps each collection, activity, and management category
+ * together. Previously shipped defaults migrate, while a genuinely custom
  * order is retained exactly as the player arranged it.
  */
 import { readFileSync } from 'node:fs';
@@ -22,17 +21,16 @@ function check(name, ok, detail = '') {
 }
 
 const tabs = nav.slice(nav.indexOf('export const TABS'), nav.indexOf('];'));
-const journal = tabs.indexOf("id: 'logs'");
 const backlog = tabs.indexOf("id: 'backlog'");
-const saves = tabs.indexOf("id: 'saves'");
+const sessions = tabs.indexOf("id: 'sessions'");
 const storage = tabs.indexOf("id: 'storage'");
-check('Journal is defined before Backlog', journal !== -1 && backlog !== -1 && journal < backlog, tabs);
-check('Saves is defined before Storage', saves !== -1 && storage !== -1 && saves < storage, tabs);
+const saves = tabs.indexOf("id: 'saves'");
+check('Collection routes come before Activity routes', backlog !== -1 && sessions !== -1 && backlog < sessions, tabs);
+check('Storage comes before Saves in the management group', storage !== -1 && saves !== -1 && storage < saves, tabs);
 
 const ids = (order) => orderedTabs(order).map((tab) => tab.id);
 const defaultIds = ids(undefined);
-check('the default puts Journal before Backlog', defaultIds.indexOf('logs') < defaultIds.indexOf('backlog'));
-check('the default puts Saves before Storage', defaultIds.indexOf('saves') < defaultIds.indexOf('storage'));
+check('Collection is followed by Activity, then Manage', defaultIds.join() === 'library,backlog,sessions,logs,storage,saves');
 
 const previousDefaults = [
   ['library', 'sessions', 'backlog', 'logs', 'storage', 'saves'],

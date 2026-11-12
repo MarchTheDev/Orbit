@@ -85,7 +85,7 @@ import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
+import { inLibraryShelf, libraryCount, onBacklogPage, onDisk, onJournalPage } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -104,6 +104,16 @@ function FilledStar({ className }: { className?: string }) {
 
 const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
 const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
+
+const PAGE_META: Record<Page, { category: string; title: string; description: string }> = {
+  library: { category: 'Collection', title: 'Library', description: 'Browse and launch the games in your collection.' },
+  backlog: { category: 'Collection', title: 'Backlog', description: 'Plan what to play next and keep your queue in order.' },
+  sessions: { category: 'Activity', title: 'Sessions', description: 'Review playtime and manage your session history.' },
+  logs: { category: 'Activity', title: 'Journal', description: 'Keep notes and memories connected to your games.' },
+  storage: { category: 'Manage', title: 'Storage', description: 'See where games live and manage library folders.' },
+  saves: { category: 'Manage', title: 'Saves', description: 'Back up saves and review cloud transfer status.' },
+  settings: { category: 'Orbit', title: 'Settings', description: 'Shape Orbit around your setup and preferences.' },
+};
 
 function savedSort(): SortKey {
   const value = localStorage.getItem('orbit.sort');
@@ -1356,6 +1366,16 @@ export default function App() {
     );
   }
 
+  const pageMeta = showThemeManager
+    ? { category: 'Personalize', title: 'Custom themes', description: 'Set the colours and style Orbit uses across every page.' }
+    : PAGE_META[page];
+  const navCounts: Partial<Record<Page, number>> = {
+    library: libraryCount(games),
+    backlog: games.filter((game) => game.planned || onBacklogPage(game, settings.syncBacklog === true, settings.backlogOn ?? [], settings.backlogOff ?? [])).length,
+    logs: games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? [])).length,
+    storage: games.filter(onDisk).length,
+  };
+
   // The opening is on unless it has been turned off, and it is the same switch
   // that fades the shell in behind it. It plays once, when the app starts.
   const opening = !booted && settings.startupAnimation !== false;
@@ -1381,6 +1401,7 @@ export default function App() {
         }}
         onOpenSettings={openSettings}
         order={settings?.tabOrder}
+        counts={navCounts}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
@@ -1388,21 +1409,23 @@ export default function App() {
         onTv={enterTv}
       />
       <header className="orbit-pagebar">
-        <div className="min-w-0">
-          <p className="orbit-page-kicker">ORBIT / WORKSPACE</p>
-          <h1>{showThemeManager ? 'Custom themes' : page === 'logs' ? 'Journal' : page === 'backlog' ? 'Backlog' : page === 'sessions' ? 'Sessions' : page === 'storage' ? 'Storage' : page === 'saves' ? 'Saves' : page === 'settings' ? 'Settings' : 'Library'}</h1>
+        <div className="orbit-page-heading">
+          <p className="orbit-page-kicker">{pageMeta.category}</p>
+          <h1>{pageMeta.title}</h1>
+          <p className="orbit-page-description">{pageMeta.description}</p>
         </div>
-        {session && runningGame ? (
+        {session && runningGame && (
           <div className="orbit-session-status" aria-label={`Playing ${runningGame.title}`}>
             <span className="orbit-session-dot" />
-              <span className="truncate">{runningGame.title}</span>
+            <div className="min-w-0">
+              <p className="orbit-session-label">NOW PLAYING</p>
+              <p className="truncate font-medium">{runningGame.title}</p>
+            </div>
             <span className="orbit-session-clock">{fmtClock(Math.floor((now - session.startedAtMs) / 1000))}</span>
             <button type="button" onClick={() => void stop()} className="orbit-session-stop" aria-label="Stop current session">
               <Square className="size-3" fill="currentColor" strokeWidth={0} /> Stop
             </button>
           </div>
-        ) : (
-          <p className="orbit-page-hint">Your games, progress, and play history</p>
         )}
       </header>
 
