@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Clock3, Disc3, Gamepad2, Grid2X2, Info, List, MapPin, Pencil, Play, Plus, Star, Square } from 'lucide-react';
-import type { Game, GameStatus, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
+import { BookOpen, Clock3, Disc3, Grid2X2, Images, Info, Pencil, Play, Plus, Star, Square } from 'lucide-react';
+import type { Game, GameLog, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
 import { fmtDate, fmtMinutes } from '../utils/format';
 import { driveLabel } from '../utils/drive';
-import { listSessions } from '../services/native';
+import { listGameLogs, listSessions, overlayGallery, type GalleryItem } from '../services/native';
+import { fileSrc } from '../services/desktop';
 import { cn } from '../utils/cn';
 import { orderedLibraryFilters } from './Toolbar';
 import { SearchField } from './ui/SearchField';
 import { Select } from './ui/Select';
 import { Cover } from './ui/Cover';
 import { GameGrid } from './GameGrid';
-import { GameList } from './GameList';
+import './LibraryWorkspace.css';
 
 interface Props {
   games: Game[];
@@ -39,13 +40,6 @@ interface Props {
   showArtwork: boolean;
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
-
-const STATUS_OPTIONS: { value: GameStatus; label: string }[] = [
-  { value: 'backlog', label: 'Planned' },
-  { value: 'playing', label: 'Playing' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'dropped', label: 'Dropped' },
-];
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'title', label: 'Title, A to Z' },
@@ -93,7 +87,6 @@ export function LibraryWorkspace({
   onAdd,
   onUpdate,
   runningId,
-  showArtwork,
   onReorder,
 }: Props) {
   const configuredFilters = orderedLibraryFilters(settings.libraryFilterOrder)
@@ -114,6 +107,8 @@ export function LibraryWorkspace({
   }, [collection, filters]);
   const selected = games.find((game) => game.id === selectedId) ?? games[0] ?? null;
   const [recentSessions, setRecentSessions] = useState<Session[]>([]);
+  const [gameLogs, setGameLogs] = useState<GameLog[]>([]);
+  const [gameCaptures, setGameCaptures] = useState<GalleryItem[]>([]);
   const playing = selected ? runningId === selected.id : false;
 
   useEffect(() => {
@@ -129,6 +124,20 @@ export function LibraryWorkspace({
     });
     return () => { current = false; };
   }, [selected?.id, selected?.sessionCount]);
+
+  useEffect(() => {
+    if (!selected) return;
+    let current = true;
+    setGameLogs([]);
+    setGameCaptures([]);
+    void listGameLogs(selected.id).then((rows) => { if (current) setGameLogs(rows); }).catch(() => { if (current) setGameLogs([]); });
+    void overlayGallery().then((items) => {
+      const comparable = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      const title = comparable(selected.title);
+      if (current) setGameCaptures(items.filter((item) => item.kind === 'screenshot' && comparable(item.game) === title));
+    }).catch(() => { if (current) setGameCaptures([]); });
+    return () => { current = false; };
+  }, [selected?.id, selected?.meta?.steamAppId]);
 
   if (!selected) {
     return (
@@ -155,118 +164,63 @@ export function LibraryWorkspace({
           <SearchField value={query} onChange={setQuery} placeholder="Find a game" className="library-search" inputClassName="w-full" />
           <Select value={sort} onChange={setSort} ariaLabel="Sort games" options={SORT_OPTIONS} className="library-sort" />
           <div className="library-view-switch" role="group" aria-label="Collection layout">
-            <button type="button" aria-label="Poster grid" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={15} /></button>
-            <button type="button" aria-label="Compact list" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={16} /></button>
+            <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>Focus</button>
+            <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={14} /> Grid</button>
           </div>
           <button type="button" onClick={onAdd} className="library-primary-button"><Plus size={16} /><span>Add game</span></button>
         </div>
       </div>
 
-      <div className="library-workspace-grid">
-        <aside className="library-filter-rail" aria-label="Library categories">
-          <div className="library-filter-heading">
-            <p className="library-eyebrow">BROWSE BY</p>
-            <span>{games.length} shown</span>
-          </div>
-          <div className="library-filter-list">
-            {filters.map(({ id }) => (
-              <button type="button" key={id} onClick={() => setFilter(id)} aria-pressed={filter === id} className={cn('library-filter-option', filter === id && 'is-active')}>
-                <span className={`library-filter-dot filter-${id}`} />
-                <span>{labelFor(id)}</span>
-                <small>{counts[id] ?? 0}</small>
-              </button>
-            ))}
-          </div>
-          <div className="library-rail-tip">
-            <Gamepad2 size={15} />
-            <span>Double-click any cover to launch it.</span>
-          </div>
-        </aside>
-
-        <section className="library-focus-column" aria-label={`${selected.title} overview`}>
-          <div className={`library-game-profile${showArtwork ? '' : ' no-art'}`}>
-            <div className="library-profile-art">
-              <Cover game={selected} className="size-full" fit="cover" loading="eager" />
-            </div>
-            <div className="library-profile-copy">
-              <div className="library-profile-overline">
-                <span className={`library-status-mark status-${selected.status}`} />
-                <span>{selected.hidden ? 'Hidden' : selected.planned ? 'Planned' : selected.status === 'playing' ? 'In progress' : selected.status}</span>
-                {selected.favorite && <Star size={12} fill="currentColor" className="text-amber-300" />}
-              </div>
-              <h1>{selected.title}</h1>
-              <p className="library-profile-meta">
-                {[selected.meta?.developer, selected.meta?.releaseYear, selected.meta?.genres?.slice(0, 2).join(' · ')].filter(Boolean).join('  /  ') || 'Game details will appear here when available'}
-              </p>
-              <div className="library-profile-actions">
-                <button type="button" onClick={playing ? onStop : () => onPlay(selected)} className="library-primary-button library-play-button">
-                  {playing ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-                  {playing ? 'Stop session' : selected.planned ? 'Start timer' : 'Play'}
-                </button>
-                <button type="button" onClick={() => onToggleFavorite(selected.id)} className={cn('library-icon-action', selected.favorite && 'is-favorite')} title={selected.favorite ? 'Remove favorite' : 'Add favorite'} aria-label={selected.favorite ? 'Remove favorite' : 'Add favorite'}>
-                  <Star size={16} fill={selected.favorite ? 'currentColor' : 'none'} />
-                </button>
-                <button type="button" onClick={() => onEdit(selected.id)} className="library-icon-action" title="Edit game" aria-label="Edit game"><Pencil size={15} /></button>
-                <button type="button" onClick={() => onDetails(selected.id)} className="library-details-action"><Info size={14} /> Full details</button>
-              </div>
-              <div className="library-profile-stats">
-                <div><span>Total playtime</span><b>{fmtMinutes(selected.playSecs / 60)}</b></div>
-                <div><span>Last played</span><b>{fmtDate(selected.lastPlayed)}</b></div>
-                <div><span>Sessions</span><b>{selected.sessionCount}</b></div>
-              </div>
-            </div>
-          </div>
-
-          <section className="library-information-card">
-            <div className="library-section-heading"><div><p className="library-eyebrow">GAME FILE</p><h3>At a glance</h3></div><button type="button" onClick={() => onDetails(selected.id)} aria-label="Open all game details"><Info size={15} /></button></div>
-            <div className="library-facts-grid">
-              <div><span>STATUS</span><Select value={selected.status} onChange={(status) => onUpdate(selected.id, { status })} ariaLabel="Game status" options={STATUS_OPTIONS} /></div>
-              <div><span>PLATFORM</span><b>{sourceLabel(selected)}</b></div>
-              <div><span>INSTALL LOCATION</span><b>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</b></div>
-              <div><span>FILE SIZE</span><b>{selected.sizeGb > 0 ? `${selected.sizeGb.toFixed(1)} GB` : 'Not measured'}</b></div>
-            </div>
-            <p className="library-summary">{selected.meta?.summary || 'No overview has been added yet. Open full details to fetch or edit game information.'}</p>
-          </section>
-
-          <section className="library-activity-card">
-            <div className="library-section-heading"><div><p className="library-eyebrow">YOUR ACTIVITY</p><h3>Recent history</h3></div><button type="button" onClick={() => onDetails(selected.id)} aria-label="Open session history"><Clock3 size={15} /></button></div>
-            {recentSessions.length > 0 ? recentSessions.map((row, index) => (
-              <div className="library-history-row" key={row.id}>
-                <span className={`library-history-marker${index === 0 ? ' is-latest' : ''}`} />
-                <div><b>{row.playthroughName || (row.manual ? 'Time logged' : 'Play session')}</b><p>{fmtDate(new Date(row.startedAt * 1000).toISOString())}{row.note ? ` · ${row.note}` : ''}</p></div>
-                <small>{fmtMinutes(row.durationSecs / 60)}</small>
-              </div>
-            )) : selected.lastPlayed ? (
-              <div className="library-history-row"><span className="library-history-marker" /><div><b>Last played</b><p>{fmtDate(selected.lastPlayed)} · {selected.sessionCount} recorded {selected.sessionCount === 1 ? 'session' : 'sessions'}</p></div><small>{fmtMinutes(selected.playSecs / 60)}</small></div>
-            ) : (
-              <div className="library-history-empty"><Clock3 size={16} /><span>No recorded sessions yet. Play starts tracking automatically.</span></div>
-            )}
-          </section>
-
-          <section className="library-collection-card">
-            <div className="library-section-heading"><div><p className="library-eyebrow">YOUR GAMES</p><h3>{labelFor(filter)} <span>{games.length}</span></h3></div><label className="library-size-control">Cover size<input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} aria-label="Cover size" /></label></div>
-            {!games.length ? <p className="library-no-results">Nothing in this category matches the current search.</p> : view === 'grid' ? (
-              <GameGrid games={games} selectedId={selected.id} onSelect={onSelect} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} />
-            ) : (
-              <GameList games={games} selectedId={selected.id} onSelect={onSelect} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} />
-            )}
-          </section>
-        </section>
-
-        <aside className="library-inspector" aria-label="Selected game facts">
-          <div className="library-inspector-cover"><Cover game={selected} className="size-full" fit="contain" loading="eager" /></div>
-          <div className="library-inspector-title"><p className="library-eyebrow">SELECTED TITLE</p><h2>{selected.title}</h2><p>{selected.meta?.developer || 'Unknown studio'}{selected.meta?.releaseYear ? ` · ${selected.meta.releaseYear}` : ''}</p></div>
-          <div className="library-inspector-divider" />
-          <div className="library-inspector-stat"><span>Playtime</span><b>{fmtMinutes(selected.playSecs / 60)}</b></div>
-          <div className="library-inspector-stat"><span>Longest session</span><b>{fmtMinutes(selected.longestSecs / 60)}</b></div>
-          <div className="library-inspector-stat"><span>Added to Orbit</span><b>{fmtDate(selected.addedAt)}</b></div>
-          <div className="library-inspector-tags">
-            <p className="library-eyebrow">GENRES</p>
-            <div>{(selected.meta?.genres ?? []).length ? selected.meta!.genres.slice(0, 6).map((genre) => <span key={genre}>{genre}</span>) : <small>Not categorized</small>}</div>
-          </div>
-          <div className="library-inspector-source"><MapPin size={14} /><span>{selected.installDir ? selected.installDir : sourceLabel(selected)}</span></div>
-        </aside>
+      <div className={`library-browser-filters${view === 'grid' ? ' grid-mode' : ''}`} aria-label="Library filters">
+        {filters.map(({ id }) => (
+          <button type="button" key={id} onClick={() => setFilter(id)} aria-pressed={filter === id} className={cn('library-filter-option', filter === id && 'is-active')}>
+            <span className={`library-filter-dot filter-${id}`} />{labelFor(id)}<small>{counts[id] ?? 0}</small>
+          </button>
+        ))}
       </div>
+
+      {view === 'grid' ? (
+        <section className="library-grid-page" aria-label="Game collection">
+          <div className="library-grid-heading"><div><p className="library-eyebrow">YOUR COLLECTION</p><h1>{labelFor(filter)} <span>{games.length}</span></h1></div><label className="library-size-control">Cover size<input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} aria-label="Cover size" /></label></div>
+          {!games.length ? <p className="library-no-results">Nothing in this category matches the current search.</p> : <GameGrid games={games} selectedId={selected.id} onSelect={onSelect} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} />}
+        </section>
+      ) : (
+        <div className="library-focus-layout">
+          <aside className="library-focus-game">
+            <div className="library-focus-cover"><Cover game={selected} className="size-full" fit="contain" loading="eager" /></div>
+            <div className="library-focus-playtime"><Clock3 size={14} /><span>{fmtMinutes(selected.playSecs / 60)} played</span></div>
+            <div className="library-profile-actions">
+              <button type="button" onClick={playing ? onStop : () => onPlay(selected)} className="library-primary-button library-play-button">{playing ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}{playing ? 'Stop session' : selected.planned ? 'Start timer' : 'Play'}</button>
+              <button type="button" onClick={() => onToggleFavorite(selected.id)} className={cn('library-icon-action', selected.favorite && 'is-favorite')} title={selected.favorite ? 'Remove favorite' : 'Add favorite'} aria-label={selected.favorite ? 'Remove favorite' : 'Add favorite'}><Star size={16} fill={selected.favorite ? 'currentColor' : 'none'} /></button>
+              <button type="button" onClick={() => onEdit(selected.id)} className="library-icon-action" title="Edit game" aria-label="Edit game"><Pencil size={15} /></button>
+              <button type="button" onClick={() => onDetails(selected.id)} className="library-details-action"><Info size={14} /> Details</button>
+            </div>
+            <div className="library-focus-quickstats"><span>{selected.status === 'playing' ? 'In progress' : selected.status === 'backlog' ? 'Planned' : labelFor(selected.status)}</span><span>{selected.sessionCount} sessions</span><span>{selected.meta?.releaseYear || 'Release year unknown'}</span></div>
+          </aside>
+
+          <main className="library-focus-content">
+            <header className="library-focus-header">
+              <div><p className="library-eyebrow">{selected.meta?.developer || sourceLabel(selected)}{selected.meta?.releaseYear ? ` · ${selected.meta.releaseYear}` : ''}</p><h1>{selected.title}</h1><p>{(selected.meta?.genres ?? []).slice(0, 4).join('  ·  ') || 'Game details and your activity in one place'}</p></div>
+              <button type="button" onClick={() => onUpdate(selected.id, { status: selected.status === 'completed' ? 'playing' : 'completed' })} className="library-complete-action">{selected.status === 'completed' ? 'Completed' : 'Mark complete'}</button>
+            </header>
+
+            <section className="library-media-strip" aria-label="Screenshots and journal">
+              <div className="library-strip-heading"><div><p className="library-eyebrow">YOUR ORBIT CAPTURES</p><h2><Images size={15} /> Screenshots &amp; journal</h2></div><button type="button" onClick={() => onDetails(selected.id)}>View all</button></div>
+              {gameCaptures.length || gameLogs.length ? <div className="library-media-items">
+                {gameCaptures.slice(0, 4).map((capture) => <a className="library-media-shot" href={fileSrc(capture.path)} target="_blank" rel="noreferrer" key={capture.path}><img src={fileSrc(capture.path)} alt={`${selected.title} screenshot`} loading="lazy" /></a>)}
+                {gameLogs.slice(0, 4).map((log) => <button type="button" className="library-journal-card" key={log.id} onClick={() => onDetails(selected.id)}><BookOpen size={15} /><span>{log.note || 'Journal entry'}</span><small>{fmtDate(new Date(log.at * 1000).toISOString())}</small></button>)}
+              </div> : <div className="library-media-empty"><Images size={17} /><span>Add an Orbit screenshot or journal entry and it will appear here.</span></div>}
+            </section>
+
+            <div className="library-focus-lower">
+              <section className="library-overview-card"><div className="library-strip-heading"><div><p className="library-eyebrow">OVERVIEW</p><h2>About this game</h2></div><button type="button" onClick={() => onDetails(selected.id)} aria-label="Open full details"><Info size={15} /></button></div><p>{selected.meta?.summary || 'No overview has been added yet. Open full details to fetch or edit game information.'}</p><div className="library-overview-meta"><span><b>Platform</b>{sourceLabel(selected)}</span><span><b>Install size</b>{selected.sizeGb > 0 ? `${selected.sizeGb.toFixed(1)} GB` : 'Not measured'}</span><span><b>Location</b>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</span></div></section>
+              <section className="library-timeline-card"><div className="library-strip-heading"><div><p className="library-eyebrow">PLAY HISTORY</p><h2><Clock3 size={15} /> Sessions</h2></div><button type="button" onClick={() => onDetails(selected.id)}>All activity</button></div>
+                {recentSessions.length ? <div className="library-timeline">{recentSessions.map((row, index) => <article className="library-timeline-row" key={row.id}><span className={`library-history-marker${index === 0 ? ' is-latest' : ''}`} /><div><b>{row.playthroughName || (row.manual ? 'Time logged' : 'Play session')}</b><p>{fmtDate(new Date(row.startedAt * 1000).toISOString())}{row.note ? ` · ${row.note}` : ''}</p></div><small>{fmtMinutes(row.durationSecs / 60)}</small></article>)}</div> : selected.lastPlayed ? <div className="library-history-empty"><Clock3 size={16} /><span>Last played {fmtDate(selected.lastPlayed)} · {selected.sessionCount} recorded sessions.</span></div> : <div className="library-history-empty"><Clock3 size={16} /><span>No recorded sessions yet. Play starts tracking automatically.</span></div>}
+              </section>
+            </div>
+          </main>
+        </div>
+      )}
     </div>
   );
 }
