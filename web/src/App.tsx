@@ -1370,7 +1370,7 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-app-frame relative h-full overflow-hidden text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
       <TopNav
@@ -1387,6 +1387,24 @@ export default function App() {
         showBars={settings.musicBars !== false}
         onTv={enterTv}
       />
+      <header className="orbit-pagebar">
+        <div className="min-w-0">
+          <p className="orbit-page-kicker">ORBIT / WORKSPACE</p>
+          <h1>{showThemeManager ? 'Custom themes' : page === 'logs' ? 'Journal' : page === 'backlog' ? 'Backlog' : page === 'sessions' ? 'Sessions' : page === 'storage' ? 'Storage' : page === 'saves' ? 'Saves' : page === 'settings' ? 'Settings' : 'Library'}</h1>
+        </div>
+        {session && runningGame ? (
+          <div className="orbit-session-status" aria-label={`Playing ${runningGame.title}`}>
+            <span className="orbit-session-dot" />
+              <span className="truncate">{runningGame.title}</span>
+            <span className="orbit-session-clock">{fmtClock(Math.floor((now - session.startedAtMs) / 1000))}</span>
+            <button type="button" onClick={() => void stop()} className="orbit-session-stop" aria-label="Stop current session">
+              <Square className="size-3" fill="currentColor" strokeWidth={0} /> Stop
+            </button>
+          </div>
+        ) : (
+          <p className="orbit-page-hint">Your games, progress, and play history</p>
+        )}
+      </header>
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
@@ -1398,7 +1416,7 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-tab-enter pb-24">
+      <main key={page} className="orbit-main-scroll orbit-tab-enter pb-24">
         {!settings ? null : showThemeManager ? (
           <ThemeManagerPage
             settings={settings}
@@ -1406,7 +1424,7 @@ export default function App() {
             onBack={() => setShowThemeManager(false)}
           />
         ) : page === 'settings' ? (
-          <div className="glass mx-6 mt-5 rounded-3xl">
+          <div className="mx-5 my-5 rounded-2xl border border-line bg-panel">
             <SettingsView
               settings={settings}
               setSettings={setSettings}
@@ -1546,23 +1564,6 @@ export default function App() {
           </>
         )}
       </main>
-
-      {session && runningGame && (
-        <div className="glass fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-5 pr-2 text-sm shadow-2xl">
-          <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
-          <span>
-            Playing <b>{runningGame.title}</b>
-          </span>
-          <span className="font-mono text-muted">{fmtClock(Math.floor((now - session.startedAtMs) / 1000))}</span>
-          <button
-            onClick={() => void stop()}
-            className="flex items-center gap-1.5 rounded-full bg-rose-500 px-4 py-1.5 text-xs font-bold text-white"
-          >
-            <Square className="size-3" fill="currentColor" strokeWidth={0} />
-            Stop
-          </button>
-        </div>
-      )}
 
       {error && (
         <p className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full bg-rose-500/90 px-4 py-1.5 text-xs text-white">

@@ -24,26 +24,115 @@ body { background: var(--c-bg); color: var(--c-text); overflow: hidden; font-fam
 ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-body {
-  background:
-    radial-gradient(ellipse 60% 50% at 85% -10%, color-mix(in srgb, var(--c-accent) 9%, transparent), transparent),
-    radial-gradient(ellipse 50% 40% at -5% 100%, color-mix(in srgb, var(--c-accent2) 6%, transparent), transparent),
-    var(--c-bg);
-}
-body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .18;
-  background-image:
-    radial-gradient(1px 1px at 20% 30%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 70% 60%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 40% 80%, var(--c-text), transparent),
-    radial-gradient(1.5px 1.5px at 90% 20%, var(--c-text), transparent),
-    radial-gradient(1px 1px at 10% 70%, var(--c-text), transparent);
-  background-size: 400px 400px;
-}
+body { background: var(--c-bg); }
+body::before { content: none; }
 .glass {
-  background: color-mix(in srgb, var(--c-panel) 86%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c-border) 88%, transparent);
-  backdrop-filter: blur(12px) saturate(1.05);
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  backdrop-filter: none;
+}
+
+.orbit-app-frame {
+  display: grid;
+  grid-template-columns: 226px minmax(0, 1fr);
+  grid-template-rows: 68px minmax(0, 1fr);
+  grid-template-areas: "sidebar header" "sidebar content";
+  background: var(--c-bg);
+}
+.orbit-sidebar {
+  grid-area: sidebar;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px 13px 14px;
+  background: var(--c-panel);
+  border-right: 1px solid var(--c-border);
+}
+.orbit-brand {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+}
+.orbit-brand span { font-size: 18px; font-weight: 750; letter-spacing: -.035em; }
+.orbit-side-nav { display: grid; gap: 4px; align-content: start; }
+.orbit-side-label {
+  margin: 0 8px 6px;
+  color: var(--c-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+.orbit-side-link {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--c-muted);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 550;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.orbit-side-link:hover { background: var(--c-panel2); color: var(--c-text); }
+.orbit-side-link.is-active {
+  border-color: var(--c-border);
+  background: var(--c-panel2);
+  color: var(--c-text);
+}
+.orbit-side-link.is-active > svg { color: var(--c-accent); }
+.orbit-side-footer { display: grid; gap: 4px; margin-top: auto; }
+.orbit-side-music { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 0 11px; color: var(--c-muted); font-size: 12px; }
+.orbit-side-music > div > button { border-radius: 8px; padding: 7px; }
+.orbit-pagebar {
+  grid-area: header;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 26px;
+  background: var(--c-bg);
+  border-bottom: 1px solid var(--c-border);
+}
+.orbit-pagebar h1 { margin: 1px 0 0; color: var(--c-text); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+.orbit-page-kicker { margin: 0; color: var(--c-muted); font-size: 8px; font-weight: 700; letter-spacing: .15em; }
+.orbit-page-hint { margin: 0; color: var(--c-muted); font-size: 11px; }
+.orbit-session-status { display: flex; min-width: 0; align-items: center; gap: 9px; color: var(--c-text); font-size: 11px; }
+.orbit-session-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #37b985; }
+.orbit-session-clock { color: var(--c-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.orbit-session-stop { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #713e47; border-radius: 7px; padding: 6px 8px; background: #48252d; color: #ffd8db; font-size: 10px; }
+.orbit-session-stop:hover { background: #5b2d37; }
+.orbit-main-scroll { grid-area: content; min-width: 0; min-height: 0; overflow: auto; background: var(--c-bg); }
+@media (max-width: 760px) {
+  .orbit-app-frame { grid-template-columns: 66px minmax(0, 1fr); }
+  .orbit-sidebar { align-items: center; padding: 14px 5px 10px; gap: 18px; }
+  .orbit-brand { justify-content: center; padding: 0; }
+  .orbit-brand span, .orbit-side-label, .orbit-side-link span, .orbit-side-music > span { display: none; }
+  .orbit-side-nav, .orbit-side-footer { width: 100%; }
+  .orbit-side-link { justify-content: center; padding: 0; }
+  .orbit-side-music { justify-content: center; padding: 0; }
+  .orbit-pagebar { padding: 9px 14px; }
+  .orbit-pagebar h1 { font-size: 16px; }
+  .orbit-page-hint { display: none; }
+  .orbit-session-status { gap: 6px; font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-side-link { transition: none; }
 }
 /* Open slides in from the right. Close slides back out that way, left to right.
    The open used to paint the drawer in place and then slide it, which is the
