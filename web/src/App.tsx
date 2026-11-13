@@ -63,7 +63,7 @@ import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import { type Filter } from './components/Toolbar';
+import { LIBRARY_FILTERS, type Filter } from './components/Toolbar';
 import { LibraryWorkspace } from './components/LibraryWorkspace';
 import { Logo } from './components/ui/Logo';
 import { GameDetail } from './components/detail/GameDetail';
@@ -101,8 +101,6 @@ function FilledStar({ className }: { className?: string }) {
 }
 
 const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
-const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
-
 function savedSort(): SortKey {
   const value = localStorage.getItem('orbit.sort');
   return SORT_KEYS.includes(value as SortKey) ? value as SortKey : 'title';
@@ -110,7 +108,7 @@ function savedSort(): SortKey {
 
 function savedFilter(): Filter {
   const value = localStorage.getItem('orbit.filter');
-  return LIBRARY_FILTER_KEYS.includes(value as Filter) ? value as Filter : 'all';
+  return LIBRARY_FILTERS.some(({ id }) => id === value) ? value as Filter : 'all';
 }
 
 export default function App() {
@@ -797,7 +795,7 @@ export default function App() {
 
   const hiddenLibraryFilters = settings?.hiddenLibraryFilters ?? [];
   // If a selected chip is hidden in Settings, fall back to All immediately.
-  const activeFilter: Filter = hiddenLibraryFilters.includes(filter) ? 'all' : filter;
+  const activeFilter: Filter = hiddenLibraryFilters.includes(filter) || !LIBRARY_FILTERS.some(({ id }) => id === filter) ? 'all' : filter;
 
   // The game that is playing is marked, so the grid can show it at a glance.
   const visible = useMemo(() => {

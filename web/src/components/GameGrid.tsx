@@ -14,6 +14,9 @@ type DragBinding = {
   onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
 };
 
+export type GridLabel = 'none' | 'title' | 'info' | 'both';
+export type CoverShape = 'portrait' | 'square' | 'wide';
+
 interface Props {
   games: Game[];
   selectedId: string | null;
@@ -32,6 +35,8 @@ interface Props {
    * anybody: both answers look deliberate.
    */
   coverTint?: boolean;
+  label?: GridLabel;
+  shape?: CoverShape;
 }
 
 export function GameGrid({
@@ -44,6 +49,8 @@ export function GameGrid({
   scale,
   onReorder,
   coverTint = true,
+  label = 'both',
+  shape = 'portrait',
 }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
@@ -63,6 +70,8 @@ export function GameGrid({
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
+          label={label}
+          shape={shape}
           bound={bind(g.id)}
           dragging={dragging === g.id}
           over={over === g.id && dragging !== null && dragging !== g.id}
@@ -90,6 +99,8 @@ function Tile({
   onPlay,
   scale,
   coverTint,
+  label,
+  shape,
   bound,
   dragging,
   over,
@@ -102,6 +113,8 @@ function Tile({
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
+  label: GridLabel;
+  shape: CoverShape;
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
@@ -159,12 +172,13 @@ function Tile({
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover. The pad ring lives on this element, not on the
           // title underneath.
-          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
+          'orbit-cover relative overflow-hidden rounded-2xl transition duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
           // The same rounded cover ring as a selected tile. A square ring on the
           // outer box sat around the title and looked like a stock overlay.
           over && !selected && 'ring-2 ring-accent ring-offset-4 ring-offset-bg',
         )}
+        style={{ aspectRatio: shape === 'square' ? '1 / 1' : shape === 'wide' ? '16 / 9' : '3 / 4' }}
       >
         <Cover game={game} className="size-full" />
         <div
@@ -216,13 +230,8 @@ function Tile({
           <Play className="size-5" fill="currentColor" strokeWidth={0} />
         </button>
       </div>
-      <p className="mt-3 truncate font-semibold" style={{ fontSize: `${Math.max(12, Math.round(14 * (scale / 100)))}px` }}>
-        {game.title}
-      </p>
-      <p className="text-xs text-muted">
-        {fmtMinutes(game.playSecs / 60)}
-        {game.drive && ` · ${driveLabel(game.drive)}`}
-      </p>
+      {(label === 'title' || label === 'both') && <p className="orbit-grid-label orbit-grid-label-title mt-3 truncate font-semibold" style={{ fontSize: `${Math.max(12, Math.round(14 * (scale / 100)))}px` }}>{game.title}</p>}
+      {(label === 'info' || label === 'both') && <p className="orbit-grid-label orbit-grid-label-info text-xs text-muted">{fmtMinutes(game.playSecs / 60)}{game.drive && ` · ${driveLabel(game.drive)}`}</p>}
     </div>
   );
 }

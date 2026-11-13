@@ -29,9 +29,6 @@ interface Props {
 
 export const LIBRARY_FILTERS: FilterDefinition[] = [
   { id: 'all', label: 'All games' },
-  { id: 'playing', label: 'Playing' },
-  { id: 'completed', label: 'Completed' },
-  { id: 'dropped', label: 'Dropped' },
   { id: 'favorites', label: 'Favorites' },
   { id: 'unplayed', label: 'Unplayed' },
   { id: 'hidden', label: 'Hidden' },

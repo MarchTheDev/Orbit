@@ -363,7 +363,7 @@
 .library-mini-game { display: block; min-width: 0; border: 0; border-radius: 5px; padding: 2px; background: transparent; color: inherit; text-align: left; }
 .library-mini-game.is-selected { outline: 1px solid #dce5e0; outline-offset: 1px; }
 .library-mini-cover { display: block; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; border-radius: 4px; background: #151917; }
-.library-mini-cover img { width: 100%; height: 100%; object-fit: cover; }
+
 .library-mini-time { display: flex; align-items: center; gap: 4px; overflow: hidden; margin-top: 4px; color: #b1bbb7; font-size: 8px; line-height: 1.2; white-space: nowrap; }
 .library-mini-time svg { flex: 0 0 auto; }
 .library-focus-game { padding: 0 0 12px; }
@@ -970,3 +970,30 @@
 @media(max-width:740px){.orbit-appbar{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;padding-inline:10px}.orbit-logo-button b{display:none}.orbit-appbar-search{max-width:none}.library-page-heading{min-height:72px;align-items:flex-start;padding:12px 11px}.library-page-heading h1{font-size:21px}.library-heading-actions{gap:4px}.library-running-session{max-width:120px}.library-running-session small{display:none}.library-toolbar-button span{display:none}.library-toolbar-button{width:32px;padding:0}.library-view-control>button{padding-inline:6px}.library-add-button{width:32px;justify-content:center;padding:0;font-size:0}.library-details-layout{grid-template-columns:minmax(0,1fr);overflow:auto;padding:0 10px 14px}.library-game-browser{max-height:220px}.library-game-browser-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));}.library-detail-content{overflow:visible}.library-grid-layout{padding:0 10px 12px}.library-grid-layout.has-drawer{grid-template-columns:minmax(0,1fr)}.library-grid-drawer{position:absolute;inset:5px 5px 5px auto;width:min(360px,92%);height:auto}.library-grid-shelf>.grid{grid-template-columns:repeat(auto-fill,minmax(clamp(90px,22vw,145px),1fr))!important}}
 @media(max-width:540px){.orbit-appbar{height:58px;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);padding-inline:7px}.orbit-logo-button b{display:none}.orbit-logo-button svg{width:27px;height:27px}.orbit-appbar-search input{min-height:34px;font-size:10px}.orbit-burger-button{width:34px;height:34px}.library-page-heading{flex-direction:column;gap:9px}.library-heading-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}.library-detail-hero{grid-template-columns:68px minmax(0,1fr);min-height:156px;gap:10px;padding:11px}.library-detail-cover{grid-row:span 2;width:68px;height:96px}.library-detail-title h2{font-size:19px}.library-detail-title>p{font-size:8px}.library-detail-score{position:absolute;top:12px;right:12px}.library-detail-actions{flex-wrap:wrap;margin-top:8px}.library-detail-actions .library-status-select{max-width:110px}.library-detail-columns{padding:8px;gap:8px}.library-detail-side-column{grid-template-columns:minmax(0,1fr)}.library-hltb-metrics{gap:4px}.library-hltb-metrics>div{padding:6px}.library-media-items{grid-template-columns:repeat(2,minmax(0,1fr))}.library-media-shot{height:60px}.library-grid-page{padding:9px}.library-grid-layout.has-drawer{grid-template-columns:minmax(0,1fr)}.library-grid-drawer{width:min(320px,95%)}.library-running-session{display:none}}
 @media(prefers-reduced-motion:reduce){.orbit-menu-panel.is-open{animation:none}.orbit-burger-button span{transition:none}}
+
+
+/* Focus/Grid options: click the active mode again to open its settings. */
+.library-view-control > button { min-width: 62px; }
+.library-view-popover select { width: 100%; min-height: 27px; border: 1px solid rgb(190 218 231 / 12%); border-radius: 6px; padding: 0 7px; background: #111a23; color: #dce7eb; font-size: 9px; }
+.library-view-segments { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 3px; }
+.library-view-segments > button { min-height: 25px; border: 1px solid rgb(190 218 231 / 9%); border-radius: 6px; padding: 0 5px; background: rgb(255 255 255 / 2%); color: #9caab2; font-size: 8px; }
+.library-view-segments > button[aria-pressed="true"] { border-color: rgb(155 216 233 / 18%); background: rgb(144 202 222 / 10%); color: #e3f2f6; }
+.library-view-popover > button[aria-pressed="false"] .library-check { color: transparent; }
+.library-game-browser.is-cover-list .library-game-browser-grid { grid-template-columns: repeat(auto-fill,minmax(clamp(70px,calc(92px * var(--library-detail-cover-scale,1)),145px),1fr)); gap: 9px; padding: 10px; }
+.library-game-browser.is-cover-list .library-mini-game { display: block; min-height: 0; padding: 3px; }
+.library-game-browser.is-cover-list .library-mini-cover { display: block; width: 100%; height: auto; aspect-ratio: var(--orbit-cover-ratio,3 / 4); border-radius: 7px; }
+.library-game-browser.is-cover-list .library-mini-copy { display: block; padding: 6px 2px 1px; }
+.library-game-browser.is-cover-list .library-mini-copy b { display: block; font-size: 9px; }
+.library-game-browser.is-cover-list .library-mini-copy small { display: block; margin-top: 3px; }
+.library-game-browser.is-cover-list .library-mini-copy em { display: none; }
+.library-game-browser.is-cover-list .library-mini-time { margin: 4px 2px 0; }
+.library-grid-shelf > .grid > div > .orbit-grid-label { display: block !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-grid-shelf > .grid > div > .orbit-grid-label-title { margin-top: 7px; color: #d9e2e5; font-size: 9px !important; }
+.library-grid-shelf > .grid > div > .orbit-grid-label-info { margin-top: 3px; color: #91a0a8; font-size: 8px; }
+.orbit-menu-footer { flex: 0 0 auto; }
+.orbit-menu-footer .orbit-menu-link { min-height: 42px; }
+.orbit-burger-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; align-content: normal; }
+.orbit-burger-button span { flex: 0 0 1.5px; margin: 0; transform-origin: center; }
+@media(max-width:740px) {
+  .library-game-browser.is-cover-list .library-game-browser-grid { grid-template-columns: repeat(auto-fill,minmax(clamp(62px,calc(20vw * var(--library-detail-cover-scale,1)),110px),1fr)); }
+}

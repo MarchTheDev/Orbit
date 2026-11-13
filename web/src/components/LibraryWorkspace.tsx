@@ -9,7 +9,7 @@ import { cn } from '../utils/cn';
 import { orderedLibraryFilters } from './Toolbar';
 import { Select } from './ui/Select';
 import { Cover } from './ui/Cover';
-import { GameGrid } from './GameGrid';
+import { GameGrid, type CoverShape, type GridLabel } from './GameGrid';
 import { Logo } from './ui/Logo';
 import './LibraryWorkspace.css';
 
@@ -104,11 +104,25 @@ export function LibraryWorkspace({
   const [viewMenu, setViewMenu] = useState<ViewMode | null>(null);
   const [activityTab, setActivityTab] = useState<'timeline' | 'journal'>('timeline');
   const [gridDrawerOpen, setGridDrawerOpen] = useState(true);
+  const [gridOpenOnSelect, setGridOpenOnSelect] = useState(() => localStorage.getItem('orbit.grid-open-on-select') !== 'false');
   const [detailLayout, setDetailLayout] = useState<'covers' | 'list'>(() => localStorage.getItem('orbit.details-layout') === 'list' ? 'list' : 'covers');
+  const [detailScale, setDetailScale] = useState(() => Number(localStorage.getItem('orbit.details-cover-size')) || 100);
+  const [gridLabel, setGridLabel] = useState<GridLabel>(() => {
+    const saved = localStorage.getItem('orbit.grid-label');
+    return saved === 'none' || saved === 'title' || saved === 'info' || saved === 'both' ? saved : 'both';
+  });
+  const [coverShape, setCoverShape] = useState<CoverShape>(() => {
+    const saved = localStorage.getItem('orbit.cover-shape');
+    return saved === 'square' || saved === 'wide' || saved === 'portrait' ? saved : 'portrait';
+  });
   const controlsRef = useRef<HTMLDivElement>(null);
   const playing = selected ? runningId === selected.id : false;
 
   useEffect(() => { localStorage.setItem('orbit.details-layout', detailLayout); }, [detailLayout]);
+  useEffect(() => { localStorage.setItem('orbit.details-cover-size', String(detailScale)); }, [detailScale]);
+  useEffect(() => { localStorage.setItem('orbit.grid-label', gridLabel); }, [gridLabel]);
+  useEffect(() => { localStorage.setItem('orbit.cover-shape', coverShape); }, [coverShape]);
+  useEffect(() => { localStorage.setItem('orbit.grid-open-on-select', String(gridOpenOnSelect)); }, [gridOpenOnSelect]);
   useEffect(() => {
     if (!filtersOpen && !viewMenu) return;
     const dismiss = (event: PointerEvent) => {
@@ -187,11 +201,23 @@ export function LibraryWorkspace({
             </div>}
           </div>
           <div className="library-view-controls" role="group" aria-label="Library view">
-            <div className="library-view-control"><button type="button" onClick={() => { setView('list'); setViewMenu(null); }} aria-pressed={view === 'list'}><List size={15} />Details</button><button type="button" className="library-view-options" onClick={() => { setViewMenu((current) => current === 'list' ? null : 'list'); setFiltersOpen(false); }} aria-label="Details view settings" aria-expanded={viewMenu === 'list'}><ChevronDown size={13} /></button>
-              {viewMenu === 'list' && <div className="library-control-popover library-view-popover"><b>Details view</b><span>Game list</span><button type="button" aria-pressed={detailLayout === 'covers'} onClick={() => { setDetailLayout('covers'); setViewMenu(null); }}><Images size={14} />Cover list</button><button type="button" aria-pressed={detailLayout === 'list'} onClick={() => { setDetailLayout('list'); setViewMenu(null); }}><List size={14} />Compact list</button></div>}
+            <div className="library-view-control">
+              <button type="button" onClick={() => { if (view !== 'list') { setView('list'); setViewMenu(null); } else { setViewMenu((current) => current === 'list' ? null : 'list'); } setFiltersOpen(false); }} aria-pressed={view === 'list'} aria-expanded={view === 'list' && viewMenu === 'list'} aria-label={view === 'list' ? 'Details view; click again for settings' : 'Switch to Details view'}><List size={15} />Details</button>
+              {viewMenu === 'list' && <div className="library-control-popover library-view-popover"><b>Details view</b><span>Game list</span>
+                <button type="button" aria-pressed={detailLayout === 'covers'} onClick={() => setDetailLayout('covers')}><Images size={14} />Cover list</button><button type="button" aria-pressed={detailLayout === 'list'} onClick={() => setDetailLayout('list')}><List size={14} />Compact list</button>
+                {detailLayout === 'covers' && <label>Cover size<input type="range" min={70} max={150} step={5} value={detailScale} onChange={(event) => setDetailScale(Number(event.target.value))} aria-label="Details cover size" /></label>}
+                <label>Cover shape<select value={coverShape} onChange={(event) => setCoverShape(event.target.value as CoverShape)}><option value="portrait">Portrait</option><option value="square">Square</option><option value="wide">Wide</option></select></label>
+              </div>}
             </div>
-            <div className="library-view-control"><button type="button" onClick={() => { setView('grid'); setViewMenu(null); }} aria-pressed={view === 'grid'}><Grid2X2 size={15} />Grid</button><button type="button" className="library-view-options" onClick={() => { setViewMenu((current) => current === 'grid' ? null : 'grid'); setFiltersOpen(false); }} aria-label="Grid view settings" aria-expanded={viewMenu === 'grid'}><ChevronDown size={13} /></button>
-              {viewMenu === 'grid' && <div className="library-control-popover library-view-popover"><b>Grid view</b><label>Cover size<input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} /></label><button type="button" aria-pressed={settings.coverTint !== false} onClick={() => onSettingsUpdate({ coverTint: settings.coverTint === false })}><span className="library-check"><Check size={12} /></span>Tint covers</button></div>}
+            <div className="library-view-control">
+              <button type="button" onClick={() => { if (view !== 'grid') { setView('grid'); setViewMenu(null); } else { setViewMenu((current) => current === 'grid' ? null : 'grid'); } setFiltersOpen(false); }} aria-pressed={view === 'grid'} aria-expanded={view === 'grid' && viewMenu === 'grid'} aria-label={view === 'grid' ? 'Grid view; click again for settings' : 'Switch to Grid view'}><Grid2X2 size={15} />Grid</button>
+              {viewMenu === 'grid' && <div className="library-control-popover library-view-popover"><b>Grid view</b>
+                <label>Cover size <small>{Math.round(170 * scale / 100)} px</small><input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} aria-label="Grid cover size" /></label>
+                <span>Under the cover</span><div className="library-view-segments" role="group" aria-label="Grid labels">{([['none','Nothing'],['title','Title'],['info','Info'],['both','Title + info']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={gridLabel === value} onClick={() => setGridLabel(value)}>{label}</button>)}</div>
+                <label>Cover shape<select value={coverShape} onChange={(event) => setCoverShape(event.target.value as CoverShape)}><option value="portrait">Portrait</option><option value="square">Square</option><option value="wide">Wide</option></select></label>
+                <button type="button" aria-pressed={settings.coverTint !== false} onClick={() => onSettingsUpdate({ coverTint: settings.coverTint === false })}><span className="library-check"><Check size={12} /></span>Tint on hover</button>
+                <button type="button" aria-pressed={gridOpenOnSelect} onClick={() => { setGridOpenOnSelect((open) => !open); if (gridOpenOnSelect) setGridDrawerOpen(false); }}><span className="library-check"><Check size={12} /></span>Open details on select</button>
+              </div>}
             </div>
           </div>
           <button type="button" onClick={onRefresh} className="library-toolbar-icon" aria-label="Refresh library" title="Refresh library"><RefreshCw size={15} /></button>
@@ -203,7 +229,7 @@ export function LibraryWorkspace({
         <section className={`library-grid-layout${gridDrawerOpen ? ' has-drawer' : ''}`} aria-label="Game collection">
           <div className="library-grid-page">
             {!games.length ? <p className="library-no-results">No games match the current filter or search.</p> : <div className="library-grid-shelf" style={{ '--orbit-cover-scale': String(scale / 100) } as CSSProperties}>
-              <GameGrid games={games} selectedId={selected.id} onSelect={(id) => { onSelect(id); setGridDrawerOpen(true); }} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} />
+              <GameGrid games={games} selectedId={selected.id} onSelect={(id) => { onSelect(id); if (gridOpenOnSelect) setGridDrawerOpen(true); }} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} label={gridLabel} shape={coverShape} />
             </div>}
           </div>
           {gridDrawerOpen && <aside className="library-grid-drawer" aria-label={`${selected.title} game details`}>
@@ -225,10 +251,10 @@ export function LibraryWorkspace({
         </section>
       ) : (
         <div className={`library-details-layout layout-${detailLayout}`}>
-          <section className="library-game-browser" aria-label="Games in this collection">
+          <section className={`library-game-browser${detailLayout === 'covers' ? ' is-cover-list' : ''}`} aria-label="Games in this collection" style={{ '--library-detail-cover-scale': String(detailScale / 100), '--orbit-cover-ratio': coverShape === 'square' ? '1 / 1' : coverShape === 'wide' ? '16 / 9' : '3 / 4' } as CSSProperties}>
             <header><div><h2>Games</h2><small>{games.length} shown</small></div><span className="library-browser-filter">{labelFor(filter)}</span></header>
             <div className="library-game-browser-grid">{games.map((game) => <button type="button" key={game.id} aria-pressed={selected.id === game.id} onClick={() => onSelect(game.id)} onDoubleClick={() => onPlay(game)} title={game.title} className={cn('library-mini-game', selected.id === game.id && 'is-selected')}>
-              <span className="library-mini-cover"><Cover game={game} className="size-full" fit="cover" /></span>
+              <span className="library-mini-cover"><Cover game={game} className="size-full" /></span>
               <span className="library-mini-copy"><b>{game.title}</b><small>{game.meta?.releaseYear || sourceLabel(game)}</small><em>{game.status === 'backlog' ? 'Planned' : game.status}</em></span>
               <span className="library-mini-time"><Clock3 size={10} />{fmtMinutes(game.playSecs / 60)}</span>
             </button>)}</div>

@@ -71,8 +71,10 @@ export function TopNav({
           <button type="button" onClick={() => action(onAddFolder)} className="orbit-menu-link"><FolderOpen size={17} strokeWidth={1.8} /><span>Add from folder</span></button>
           <div className="orbit-menu-divider" />
           <button type="button" onClick={() => action(onConsole)} className="orbit-menu-link"><Gamepad2 size={17} strokeWidth={1.8} /><span>Console mode</span></button>
-          <button type="button" onClick={() => go('settings')} aria-current={page === 'settings' ? 'page' : undefined} className={`orbit-menu-link${page === 'settings' ? ' is-active' : ''}`}><SettingsIcon size={17} strokeWidth={1.8} /><span>Settings</span></button>
         </nav>
+        <div className="orbit-menu-footer">
+          <button type="button" onClick={() => go('settings')} aria-current={page === 'settings' ? 'page' : undefined} className={`orbit-menu-link${page === 'settings' ? ' is-active' : ''}`}><SettingsIcon size={17} strokeWidth={1.8} /><span>Settings</span></button>
+        </div>
       </aside>
     </>
   );
