@@ -19,9 +19,9 @@ function check(name, ok) {
 
 check('the app mounts the new Library workspace', app.includes("import { LibraryWorkspace } from './components/LibraryWorkspace'") && app.includes('<LibraryWorkspace'));
 check('Library fills the window and keeps navigation available in the hamburger drawer', app.includes('orbit-library-shell') && app.includes('onMenu={() => setNavOpen(true)}') && app.includes('drawerOpen={navOpen}'));
-check('selecting a cover changes focus without forcing the legacy details drawer open', app.includes('detailOpen && (') && workspace.includes('onSelect={onSelect}'));
-check('Focus follows the reference hierarchy with a full-width title, cover/actions, journal, overview, and timeline',
-  ['library-focus-header', 'library-focus-game', 'library-journal-section', 'library-overview-card', 'library-timeline-section'].every((name) => workspace.includes(name)));
+check('selecting a title updates the focus panel and the Grid drawer', workspace.includes('onClick={() => onSelect(game.id)}') && workspace.includes('onSelect={selectGame}'));
+check('Focus follows Heronite’s grouped shelf, cover/actions, screenshots, overview, timeline, and details columns',
+  ['library-game-browser', 'library-focus-game', 'library-journal-section', 'library-overview-card', 'library-timeline-section', 'library-focus-details'].every((name) => workspace.includes(name)));
 check('the library provides Focus and cover Grid views with manual ordering', workspace.includes("setView('list')") && workspace.includes("setView('grid')") && workspace.includes('<GameGrid') && workspace.includes("sort === 'manual'"));
 check('the screenshot strip shows this game’s Orbit captures and journal entries', workspace.includes('listGameLogs(selected.id)') && workspace.includes('overlayGallery()') && workspace.includes('gameCaptures.slice(0, 4)'));
 check('Grid uses the full available width and reduces each tile to cover plus playtime', styles.includes('.orbit-library-shell') && styles.includes('.library-grid-page > .grid > div > p:first-of-type') && styles.includes('.library-grid-caption'));
