@@ -1260,36 +1260,11 @@ html.orbit-linux .orbit-topbar {
 }
 .orbit-menu-item[aria-current='page'] { color: var(--c-accent); }
 .orbit-menu-item[aria-current='page'] svg { color: var(--c-accent); }
-.orbit-menu-item small {
-  margin-left: auto;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--c-muted);
-  font-variant-numeric: tabular-nums;
-}
 .orbit-menu-sep {
   height: 1px;
   margin: 6px 8px;
   background: color-mix(in srgb, var(--c-text) 8%, transparent);
 }
-.orbit-menu-more {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 4px;
-}
-.orbit-menu-more button {
-  padding: 5px 7px;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  color: var(--c-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: color .1s var(--ease-snap), background-color .1s var(--ease-snap);
-}
-.orbit-menu-more button:hover { color: var(--c-text); background: color-mix(in srgb, var(--c-text) 6%, transparent); }
-.orbit-menu-more button[aria-current='page'] { color: var(--c-accent); }
 
 /* The room. Pages own their own headers; this only places them. */
 .orbit-main {
@@ -1395,7 +1370,106 @@ html.orbit-linux .orbit-topbar {
   font-size: 12.5px;
   color: var(--c-muted);
 }
-.orbit-viewmenu-row input[type='range'] { margin-left: auto; width: 96px; }
+.orbit-viewmenu-value {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-viewmenu-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 8px 3px;
+}
+.orbit-viewmenu-sublabel {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--c-text) 88%, transparent);
+}
+.orbit-viewmenu input[type='range'] { margin: 2px 8px 8px; width: calc(100% - 16px); }
+
+/* A compact three- or four-way switch inside a view menu, drawn as one
+   sunken track with the chosen answer raised. */
+.orbit-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+.orbit-seg button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-seg button:hover { color: var(--c-text); }
+.orbit-seg button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--c-accent) 16%, var(--c-panel));
+  color: var(--c-text);
+}
+
+/* Section chips: lit when the game page shows that section. */
+.orbit-minichips { display: flex; flex-wrap: wrap; gap: 5px; }
+.orbit-minichips button {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-text) 3%, transparent);
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-minichips button:hover { color: var(--c-text); }
+.orbit-minichips button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--c-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  color: var(--c-text);
+}
+
+/* Cover shape sketches: the outline is the point, so each tile draws the
+   proportion rather than a picture. */
+.orbit-shapes { display: flex; gap: 6px; padding: 2px 8px 2px; }
+.orbit-shape {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 7px 2px 6px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 3%, transparent);
+  color: var(--c-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap), background-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-shape span {
+  display: block;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--c-text) 24%, transparent);
+}
+.orbit-shape:hover { color: var(--c-text); }
+.orbit-shape[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 13%, transparent);
+  color: var(--c-text);
+}
+.orbit-shape[aria-pressed='true'] span { background: var(--c-accent); }
 
 /* The library: one shelf of every game on the left, the game itself beside
    it. Filters prune the shelf; nothing is divided by what state a game is in. */
@@ -1451,6 +1525,9 @@ html.orbit-linux .orbit-topbar {
   align-items: start;
   border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
 }
+.orbit-lib.is-shelf-small { grid-template-columns: 258px minmax(0, 1fr); }
+.orbit-lib.is-shelf-large { grid-template-columns: 372px minmax(0, 1fr); }
+.orbit-lib.is-shelf-small .orbit-shelf-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px 8px; }
 
 .orbit-shelf {
   position: sticky;
@@ -1556,42 +1633,61 @@ html.orbit-linux .orbit-topbar {
   color: var(--c-muted);
 }
 
-/* The game page. Its art lights the top of the column and fades into the
-   room colour, so the title sits on the game rather than on a card. */
+/* The game page. Its artwork is a stage the hero owns: held inside the hero's
+   rounded band, shaded back into the room on the left and along the bottom, so
+   the title always sits on the app's own colour. Nothing spills into the shelf
+   or the tools above it. */
 .orbit-gamepage {
   position: relative;
   min-width: 0;
   padding: 0 0 26px 26px;
 }
+.orbit-gamepage-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: end;
+  gap: 24px;
+  padding: 26px 22px 24px;
+  border-radius: 18px;
+}
 .orbit-gamepage-art {
+  --stage-art-opacity: .6;
   position: absolute;
-  inset: 0 0 auto 0;
-  height: 360px;
+  inset: 0;
+  z-index: 0;
   background-size: cover;
-  background-position: center 22%;
-  opacity: .45;
-  -webkit-mask-image: linear-gradient(180deg, #000 12%, transparent 96%);
-  mask-image: linear-gradient(180deg, #000 12%, transparent 96%);
+  background-position: center 30%;
+  opacity: var(--stage-art-opacity);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
   pointer-events: none;
   animation: orbit-gamepage-in .3s var(--ease-out) both;
 }
 @keyframes orbit-gamepage-in {
   from { opacity: 0; }
-  to { opacity: .45; }
+  to { opacity: var(--stage-art-opacity); }
 }
-html.orbit-linux .orbit-gamepage-art { opacity: .3; }
-.orbit-gamepage-hero {
-  position: relative;
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  align-items: end;
-  gap: 24px;
-  padding: 26px 2px 24px;
+html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
+.orbit-gamepage-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--c-bg) 0%, color-mix(in srgb, var(--c-bg) 62%, transparent) 42%, transparent 84%),
+    linear-gradient(0deg, var(--c-bg) 0%, color-mix(in srgb, var(--c-bg) 30%, transparent) 26%, transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--c-bg) 45%, transparent) 0%, transparent 14%);
 }
+.orbit-gamepage-hero > *:not(.orbit-gamepage-art) { position: relative; z-index: 2; }
 .orbit-gamepage-cover {
   width: 150px;
   aspect-ratio: 2 / 3;
   border-radius: 12px;
+  box-shadow: 0 20px 44px -22px rgba(0, 0, 0, .85);
 }
 .orbit-gamepage-title {
   font-size: clamp(27px, 3.2vw, 42px);
@@ -1608,25 +1704,6 @@ html.orbit-linux .orbit-gamepage-art { opacity: .3; }
   font-size: 12px;
   color: var(--c-muted);
 }
-.orbit-statepill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 23px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--c-muted);
-}
-.orbit-statepill i { width: 5px; height: 5px; border-radius: 999px; background: currentColor; }
-.orbit-statepill[data-status='playing'] { color: #5fc99a; border-color: color-mix(in srgb, #5fc99a 35%, transparent); }
-.orbit-statepill[data-status='completed'] { color: var(--c-accent); border-color: color-mix(in srgb, var(--c-accent) 40%, transparent); }
-.orbit-statepill[data-status='dropped'] { color: var(--c-muted); }
-.orbit-statepill[data-status='backlog'] { color: var(--c-accent2); border-color: color-mix(in srgb, var(--c-accent2) 35%, transparent); }
 .orbit-gamepage-desc {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -2138,6 +2215,8 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
 
 @media (max-width: 1280px) {
   .orbit-lib { grid-template-columns: 268px minmax(0, 1fr); }
+  .orbit-lib.is-shelf-medium { grid-template-columns: 268px minmax(0, 1fr); }
+  .orbit-lib.is-shelf-large { grid-template-columns: 330px minmax(0, 1fr); }
   .orbit-gamepage-body { grid-template-columns: minmax(0, 1fr) 286px; gap: 26px; }
   .orbit-topgames { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   /* Below this the chips and the tools cannot share one line without the
@@ -2170,8 +2249,7 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
   .orbit-shelf-rows { flex-direction: row; overflow-x: auto; }
   .orbit-shelf-row { flex: 0 0 220px; width: 220px; }
   .orbit-gamepage { padding: 18px 0 0; }
-  .orbit-gamepage-art { height: 280px; }
-  .orbit-gamepage-hero { grid-template-columns: 116px minmax(0, 1fr); gap: 16px; padding-top: 10px; }
+  .orbit-gamepage-hero { grid-template-columns: 116px minmax(0, 1fr); gap: 16px; padding: 16px 16px 18px; }
   .orbit-gamepage-cover { width: 116px; }
   .orbit-stats-hero { min-height: 230px; padding: 20px; }
   .orbit-chart { height: 150px; }

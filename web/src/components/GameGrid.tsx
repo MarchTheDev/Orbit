@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Pencil, Play, Star } from 'lucide-react';
-import type { Game } from '../types';
+import type { CoverShape, Game, GridLabel } from '../types';
 import { fmtMinutes } from '../utils/format';
 import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
@@ -32,6 +32,14 @@ interface Props {
    * anybody: both answers look deliberate.
    */
   coverTint?: boolean;
+  /** The shape every cover is drawn in. */
+  shape?: CoverShape;
+  /** What sits under a cover: nothing, the title, its readings, or both. */
+  label?: GridLabel;
+}
+
+function shapeRatio(shape: CoverShape): string {
+  return shape.replace(':', ' / ');
 }
 
 export function GameGrid({
@@ -44,6 +52,8 @@ export function GameGrid({
   scale,
   onReorder,
   coverTint = true,
+  shape = '3:4',
+  label = 'title-info',
 }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
@@ -63,6 +73,8 @@ export function GameGrid({
           onPlay={onPlay}
           scale={scale}
           coverTint={coverTint}
+          shape={shape}
+          label={label}
           bound={bind(g.id)}
           dragging={dragging === g.id}
           over={over === g.id && dragging !== null && dragging !== g.id}
@@ -90,6 +102,8 @@ function Tile({
   onPlay,
   scale,
   coverTint,
+  shape,
+  label,
   bound,
   dragging,
   over,
@@ -102,6 +116,8 @@ function Tile({
   onPlay: (g: Game) => void;
   scale: number;
   coverTint: boolean;
+  shape: CoverShape;
+  label: GridLabel;
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
@@ -111,6 +127,8 @@ function Tile({
   const [dismissedUnfilledStar, setDismissedUnfilledStar] = useState(false);
   const previousFavorite = useRef(game.favorite);
   const tint = useHoverTint(game, coverTint, hovered);
+  const showTitle = label === 'title' || label === 'title-info';
+  const showInfo = label === 'info' || label === 'title-info';
 
   // A context-menu action changes the game prop without going through the
   // quick-star button. Keep the same hover dismissal for either route, before
@@ -154,12 +172,13 @@ function Tile({
             onSelect(game.id);
           }
         }}
+        style={{ aspectRatio: shapeRatio(shape) }}
         className={cn(
           // A neutral shadow on hover, not an accent-coloured one: with the
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover. The pad ring lives on this element, not on the
           // title underneath.
-          'orbit-cover relative aspect-[3/4] overflow-hidden rounded-2xl transition duration-150 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
+          'orbit-cover relative overflow-hidden rounded-2xl transition duration-150 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
           selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
           // The same rounded cover ring as a selected tile. A square ring on the
           // outer box sat around the title and looked like a stock overlay.
@@ -216,13 +235,17 @@ function Tile({
           <Play className="size-4" fill="currentColor" strokeWidth={0} />
         </button>
       </div>
-      <p className="mt-2.5 truncate font-medium" style={{ fontSize: `${Math.max(12, Math.round(13 * (scale / 100)))}px` }}>
-        {game.title}
-      </p>
-      <p className="orbit-num mt-0.5 text-[11px] text-muted">
-        {fmtMinutes(game.playSecs / 60)}
-        {game.drive && ` · ${driveLabel(game.drive)}`}
-      </p>
+      {showTitle && (
+        <p className="mt-2.5 truncate font-medium" style={{ fontSize: `${Math.max(12, Math.round(13 * (scale / 100)))}px` }}>
+          {game.title}
+        </p>
+      )}
+      {showInfo && (
+        <p className={cn('orbit-num truncate text-[11px] text-muted', showTitle ? 'mt-0.5' : 'mt-2.5')}>
+          {fmtMinutes(game.playSecs / 60)}
+          {game.drive && ` · ${driveLabel(game.drive)}`}
+        </p>
+      )}
     </div>
   );
 }

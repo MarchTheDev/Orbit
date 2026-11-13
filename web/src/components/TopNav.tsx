@@ -191,7 +191,6 @@ export function TopNav({
           >
             <ChartNoAxesColumn className="size-[17px] shrink-0" strokeWidth={1.8} />
             Statistics
-            <small>Playtime, journal, backlog</small>
           </button>
 
           <div className="orbit-menu-sep" role="separator" />
@@ -223,12 +222,15 @@ export function TopNav({
           </button>
 
           <div className="orbit-menu-sep" role="separator" />
-          {/* Two rooms the menu deliberately leaves out: Saves and Storage are
-              picked up when needed rather than browsed. */}
-          <div className="orbit-menu-more">
-            <button onClick={() => go('saves')} aria-current={page === 'saves' ? 'page' : undefined}>Saves</button>
-            <button onClick={() => go('storage')} aria-current={page === 'storage' ? 'page' : undefined}>Storage</button>
-          </div>
+
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'saves' ? 'page' : undefined} onClick={() => go('saves')}>
+            <Save className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Saves
+          </button>
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'storage' ? 'page' : undefined} onClick={() => go('storage')}>
+            <HardDrive className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Storage
+          </button>
         </div>
       )}
     </>

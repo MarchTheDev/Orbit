@@ -16,7 +16,16 @@ import {
   Star,
   Timer,
 } from 'lucide-react';
-import type { ActiveSession, Game, GameFacts, SortKey } from '../types';
+import type {
+  ActiveSession,
+  CoverShape,
+  Game,
+  GameFacts,
+  GameSection,
+  GridLabel,
+  ShelfSize,
+  SortKey,
+} from '../types';
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
@@ -37,6 +46,33 @@ import { GameLogView } from './detail/GameLogView';
 export type LibraryMode = 'details' | 'grid';
 /** How the left shelf is drawn in Details: artwork, or a compact list. */
 export type ShelfLayout = 'covers' | 'list';
+
+const COVER_SHAPES: { value: CoverShape; label: string }[] = [
+  { value: '2:3', label: '2:3' },
+  { value: '3:4', label: '3:4' },
+  { value: '1:1', label: '1:1' },
+  { value: '16:9', label: '16:9' },
+];
+
+const SHELF_SIZES: { value: ShelfSize; label: string }[] = [
+  { value: 'small', label: 'Small' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'large', label: 'Large' },
+];
+
+const GRID_LABELS: { value: GridLabel; label: string; title: string }[] = [
+  { value: 'nothing', label: 'Nothing', title: 'Nothing under the cover' },
+  { value: 'title', label: 'Title', title: 'The title alone' },
+  { value: 'info', label: 'Info', title: 'Playtime and drive alone' },
+  { value: 'title-info', label: 'Both', title: 'Title, then playtime and drive' },
+];
+
+const SECTIONS: { value: GameSection; label: string }[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'gallery', label: 'Gallery' },
+  { value: 'journal', label: 'Journal' },
+  { value: 'achievements', label: 'Achievements' },
+];
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'title', label: 'A-Z' },
@@ -78,6 +114,14 @@ export function LibraryView({
   setMode,
   rail,
   setRail,
+  shelfSize,
+  setShelfSize,
+  shape,
+  setShape,
+  gridLabel,
+  setGridLabel,
+  sections,
+  setSections,
   runningId,
   session,
   onPlay,
@@ -110,6 +154,16 @@ export function LibraryView({
   setMode: (next: LibraryMode) => void;
   rail: ShelfLayout;
   setRail: (next: ShelfLayout) => void;
+  shelfSize: ShelfSize;
+  setShelfSize: (next: ShelfSize) => void;
+  /** The shape every cover in both views is drawn in. */
+  shape: CoverShape;
+  setShape: (next: CoverShape) => void;
+  gridLabel: GridLabel;
+  setGridLabel: (next: GridLabel) => void;
+  /** The game page sections shown in Details. */
+  sections: GameSection[];
+  setSections: (next: GameSection[]) => void;
   runningId: string | null;
   session: ActiveSession | null;
   onPlay: (game: Game) => void;
@@ -159,9 +213,20 @@ export function LibraryView({
   const focus = games.find((game) => game.id === focusId) ?? null;
   const playedSecs = games.reduce((sum, game) => sum + game.playSecs, 0);
 
+  // The switch changes the view; the view you are already in opens its
+  // settings. Doing both on one click made changing views feel like it had
+  // left a menu behind.
   const chooseMode = (next: LibraryMode) => {
-    setMode(next);
+    if (next !== mode) {
+      setMode(next);
+      setViewMenu(null);
+      return;
+    }
     setViewMenu((current) => (current === next ? null : next));
+  };
+
+  const toggleSection = (section: GameSection) => {
+    setSections(sections.includes(section) ? sections.filter((item) => item !== section) : [...sections, section]);
   };
 
   return (
@@ -199,15 +264,27 @@ export function LibraryView({
             options={SORT_OPTIONS}
           />
           <div className="orbit-viewswitch" ref={viewSwitch}>
-            <button className="orbit-viewbtn" aria-pressed={mode === 'details'} onClick={() => chooseMode('details')}>
+            <button
+              className="orbit-viewbtn"
+              aria-pressed={mode === 'details'}
+              aria-expanded={viewMenu === 'details'}
+              title={mode === 'details' ? 'Details view options' : 'Switch to Details'}
+              onClick={() => chooseMode('details')}
+            >
               <List className="size-3.5" strokeWidth={2} />
               Details
-              <ChevronDown className="caret" strokeWidth={2} />
+              {mode === 'details' && <ChevronDown className="caret" strokeWidth={2} />}
             </button>
-            <button className="orbit-viewbtn" aria-pressed={mode === 'grid'} onClick={() => chooseMode('grid')}>
+            <button
+              className="orbit-viewbtn"
+              aria-pressed={mode === 'grid'}
+              aria-expanded={viewMenu === 'grid'}
+              title={mode === 'grid' ? 'Grid view options' : 'Switch to Grid'}
+              onClick={() => chooseMode('grid')}
+            >
               <LayoutGrid className="size-3.5" strokeWidth={2} />
               Grid
-              <ChevronDown className="caret" strokeWidth={2} />
+              {mode === 'grid' && <ChevronDown className="caret" strokeWidth={2} />}
             </button>
 
             {viewMenu === 'details' && (
@@ -237,28 +314,88 @@ export function LibraryView({
                   List
                   {rail === 'list' && <Check className="ml-auto size-3.5" />}
                 </button>
-                <p className="orbit-viewmenu-note">The shelf follows the filters above; the game page never leaves it.</p>
+
+                {rail === 'covers' && (
+                  <div className="orbit-viewmenu-block">
+                    <span className="orbit-viewmenu-sublabel">Cover size</span>
+                    <div className="orbit-seg" role="group" aria-label="Shelf cover size">
+                      {SHELF_SIZES.map((size) => (
+                        <button
+                          key={size.value}
+                          type="button"
+                          aria-pressed={shelfSize === size.value}
+                          onClick={() => setShelfSize(size.value)}
+                        >
+                          {size.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="orbit-viewmenu-block">
+                  <span className="orbit-viewmenu-sublabel">Game sections</span>
+                  <div className="orbit-minichips" role="group" aria-label="Game page sections">
+                    {SECTIONS.map((section) => (
+                      <button
+                        key={section.value}
+                        type="button"
+                        aria-pressed={sections.includes(section.value)}
+                        onClick={() => toggleSection(section.value)}
+                      >
+                        {section.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <span className="orbit-viewmenu-label">Covers</span>
+                <ShapeRow value={shape} onChange={setShape} />
+                <p className="orbit-viewmenu-note">
+                  The shelf follows the filters above; the game page never leaves it. A game's own cover is picked in Edit.
+                </p>
               </div>
             )}
 
             {viewMenu === 'grid' && (
               <div className="orbit-viewmenu" role="dialog" aria-label="Grid settings">
-                <span className="orbit-viewmenu-label">Covers</span>
                 <div className="orbit-viewmenu-row">
-                  <span>Size</span>
-                  <input
-                    type="range"
-                    min={70}
-                    max={170}
-                    step={5}
-                    value={scale}
-                    onChange={(event) => setScale(Number(event.target.value))}
-                    className="orbit-range cursor-pointer"
-                    aria-label="Cover size"
-                  />
+                  <span>Cover size</span>
+                  <span className="orbit-viewmenu-value">{Math.round(170 * (scale / 100))} px</span>
                 </div>
+                <input
+                  type="range"
+                  min={70}
+                  max={170}
+                  step={5}
+                  value={scale}
+                  onChange={(event) => setScale(Number(event.target.value))}
+                  className="orbit-range w-full cursor-pointer"
+                  aria-label="Cover size"
+                />
+
+                <div className="orbit-viewmenu-block">
+                  <span className="orbit-viewmenu-sublabel">Under the cover</span>
+                  <div className="orbit-seg" role="group" aria-label="Under the cover">
+                    {GRID_LABELS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        title={option.title}
+                        aria-pressed={gridLabel === option.value}
+                        onClick={() => setGridLabel(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <span className="orbit-viewmenu-label">Covers</span>
+                <ShapeRow value={shape} onChange={setShape} />
+
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint with the artwork" />
+                  <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
                 </div>
                 {sort === 'manual' && (
                   <p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>
@@ -288,6 +425,8 @@ export function LibraryView({
               scale={scale}
               onReorder={sort === 'manual' ? onReorder : undefined}
               coverTint={coverTint}
+              shape={shape}
+              label={gridLabel}
             />
           )}
         </div>
@@ -298,7 +437,7 @@ export function LibraryView({
           action={total === 0 ? { label: 'Add game', onClick: onAdd } : { label: 'Clear search', onClick: () => { setQuery(''); setFilter('all'); }}}
         />
       ) : (
-        <div className="orbit-lib">
+        <div className={cn('orbit-lib', `is-shelf-${shelfSize}`)}>
           <aside className="orbit-shelf" aria-label="Games">
             <div className="orbit-shelf-head">
               <h2>Shelf</h2>
@@ -316,8 +455,8 @@ export function LibraryView({
                       onClick={() => setFocusId(game.id)}
                       title={game.title}
                     >
-                      <span className="relative block">
-                        <Cover game={game} className="orbit-cover aspect-[2/3] w-full" loading="lazy" />
+                      <span className="relative block" style={{ aspectRatio: shape.replace(':', ' / ') }}>
+                        <Cover game={game} className="orbit-cover size-full" loading="lazy" />
                         {game.id === runningId && (
                           <span className="orbit-pulse absolute right-1.5 top-1.5 z-10 size-1.5 rounded-full bg-emerald-400" />
                         )}
@@ -337,10 +476,15 @@ export function LibraryView({
                       onClick={() => setFocusId(game.id)}
                       title={game.title}
                     >
-                      <Cover game={game} className="orbit-cover" style={{ width: 34, height: 45 }} loading="lazy" />
+                      <span className="relative block shrink-0">
+                        <Cover game={game} className="orbit-cover" style={{ width: 34, height: 45 }} loading="lazy" />
+                        {game.id === runningId && (
+                          <span className="orbit-pulse absolute -right-0.5 -top-0.5 z-10 size-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </span>
                       <div>
                         <b>{game.title}</b>
-                        <span>{fmtMinutes(game.playSecs / 60)}{game.id === runningId ? ' · playing' : ''}</span>
+                        <span>{fmtMinutes(game.playSecs / 60)}</span>
                       </div>
                     </button>
                   ))}
@@ -353,6 +497,8 @@ export function LibraryView({
             <GamePage
               key={focus.id}
               game={focus}
+              shape={shape}
+              sections={sections}
               running={focus.id === runningId}
               hasSession={session?.gameId === focus.id}
               onPlay={() => onPlay(focus)}
@@ -372,6 +518,27 @@ export function LibraryView({
         </div>
       )}
     </>
+  );
+}
+
+/** Four sketches, in the shapes covers come in. */
+function ShapeRow({ value, onChange }: { value: CoverShape; onChange: (next: CoverShape) => void }) {
+  return (
+    <div className="orbit-shapes" role="group" aria-label="Cover shape">
+      {COVER_SHAPES.map((shape) => (
+        <button
+          key={shape.value}
+          type="button"
+          className="orbit-shape"
+          aria-pressed={value === shape.value}
+          title={`Covers in ${shape.label}`}
+          onClick={() => onChange(shape.value)}
+        >
+          <span style={{ aspectRatio: shape.value.replace(':', ' / '), height: 22 }} />
+          {shape.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -400,6 +567,8 @@ function Blank({
  */
 function GamePage({
   game,
+  shape,
+  sections,
   running,
   hasSession,
   onPlay,
@@ -411,6 +580,8 @@ function GamePage({
   onDiscoverSteam,
 }: {
   game: Game;
+  shape: CoverShape;
+  sections: GameSection[];
   running: boolean;
   hasSession: boolean;
   onPlay: () => void;
@@ -425,7 +596,6 @@ function GamePage({
   const main = game.hltb?.main ?? 0;
   const hours = game.playSecs / 3600;
   const progress = main > 0 ? Math.min(100, Math.round((hours / main) * 100)) : null;
-  const status = running ? 'playing' : game.status;
   const rating = game.meta?.rating;
 
   const [hltbBusy, setHltbBusy] = useState(false);
@@ -480,28 +650,28 @@ function GamePage({
 
   return (
     <div className="orbit-gamepage">
-      <div
-        className="orbit-gamepage-art"
-        aria-hidden
-        style={
-          art
-            ? { backgroundImage: `url("${art}")` }
-            : {
-                backgroundImage: `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
-                backgroundSize: 'auto, auto',
-              }
-        }
-      />
-
       <div className="orbit-gamepage-hero">
-        <Cover game={game} className="orbit-gamepage-cover" loading="eager" />
+        <div
+          className="orbit-gamepage-art"
+          aria-hidden
+          style={
+            art
+              ? { backgroundImage: `url("${art}")` }
+              : {
+                  backgroundImage: `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
+                  backgroundSize: 'auto, auto',
+                }
+          }
+        />
+        <Cover
+          game={game}
+          className="orbit-gamepage-cover"
+          style={{ aspectRatio: shape.replace(':', ' / ') }}
+          loading="eager"
+        />
         <div className="min-w-0">
           <h1 className="orbit-gamepage-title">{game.title}</h1>
           <div className="orbit-gamepage-meta">
-            <span className="orbit-statepill" data-status={status}>
-              <i />
-              {status === 'playing' ? 'Playing' : status === 'completed' ? 'Completed' : status === 'dropped' ? 'Dropped' : 'Backlog'}
-            </span>
             {game.meta?.releaseYear ? <span>{game.meta.releaseYear}</span> : null}
             {game.meta?.developer ? <span>{game.meta.developer}</span> : null}
             {game.meta?.genres?.length ? <span>{game.meta.genres.slice(0, 3).join(' · ')}</span> : null}
@@ -568,19 +738,22 @@ function GamePage({
 
       <div className="orbit-gamepage-body">
         <div className="orbit-gamepage-main">
-          <section className="orbit-section">
-            <h2>Overview</h2>
-            <div className="orbit-section-body">
-              {game.meta?.summary ? (
-                <p className="max-w-[68ch] text-[13.5px] leading-relaxed text-fg/75">{game.meta.summary}</p>
-              ) : (
-                <p className="text-xs text-muted">
-                  No description yet. Orbit fetches one when the game is added; Edit can fill it in by hand.
-                </p>
-              )}
-            </div>
-          </section>
+          {sections.includes('overview') && (
+            <section className="orbit-section">
+              <h2>Overview</h2>
+              <div className="orbit-section-body">
+                {game.meta?.summary ? (
+                  <p className="max-w-[68ch] text-[13.5px] leading-relaxed text-fg/75">{game.meta.summary}</p>
+                ) : (
+                  <p className="text-xs text-muted">
+                    No description yet. Orbit fetches one when the game is added; Edit can fill it in by hand.
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
 
+          {sections.includes('gallery') && (
           <section className="orbit-section">
             <h2>
               <Images className="size-3.5" />
@@ -607,17 +780,20 @@ function GamePage({
               )}
             </div>
           </section>
+          )}
 
-          <section className="orbit-section">
-            <h2>Journal</h2>
-            <div className="orbit-section-body">
-              <GameLogView game={game} onNotes={(notes) => onUpdate({ notes })} />
-            </div>
-          </section>
+          {sections.includes('journal') && (
+            <section className="orbit-section">
+              <h2>Journal</h2>
+              <div className="orbit-section-body">
+                <GameLogView game={game} onNotes={(notes) => onUpdate({ notes })} />
+              </div>
+            </section>
+          )}
 
           {/* The achievements panel carries its own heading and progress.
               It reads the list from Steam the first time it is shown. */}
-          <AchievementsTab game={game} onUpdate={onUpdate} />
+          {sections.includes('achievements') && <AchievementsTab game={game} onUpdate={onUpdate} />}
         </div>
 
         <aside className="orbit-gamepage-side">
@@ -628,7 +804,6 @@ function GamePage({
               <Fact label="Released" value={game.meta?.releaseYear ? String(game.meta.releaseYear) : '—'} />
               <Fact label="Genres" value={game.meta?.genres?.length ? game.meta.genres.join(', ') : '—'} />
               <Fact label="Store rating" value={rating !== null && rating !== undefined ? `${rating}/100` : '—'} />
-              <Fact label="Status" value={status === 'playing' ? 'Playing' : status === 'completed' ? 'Completed' : status === 'dropped' ? 'Dropped' : 'Backlog'} />
               <Fact label="Sessions" value={String(game.sessionCount)} />
               <Fact label="Added" value={fmtDate(game.addedAt)} />
               <Fact label="Size" value={game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : '—'} />

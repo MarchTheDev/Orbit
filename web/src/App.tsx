@@ -16,7 +16,18 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, LauncherGame, OtherLauncher, Page, Settings, SortKey } from './types';
+import type {
+  CoverShape,
+  Game,
+  GameSection,
+  GridLabel,
+  LauncherGame,
+  OtherLauncher,
+  Page,
+  Settings,
+  ShelfSize,
+  SortKey,
+} from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { useGamepad } from './hooks/useGamepad';
@@ -124,6 +135,33 @@ function savedRail(): ShelfLayout {
   return localStorage.getItem('orbit.library.rail') === 'list' ? 'list' : 'covers';
 }
 
+function savedShelfSize(): ShelfSize {
+  const value = localStorage.getItem('orbit.library.shelf');
+  return value === 'small' || value === 'large' ? value : 'medium';
+}
+
+function savedShape(): CoverShape {
+  const value = localStorage.getItem('orbit.library.shape');
+  return value === '2:3' || value === '1:1' || value === '16:9' ? value : '3:4';
+}
+
+function savedGridLabel(): GridLabel {
+  const value = localStorage.getItem('orbit.library.label');
+  return value === 'nothing' || value === 'title' || value === 'info' ? value : 'title-info';
+}
+
+const ALL_SECTIONS: GameSection[] = ['overview', 'gallery', 'journal', 'achievements'];
+
+function savedSections(): GameSection[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem('orbit.library.sections') ?? 'null');
+    if (Array.isArray(value)) return ALL_SECTIONS.filter((section) => value.includes(section));
+  } catch {
+    // A damaged value is no reason to hide the page's sections.
+  }
+  return ALL_SECTIONS;
+}
+
 export default function App() {
   const {
     games,
@@ -172,6 +210,14 @@ export default function App() {
   const [mode, setMode] = useState<LibraryMode>(savedMode);
   /** How the Details shelf is drawn: artwork, or a compact list. */
   const [rail, setRail] = useState<ShelfLayout>(savedRail);
+  /** How wide the shelf's covers are drawn. */
+  const [shelfSize, setShelfSize] = useState<ShelfSize>(savedShelfSize);
+  /** The shape both views draw covers in. */
+  const [shape, setShape] = useState<CoverShape>(savedShape);
+  /** What sits under a grid cover. */
+  const [gridLabel, setGridLabel] = useState<GridLabel>(savedGridLabel);
+  /** The game page sections shown in Details. */
+  const [sections, setSections] = useState<GameSection[]>(savedSections);
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
@@ -237,6 +283,10 @@ export default function App() {
 
   useEffect(() => localStorage.setItem('orbit.library.mode', mode), [mode]);
   useEffect(() => localStorage.setItem('orbit.library.rail', rail), [rail]);
+  useEffect(() => localStorage.setItem('orbit.library.shelf', shelfSize), [shelfSize]);
+  useEffect(() => localStorage.setItem('orbit.library.shape', shape), [shape]);
+  useEffect(() => localStorage.setItem('orbit.library.label', gridLabel), [gridLabel]);
+  useEffect(() => localStorage.setItem('orbit.library.sections', JSON.stringify(sections)), [sections]);
   useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
   useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
@@ -1560,6 +1610,14 @@ export default function App() {
             setMode={setMode}
             rail={rail}
             setRail={setRail}
+            shelfSize={shelfSize}
+            setShelfSize={setShelfSize}
+            shape={shape}
+            setShape={setShape}
+            gridLabel={gridLabel}
+            setGridLabel={setGridLabel}
+            sections={sections}
+            setSections={setSections}
             runningId={runningGame?.id ?? null}
             session={session}
             onPlay={(game) => void startGame(game)}

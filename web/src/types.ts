@@ -281,6 +281,15 @@ export interface Game {
 export type ViewMode = 'focus' | 'grid' | 'list';
 export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | 'manual';
 
+/** What a cover reads under it in the Grid wall. */
+export type GridLabel = 'nothing' | 'title' | 'info' | 'title-info';
+/** The shape every cover is drawn in, shared by both library views. */
+export type CoverShape = '2:3' | '3:4' | '1:1' | '16:9';
+/** How wide the Details shelf is drawn. */
+export type ShelfSize = 'small' | 'medium' | 'large';
+/** The game page's sections, shown or hidden from the Details view options. */
+export type GameSection = 'overview' | 'gallery' | 'journal' | 'achievements';
+
 /** The top-level screens; Settings is reached from the menu. */
 export type Page = 'library' | 'statistics' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'saves' | 'settings';
 
