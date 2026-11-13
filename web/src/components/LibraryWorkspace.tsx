@@ -224,6 +224,7 @@ export function LibraryWorkspace({
           <Logo className="library-empty-logo" />
           <h2>{collection.length ? 'No games in this view' : 'Start your collection'}</h2>
           <p>{collection.length ? 'Try a different category or search.' : 'Add a game to build your library. Orbit keeps your games, activity, and notes together.'}</p>
+          {(filter !== 'all' || query) && <button type="button" className="library-reset-view-button" onClick={() => { setFilter('all'); setQuery(''); }}>Show all games</button>}
           <button type="button" onClick={onAdd} className="library-primary-button"><Plus size={16} /> Add a game</button>
         </div>
       </div>
@@ -240,6 +241,7 @@ export function LibraryWorkspace({
         <div className="library-search-center"><SearchField value={query} onChange={setQuery} placeholder="Search your games" className="library-search" inputClassName="w-full" /></div>
         <div className="library-command-actions">
           {activeGameTitle && <div className="library-running-session"><span /><b>{activeGameTitle}</b><small>{activeGameClock}</small><button type="button" onClick={onStop} aria-label="Stop current session"><Square size={12} fill="currentColor" /></button></div>}
+          {filter !== 'all' && <button type="button" onClick={() => setFilter('all')} className="library-active-filter" aria-label={`Clear ${labelFor(filter)} filter`} title="Show all games"><span className={`library-filter-dot filter-${filter}`} /><b>{labelFor(filter)}</b><small>{selectedCount}</small><X size={13} /></button>}
           <div className="library-filter-control">
             <button type="button" className={cn('library-toolbar-icon', filtersOpen && 'is-active')} onClick={() => setFiltersOpen((open) => !open)} aria-label="Filters and sorting" aria-expanded={filtersOpen}><SlidersHorizontal size={16} /></button>
             {filtersOpen && <div className="library-filter-popover">
@@ -258,13 +260,6 @@ export function LibraryWorkspace({
           <button type="button" onClick={onSettings} className="library-toolbar-icon" aria-label="Open settings" title="Settings"><SettingsIcon size={17} /></button>
           {showMusic && <MusicButton sound={settings.sound} onChange={onSoundChange} showBars={showMusicBars} onOpenSettings={onMusicSettings} />}
         </div>
-      </div>
-
-      <div className="library-filter-strip" aria-label="Library filters">
-        {filters.map(({ id }) => <button type="button" key={id} onClick={() => setFilter(id)} aria-pressed={filter === id} className={cn('library-filter-chip', filter === id && 'is-active')}>
-          <span className={`library-filter-dot filter-${id}`} />{labelFor(id)}<small>{counts[id] ?? 0}</small>
-        </button>)}
-        <button type="button" className="library-filter-chip library-add-chip" onClick={onAdd}><Plus size={13} /> Add a game</button>
       </div>
 
       {view === 'grid' ? (

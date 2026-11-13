@@ -583,15 +583,6 @@
 .library-commandbar { min-height: 54px; flex-basis: 54px; border-color: rgb(190 218 231 / 9%); padding-inline: 20px; background: rgb(11 16 22 / 89%); backdrop-filter: blur(18px); }
 .library-menu-button, .library-toolbar-icon { border-radius: 10px; }
 .library-search input { border-radius: 10px !important; }
-.library-filter-strip { display: flex; min-height: 48px; flex: 0 0 auto; align-items: center; gap: 6px; overflow-x: auto; border-bottom: 1px solid rgb(190 218 231 / 8%); padding: 0 20px; scrollbar-width: none; }
-.library-filter-strip::-webkit-scrollbar { display: none; }
-.library-filter-chip { display: inline-flex; min-height: 31px; flex: 0 0 auto; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: 9px; padding: 0 10px; background: transparent; color: #81909d; font-size: 10px; font-weight: 600; transition: 140ms ease; }
-.library-filter-chip:hover { color: #d5e0e5; background: rgb(255 255 255 / 4%); }
-.library-filter-chip.is-active { border-color: rgb(173 220 235 / 13%); background: rgb(144 202 222 / 10%); color: #e3f1f5; }
-.library-filter-chip small { border-radius: 5px; padding: 1px 5px; background: rgb(255 255 255 / 6%); color: #9fadb7; font-size: 9px; }
-.library-filter-chip .library-filter-dot { width: 6px; height: 6px; }
-.library-add-chip { margin-left: auto; border-color: rgb(190 218 231 / 12%); color: #b2c4ce; }
-.library-add-chip svg { color: #a6d7e5; }
 .library-focus-scroll { width: 100%; height: auto; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 21px 20px 28px; }
 .library-design-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin: 0 auto 18px; width: min(100%, 1600px); }
 .library-design-heading > div:first-child > p { margin: 0 0 5px; color: #82909b; font-size: 9px; font-weight: 700; letter-spacing: .12em; }
@@ -650,8 +641,6 @@
 }
 @media (max-width: 760px) {
   .library-commandbar { min-height: 48px; flex-basis: 48px; padding-inline: 8px; }
-  .library-filter-strip { min-height: 42px; padding-inline: 9px; }
-  .library-add-chip { margin-left: 0; }
   .library-focus-scroll { height: auto; overflow: auto; padding: 15px 10px 22px; }
   .library-design-heading { align-items: flex-start; }
   .library-design-stats { gap: 12px; }
@@ -714,7 +703,6 @@
 .library-command-actions > .relative { display: flex; align-items: center; }
 .library-command-actions > .relative > button { border-radius: 9px; padding: 8px; color: #a8b6bf; }
 .library-command-actions > .relative > button:hover { background: rgb(255 255 255 / 5%); color: #e8f0f3; }
-.library-filter-strip { background: transparent; }
 .orbit-pagebar { min-height: 76px; border: 0; padding: 10px 24px; background: transparent; }
 .orbit-pagebar .orbit-page-menu { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid rgb(190 218 231 / 10%); border-radius: 10px; background: rgb(255 255 255 / 2%); color: #9daeb8; }
 .orbit-pagebar .orbit-page-menu:hover { background: rgb(255 255 255 / 5%); color: #e8f0f3; }
@@ -736,7 +724,6 @@
   .library-command-actions { gap: 1px; }
   .library-command-actions .library-view-switch { display: none; }
   .library-command-actions > .library-toolbar-icon { width: 29px; }
-  .library-filter-strip { min-height: 38px; padding-inline: 8px; }
   .orbit-pagebar { min-height: 64px; padding: 7px 9px; }
   .orbit-pagebar h1 { font-size: 16px; }
   .orbit-page-kicker { display: none; }
@@ -744,3 +731,10 @@
   .orbit-topbar-music > div > button { padding: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { .orbit-menu-panel.is-open { animation: none; } }
+.library-reset-view-button { border: 1px solid rgb(155 216 233 / 18%); border-radius: 8px; padding: 7px 11px; background: rgb(144 202 222 / 9%); color: #c8e4ed; font-size: 10px; font-weight: 650; }
+.library-reset-view-button:hover { background: rgb(144 202 222 / 15%); }
+@media (max-width: 560px) {
+  .library-command-actions .library-active-filter { display: flex; max-width: 96px; min-height: 28px; gap: 4px; padding: 0 6px; }
+  .library-command-actions .library-active-filter b { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .library-command-actions .library-active-filter small { display: none; }
+}

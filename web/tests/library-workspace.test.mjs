@@ -26,5 +26,7 @@ check('the library provides Focus and cover Grid views with manual ordering', wo
 check('the screenshot strip shows this game’s Orbit captures and journal entries', workspace.includes('listGameLogs(selected.id)') && workspace.includes('overlayGallery()') && workspace.includes('gameCaptures.slice(0, 4)'));
 check('Grid uses the full available width and reduces each tile to cover plus playtime', styles.includes('.orbit-library-shell') && styles.includes('.library-grid-page > .grid > div > p:first-of-type') && styles.includes('.library-grid-caption'));
 check('responsive Focus and Grid layouts adapt to narrow windows', styles.includes('.library-focus-layout') && styles.includes('@media (max-width: 560px)'));
+check('category shortcuts are removed from the top of the Library', !workspace.includes('className="library-filter-strip"'));
+check('an empty filtered result can reset filters and search back to all games', workspace.includes('Show all games') && workspace.includes("setFilter('all'); setQuery('')"));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;
