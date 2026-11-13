@@ -1,7 +1,8 @@
-import { ArrowDownUp, Eye, EyeOff, Plus, Rows3 } from 'lucide-react';
+import { ArrowDownUp, Eye, EyeOff, LayoutGrid, List, Orbit, Plus, Rows3 } from 'lucide-react';
 import type { LibraryFilter, SortKey, ViewMode } from '../types';
 import { SearchField } from './ui/SearchField';
 import { Select } from './ui/Select';
+import { cn } from '../utils/cn';
 
 /** The status chips above the library. */
 export type Filter = LibraryFilter;
@@ -15,6 +16,7 @@ interface Props {
   query: string;
   setQuery: (q: string) => void;
   view: ViewMode;
+  setView: (v: ViewMode) => void;
   sort: SortKey;
   setSort: (s: SortKey) => void;
   onAdd: () => void;
@@ -28,7 +30,7 @@ interface Props {
 }
 
 export const LIBRARY_FILTERS: FilterDefinition[] = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'All games' },
   { id: 'playing', label: 'Playing' },
   { id: 'completed', label: 'Completed' },
   { id: 'dropped', label: 'Dropped' },
@@ -57,13 +59,13 @@ export function orderedLibraryFilters(order?: Filter[]): FilterDefinition[] {
 }
 
 export function Toolbar({
-  count,
   total,
   filter,
   setFilter,
   query,
   setQuery,
   view,
+  setView,
   sort,
   setSort,
   onAdd,
@@ -79,95 +81,112 @@ export function Toolbar({
   const categories = visibleFilters.length > 0 ? visibleFilters : [LIBRARY_FILTERS[0]];
 
   return (
-    <div className="relative z-10 mt-6 space-y-3 px-4 sm:px-6 xl:px-7">
-      <div className="flex flex-wrap items-center gap-2.5">
-        <h2 className="mr-auto flex items-baseline gap-2.5">
-          <span className="orbit-kicker">Browse</span>
-          <span className="orbit-num text-xs text-muted">
-            {count}
-            {count !== total && <span className="text-muted/60"> / {total}</span>}
-          </span>
-        </h2>
+    <div className="relative z-10 mb-3.5 mt-1 space-y-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
+        {/* The filter row reads left to right the way the design drew it, and
+            scrolls rather than wrapping onto a second line when the window is
+            narrow. */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto" role="group" aria-label="Library filters">
+          {categories.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              aria-pressed={filter === f.id}
+              className={cn('chip shrink-0', filter === f.id && 'is-active')}
+            >
+              {f.label}
+              {f.id === 'all' && <span className="orbit-num rounded-md bg-black/15 px-1.5 py-px text-[9.5px]">{total}</span>}
+            </button>
+          ))}
+          {sort === 'manual' && view !== 'focus' && (
+            <span className="ml-2 flex shrink-0 items-center gap-1.5 text-[11px] text-muted">
+              <ArrowDownUp className="size-3.5" />
+              Drag a game to move it in your order
+            </span>
+          )}
+        </div>
 
-        {/* The bar's search opens the palette; Focus has no second field. In the
-            grid and the list this one filters the visible games as you type. */}
-        {view !== 'focus' && <SearchField value={query} onChange={setQuery} placeholder="Search games" />}
+        <div className="flex items-center gap-2">
+          {/* The bar's search opens the palette; Focus has no second field. In
+              the grid and the list this one filters the visible games as you type. */}
+          {view !== 'focus' && <SearchField value={query} onChange={setQuery} placeholder="Search games" />}
 
-        {view !== 'focus' && (
+          <div className="orbit-segmented" role="group" aria-label="How the library is drawn">
+            {(
+              [
+                ['focus', Orbit, 'Focus'],
+                ['grid', LayoutGrid, 'Grid'],
+                ['list', List, 'List'],
+              ] as const
+            ).map(([mode, Icon, label]) => (
+              <button
+                key={mode}
+                onClick={() => setView(mode)}
+                title={label}
+                aria-label={label}
+                aria-pressed={view === mode}
+              >
+                <Icon className="size-4" strokeWidth={1.8} />
+              </button>
+            ))}
+          </div>
+
+          {view !== 'focus' && (
+            <button
+              onClick={onToggleHero}
+              aria-pressed={showHero}
+              title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
+              className="orbit-square-btn !h-9 !w-9"
+            >
+              {showHero ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          )}
+
+          <Select
+            value={sort}
+            onChange={setSort}
+            className="!rounded-[10px] !px-3 !py-2 text-xs"
+            ariaLabel="How the library is ordered"
+            options={[
+              { value: 'title', label: 'A-Z' },
+              { value: 'lastPlayed', label: 'Last played' },
+              { value: 'playtime', label: 'Playtime' },
+              { value: 'added', label: 'Recently added' },
+              { value: 'size', label: 'Size' },
+              { value: 'manual', label: 'My order (drag to arrange)' },
+            ]}
+          />
+
+          {/* How big the covers are drawn. Focus sizes its own stage, so the
+             control only appears where the covers are actually in a grid. */}
+          {view !== 'focus' && (
+            <label
+              className="flex items-center gap-2.5 rounded-[10px] border border-line py-1.5 pl-3 pr-3.5 text-muted"
+              title="Cover size"
+            >
+              <Rows3 className="size-4" />
+              <input
+                type="range"
+                min={70}
+                max={170}
+                step={5}
+                value={scale}
+                onChange={(e) => setScale(Number(e.target.value))}
+                className="orbit-range w-20 cursor-pointer"
+                aria-label="Cover size"
+              />
+            </label>
+          )}
+
           <button
-            onClick={onToggleHero}
-            aria-pressed={showHero}
-            title={showHero ? 'Hide Jump back in panel' : 'Show Jump back in panel'}
-            className="flex items-center gap-2 rounded-xl border border-line px-3.5 py-2 text-xs font-medium text-muted transition hover:text-fg"
+            onClick={onAdd}
+            className="orbit-square-btn !h-9 !w-9"
+            title="Add game"
+            aria-label="Add game"
           >
-            {showHero ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            <span className="hidden xl:inline">{showHero ? 'Hide' : 'Show'} Jump back in</span>
+            <Plus className="size-[18px]" strokeWidth={1.9} />
           </button>
-        )}
-
-        <Select
-          value={sort}
-          onChange={setSort}
-          className="!rounded-xl !px-3.5 !py-2 text-sm"
-          ariaLabel="How the library is ordered"
-          options={[
-            { value: 'title', label: 'A-Z' },
-            { value: 'lastPlayed', label: 'Last played' },
-            { value: 'playtime', label: 'Playtime' },
-            { value: 'added', label: 'Recently added' },
-            { value: 'size', label: 'Size' },
-            { value: 'manual', label: 'My order (drag to arrange)' },
-          ]}
-        />
-
-        {/* How big the covers are drawn. Focus sizes its own stage, so the
-            control only appears where the covers are actually in a grid. */}
-        {view !== 'focus' && (
-          <label
-            className="flex items-center gap-2.5 rounded-xl border border-line py-1.5 pl-3.5 pr-4 text-muted"
-            title="Cover size"
-          >
-            <Rows3 className="size-4" />
-            <input
-              type="range"
-              min={70}
-              max={170}
-              step={5}
-              value={scale}
-              onChange={(e) => setScale(Number(e.target.value))}
-              className="orbit-range w-20 cursor-pointer"
-              aria-label="Cover size"
-            />
-          </label>
-        )}
-
-        <button
-          onClick={onAdd}
-          className="btn-accent grid size-9 place-items-center"
-          title="Add game"
-          aria-label="Add game"
-        >
-          <Plus className="size-5" />
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {categories.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            aria-pressed={filter === f.id}
-            className="chip"
-          >
-            {f.label}
-          </button>
-        ))}
-        {sort === 'manual' && view !== 'focus' && (
-          <span className="ml-2 flex items-center gap-1.5 text-[11px] text-muted">
-            <ArrowDownUp className="size-3.5" />
-            Drag a game to move it in your order
-          </span>
-        )}
+        </div>
       </div>
     </div>
   );

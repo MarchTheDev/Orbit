@@ -56,6 +56,7 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { WorkspaceBar } from './components/WorkspaceBar';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
@@ -87,7 +88,7 @@ import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
+import { inLibraryShelf, libraryCount, onBacklogPage, onDisk, onJournalPage } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -187,6 +188,8 @@ export default function App() {
   const [booted, setBooted] = useState(false);
   /** Ctrl K: one field over every page, game and action. */
   const [palette, setPalette] = useState(false);
+  /** Below its breakpoint the sidebar waits off screen for the menu button. */
+  const [navOpen, setNavOpen] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
   const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
   const settingsJumpToken = useRef(0);
@@ -926,6 +929,7 @@ export default function App() {
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
+    setNavOpen(false);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
@@ -1084,6 +1088,17 @@ export default function App() {
   // The drawer draws its own live clock, so it gets the stored numbers rather
   // than these, and nothing is counted twice.
   const runningGame = played.find((g) => g.id === session?.gameId) ?? null;
+
+  // The numbers the sidebar's profile card and the library heading read:
+  // the shelf itself, the Backlog's waiting entries, and everything played.
+  const libraryTotal = libraryCount(games);
+  const backlogTotal = games.filter(
+    (g) =>
+      g.planned ||
+      onBacklogPage(g, settings?.syncBacklog === true, settings?.backlogOn ?? [], settings?.backlogOff ?? []) ||
+      (inLibraryShelf(g) && g.status === 'backlog'),
+  ).length;
+  const totalPlaySecs = played.reduce((sum, g) => sum + g.playSecs, 0);
 
   const startGame = async (g: Game) => {
     if (session?.gameId === g.id) return;
@@ -1407,7 +1422,7 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
-      <div className="min-h-full">
+      <div className="orbit-shell">
       <TopNav
         page={page}
         setPage={(next) => {
@@ -1415,15 +1430,25 @@ export default function App() {
           setPage(next);
         }}
         order={settings.tabOrder}
-        view={view}
-        setView={setView}
-        onOpenPalette={() => setPalette(true)}
+        gamesCount={libraryTotal}
+        backlogCount={backlogTotal}
+        totalSecs={totalPlaySecs}
         onOpenSettings={openSettings}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
         showBars={settings.musicBars !== false}
         onTv={enterTv}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+      />
+
+      <div className="orbit-work">
+      <WorkspaceBar
+        onMenu={() => setNavOpen(true)}
+        onOpenPalette={() => setPalette(true)}
+        runningTitle={runningGame?.title ?? null}
+        onAdd={() => setShowAdd(true)}
       />
 
       {dragOver && !showAdd && (
@@ -1436,7 +1461,7 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-tab-enter pb-24">
+      <main key={page} className="orbit-tab-enter min-w-0 flex-1 pb-24">
         {!settings ? null : showThemeManager ? (
           <ThemeManagerPage
             settings={settings}
@@ -1520,6 +1545,23 @@ export default function App() {
           <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
+            <header className="orbit-page-head">
+              <div>
+                <p className="orbit-eyebrow">Welcome back</p>
+                <h1 className="orbit-page-title">Library</h1>
+              </div>
+              <div className="orbit-head-meta">
+                <div>
+                  <strong>{Math.round(totalPlaySecs / 3600)}h</strong>
+                  <span>total playtime</span>
+                </div>
+                <div>
+                  <strong>{libraryTotal}</strong>
+                  <span>games tracked</span>
+                </div>
+              </div>
+            </header>
+
             {showHome && view !== 'focus' && settings.showHero !== false && heroGame && (
               <Hero
                 game={heroGame}
@@ -1536,6 +1578,7 @@ export default function App() {
               query={query}
               setQuery={setQuery}
               view={view}
+              setView={setView}
               sort={sort}
               setSort={setSort}
               onAdd={() => setShowAdd(true)}
@@ -1548,11 +1591,23 @@ export default function App() {
             />
             <div>
               {!ready ? null : visible.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted">
-                  <Logo className="size-16 opacity-50" />
-                  <p>{games.length === 0 ? 'Nothing in this orbit yet.' : 'Nothing matches that.'}</p>
-                  {games.length === 0 && (
-                    <p className="text-xs">Drop a game program on the window, or use Add game.</p>
+                <div className="orbit-empty">
+                  <Logo className="mb-1 size-12 opacity-60" />
+                  <h2>{games.length === 0 ? 'Nothing in this orbit yet' : 'No games found'}</h2>
+                  <p>
+                    {games.length === 0
+                      ? 'Drop a game program on the window, or use Add game.'
+                      : 'Try another title or clear the current filter.'}
+                  </p>
+                  {games.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setQuery('');
+                        setFilter('all');
+                      }}
+                    >
+                      Clear search
+                    </button>
                   )}
                 </div>
               ) : view === 'focus' ? (
@@ -1565,6 +1620,7 @@ export default function App() {
                   onDetails={setSelectedId}
                   onEdit={openGameEditor}
                   onToggleFavorite={toggleFavorite}
+                  onDiscoverSteam={() => setShowSteam(true)}
                 />
               ) : view === 'grid' ? (
                 <GameGrid
@@ -1594,6 +1650,7 @@ export default function App() {
           </>
         )}
       </main>
+      </div>
       </div>
 
       {session && runningGame && (
