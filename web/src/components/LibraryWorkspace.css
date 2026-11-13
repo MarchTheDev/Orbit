@@ -453,6 +453,21 @@
 .library-achievement-row small { overflow: hidden; color: #a2ada8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .library-achievements > button { margin-top: 5px; border: 0; background: transparent; color: #aeb8b4; font-size: 8px; }
 
+/* The other Orbit pages keep their functions while sharing Heronite's single-window navigation frame. */
+.orbit-app-frame:not(.orbit-library-shell) { grid-template-columns: minmax(0,1fr); grid-template-rows: 76px minmax(0,1fr); grid-template-areas: "header" "content"; }
+.orbit-app-frame:not(.orbit-library-shell) > .orbit-sidebar { display: none; }
+.orbit-app-frame:not(.orbit-library-shell) > .orbit-sidebar.is-open { position: absolute; z-index: 61; inset: 0 auto 0 0; display: flex; width: 248px; height: 100%; box-shadow: 10px 0 32px rgb(0 0 0 / 42%); }
+.orbit-app-frame:not(.orbit-library-shell) > .orbit-nav-scrim { position: absolute; z-index: 60; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(0 0 0 / 58%); }
+.orbit-app-frame:not(.orbit-library-shell) > .orbit-pagebar { min-width: 0; justify-content: flex-start; gap: 13px; border-bottom: 1px solid rgb(235 242 239 / 9%); padding: 8px 18px; background: rgb(13 17 16 / 92%); }
+.orbit-page-menu { display: grid; width: 31px; height: 31px; flex: 0 0 auto; place-items: center; border: 1px solid transparent; border-radius: 50%; background: transparent; color: #aeb8b4; }
+.orbit-page-menu:hover { border-color: rgb(235 242 239 / 12%); background: rgb(240 245 242 / 8%); color: #f0f3f1; }
+.orbit-app-frame:not(.orbit-library-shell) > .orbit-main-scroll { min-width: 0; background: transparent; }
+@media (max-width: 760px) {
+  .orbit-app-frame:not(.orbit-library-shell) { grid-template-rows: 68px minmax(0,1fr); }
+  .orbit-app-frame:not(.orbit-library-shell) > .orbit-pagebar { padding: 7px 10px; }
+  .orbit-app-frame:not(.orbit-library-shell) > .orbit-sidebar.is-open { width: min(248px,82vw); }
+}
+
 /* Grid: full cover shelf with the selected game's overlapping quick-actions drawer. */
 .library-grid-caption { display: flex; min-height: 36px; flex: 0 0 36px; align-items: center; gap: 7px; padding: 0 13px; color: #e8eeeb; font-size: 10px; }
 .library-grid-caption small { color: #a4afaa; font-size: 8px; }

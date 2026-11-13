@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Info,
   LoaderCircle,
+  Menu,
   MoveRight,
   Pencil,
   Play,
@@ -1415,6 +1416,7 @@ export default function App() {
         onTv={enterTv}
       />
       <header className="orbit-pagebar">
+        <button type="button" className="orbit-page-menu" onClick={() => setNavOpen(true)} aria-label="Open Orbit navigation"><Menu size={18} /></button>
         <div className="orbit-page-heading">
           <p className="orbit-page-kicker">{pageMeta.category}</p>
           <h1>{pageMeta.title}</h1>

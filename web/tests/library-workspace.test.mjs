@@ -18,7 +18,7 @@ function check(name, ok) {
 }
 
 check('the app mounts the new Library workspace', app.includes("import { LibraryWorkspace } from './components/LibraryWorkspace'") && app.includes('<LibraryWorkspace'));
-check('Library fills the window and keeps navigation available in the hamburger drawer', app.includes('orbit-library-shell') && app.includes('onMenu={() => setNavOpen(true)}') && app.includes('drawerOpen={navOpen}'));
+check('the Heronite-style window uses one hamburger navigation drawer across Orbit pages', app.includes('orbit-library-shell') && app.includes('onMenu={() => setNavOpen(true)}') && app.includes('className="orbit-page-menu"') && app.includes('drawerOpen={navOpen}') && styles.includes('.orbit-app-frame:not(.orbit-library-shell)'));
 check('selecting a title updates the focus panel and the Grid drawer', workspace.includes('onClick={() => onSelect(game.id)}') && workspace.includes('onSelect={selectGame}'));
 check('Focus follows Heronite’s grouped shelf, cover/actions, screenshots, overview, timeline, and details columns',
   ['library-game-browser', 'library-focus-game', 'library-journal-section', 'library-overview-card', 'library-timeline-section', 'library-focus-details'].every((name) => workspace.includes(name)));
