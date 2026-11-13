@@ -145,6 +145,8 @@ export default function App() {
   // Keep the rest of Orbit available and leave the overlay settings untouched.
   const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [page]);
   /** TV mode: the library fullscreen, read from a couch. */
   const [tv, setTv] = useState(false);
 
@@ -167,7 +169,7 @@ export default function App() {
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
+  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'list');
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -1392,7 +1394,7 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}orbit-app-frame relative h-full overflow-hidden text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-app-frame relative h-full overflow-hidden text-fg${focused ? '' : ' orbit-idle'}${page === 'library' ? ' orbit-library-shell' : ''}`
         }
       >
       <TopNav
@@ -1402,6 +1404,8 @@ export default function App() {
           setPage(next);
         }}
         onOpenSettings={openSettings}
+        drawerOpen={navOpen}
+        onClose={() => setNavOpen(false)}
         order={settings?.tabOrder}
         counts={navCounts}
         sound={settings.sound}
@@ -1549,8 +1553,12 @@ export default function App() {
                 onStop={() => void stop()}
                 onAdd={() => setShowAdd(true)}
                 onUpdate={(id, patch) => updateGame(id, patch)}
+                onMenu={() => setNavOpen(true)}
+                onRefresh={() => void reload()}
+                onSettings={() => openSettings()}
+                activeGameTitle={session && runningGame ? runningGame.title : null}
+                activeGameClock={session ? fmtClock(Math.floor((now - session.startedAtMs) / 1000)) : null}
                 runningId={runningGame?.id ?? null}
-                showArtwork={settings.showHero !== false}
                 onReorder={sort === 'manual' ? reorder : undefined}
               />
             )}

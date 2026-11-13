@@ -57,6 +57,8 @@ export function TopNav({
   showBars,
   onOpenSettings,
   onTv,
+  drawerOpen = false,
+  onClose = () => {},
 }: {
   page: Page;
   setPage: (page: Page) => void;
@@ -68,6 +70,8 @@ export function TopNav({
   showMusic: boolean;
   showBars: boolean;
   onTv: () => void;
+  drawerOpen?: boolean;
+  onClose?: () => void;
 }) {
   const tabs = useMemo(() => orderedTabs(order), [order]);
   const sections = useMemo(() => {
@@ -82,7 +86,9 @@ export function TopNav({
   }, [tabs]);
 
   return (
-    <aside className="orbit-sidebar" aria-label="Orbit navigation">
+    <>
+      {drawerOpen && <button type="button" className="orbit-nav-scrim" aria-label="Close Orbit navigation" onClick={onClose} />}
+      <aside className={`orbit-sidebar${drawerOpen ? ' is-open' : ''}`} aria-label="Orbit navigation">
       <button
         type="button"
         onClick={() => setPage('library')}
@@ -148,6 +154,7 @@ export function TopNav({
           <span>Settings</span>
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

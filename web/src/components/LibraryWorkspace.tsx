@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Clock3, Disc3, Grid2X2, Images, Info, Pencil, Play, Plus, Star, Square } from 'lucide-react';
-import type { Game, GameLog, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
-import { fmtDate, fmtMinutes } from '../utils/format';
+import { BookOpen, ChevronDown, Clock3, Disc3, Grid2X2, Images, Info, Menu, Pencil, Play, Plus, RefreshCw, Settings as SettingsIcon, SlidersHorizontal, Star, Square, X } from 'lucide-react';
+import type { Game, GameLog, GameStatus, LibraryFilter, Session, Settings, SortKey, ViewMode } from '../types';
+import { fmtMinutes } from '../utils/format';
 import { driveLabel } from '../utils/drive';
 import { listGameLogs, listSessions, overlayGallery, type GalleryItem } from '../services/native';
 import { fileSrc } from '../services/desktop';
@@ -11,6 +11,7 @@ import { SearchField } from './ui/SearchField';
 import { Select } from './ui/Select';
 import { Cover } from './ui/Cover';
 import { GameGrid } from './GameGrid';
+import { Logo } from './ui/Logo';
 import './LibraryWorkspace.css';
 
 interface Props {
@@ -36,8 +37,12 @@ interface Props {
   onStop: () => void;
   onAdd: () => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
+  onMenu: () => void;
+  onRefresh: () => void;
+  onSettings: () => void;
+  activeGameTitle: string | null;
+  activeGameClock: string | null;
   runningId: string | null;
-  showArtwork: boolean;
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
@@ -50,8 +55,15 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'manual', label: 'Custom order' },
 ];
 
+const STATUS_OPTIONS: { value: GameStatus; label: string }[] = [
+  { value: 'backlog', label: 'Planned' },
+  { value: 'playing', label: 'Playing' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'dropped', label: 'Dropped' },
+];
+
 function labelFor(filter: LibraryFilter): string {
-  return filter === 'all' ? 'Everything' : filter === 'favorites' ? 'Favorites' : filter === 'unplayed' ? 'Not played' : filter === 'hidden' ? 'Hidden' : filter[0].toUpperCase() + filter.slice(1);
+  return filter === 'all' ? 'All games' : filter === 'favorites' ? 'Favorites' : filter === 'unplayed' ? 'Unplayed' : filter === 'hidden' ? 'Hidden' : filter[0].toUpperCase() + filter.slice(1);
 }
 
 function sourceLabel(game: Game): string {
@@ -61,6 +73,15 @@ function sourceLabel(game: Game): string {
   if (game.launch.kind === 'executable') return 'Local executable';
   if (game.installDir) return 'Local install';
   return 'Manual tracking';
+}
+
+function shortDay(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function dayKey(unixSeconds: number): string {
+  const date = new Date(unixSeconds * 1000);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
 export function LibraryWorkspace({
@@ -86,6 +107,11 @@ export function LibraryWorkspace({
   onStop,
   onAdd,
   onUpdate,
+  onMenu,
+  onRefresh,
+  onSettings,
+  activeGameTitle,
+  activeGameClock,
   runningId,
   onReorder,
 }: Props) {
@@ -106,21 +132,23 @@ export function LibraryWorkspace({
     return result;
   }, [collection, filters]);
   const selected = games.find((game) => game.id === selectedId) ?? games[0] ?? null;
-  const [recentSessions, setRecentSessions] = useState<Session[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<Session[]>([]);
   const [gameLogs, setGameLogs] = useState<GameLog[]>([]);
   const [gameCaptures, setGameCaptures] = useState<GalleryItem[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<'timeline' | 'journal'>('timeline');
   const playing = selected ? runningId === selected.id : false;
 
   useEffect(() => {
     if (!selected) {
-      setRecentSessions([]);
+      setSessionHistory([]);
       return;
     }
     let current = true;
-    void listSessions(3, 0, selected.id).then((rows) => {
-      if (current) setRecentSessions(rows);
+    void listSessions(30, 0, selected.id).then((rows) => {
+      if (current) setSessionHistory(rows);
     }).catch(() => {
-      if (current) setRecentSessions([]);
+      if (current) setSessionHistory([]);
     });
     return () => { current = false; };
   }, [selected?.id, selected?.sessionCount]);
@@ -137,14 +165,30 @@ export function LibraryWorkspace({
       if (current) setGameCaptures(items.filter((item) => item.kind === 'screenshot' && comparable(item.game) === title));
     }).catch(() => { if (current) setGameCaptures([]); });
     return () => { current = false; };
-  }, [selected?.id, selected?.meta?.steamAppId]);
+  }, [selected?.id]);
+
+  const sessionGroups = useMemo(() => {
+    const groups = new Map<string, { startedAt: number; sessions: Session[]; duration: number }>();
+    for (const session of sessionHistory) {
+      const key = dayKey(session.startedAt);
+      const group = groups.get(key) ?? { startedAt: session.startedAt, sessions: [], duration: 0 };
+      group.sessions.push(session);
+      group.duration += session.durationSecs;
+      group.startedAt = Math.max(group.startedAt, session.startedAt);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  }, [sessionHistory]);
+  const journalCount = gameLogs.length;
+  const galleryCount = gameCaptures.length;
+  const selectedCount = counts[filter] ?? 0;
 
   if (!selected) {
     return (
       <div className="library-workspace library-empty-state">
         <div className="library-empty-card">
           <span className="library-empty-icon"><Disc3 size={22} /></span>
-          <p className="library-eyebrow">YOUR COLLECTION</p>
+          <Logo className="library-empty-logo" />
           <h2>{collection.length ? 'No games in this view' : 'Start your collection'}</h2>
           <p>{collection.length ? 'Try a different category or search.' : 'Add a game to build your library. Orbit keeps your games, activity, and notes together.'}</p>
           <button type="button" onClick={onAdd} className="library-primary-button"><Plus size={16} /> Add a game</button>
@@ -154,71 +198,113 @@ export function LibraryWorkspace({
   }
 
   return (
-    <div className="library-workspace">
+    <div className={`library-workspace${view === 'grid' ? ' is-grid-view' : ' is-focus-view'}`}>
       <div className="library-commandbar">
-        <div className="library-command-title">
-          <p className="library-eyebrow">COLLECTION</p>
-          <h2>Library <span>{collection.length}</span></h2>
+        <div className="library-command-leading">
+          <button type="button" className="library-menu-button" onClick={onMenu} aria-label="Open Orbit navigation"><Menu size={19} /></button>
+          <SearchField value={query} onChange={setQuery} placeholder="Search games" className="library-search" inputClassName="w-full" />
+          <div className="library-filter-control">
+            <button type="button" className={cn('library-toolbar-icon', filtersOpen && 'is-active')} onClick={() => setFiltersOpen((open) => !open)} aria-label="Filters and sorting" aria-expanded={filtersOpen}><SlidersHorizontal size={16} /></button>
+            {filtersOpen && <div className="library-filter-popover">
+              <div className="library-popover-heading"><b>Filter library</b><button type="button" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={15} /></button></div>
+              <div className="library-popover-filters">{filters.map(({ id }) => <button type="button" key={id} onClick={() => { setFilter(id); setFiltersOpen(false); }} aria-pressed={filter === id} className={cn('library-filter-choice', filter === id && 'is-active')}><span className={`library-filter-dot filter-${id}`} />{labelFor(id)}<small>{counts[id] ?? 0}</small></button>)}</div>
+              <div className="library-popover-sort"><span>Sort by</span><Select value={sort} onChange={setSort} ariaLabel="Sort games" options={SORT_OPTIONS} className="library-sort" /></div>
+              <label className="library-popover-size">Cover size <input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} aria-label="Cover size" /></label>
+              <button type="button" className="library-add-from-filter" onClick={() => { setFiltersOpen(false); onAdd(); }}><Plus size={14} />Add a game</button>
+            </div>}
+          </div>
+          <button type="button" onClick={() => setFilter('all')} className="library-active-filter" aria-label={`${labelFor(filter)} filter, clear filter`}>
+            <span className={`library-filter-dot filter-${filter}`} /><b>{labelFor(filter)}</b><small>{selectedCount}</small><X size={13} />
+          </button>
         </div>
         <div className="library-command-actions">
-          <SearchField value={query} onChange={setQuery} placeholder="Find a game" className="library-search" inputClassName="w-full" />
-          <Select value={sort} onChange={setSort} ariaLabel="Sort games" options={SORT_OPTIONS} className="library-sort" />
+          {activeGameTitle && <div className="library-running-session"><span /><b>{activeGameTitle}</b><small>{activeGameClock}</small><button type="button" onClick={onStop} aria-label="Stop current session"><Square size={12} fill="currentColor" /></button></div>}
           <div className="library-view-switch" role="group" aria-label="Collection layout">
-            <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>Focus</button>
-            <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={14} /> Grid</button>
+            <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}><span className="view-focus-glyph" />Focus</button>
+            <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={14} />Grid</button>
           </div>
-          <button type="button" onClick={onAdd} className="library-primary-button"><Plus size={16} /><span>Add game</span></button>
+          <button type="button" onClick={onRefresh} className="library-toolbar-icon" aria-label="Refresh library" title="Refresh library"><RefreshCw size={16} /></button>
+          <button type="button" onClick={onSettings} className="library-toolbar-icon" aria-label="Open settings" title="Settings"><SettingsIcon size={17} /></button>
         </div>
-      </div>
-
-      <div className={`library-browser-filters${view === 'grid' ? ' grid-mode' : ''}`} aria-label="Library filters">
-        {filters.map(({ id }) => (
-          <button type="button" key={id} onClick={() => setFilter(id)} aria-pressed={filter === id} className={cn('library-filter-option', filter === id && 'is-active')}>
-            <span className={`library-filter-dot filter-${id}`} />{labelFor(id)}<small>{counts[id] ?? 0}</small>
-          </button>
-        ))}
       </div>
 
       {view === 'grid' ? (
-        <section className="library-grid-page" aria-label="Game collection">
-          <div className="library-grid-heading"><div><p className="library-eyebrow">YOUR COLLECTION</p><h1>{labelFor(filter)} <span>{games.length}</span></h1></div><label className="library-size-control">Cover size<input type="range" min={70} max={150} step={5} value={scale} onChange={(event) => setScale(Number(event.target.value))} aria-label="Cover size" /></label></div>
-          {!games.length ? <p className="library-no-results">Nothing in this category matches the current search.</p> : <GameGrid games={games} selectedId={selected.id} onSelect={onSelect} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} />}
-        </section>
+        <>
+          <div className="library-grid-caption"><span className={`library-filter-dot filter-${filter}`} /><b>{labelFor(filter)}</b><small>{games.length}</small></div>
+          <section className="library-grid-page" aria-label="Game collection">
+            {!games.length ? <p className="library-no-results">Nothing in this category matches the current search.</p> : <GameGrid games={games} selectedId={selected.id} onSelect={onSelect} onEdit={onEdit} onToggleFavorite={onToggleFavorite} onPlay={onPlay} scale={scale} onReorder={sort === 'manual' ? onReorder : undefined} coverTint={settings.coverTint !== false} />}
+          </section>
+        </>
       ) : (
-        <div className="library-focus-layout">
-          <aside className="library-focus-game">
-            <div className="library-focus-cover"><Cover game={selected} className="size-full" fit="contain" loading="eager" /></div>
-            <div className="library-focus-playtime"><Clock3 size={14} /><span>{fmtMinutes(selected.playSecs / 60)} played</span></div>
-            <div className="library-profile-actions">
-              <button type="button" onClick={playing ? onStop : () => onPlay(selected)} className="library-primary-button library-play-button">{playing ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}{playing ? 'Stop session' : selected.planned ? 'Start timer' : 'Play'}</button>
-              <button type="button" onClick={() => onToggleFavorite(selected.id)} className={cn('library-icon-action', selected.favorite && 'is-favorite')} title={selected.favorite ? 'Remove favorite' : 'Add favorite'} aria-label={selected.favorite ? 'Remove favorite' : 'Add favorite'}><Star size={16} fill={selected.favorite ? 'currentColor' : 'none'} /></button>
-              <button type="button" onClick={() => onEdit(selected.id)} className="library-icon-action" title="Edit game" aria-label="Edit game"><Pencil size={15} /></button>
-              <button type="button" onClick={() => onDetails(selected.id)} className="library-details-action"><Info size={14} /> Details</button>
-            </div>
-            <div className="library-focus-quickstats"><span>{selected.status === 'playing' ? 'In progress' : selected.status === 'backlog' ? 'Planned' : labelFor(selected.status)}</span><span>{selected.sessionCount} sessions</span><span>{selected.meta?.releaseYear || 'Release year unknown'}</span></div>
-          </aside>
+        <div className="library-focus-scroll">
+          <header className="library-focus-header">
+            <div><h1>{selected.title}</h1><p>{selected.meta?.releaseYear || 'Release year unknown'}<span>·</span>{sourceLabel(selected)}<span>·</span>{(selected.meta?.genres ?? []).slice(0, 2).join(' / ') || 'Uncategorized'}</p></div>
+          </header>
+          <div className="library-focus-layout">
+            <aside className="library-focus-game" aria-label="Game actions and details">
+              <div className="library-focus-cover"><Cover game={selected} className="size-full" fit="contain" loading="eager" /></div>
+              <div className="library-focus-playtime"><Clock3 size={13} /><span>{fmtMinutes(selected.playSecs / 60)} played</span></div>
+              <button type="button" onClick={playing ? onStop : () => onPlay(selected)} className="library-primary-button library-play-button">
+                {playing ? <Square size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}{playing ? 'Stop session' : selected.planned ? 'Start timer' : 'Play'}
+              </button>
+              <div className="library-focus-actions">
+                <Select value={selected.status} onChange={(status) => onUpdate(selected.id, { status })} ariaLabel="Game status" options={STATUS_OPTIONS} className="library-status-select" />
+                <button type="button" onClick={() => onToggleFavorite(selected.id)} className={cn('library-icon-action', selected.favorite && 'is-favorite')} title={selected.favorite ? 'Remove favorite' : 'Add favorite'} aria-label={selected.favorite ? 'Remove favorite' : 'Add favorite'}><Star size={16} fill={selected.favorite ? 'currentColor' : 'none'} /></button>
+                <button type="button" onClick={() => onEdit(selected.id)} className="library-icon-action" title="Edit game" aria-label="Edit game"><Pencil size={15} /></button>
+                <button type="button" onClick={() => onDetails(selected.id)} className="library-icon-action" title="Game details" aria-label="Game details"><SettingsIcon size={15} /></button>
+              </div>
+              {selected.meta?.rating !== null && selected.meta?.rating !== undefined && <div className="library-rating-row"><span>Rating</span><div aria-label={`Score ${selected.meta.rating} out of 100`}>{Array.from({ length: 5 }, (_, index) => <Star key={index} size={15} fill={index < Math.round(selected.meta!.rating! / 20) ? 'currentColor' : 'none'} />)}</div></div>}
+              <div className="library-facts-card">
+                {selected.meta?.rating !== null && selected.meta?.rating !== undefined && <div><span>Score</span><b>{selected.meta.rating}</b></div>}
+                <div><span>Library</span><b>{sourceLabel(selected)}</b></div>
+                <div><span>Install</span><b>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</b></div>
+                <div><span>Playtime</span><b>{fmtMinutes(selected.playSecs / 60)}</b></div>
+                {selected.sizeGb > 0 && <div><span>Install size</span><b>{selected.sizeGb.toFixed(1)} GB</b></div>}
+              </div>
+              <button type="button" className="library-full-details" onClick={() => onDetails(selected.id)}><Info size={14} /> Open full details <ChevronDown size={13} /></button>
+            </aside>
 
-          <main className="library-focus-content">
-            <header className="library-focus-header">
-              <div><p className="library-eyebrow">{selected.meta?.developer || sourceLabel(selected)}{selected.meta?.releaseYear ? ` · ${selected.meta.releaseYear}` : ''}</p><h1>{selected.title}</h1><p>{(selected.meta?.genres ?? []).slice(0, 4).join('  ·  ') || 'Game details and your activity in one place'}</p></div>
-              <button type="button" onClick={() => onUpdate(selected.id, { status: selected.status === 'completed' ? 'playing' : 'completed' })} className="library-complete-action">{selected.status === 'completed' ? 'Completed' : 'Mark complete'}</button>
-            </header>
-
-            <section className="library-media-strip" aria-label="Screenshots and journal">
-              <div className="library-strip-heading"><div><p className="library-eyebrow">YOUR ORBIT CAPTURES</p><h2><Images size={15} /> Screenshots &amp; journal</h2></div><button type="button" onClick={() => onDetails(selected.id)}>View all</button></div>
-              {gameCaptures.length || gameLogs.length ? <div className="library-media-items">
-                {gameCaptures.slice(0, 4).map((capture) => <a className="library-media-shot" href={fileSrc(capture.path)} target="_blank" rel="noreferrer" key={capture.path}><img src={fileSrc(capture.path)} alt={`${selected.title} screenshot`} loading="lazy" /></a>)}
-                {gameLogs.slice(0, 4).map((log) => <button type="button" className="library-journal-card" key={log.id} onClick={() => onDetails(selected.id)}><BookOpen size={15} /><span>{log.note || 'Journal entry'}</span><small>{fmtDate(new Date(log.at * 1000).toISOString())}</small></button>)}
-              </div> : <div className="library-media-empty"><Images size={17} /><span>Add an Orbit screenshot or journal entry and it will appear here.</span></div>}
-            </section>
-
-            <div className="library-focus-lower">
-              <section className="library-overview-card"><div className="library-strip-heading"><div><p className="library-eyebrow">OVERVIEW</p><h2>About this game</h2></div><button type="button" onClick={() => onDetails(selected.id)} aria-label="Open full details"><Info size={15} /></button></div><p>{selected.meta?.summary || 'No overview has been added yet. Open full details to fetch or edit game information.'}</p><div className="library-overview-meta"><span><b>Platform</b>{sourceLabel(selected)}</span><span><b>Install size</b>{selected.sizeGb > 0 ? `${selected.sizeGb.toFixed(1)} GB` : 'Not measured'}</span><span><b>Location</b>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</span></div></section>
-              <section className="library-timeline-card"><div className="library-strip-heading"><div><p className="library-eyebrow">PLAY HISTORY</p><h2><Clock3 size={15} /> Sessions</h2></div><button type="button" onClick={() => onDetails(selected.id)}>All activity</button></div>
-                {recentSessions.length ? <div className="library-timeline">{recentSessions.map((row, index) => <article className="library-timeline-row" key={row.id}><span className={`library-history-marker${index === 0 ? ' is-latest' : ''}`} /><div><b>{row.playthroughName || (row.manual ? 'Time logged' : 'Play session')}</b><p>{fmtDate(new Date(row.startedAt * 1000).toISOString())}{row.note ? ` · ${row.note}` : ''}</p></div><small>{fmtMinutes(row.durationSecs / 60)}</small></article>)}</div> : selected.lastPlayed ? <div className="library-history-empty"><Clock3 size={16} /><span>Last played {fmtDate(selected.lastPlayed)} · {selected.sessionCount} recorded sessions.</span></div> : <div className="library-history-empty"><Clock3 size={16} /><span>No recorded sessions yet. Play starts tracking automatically.</span></div>}
+            <main className="library-focus-content">
+              <section className="library-journal-section" aria-label="Screenshots and journal entries">
+                <div className="library-focus-section-head"><h2>Journal</h2><button type="button" onClick={() => setActivityTab('journal')}>{journalCount + galleryCount} entries</button></div>
+                {galleryCount || journalCount ? <div className="library-media-items">
+                  {gameCaptures.slice(0, 4).map((capture) => <a className="library-media-shot" href={fileSrc(capture.path)} target="_blank" rel="noreferrer" key={capture.path}><img src={fileSrc(capture.path)} alt={`${selected.title} screenshot`} loading="lazy" /></a>)}
+                  {gameLogs.slice(0, Math.max(0, 4 - Math.min(galleryCount, 4))).map((log) => <button type="button" className="library-journal-card" key={log.id} onClick={() => { setActivityTab('journal'); onDetails(selected.id); }}><BookOpen size={15} /><span>{log.note || 'Journal entry'}</span><small>{shortDay(log.at)}</small></button>)}
+                </div> : <div className="library-media-empty"><Images size={17} /><span>Your screenshots and journal entries will appear here.</span></div>}
               </section>
-            </div>
-          </main>
+
+              <section className="library-overview-card">
+                <div className="library-focus-section-head"><h2>Overview</h2><button type="button" onClick={() => onDetails(selected.id)} aria-label="Edit game overview"><Pencil size={14} /></button></div>
+                <p>{selected.meta?.summary || 'No overview has been added yet.'}</p>
+                <div className="library-overview-note">
+                  {selected.hltb && <span><b>{selected.hltb.main}h</b> to credits</span>}
+                  {selected.hltb && <i>·</i>}
+                  <span>{selected.sessionCount} sessions recorded</span>
+                </div>
+              </section>
+
+              <section className="library-timeline-section">
+                <div className="library-timeline-head">
+                  <div><h2>Timeline</h2><small>{selected.sessionCount} sessions{sessionGroups.length ? ` since ${shortDay(sessionGroups[sessionGroups.length - 1].startedAt)}` : ''}</small></div>
+                  <div className="library-activity-switch" role="tablist" aria-label="Game activity">
+                    <button type="button" role="tab" aria-selected={activityTab === 'timeline'} onClick={() => setActivityTab('timeline')}>Timeline</button>
+                    <button type="button" role="tab" aria-selected={activityTab === 'journal'} onClick={() => setActivityTab('journal')}>Journal</button>
+                  </div>
+                </div>
+                {activityTab === 'timeline' ? sessionGroups.length ? <div className="library-timeline-list">{sessionGroups.map((group) => {
+                  const notes = gameLogs.filter((log) => dayKey(log.at) === dayKey(group.startedAt)).length;
+                  return <article className="library-timeline-day" key={dayKey(group.startedAt)}>
+                    <div className="library-timeline-date"><b>{shortDay(group.startedAt)}</b><small>{group.sessions.length} {group.sessions.length === 1 ? 'session' : 'sessions'}</small></div>
+                    <span className="library-timeline-node" />
+                    <div className="library-timeline-event"><b>Played {fmtMinutes(group.duration / 60)}</b><span>{notes > 0 ? ` · ${notes} journal ${notes === 1 ? 'entry' : 'entries'}` : ''}</span>
+                      {group.sessions.map((session) => session.note && <p key={session.id}>{session.note}</p>)}
+                    </div>
+                  </article>;
+                })}</div> : <div className="library-activity-empty"><Clock3 size={16} /><span>No recorded sessions yet. Play starts tracking automatically.</span></div> : gameLogs.length ? <div className="library-journal-list">{gameLogs.map((log) => <article key={log.id}><span className="library-journal-date">{shortDay(log.at)}</span><div><b>{log.note || 'Journal entry'}</b>{log.details && <p>{log.details}</p>}</div><small>{log.secs > 0 ? fmtMinutes(log.secs / 60) : ''}</small></article>)}</div> : <div className="library-activity-empty"><BookOpen size={16} /><span>No journal entries yet.</span></div>}
+                <button type="button" className="library-view-history" onClick={() => onDetails(selected.id)}>View full history <span>→</span></button>
+              </section>
+            </main>
+          </div>
         </div>
       )}
     </div>
