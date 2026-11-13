@@ -250,6 +250,13 @@ export function LibraryWorkspace({
         </div>
       </div>
 
+      <div className="library-filter-strip" aria-label="Library filters">
+        {filters.map(({ id }) => <button type="button" key={id} onClick={() => setFilter(id)} aria-pressed={filter === id} className={cn('library-filter-chip', filter === id && 'is-active')}>
+          <span className={`library-filter-dot filter-${id}`} />{labelFor(id)}<small>{counts[id] ?? 0}</small>
+        </button>)}
+        <button type="button" className="library-filter-chip library-add-chip" onClick={onAdd}><Plus size={13} /> Add a game</button>
+      </div>
+
       {view === 'grid' ? (
         <>
           <div className="library-grid-caption"><span className={`library-filter-dot filter-${filter}`} /><b>{labelFor(filter)}</b><small>{games.length}</small></div>
@@ -279,12 +286,22 @@ export function LibraryWorkspace({
         </>
       ) : (
         <div className="library-focus-scroll">
+          <header className="library-design-heading">
+            <div><p>YOUR COLLECTION</p><h1>Game Library</h1></div>
+            <div className="library-design-stats" aria-label="Collection statistics">
+              <div><b>{collection.filter((game) => !game.hidden).length}</b><span>Games</span></div>
+              <div><b>{fmtMinutes(collection.reduce((total, game) => total + game.playSecs, 0) / 60)}</b><span>Playtime</span></div>
+              <div><b>{collection.filter((game) => game.favorite && !game.hidden).length}</b><span>Favorites</span></div>
+            </div>
+          </header>
           <div className="library-focus-layout">
             <section className="library-game-browser" aria-label="Games in this collection">
               {groups.map((group) => <div className="library-game-browser-group" key={group.status}>
                 <header><span className={`library-filter-dot filter-${group.status}`} /><b>{group.label}</b><small>{group.games.length}</small></header>
                 <div className="library-game-browser-grid">{group.games.map((game) => <button type="button" key={game.id} aria-pressed={selected.id === game.id} onClick={() => onSelect(game.id)} onDoubleClick={() => onPlay(game)} title={game.title} className={cn('library-mini-game', selected.id === game.id && 'is-selected')}>
-                  <span className="library-mini-cover"><Cover game={game} className="size-full" fit="cover" /></span><span className="library-mini-time"><Clock3 size={10} />{fmtMinutes(game.playSecs / 60)}</span>
+                  <span className="library-mini-cover"><Cover game={game} className="size-full" fit="cover" /></span>
+                  <span className="library-mini-copy"><b>{game.title}</b><small>{game.meta?.releaseYear || sourceLabel(game)}</small><em>{game.status === 'backlog' ? 'Planned' : game.status}</em></span>
+                  <span className="library-mini-time"><Clock3 size={10} />{fmtMinutes(game.playSecs / 60)}</span>
                 </button>)}</div>
               </div>)}
             </section>
