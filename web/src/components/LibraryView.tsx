@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CalendarDays,
   Check,
-  ChevronDown,
   HardDrive,
   Images,
   Info,
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import type {
   ActiveSession,
+  CoverCorners,
   CoverShape,
   Game,
   GameFacts,
@@ -60,6 +60,12 @@ const SHELF_SIZES: { value: ShelfSize; label: string }[] = [
   { value: 'large', label: 'Large' },
 ];
 
+const COVER_CORNERS: { value: CoverCorners; label: string }[] = [
+  { value: 'square', label: 'Square' },
+  { value: 'soft', label: 'Soft' },
+  { value: 'round', label: 'Round' },
+];
+
 const GRID_LABELS: { value: GridLabel; label: string; title: string }[] = [
   { value: 'nothing', label: 'Nothing', title: 'Nothing under the cover' },
   { value: 'title', label: 'Title', title: 'The title alone' },
@@ -73,6 +79,23 @@ const SECTIONS: { value: GameSection; label: string }[] = [
   { value: 'journal', label: 'Journal' },
   { value: 'achievements', label: 'Achievements' },
 ];
+
+const DEFAULT_SHAPE: CoverShape = '3:4';
+const DEFAULT_LABEL: GridLabel = 'title-info';
+const DEFAULT_SCALE = 100;
+
+function savedCorners(): CoverCorners {
+  const value = localStorage.getItem('orbit.library.corners');
+  return value === 'square' || value === 'round' ? value : 'soft';
+}
+
+function savedLift(): boolean {
+  return localStorage.getItem('orbit.library.lift') !== 'off';
+}
+
+function savedGridOpen(): boolean {
+  return localStorage.getItem('orbit.library.openselect') === 'on';
+}
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'title', label: 'A-Z' },
@@ -178,7 +201,15 @@ export function LibraryView({
 }) {
   const [focusId, setFocusId] = useState<string | null>(games[0]?.id ?? null);
   const [viewMenu, setViewMenu] = useState<LibraryMode | null>(null);
+  const [corners, setCorners] = useState<CoverCorners>(savedCorners);
+  const [lift, setLift] = useState(savedLift);
+  /** Whether a grid click opens the game's full page instead of the drawer. */
+  const [gridOpen, setGridOpen] = useState(savedGridOpen);
   const viewSwitch = useRef<HTMLDivElement>(null);
+
+  useEffect(() => localStorage.setItem('orbit.library.corners', corners), [corners]);
+  useEffect(() => localStorage.setItem('orbit.library.lift', lift ? 'on' : 'off'), [lift]);
+  useEffect(() => localStorage.setItem('orbit.library.openselect', gridOpen ? 'on' : 'off'), [gridOpen]);
 
   // A filter that removes the open game moves the page to the first one left,
   // rather than leaving a blank page beside a shelf of other games.
@@ -229,8 +260,27 @@ export function LibraryView({
     setSections(sections.includes(section) ? sections.filter((item) => item !== section) : [...sections, section]);
   };
 
+  const resetDetails = () => {
+    setRail('covers');
+    setShelfSize('medium');
+    setSections(SECTIONS.map((section) => section.value));
+    setShape(DEFAULT_SHAPE);
+    setCorners('soft');
+    setLift(true);
+  };
+
+  const resetGrid = () => {
+    setScale(DEFAULT_SCALE);
+    setGridLabel(DEFAULT_LABEL);
+    setShape(DEFAULT_SHAPE);
+    setCorners('soft');
+    setLift(true);
+    setGridOpen(false);
+    setCoverTint(true);
+  };
+
   return (
-    <>
+    <div className="orbit-library" data-corners={corners} data-lift={lift ? 'on' : 'off'}>
       <header className="orbit-pagehead">
         <h1>Library</h1>
         <div className="orbit-pagehead-meta">
@@ -273,7 +323,6 @@ export function LibraryView({
             >
               <List className="size-3.5" strokeWidth={2} />
               Details
-              {mode === 'details' && <ChevronDown className="caret" strokeWidth={2} />}
             </button>
             <button
               className="orbit-viewbtn"
@@ -284,7 +333,6 @@ export function LibraryView({
             >
               <LayoutGrid className="size-3.5" strokeWidth={2} />
               Grid
-              {mode === 'grid' && <ChevronDown className="caret" strokeWidth={2} />}
             </button>
 
             {viewMenu === 'details' && (
@@ -351,9 +399,16 @@ export function LibraryView({
 
                 <span className="orbit-viewmenu-label">Covers</span>
                 <ShapeRow value={shape} onChange={setShape} />
+                <CornersRow value={corners} onChange={setCorners} />
+                <div className="orbit-viewmenu-row">
+                  <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
+                </div>
                 <p className="orbit-viewmenu-note">
                   The shelf follows the filters above; the game page never leaves it. A game's own cover is picked in Edit.
                 </p>
+                <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
+                  Reset to defaults
+                </button>
               </div>
             )}
 
@@ -393,13 +448,27 @@ export function LibraryView({
 
                 <span className="orbit-viewmenu-label">Covers</span>
                 <ShapeRow value={shape} onChange={setShape} />
+                <CornersRow value={corners} onChange={setCorners} />
 
                 <div className="orbit-viewmenu-row">
+                  <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
+                </div>
+                <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
+                </div>
+
+                <div className="orbit-viewmenu-block">
+                  <CheckboxInline checked={gridOpen} onChange={setGridOpen} label="Open details on select" />
+                  <p className="orbit-viewmenu-note">
+                    A click opens the game's full page; off, it opens the details drawer.
+                  </p>
                 </div>
                 {sort === 'manual' && (
                   <p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>
                 )}
+                <button type="button" className="orbit-viewmenu-reset" onClick={resetGrid}>
+                  Reset to defaults
+                </button>
               </div>
             )}
           </div>
@@ -418,7 +487,14 @@ export function LibraryView({
             <GameGrid
               games={games}
               selectedId={null}
-              onSelect={onOpenDetails}
+              onSelect={(id) => {
+                if (!gridOpen) {
+                  onOpenDetails(id);
+                  return;
+                }
+                setFocusId(id);
+                setMode('details');
+              }}
               onEdit={onEdit}
               onToggleFavorite={onToggleFavorite}
               onPlay={onPlay}
@@ -427,6 +503,7 @@ export function LibraryView({
               coverTint={coverTint}
               shape={shape}
               label={gridLabel}
+              lift={lift}
             />
           )}
         </div>
@@ -517,7 +594,7 @@ export function LibraryView({
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -538,6 +615,27 @@ function ShapeRow({ value, onChange }: { value: CoverShape; onChange: (next: Cov
           {shape.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** How hard the corners of every cover are. */
+function CornersRow({ value, onChange }: { value: CoverCorners; onChange: (next: CoverCorners) => void }) {
+  return (
+    <div className="orbit-viewmenu-block">
+      <span className="orbit-viewmenu-sublabel">Corners</span>
+      <div className="orbit-seg" role="group" aria-label="Cover corners">
+        {COVER_CORNERS.map((corner) => (
+          <button
+            key={corner.value}
+            type="button"
+            aria-pressed={value === corner.value}
+            onClick={() => onChange(corner.value)}
+          >
+            {corner.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

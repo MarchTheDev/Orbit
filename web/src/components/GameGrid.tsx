@@ -36,6 +36,8 @@ interface Props {
   shape?: CoverShape;
   /** What sits under a cover: nothing, the title, its readings, or both. */
   label?: GridLabel;
+  /** Whether a hovered cover rises a little. */
+  lift?: boolean;
 }
 
 function shapeRatio(shape: CoverShape): string {
@@ -54,6 +56,7 @@ export function GameGrid({
   coverTint = true,
   shape = '3:4',
   label = 'title-info',
+  lift = true,
 }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
 
@@ -75,6 +78,7 @@ export function GameGrid({
           coverTint={coverTint}
           shape={shape}
           label={label}
+          lift={lift}
           bound={bind(g.id)}
           dragging={dragging === g.id}
           over={over === g.id && dragging !== null && dragging !== g.id}
@@ -104,6 +108,7 @@ function Tile({
   coverTint,
   shape,
   label,
+  lift,
   bound,
   dragging,
   over,
@@ -118,6 +123,7 @@ function Tile({
   coverTint: boolean;
   shape: CoverShape;
   label: GridLabel;
+  lift: boolean;
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
@@ -172,13 +178,14 @@ function Tile({
             onSelect(game.id);
           }
         }}
-        style={{ aspectRatio: shapeRatio(shape) }}
+        style={{ aspectRatio: shapeRatio(shape), borderRadius: 'var(--orbit-cover-radius, 16px)' }}
         className={cn(
           // A neutral shadow on hover, not an accent-coloured one: with the
           // tint set to follow the artwork, nothing from the theme should be
           // drawn over a cover. The pad ring lives on this element, not on the
           // title underneath.
-          'orbit-cover relative overflow-hidden rounded-2xl transition duration-150 group-hover:-translate-y-0.5 group-hover:shadow-2xl group-hover:shadow-black/50',
+          'orbit-cover relative overflow-hidden transition duration-150 group-hover:shadow-2xl group-hover:shadow-black/50',
+          lift && 'group-hover:-translate-y-0.5',
           selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
           // The same rounded cover ring as a selected tile. A square ring on the
           // outer box sat around the title and looked like a stock overlay.

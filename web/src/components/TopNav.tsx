@@ -216,10 +216,6 @@ export function TopNav({
             <Gamepad2 className="size-[17px] shrink-0" strokeWidth={1.8} />
             Console mode
           </button>
-          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onOpenSettings)}>
-            <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
-            Settings
-          </button>
 
           <div className="orbit-menu-sep" role="separator" />
 
@@ -230,6 +226,13 @@ export function TopNav({
           <button role="menuitem" className="orbit-menu-item" aria-current={page === 'storage' ? 'page' : undefined} onClick={() => go('storage')}>
             <HardDrive className="size-[17px] shrink-0" strokeWidth={1.8} />
             Storage
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onOpenSettings)}>
+            <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Settings
           </button>
         </div>
       )}

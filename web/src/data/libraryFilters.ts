@@ -1,16 +1,12 @@
 import type { LibraryFilter } from '../types';
 
-/** The status chips above the library. */
+/** The chips above the library: what the shelf is narrowed to. */
 export type Filter = LibraryFilter;
 export type FilterDefinition = { id: Filter; label: string };
 
 export const LIBRARY_FILTERS: FilterDefinition[] = [
   { id: 'all', label: 'All games' },
-  { id: 'playing', label: 'Playing' },
-  { id: 'completed', label: 'Completed' },
-  { id: 'dropped', label: 'Dropped' },
   { id: 'favorites', label: 'Favorites' },
-  { id: 'unplayed', label: 'Unplayed' },
   // Last, because it is the one nobody needs every day, and it is the only way
   // back to a game that has been hidden.
   { id: 'hidden', label: 'Hidden' },

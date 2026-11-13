@@ -25,8 +25,8 @@ export interface OverlayShortcuts {
 
 export type GameStatus = 'backlog' | 'playing' | 'completed' | 'dropped';
 export type PlanPlatform = 'Steam' | 'Epic Games' | 'Nintendo' | 'Other';
-/** The Library has an Unplayed filter; Backlog is its own page. */
-export type LibraryFilter = 'all' | 'favorites' | Exclude<GameStatus, 'backlog'> | 'unplayed' | 'hidden';
+/** The chips narrow the one shelf; Backlog is its own page. */
+export type LibraryFilter = 'all' | 'favorites' | 'hidden';
 export type OtherLauncher =
   | 'Epic Games'
   | 'Ubisoft Connect'
@@ -285,6 +285,8 @@ export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | '
 export type GridLabel = 'nothing' | 'title' | 'info' | 'title-info';
 /** The shape every cover is drawn in, shared by both library views. */
 export type CoverShape = '2:3' | '3:4' | '1:1' | '16:9';
+/** How hard the corners of every cover are. */
+export type CoverCorners = 'square' | 'soft' | 'round';
 /** How wide the Details shelf is drawn. */
 export type ShelfSize = 'small' | 'medium' | 'large';
 /** The game page's sections, shown or hidden from the Details view options. */

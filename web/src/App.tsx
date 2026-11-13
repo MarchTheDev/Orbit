@@ -882,8 +882,6 @@ export default function App() {
       if (q && !g.title.toLowerCase().includes(q)) return false;
       if (activeFilter === 'hidden') return !!g.hidden;
       if (activeFilter === 'favorites') return g.favorite;
-      if (activeFilter === 'unplayed') return g.sessionCount === 0;
-      if (activeFilter !== 'all') return g.status === activeFilter;
       return true;
     });
     const by: Record<SortKey, (a: Game, b: Game) => number> = {

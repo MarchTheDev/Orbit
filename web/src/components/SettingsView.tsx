@@ -312,7 +312,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
-  { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing completed dropped favorites unplayed hidden reorder show hide' },
+  { label: 'Library chips', section: 'orbit-library', keywords: 'all favorites hidden reorder show hide' },
   { label: 'Library folders and drives', section: 'orbit-library', keywords: 'where installed paths storage folders drives move' },
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
   { label: 'Window when a game starts', section: 'orbit-playing', keywords: 'minimize tray close launch' },

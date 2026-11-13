@@ -1163,15 +1163,17 @@ html.orbit-linux .orbit-topbar {
 .orbit-burger i {
   display: block;
   width: 16px;
-  height: 1.8px;
+  height: 2px;
   border-radius: 2px;
   background: currentColor;
   transition: transform .18s var(--ease-snap), opacity .12s var(--ease-snap);
 }
-.orbit-burger i + i { margin-top: 4.5px; }
-.orbit-burger[aria-expanded='true'] i:nth-child(1) { transform: translateY(6.3px) rotate(45deg); }
+/* Whole pixels, so all three bars land on the same device row and none of
+   them picks up a half-lit edge the others do not have. */
+.orbit-burger i + i { margin-top: 4px; }
+.orbit-burger[aria-expanded='true'] i:nth-child(1) { transform: translateY(6px) rotate(45deg); }
 .orbit-burger[aria-expanded='true'] i:nth-child(2) { opacity: 0; }
-.orbit-burger[aria-expanded='true'] i:nth-child(3) { transform: translateY(-6.3px) rotate(-45deg); }
+.orbit-burger[aria-expanded='true'] i:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
 .orbit-search {
   display: flex;
@@ -1305,7 +1307,8 @@ html.orbit-linux .orbit-topbar {
   font-variant-numeric: tabular-nums;
 }
 
-/* Details / Grid, each with its own settings under the caret. */
+/* Details / Grid: a click switches view, a second click on the active one
+   opens that view's settings. */
 .orbit-viewswitch {
   position: relative;
   display: flex;
@@ -1317,7 +1320,7 @@ html.orbit-linux .orbit-topbar {
   align-items: center;
   gap: 7px;
   height: 34px;
-  padding: 0 11px 0 12px;
+  padding: 0 12px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
   background: color-mix(in srgb, var(--c-text) 3%, transparent);
@@ -1332,12 +1335,6 @@ html.orbit-linux .orbit-topbar {
   border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
   background: color-mix(in srgb, var(--c-accent) 13%, transparent);
   color: var(--c-text);
-}
-.orbit-viewbtn .caret {
-  width: 14px;
-  height: 14px;
-  margin-left: -1px;
-  opacity: .7;
 }
 .orbit-viewmenu {
   position: absolute;
@@ -1473,6 +1470,10 @@ html.orbit-linux .orbit-topbar {
 
 /* The library: one shelf of every game on the left, the game itself beside
    it. Filters prune the shelf; nothing is divided by what state a game is in. */
+.orbit-library { --orbit-cover-radius: 12px; }
+.orbit-library[data-corners='square'] { --orbit-cover-radius: 3px; }
+.orbit-library[data-corners='round'] { --orbit-cover-radius: 22px; }
+.orbit-library[data-lift='off'] .orbit-shelf-tile:hover .orbit-cover { transform: none; }
 .orbit-libtools {
   display: flex;
   flex-wrap: wrap;
@@ -1502,6 +1503,19 @@ html.orbit-linux .orbit-topbar {
   line-height: 1.45;
   color: var(--c-muted);
 }
+.orbit-viewmenu-reset {
+  margin-top: 2px;
+  padding: 9px 4px 2px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.orbit-viewmenu-reset:hover { color: var(--c-text); }
 .orbit-quiet-link {
   display: inline-flex;
   align-items: center;
@@ -1573,7 +1587,7 @@ html.orbit-linux .orbit-topbar {
   text-align: left;
   cursor: pointer;
 }
-.orbit-shelf-tile .orbit-cover { border-radius: 10px; transition: outline-color .12s var(--ease-snap), transform .12s var(--ease-snap); }
+.orbit-shelf-tile .orbit-cover { border-radius: var(--orbit-cover-radius, 10px); transition: outline-color .12s var(--ease-snap), transform .12s var(--ease-snap); }
 .orbit-shelf-tile:hover .orbit-cover { transform: translateY(-1px); }
 .orbit-shelf-tile[aria-current='true'] .orbit-cover {
   outline: 2px solid var(--c-accent);
@@ -1686,7 +1700,7 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
 .orbit-gamepage-cover {
   width: 150px;
   aspect-ratio: 2 / 3;
-  border-radius: 12px;
+  border-radius: var(--orbit-cover-radius, 12px);
   box-shadow: 0 20px 44px -22px rgba(0, 0, 0, .85);
 }
 .orbit-gamepage-title {
