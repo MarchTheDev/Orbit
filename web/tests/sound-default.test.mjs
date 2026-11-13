@@ -43,7 +43,7 @@ const tooltip = async (sound) => {
   await act(async () => {
     root.render(createElement(MusicButton, { sound, onChange: noop, showBars: false, onOpenSettings: noop }));
   });
-  return document.querySelector('[aria-label="Music"]').getAttribute('title');
+  return document.querySelector('[aria-label="Sound"]').getAttribute('title');
 };
 
 console.log('the music when nobody has chosen');

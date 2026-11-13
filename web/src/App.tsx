@@ -8,7 +8,6 @@ import {
   FolderOpen,
   Info,
   LoaderCircle,
-  Menu,
   MoveRight,
   Pencil,
   Play,
@@ -58,6 +57,8 @@ import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
 import { MusicButton } from './components/MusicButton';
+import { SearchField } from './components/ui/SearchField';
+import { StatisticsView } from './components/StatisticsView';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
@@ -68,10 +69,7 @@ import { Logo } from './components/ui/Logo';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
-import { SessionsView } from './components/SessionsView';
-import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
-import { LogsView } from './components/LogsView';
 import { SteamImportModal, gameFromSteam } from './components/SteamImportModal';
 import { OtherLauncherImportModal } from './components/OtherLauncherImportModal';
 import { AddGameModal } from './components/modals/AddGameModal';
@@ -85,7 +83,7 @@ import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, libraryCount, onBacklogPage, onDisk, onJournalPage } from './utils/library';
+import { inLibraryShelf, onDisk } from './utils/library';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -104,16 +102,6 @@ function FilledStar({ className }: { className?: string }) {
 
 const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
 const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
-
-const PAGE_META: Record<Page, { category: string; title: string; description: string }> = {
-  library: { category: 'Collection', title: 'Library', description: 'Browse and launch the games in your collection.' },
-  backlog: { category: 'Collection', title: 'Backlog', description: 'Plan what to play next and keep your queue in order.' },
-  sessions: { category: 'Activity', title: 'Sessions', description: 'Review playtime and manage your session history.' },
-  logs: { category: 'Activity', title: 'Journal', description: 'Keep notes and memories connected to your games.' },
-  storage: { category: 'Manage', title: 'Storage', description: 'See where games live and manage library folders.' },
-  saves: { category: 'Manage', title: 'Saves', description: 'Back up saves and review cloud transfer status.' },
-  settings: { category: 'Orbit', title: 'Settings', description: 'Shape Orbit around your setup and preferences.' },
-};
 
 function savedSort(): SortKey {
   const value = localStorage.getItem('orbit.sort');
@@ -175,6 +163,7 @@ export default function App() {
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailContext, setDetailContext] = useState<'library' | 'backlog'>('library');
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
@@ -929,9 +918,10 @@ export default function App() {
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
-  const openDetail = (id: string) => {
+  const openDetail = (id: string, context: 'library' | 'backlog' = 'library') => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
+    setDetailContext(context);
     setDetailOpen(true);
   };
 
@@ -1372,16 +1362,6 @@ export default function App() {
     );
   }
 
-  const pageMeta = showThemeManager
-    ? { category: 'Personalize', title: 'Custom themes', description: 'Set the colours and style Orbit uses across every page.' }
-    : PAGE_META[page];
-  const navCounts: Partial<Record<Page, number>> = {
-    library: libraryCount(games),
-    backlog: games.filter((game) => game.planned || onBacklogPage(game, settings.syncBacklog === true, settings.backlogOn ?? [], settings.backlogOff ?? [])).length,
-    logs: games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? [])).length,
-    storage: games.filter(onDisk).length,
-  };
-
   // The opening is on unless it has been turned off, and it is the same switch
   // that fades the shell in behind it. It plays once, when the app starts.
   const opening = !booted && settings.startupAnimation !== false;
@@ -1408,33 +1388,24 @@ export default function App() {
         drawerOpen={navOpen}
         onClose={() => setNavOpen(false)}
         order={settings?.tabOrder}
-        counts={navCounts}
-        onTv={() => {
-          setNavOpen(false);
-          enterTv();
+        onAddGame={() => setShowAdd(true)}
+        onAddFolder={() => {
+          setImportFolder(null);
+          setShowImport(true);
         }}
+        onConsole={enterTv}
       />
-      <header className="orbit-pagebar">
-        <button type="button" className="orbit-page-menu" onClick={() => setNavOpen(true)} aria-label="Open Orbit menu" aria-expanded={navOpen}><Menu size={18} /></button>
-        <div className="orbit-page-heading">
-          <p className="orbit-page-kicker">{pageMeta.category}</p>
-          <h1>{pageMeta.title}</h1>
-          <p className="orbit-page-description">{pageMeta.description}</p>
+      <header className="orbit-appbar">
+        <div className="orbit-appbar-brand">
+          <button type="button" className="orbit-burger-button" onClick={() => setNavOpen(true)} aria-label="Open Orbit menu" aria-expanded={navOpen}>
+            <span /><span /><span />
+          </button>
+          <button type="button" className="orbit-logo-button" onClick={() => { setShowThemeManager(false); setPage('library'); }} aria-label="Orbit Library"><Logo className="size-8" animated /><b>Orbit</b></button>
         </div>
-        {session && runningGame && (
-          <div className="orbit-session-status" aria-label={`Playing ${runningGame.title}`}>
-            <span className="orbit-session-dot" />
-            <div className="min-w-0">
-              <p className="orbit-session-label">NOW PLAYING</p>
-              <p className="truncate font-medium">{runningGame.title}</p>
-            </div>
-            <span className="orbit-session-clock">{fmtClock(Math.floor((now - session.startedAtMs) / 1000))}</span>
-            <button type="button" onClick={() => void stop()} className="orbit-session-stop" aria-label="Stop current session">
-              <Square className="size-3" fill="currentColor" strokeWidth={0} /> Stop
-            </button>
-          </div>
-        )}
-        {settings.topbarMusic !== false && <div className="orbit-topbar-music"><MusicButton sound={settings.sound} onChange={(sound) => setSettings({ sound })} showBars={settings.musicBars !== false} onOpenSettings={() => openSettings('orbit-sound')} /></div>}
+        <div className="orbit-appbar-search"><SearchField value={query} onChange={setQuery} placeholder="Search your games" className="w-full" inputClassName="w-full" /></div>
+        <div className="orbit-appbar-actions">
+          {settings.topbarMusic !== false && <MusicButton sound={settings.sound} onChange={(sound) => setSettings({ sound })} showBars={settings.musicBars !== false} onOpenSettings={() => openSettings('orbit-sound')} />}
+        </div>
       </header>
 
       {dragOver && !showAdd && (
@@ -1478,42 +1449,21 @@ export default function App() {
               onFoundUpdate={setUpdate}
             />
           </div>
-        ) : page === 'backlog' ? (
-          <BacklogView
-            games={played}
-            onSelect={openDetail}
-            onEdit={(id) => openGameEditor(id, true)}
-            onStatus={(id, status) => updateGame(id, { status })}
-            onAdd={(game) => addGames([game])}
-            onUpdate={(id, patch) => updateGame(id, patch)}
-            onRemove={(id) => removeGame(id)}
-            fetchMetadata={settings.fetchMetadata}
-            // Off by default: a game the player added to the library by hand
-            // stays there, and only crosses over to this page when asked for.
-            syncLibrary={settings.syncBacklog === true}
-            backlogOn={settings.backlogOn ?? []}
-            backlogOff={settings.backlogOff ?? []}
-            onBacklogMembership={setBacklogMembership}
-            myOrder={settings.backlogOrder}
-            setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
-          />
-        ) : page === 'sessions' ? (
-          <SessionsView
-            games={games}
+        ) : page === 'sessions' || page === 'backlog' || page === 'logs' ? (
+          <StatisticsView
+            games={played.filter((game) => !query.trim() || game.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))}
+            settings={settings}
             onChanged={() => void reload()}
             onOpenGame={openDetail}
-          />
-        ) : page === 'logs' ? (
-          <LogsView
-            games={games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? []))}
-            allGames={games}
-            onJournalMembership={setJournalMembership}
-            onUpdate={(id, patch) => updateGame(id, patch)}
             onEditGame={openGameEditor}
-            // The Journal is read for the game being written about, so it can be
-            // arranged in whatever order that reading wants.
-            order={settings.logOrder ?? []}
-            onOrder={(ids) => setSettings({ logOrder: ids })}
+            onStatus={(id, status) => updateGame(id, { status })}
+            onAddPlanned={(game) => addGames([game])}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onRemove={(id) => removeGame(id)}
+            onBacklogMembership={setBacklogMembership}
+            onJournalMembership={setJournalMembership}
+            onBacklogOrder={(ids) => setSettings({ backlogOrder: ids })}
+            onJournalOrder={(ids) => setSettings({ logOrder: ids })}
           />
         ) : page === 'storage' ? (
           <StorageView
@@ -1546,6 +1496,7 @@ export default function App() {
                 setView={setView}
                 scale={scale}
                 setScale={(next) => setSettings({ coverScale: next })}
+                onSettingsUpdate={(patch) => setSettings(patch)}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onDetails={openDetail}
@@ -1555,14 +1506,7 @@ export default function App() {
                 onStop={() => void stop()}
                 onAdd={() => setShowAdd(true)}
                 onUpdate={(id, patch) => updateGame(id, patch)}
-                onMenu={() => setNavOpen(true)}
-                menuOpen={navOpen}
                 onRefresh={() => void reload()}
-                onSettings={() => openSettings()}
-                onMusicSettings={() => openSettings('orbit-sound')}
-                onSoundChange={(sound) => setSettings({ sound })}
-                showMusic={settings.topbarMusic !== false}
-                showMusicBars={settings.musicBars !== false}
                 activeGameTitle={session && runningGame ? runningGame.title : null}
                 activeGameClock={session ? fmtClock(Math.floor((now - session.startedAtMs) / 1000)) : null}
                 runningId={runningGame?.id ?? null}
@@ -1696,7 +1640,7 @@ export default function App() {
           game={selected}
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
-          context={page === 'backlog' ? 'backlog' : 'library'}
+          context={detailContext}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
@@ -1708,7 +1652,7 @@ export default function App() {
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
           onLeaveBacklog={
-            page === 'backlog' && inLibraryShelf(selected)
+            detailContext === 'backlog' && inLibraryShelf(selected)
               ? () => {
                   const id = selected.id;
                   setSettings((current) => {

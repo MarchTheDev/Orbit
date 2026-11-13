@@ -79,7 +79,7 @@ export function MusicButton({
     <div className="relative" ref={box}>
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="Music"
+        aria-label="Sound"
         aria-expanded={open}
         title={!playing ? 'Music is off' : volume <= 0 ? 'Music is muted' : 'Music is on'}
         className={cn(

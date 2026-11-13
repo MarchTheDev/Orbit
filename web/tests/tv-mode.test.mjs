@@ -196,7 +196,7 @@ check('up from the buttons reaches the top bar, where the way out is',
   document.activeElement?.closest('[data-tv-topbar]') !== null);
 check('and there is a button there that leaves TV mode',
   [...document.querySelectorAll('[data-tv-topbar] button')].some(
-    (button) => button.getAttribute('aria-label') === 'Leave TV mode',
+    (button) => button.getAttribute('aria-label') === 'Leave Console mode',
   ));
 await key('ArrowRight');
 check('right in the bar stays in the bar instead of walking the rail',
@@ -405,7 +405,7 @@ await key('ArrowRight');
 check('right moves along the bar rather than into the rail',
   inBar() && document.activeElement !== sound && selected() === '0');
 check('and the way out is one of the stops on it',
-  document.activeElement?.getAttribute('aria-label') === 'Leave TV mode',
+  document.activeElement?.getAttribute('aria-label') === 'Leave Console mode',
   String(document.activeElement?.getAttribute('aria-label')));
 
 played.length = 0;
@@ -570,7 +570,7 @@ padHost.remove();
 delete dom.window.__TAURI__;
 dom.window.document.hasFocus = hadFocus;
 
-console.log('TV mode lives in the navigation menu, with music left on the top bar');
+console.log('Console mode is in the hamburger menu and sound stays in the global bar');
 
 const nav = await import('../src/components/TopNav.tsx');
 const source = await import('node:fs').then((fs) =>
@@ -579,10 +579,10 @@ const source = await import('node:fs').then((fs) =>
 const appSource = await import('node:fs').then((fs) =>
   fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'),
 );
-check('the menu provides a TV mode action', typeof nav.TopNav === 'function' && source.includes('onTv') && source.includes('TV mode'));
-check('TV mode is in the menu footer, separate from topbar music',
-  source.includes('orbit-menu-footer') && source.indexOf('onClick={onTv}') > source.indexOf('orbit-menu-footer') && appSource.includes('orbit-topbar-music'));
-check('the menu TV action invokes the supplied mode callback', source.includes('onClick={onTv}'));
+check('the menu provides Console mode', typeof nav.TopNav === 'function' && source.includes('onConsole') && source.includes('Console mode'));
+check('Console mode is a menu action while sound is rendered in the top bar',
+  source.includes('onClick={() => action(onConsole)}') && appSource.includes('orbit-appbar-actions') && appSource.includes('<MusicButton'));
+check('the Console mode menu action invokes the supplied mode callback', source.includes('action(onConsole)'));
 
 await act(async () => {
   await wait(20);
