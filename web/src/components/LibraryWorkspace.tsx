@@ -44,6 +44,17 @@ interface Props {
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 }
 
+const DETAIL_SECTION_OPTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'hltb', label: 'How long to beat' },
+  { id: 'activity', label: 'Sessions & journal' },
+  { id: 'facts', label: 'Game details' },
+  { id: 'achievements', label: 'Achievements' },
+  { id: 'gallery', label: 'Screenshot gallery' },
+] as const;
+type DetailSection = (typeof DETAIL_SECTION_OPTIONS)[number]['id'];
+const DETAIL_SECTION_IDS = DETAIL_SECTION_OPTIONS.map(({ id }) => id) as DetailSection[];
+
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'title', label: 'Title, A to Z' },
   { value: 'lastPlayed', label: 'Recently played' },
@@ -115,6 +126,16 @@ export function LibraryWorkspace({
     const saved = localStorage.getItem('orbit.cover-shape');
     return saved === 'square' || saved === 'wide' || saved === 'portrait' ? saved : 'portrait';
   });
+  const [detailSections, setDetailSections] = useState<DetailSection[]>(() => {
+    const saved = localStorage.getItem('orbit.details-sections');
+    if (saved === null) return [...DETAIL_SECTION_IDS];
+    try {
+      const parsed: unknown = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter((id): id is DetailSection => DETAIL_SECTION_IDS.includes(id)) : [...DETAIL_SECTION_IDS];
+    } catch {
+      return [...DETAIL_SECTION_IDS];
+    }
+  });
   const controlsRef = useRef<HTMLDivElement>(null);
   const playing = selected ? runningId === selected.id : false;
 
@@ -123,6 +144,7 @@ export function LibraryWorkspace({
   useEffect(() => { localStorage.setItem('orbit.grid-label', gridLabel); }, [gridLabel]);
   useEffect(() => { localStorage.setItem('orbit.cover-shape', coverShape); }, [coverShape]);
   useEffect(() => { localStorage.setItem('orbit.grid-open-on-select', String(gridOpenOnSelect)); }, [gridOpenOnSelect]);
+  useEffect(() => { localStorage.setItem('orbit.details-sections', JSON.stringify(detailSections)); }, [detailSections]);
   useEffect(() => {
     if (!filtersOpen && !viewMenu) return;
     const dismiss = (event: PointerEvent) => {
@@ -207,6 +229,7 @@ export function LibraryWorkspace({
                 <button type="button" aria-pressed={detailLayout === 'covers'} onClick={() => setDetailLayout('covers')}><Images size={14} />Cover list</button><button type="button" aria-pressed={detailLayout === 'list'} onClick={() => setDetailLayout('list')}><List size={14} />Compact list</button>
                 {detailLayout === 'covers' && <label>Cover size<input type="range" min={70} max={150} step={5} value={detailScale} onChange={(event) => setDetailScale(Number(event.target.value))} aria-label="Details cover size" /></label>}
                 <label>Cover shape<select value={coverShape} onChange={(event) => setCoverShape(event.target.value as CoverShape)}><option value="portrait">Portrait</option><option value="square">Square</option><option value="wide">Wide</option></select></label>
+                <span>Game sections</span><div className="library-view-section-options" role="group" aria-label="Details sections">{DETAIL_SECTION_OPTIONS.map(({ id, label }) => <button key={id} type="button" aria-pressed={detailSections.includes(id)} onClick={() => setDetailSections((current) => current.includes(id) ? current.filter((section) => section !== id) : [...current, id])}><span className="library-check"><Check size={12} /></span>{label}</button>)}</div>
               </div>}
             </div>
             <div className="library-view-control">
@@ -272,19 +295,21 @@ export function LibraryWorkspace({
             </header>
 
             <div className="library-detail-columns">
+              {detailSections.length === 0 ? <div className="library-sections-empty"><b>Game sections are hidden</b><span>Turn sections back on in Details settings.</span></div> : <>
               <div className="library-detail-main-column">
-                <section className="library-info-panel library-overview-panel"><header><h3>Overview</h3><button type="button" onClick={() => onEdit(selected.id)} aria-label="Edit overview"><Pencil size={13} /></button></header><p>{selected.meta?.summary || 'No overview has been added yet. Add your own notes in Edit game.'}</p><div className="library-overview-foot"><span>{fmtMinutes(selected.playSecs / 60)} played</span><i>·</i><span>{selected.sessionCount} sessions</span>{selected.hltb && <><i>·</i><span>{selected.hltb.main}h to beat</span></>}</div></section>
-                <section className="library-info-panel library-hltb-panel"><header><h3>How long to beat</h3><button type="button" onClick={() => onEdit(selected.id)} aria-label="Edit HowLongToBeat details"><Pencil size={13} /></button></header>{selected.hltb ? <div className="library-hltb-metrics"><div><b>{selected.hltb.main}h</b><span>Main story</span></div><div><b>{selected.hltb.mainExtra}h</b><span>Main + extras</span></div><div><b>{selected.hltb.completionist}h</b><span>Completionist</span></div><small>Source: {selected.hltb.source === 'hltb' ? 'HowLongToBeat' : 'estimate'}</small></div> : <p className="library-info-empty">No HowLongToBeat estimate yet.</p>}</section>
-                <section className="library-info-panel library-activity-panel"><header><div><h3>{activityTab === 'timeline' ? 'Recent sessions' : 'Journal'}</h3><small>{selected.sessionCount} recorded sessions</small></div><div className="library-activity-switch"><button type="button" aria-pressed={activityTab === 'timeline'} onClick={() => setActivityTab('timeline')}>Sessions</button><button type="button" aria-pressed={activityTab === 'journal'} onClick={() => setActivityTab('journal')}>Journal</button></div></header>
+                {detailSections.includes('overview') && <section className="library-info-panel library-overview-panel"><header><h3>Overview</h3><button type="button" onClick={() => onEdit(selected.id)} aria-label="Edit overview"><Pencil size={13} /></button></header><p>{selected.meta?.summary || 'No overview has been added yet. Add your own notes in Edit game.'}</p><div className="library-overview-foot"><span>{fmtMinutes(selected.playSecs / 60)} played</span><i>·</i><span>{selected.sessionCount} sessions</span>{selected.hltb && <><i>·</i><span>{selected.hltb.main}h to beat</span></>}</div></section>}
+                {detailSections.includes('hltb') && <section className="library-info-panel library-hltb-panel"><header><h3>How long to beat</h3><button type="button" onClick={() => onEdit(selected.id)} aria-label="Edit HowLongToBeat details"><Pencil size={13} /></button></header>{selected.hltb ? <div className="library-hltb-metrics"><div><b>{selected.hltb.main}h</b><span>Main story</span></div><div><b>{selected.hltb.mainExtra}h</b><span>Main + extras</span></div><div><b>{selected.hltb.completionist}h</b><span>Completionist</span></div><small>Source: {selected.hltb.source === 'hltb' ? 'HowLongToBeat' : 'estimate'}</small></div> : <p className="library-info-empty">No HowLongToBeat estimate yet.</p>}</section>}
+                {detailSections.includes('activity') && <section className="library-info-panel library-activity-panel"><header><div><h3>{activityTab === 'timeline' ? 'Recent sessions' : 'Journal'}</h3><small>{selected.sessionCount} recorded sessions</small></div><div className="library-activity-switch"><button type="button" aria-pressed={activityTab === 'timeline'} onClick={() => setActivityTab('timeline')}>Sessions</button><button type="button" aria-pressed={activityTab === 'journal'} onClick={() => setActivityTab('journal')}>Journal</button></div></header>
                   {activityTab === 'timeline' ? sessionGroups.length ? <div className="library-timeline-list">{sessionGroups.map((group) => <article className="library-timeline-day" key={dayKey(group.startedAt)}><div className="library-timeline-date"><b>{shortDay(group.startedAt)}</b><small>{group.sessions.length} {group.sessions.length === 1 ? 'session' : 'sessions'}</small></div><span className="library-timeline-node" /><div className="library-timeline-event"><b>Played {fmtMinutes(group.duration / 60)}</b>{group.sessions.map((session) => session.note && <p key={session.id}>{session.note}</p>)}</div></article>)}</div> : <div className="library-activity-empty"><Clock3 size={15} /><span>No recorded sessions yet.</span></div> : gameLogs.length ? <div className="library-journal-list">{gameLogs.slice(0, 8).map((log) => <article key={log.id}><span className="library-journal-date">{shortDay(log.at)}</span><div><b>{log.note || 'Journal entry'}</b>{log.details && <p>{log.details}</p>}</div><small>{log.secs > 0 ? fmtMinutes(log.secs / 60) : ''}</small></article>)}</div> : <div className="library-activity-empty"><BookOpen size={15} /><span>No journal entries yet.</span></div>}
                   <button type="button" className="library-view-history" onClick={() => onDetails(selected.id)}>Open full game history <span>→</span></button>
-                </section>
+                </section>}
               </div>
               <aside className="library-detail-side-column">
-                <section className="library-info-panel"><header><h3>Details</h3></header><dl className="library-detail-facts"><div><dt>Developer</dt><dd>{selected.meta?.developer || 'Unknown'}</dd></div><div><dt>Release</dt><dd>{selected.meta?.releaseYear || 'Unknown'}</dd></div><div><dt>Genre</dt><dd>{selected.meta?.genres?.join(', ') || 'Uncategorized'}</dd></div><div><dt>Platform</dt><dd>{sourceLabel(selected)}</dd></div><div><dt>Install location</dt><dd title={selected.installDir || ''}>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</dd></div><div><dt>Playtime</dt><dd>{fmtMinutes(selected.playSecs / 60)}</dd></div><div><dt>Sessions</dt><dd>{selected.sessionCount}</dd></div>{selected.sizeGb > 0 && <div><dt>File size</dt><dd>{selected.sizeGb.toFixed(1)} GB</dd></div>}</dl></section>
-                {!!selected.achievements?.length && <section className="library-info-panel library-achievements"><header><h3>Achievements</h3><small>{selected.achievements.filter((item) => item.unlocked).length}/{selected.achievements.length}</small></header><div className="library-achievement-progress"><span style={{ width: `${Math.round(selected.achievements.filter((item) => item.unlocked).length / selected.achievements.length * 100)}%` }} /></div>{selected.achievements.filter((item) => item.unlocked).slice(0, 5).map((achievement) => <div className="library-achievement-row" key={achievement.id}>{achievement.icon ? <img src={achievement.icon} alt="" /> : <span className="library-achievement-placeholder"><Check size={12} /></span>}<span><b>{achievement.name}</b><small>{achievement.description}</small></span></div>)}<button type="button" onClick={() => onDetails(selected.id)}>View achievements</button></section>}
-                <section className="library-info-panel library-gallery-panel"><header><h3>Gallery</h3><span>{gameCaptures.length} screenshots</span></header>{gameCaptures.length ? <div className="library-media-items">{gameCaptures.slice(0, 6).map((capture) => <a className="library-media-shot" href={fileSrc(capture.path)} target="_blank" rel="noreferrer" key={capture.path}><img src={fileSrc(capture.path)} alt={`${selected.title} screenshot`} loading="lazy" /></a>)}</div> : <div className="library-activity-empty"><Images size={15} /><span>Captured screenshots show here.</span></div>}</section>
+                {detailSections.includes('facts') && <section className="library-info-panel"><header><h3>Details</h3></header><dl className="library-detail-facts"><div><dt>Developer</dt><dd>{selected.meta?.developer || 'Unknown'}</dd></div><div><dt>Release</dt><dd>{selected.meta?.releaseYear || 'Unknown'}</dd></div><div><dt>Genre</dt><dd>{selected.meta?.genres?.join(', ') || 'Uncategorized'}</dd></div><div><dt>Platform</dt><dd>{sourceLabel(selected)}</dd></div><div><dt>Install location</dt><dd title={selected.installDir || ''}>{selected.installDir ? driveLabel(selected.drive || selected.installDir) : 'Not installed'}</dd></div><div><dt>Playtime</dt><dd>{fmtMinutes(selected.playSecs / 60)}</dd></div><div><dt>Sessions</dt><dd>{selected.sessionCount}</dd></div>{selected.sizeGb > 0 && <div><dt>File size</dt><dd>{selected.sizeGb.toFixed(1)} GB</dd></div>}</dl></section>}
+                {detailSections.includes('achievements') && !!selected.achievements?.length && <section className="library-info-panel library-achievements"><header><h3>Achievements</h3><small>{selected.achievements.filter((item) => item.unlocked).length}/{selected.achievements.length}</small></header><div className="library-achievement-progress"><span style={{ width: `${Math.round(selected.achievements.filter((item) => item.unlocked).length / selected.achievements.length * 100)}%` }} /></div>{selected.achievements.filter((item) => item.unlocked).slice(0, 5).map((achievement) => <div className="library-achievement-row" key={achievement.id}>{achievement.icon ? <img src={achievement.icon} alt="" /> : <span className="library-achievement-placeholder"><Check size={12} /></span>}<span><b>{achievement.name}</b><small>{achievement.description}</small></span></div>)}<button type="button" onClick={() => onDetails(selected.id)}>View achievements</button></section>}
+                {detailSections.includes('gallery') && <section className="library-info-panel library-gallery-panel"><header><h3>Gallery</h3><span>{gameCaptures.length} screenshots</span></header>{gameCaptures.length ? <div className="library-media-items">{gameCaptures.slice(0, 6).map((capture) => <a className="library-media-shot" href={fileSrc(capture.path)} target="_blank" rel="noreferrer" key={capture.path}><img src={fileSrc(capture.path)} alt={`${selected.title} screenshot`} loading="lazy" /></a>)}</div> : <div className="library-activity-empty"><Images size={15} /><span>Captured screenshots show here.</span></div>}</section>}
               </aside>
+              </>}
             </div>
           </main>
         </div>

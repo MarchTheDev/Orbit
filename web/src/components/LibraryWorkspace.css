@@ -997,3 +997,13 @@
 @media(max-width:740px) {
   .library-game-browser.is-cover-list .library-game-browser-grid { grid-template-columns: repeat(auto-fill,minmax(clamp(62px,calc(20vw * var(--library-detail-cover-scale,1)),110px),1fr)); }
 }
+
+/* Focus's detail stage can be tailored without leaving the view settings. */
+.library-view-popover { max-height: min(68vh, 480px); overflow-y: auto; scrollbar-width: thin; }
+.library-view-section-options { display: grid; gap: 2px; }
+.library-view-section-options > button { display: flex; min-height: 27px; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: 6px; padding: 0 6px; background: transparent; color: #aebbc2; text-align: left; font-size: 8.5px; }
+.library-view-section-options > button:hover,
+.library-view-section-options > button[aria-pressed="true"] { border-color: rgb(155 216 233 / 12%); background: rgb(255 255 255 / 4%); color: #e3f2f6; }
+.library-view-section-options > button[aria-pressed="false"] .library-check { color: transparent; }
+.library-sections-empty { display: flex; min-height: 130px; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border: 1px dashed rgb(190 218 231 / 15%); border-radius: 12px; color: #aab8c0; text-align: center; font-size: 10px; }
+.library-sections-empty span { color: #81909a; font-size: 9px; }
