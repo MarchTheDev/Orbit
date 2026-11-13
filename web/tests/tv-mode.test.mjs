@@ -570,19 +570,19 @@ padHost.remove();
 delete dom.window.__TAURI__;
 dom.window.document.hasFocus = hadFocus;
 
-console.log('the button is in the top bar, beside the sound');
+console.log('TV mode lives in the navigation menu, with music left on the top bar');
 
 const nav = await import('../src/components/TopNav.tsx');
 const source = await import('node:fs').then((fs) =>
   fs.readFileSync(new URL('../src/components/TopNav.tsx', import.meta.url), 'utf8'),
 );
-check('the bar has a TV control that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
-check('it sits beside the music control rather than at the far corner',
-  source.indexOf('onClick={onTv}') < source.indexOf('<MusicButton'));
-check('the TV button is a plain television, drawn like the icons beside it',
-  /aria-label="TV mode"/.test(source) &&
-    !/orbit-tv-button|box-shadow|gradient/.test(source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400)),
-  source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400));
+const appSource = await import('node:fs').then((fs) =>
+  fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'),
+);
+check('the menu provides a TV mode action', typeof nav.TopNav === 'function' && source.includes('onTv') && source.includes('TV mode'));
+check('TV mode is in the menu footer, separate from topbar music',
+  source.includes('orbit-menu-footer') && source.indexOf('onClick={onTv}') > source.indexOf('orbit-menu-footer') && appSource.includes('orbit-topbar-music'));
+check('the menu TV action invokes the supplied mode callback', source.includes('onClick={onTv}'));
 
 await act(async () => {
   await wait(20);

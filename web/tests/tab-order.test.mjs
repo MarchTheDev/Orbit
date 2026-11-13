@@ -21,12 +21,14 @@ function check(name, ok, detail = '') {
 }
 
 const tabs = nav.slice(nav.indexOf('export const TABS'), nav.indexOf('];'));
+const groups = nav.slice(nav.indexOf('const GROUP_FOR'), nav.indexOf('};', nav.indexOf('const GROUP_FOR')));
 const backlog = tabs.indexOf("id: 'backlog'");
 const sessions = tabs.indexOf("id: 'sessions'");
 const storage = tabs.indexOf("id: 'storage'");
 const saves = tabs.indexOf("id: 'saves'");
-check('Collection routes come before Activity routes', backlog !== -1 && sessions !== -1 && backlog < sessions, tabs);
-check('Storage comes before Saves in the management group', storage !== -1 && saves !== -1 && storage < saves, tabs);
+check('Backlog, Sessions, and Journal share the Activity menu category', ["backlog: 'Activity'", "sessions: 'Activity'", "logs: 'Activity'"].every((entry) => groups.includes(entry)), groups);
+check('Library stays in Collection and file management stays in Manage', groups.includes("library: 'Collection'") && groups.includes("storage: 'Manage'") && groups.includes("saves: 'Manage'"), groups);
+check('Storage comes before Saves in the menu routes', storage !== -1 && saves !== -1 && storage < saves, tabs);
 
 const ids = (order) => orderedTabs(order).map((tab) => tab.id);
 const defaultIds = ids(undefined);

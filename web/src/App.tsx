@@ -57,6 +57,7 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { MusicButton } from './components/MusicButton';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
@@ -1404,19 +1405,17 @@ export default function App() {
           setShowThemeManager(false);
           setPage(next);
         }}
-        onOpenSettings={openSettings}
         drawerOpen={navOpen}
         onClose={() => setNavOpen(false)}
         order={settings?.tabOrder}
         counts={navCounts}
-        sound={settings.sound}
-        setSound={(sound) => setSettings({ sound })}
-        showMusic={settings.topbarMusic !== false}
-        showBars={settings.musicBars !== false}
-        onTv={enterTv}
+        onTv={() => {
+          setNavOpen(false);
+          enterTv();
+        }}
       />
       <header className="orbit-pagebar">
-        <button type="button" className="orbit-page-menu" onClick={() => setNavOpen(true)} aria-label="Open Orbit navigation"><Menu size={18} /></button>
+        <button type="button" className="orbit-page-menu" onClick={() => setNavOpen(true)} aria-label="Open Orbit menu" aria-expanded={navOpen}><Menu size={18} /></button>
         <div className="orbit-page-heading">
           <p className="orbit-page-kicker">{pageMeta.category}</p>
           <h1>{pageMeta.title}</h1>
@@ -1435,6 +1434,7 @@ export default function App() {
             </button>
           </div>
         )}
+        {settings.topbarMusic !== false && <div className="orbit-topbar-music"><MusicButton sound={settings.sound} onChange={(sound) => setSettings({ sound })} showBars={settings.musicBars !== false} onOpenSettings={() => openSettings('orbit-sound')} /></div>}
       </header>
 
       {dragOver && !showAdd && (
@@ -1556,8 +1556,13 @@ export default function App() {
                 onAdd={() => setShowAdd(true)}
                 onUpdate={(id, patch) => updateGame(id, patch)}
                 onMenu={() => setNavOpen(true)}
+                menuOpen={navOpen}
                 onRefresh={() => void reload()}
                 onSettings={() => openSettings()}
+                onMusicSettings={() => openSettings('orbit-sound')}
+                onSoundChange={(sound) => setSettings({ sound })}
+                showMusic={settings.topbarMusic !== false}
+                showMusicBars={settings.musicBars !== false}
                 activeGameTitle={session && runningGame ? runningGame.title : null}
                 activeGameClock={session ? fmtClock(Math.floor((now - session.startedAtMs) / 1000)) : null}
                 runningId={runningGame?.id ?? null}

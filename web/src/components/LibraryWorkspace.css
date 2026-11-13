@@ -677,3 +677,70 @@
   .library-focus-content { grid-column: 1; }
   .library-filter-chip { padding-inline: 8px; }
 }
+
+/* The navigation is a floating top-menu, not a permanent rail or separate page chrome. */
+.orbit-menu-scrim { position: absolute; z-index: 69; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(3 7 11 / 48%); backdrop-filter: blur(2px); }
+.orbit-menu-panel { position: absolute; z-index: 70; top: 12px; left: 12px; display: none; width: min(310px, calc(100vw - 24px)); max-height: calc(100% - 24px); flex-direction: column; overflow: auto; border: 1px solid rgb(190 218 231 / 15%); border-radius: 17px; padding: 14px; background: rgb(16 24 33 / 97%); color: #e7eef2; box-shadow: 0 24px 75px rgb(0 0 0 / 56%), inset 0 1px rgb(255 255 255 / 4%); backdrop-filter: blur(26px); }
+.orbit-menu-panel.is-open { display: flex; animation: orbit-menu-enter 170ms ease both; }
+.orbit-menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 0 12px 2px; border-bottom: 1px solid rgb(190 218 231 / 10%); }
+.orbit-menu-brand { display: flex; align-items: center; gap: 9px; color: #eef4f6; }
+.orbit-menu-brand > span { display: grid; gap: 2px; }
+.orbit-menu-brand b { font-size: 16px; font-weight: 750; letter-spacing: -.035em; }
+.orbit-menu-brand small { color: #81909d; font-size: 8px; font-weight: 700; letter-spacing: .11em; }
+.orbit-menu-close { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #9cabb4; }
+.orbit-menu-close:hover { border-color: rgb(190 218 231 / 11%); background: rgb(255 255 255 / 5%); color: #eff4f6; }
+.orbit-menu-nav { display: grid; gap: 17px; padding: 16px 0; }
+.orbit-menu-group { display: grid; gap: 4px; }
+.orbit-menu-group h2 { margin: 0 0 2px 8px; color: #84939e; font-size: 9px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.orbit-menu-link { display: flex; min-height: 39px; align-items: center; gap: 11px; border: 1px solid transparent; border-radius: 9px; padding: 0 10px; background: transparent; color: #a9b6be; text-align: left; font-size: 11px; font-weight: 550; transition: 130ms ease; }
+.orbit-menu-link:hover { background: rgb(255 255 255 / 5%); color: #edf3f5; }
+.orbit-menu-link.is-active { border-color: rgb(155 216 233 / 14%); background: rgb(142 201 221 / 11%); color: #e4f2f5; }
+.orbit-menu-link.is-active > svg { color: #a4d8e7; }
+.orbit-menu-link > span { flex: 1; }
+.orbit-menu-link > small { min-width: 22px; border-radius: 6px; padding: 2px 5px; background: rgb(255 255 255 / 6%); color: #a5b3bc; font-size: 9px; text-align: center; }
+.orbit-menu-footer { display: grid; gap: 3px; margin-top: auto; border-top: 1px solid rgb(190 218 231 / 10%); padding-top: 10px; }
+@keyframes orbit-menu-enter { from { opacity: 0; transform: translateY(-5px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.library-commandbar { position: relative; display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,min(38vw,440px)) minmax(0,1fr); min-height: 62px; flex-basis: 62px; gap: 12px; border: 0; padding: 0 20px; background: transparent; backdrop-filter: none; }
+.library-command-leading { gap: 9px; }
+.library-command-brand { display: inline-flex; align-items: center; gap: 7px; border: 0; padding: 4px; background: transparent; color: #e7eef1; font-size: 13px; font-weight: 750; letter-spacing: -.03em; }
+.library-command-brand svg { color: #a7d9e8; }
+.library-menu-button { width: 34px; height: 34px; border: 1px solid rgb(190 218 231 / 10%); border-radius: 10px; background: rgb(255 255 255 / 2%); }
+.library-menu-button[aria-expanded="true"] { border-color: rgb(155 216 233 / 22%); background: rgb(144 202 222 / 10%); color: #def1f5; }
+.library-search-center { display: flex; min-width: 0; align-items: center; justify-content: center; }
+.library-search { width: 100%; max-width: 440px; }
+.library-search input { min-height: 36px !important; border-color: rgb(190 218 231 / 12%) !important; background: rgb(255 255 255 / 3%) !important; }
+.library-command-actions { justify-content: flex-end; gap: 8px; }
+.library-command-actions > .relative { display: flex; align-items: center; }
+.library-command-actions > .relative > button { border-radius: 9px; padding: 8px; color: #a8b6bf; }
+.library-command-actions > .relative > button:hover { background: rgb(255 255 255 / 5%); color: #e8f0f3; }
+.library-filter-strip { background: transparent; }
+.orbit-pagebar { min-height: 76px; border: 0; padding: 10px 24px; background: transparent; }
+.orbit-pagebar .orbit-page-menu { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid rgb(190 218 231 / 10%); border-radius: 10px; background: rgb(255 255 255 / 2%); color: #9daeb8; }
+.orbit-pagebar .orbit-page-menu:hover { background: rgb(255 255 255 / 5%); color: #e8f0f3; }
+.orbit-page-heading { margin-right: auto; }
+.orbit-pagebar .orbit-session-status { margin-left: auto; }
+.orbit-topbar-music { display: flex; flex: 0 0 auto; align-items: center; }
+.orbit-topbar-music > div > button { border: 1px solid rgb(190 218 231 / 10%); border-radius: 9px; background: rgb(255 255 255 / 2%); color: #a7d6e4; }
+.orbit-topbar-music > div > button:hover { background: rgb(255 255 255 / 6%); color: #e8f4f7; }
+@media (max-width: 900px) {
+  .library-commandbar { grid-template-columns: auto minmax(160px, 1fr) auto; padding-inline: 12px; }
+  .library-command-brand span { display: none; }
+  .library-command-actions { gap: 3px; }
+  .orbit-pagebar { padding-inline: 14px; }
+}
+@media (max-width: 560px) {
+  .library-commandbar { grid-template-columns: auto minmax(0,1fr) auto; gap: 6px; min-height: 54px; flex-basis: 54px; padding-inline: 8px; }
+  .library-command-brand { display: none; }
+  .library-search input { min-height: 33px !important; }
+  .library-command-actions { gap: 1px; }
+  .library-command-actions .library-view-switch { display: none; }
+  .library-command-actions > .library-toolbar-icon { width: 29px; }
+  .library-filter-strip { min-height: 38px; padding-inline: 8px; }
+  .orbit-pagebar { min-height: 64px; padding: 7px 9px; }
+  .orbit-pagebar h1 { font-size: 16px; }
+  .orbit-page-kicker { display: none; }
+  .orbit-pagebar .orbit-session-status { max-width: 42%; }
+  .orbit-topbar-music > div > button { padding: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .orbit-menu-panel.is-open { animation: none; } }

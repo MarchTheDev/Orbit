@@ -12,6 +12,7 @@ import { Select } from './ui/Select';
 import { Cover } from './ui/Cover';
 import { GameGrid } from './GameGrid';
 import { Logo } from './ui/Logo';
+import { MusicButton } from './MusicButton';
 import './LibraryWorkspace.css';
 
 interface Props {
@@ -38,8 +39,13 @@ interface Props {
   onAdd: () => void;
   onUpdate: (id: string, patch: Partial<Game>) => void;
   onMenu: () => void;
+  menuOpen: boolean;
   onRefresh: () => void;
   onSettings: () => void;
+  onMusicSettings: () => void;
+  onSoundChange: (sound: Settings['sound']) => void;
+  showMusic: boolean;
+  showMusicBars: boolean;
   activeGameTitle: string | null;
   activeGameClock: string | null;
   runningId: string | null;
@@ -113,8 +119,13 @@ export function LibraryWorkspace({
   onAdd,
   onUpdate,
   onMenu,
+  menuOpen,
   onRefresh,
   onSettings,
+  onMusicSettings,
+  onSoundChange,
+  showMusic,
+  showMusicBars,
   activeGameTitle,
   activeGameClock,
   runningId,
@@ -223,8 +234,12 @@ export function LibraryWorkspace({
     <div className={`library-workspace${view === 'grid' ? ' is-grid-view' : ' is-focus-view'}`}><div className="library-backdrop" aria-hidden style={backdrop ? { backgroundImage: `url("${backdrop.replace(/"/g, '%22')}")` } : undefined} />
       <div className="library-commandbar">
         <div className="library-command-leading">
-          <button type="button" className="library-menu-button" onClick={onMenu} aria-label="Open Orbit navigation"><Menu size={19} /></button>
-          <SearchField value={query} onChange={setQuery} placeholder="Search games" className="library-search" inputClassName="w-full" />
+          <button type="button" className="library-menu-button" onClick={onMenu} aria-label="Open Orbit menu" aria-expanded={menuOpen}><Menu size={19} /></button>
+          <button type="button" className="library-command-brand" onClick={() => setFilter('all')} aria-label="Orbit Library"><Logo className="size-7" /><span>Orbit</span></button>
+        </div>
+        <div className="library-search-center"><SearchField value={query} onChange={setQuery} placeholder="Search your games" className="library-search" inputClassName="w-full" /></div>
+        <div className="library-command-actions">
+          {activeGameTitle && <div className="library-running-session"><span /><b>{activeGameTitle}</b><small>{activeGameClock}</small><button type="button" onClick={onStop} aria-label="Stop current session"><Square size={12} fill="currentColor" /></button></div>}
           <div className="library-filter-control">
             <button type="button" className={cn('library-toolbar-icon', filtersOpen && 'is-active')} onClick={() => setFiltersOpen((open) => !open)} aria-label="Filters and sorting" aria-expanded={filtersOpen}><SlidersHorizontal size={16} /></button>
             {filtersOpen && <div className="library-filter-popover">
@@ -235,18 +250,13 @@ export function LibraryWorkspace({
               <button type="button" className="library-add-from-filter" onClick={() => { setFiltersOpen(false); onAdd(); }}><Plus size={14} />Add a game</button>
             </div>}
           </div>
-          <button type="button" onClick={() => setFilter('all')} className="library-active-filter" aria-label={`${labelFor(filter)} filter, clear filter`}>
-            <span className={`library-filter-dot filter-${filter}`} /><b>{labelFor(filter)}</b><small>{selectedCount}</small><X size={13} />
-          </button>
-        </div>
-        <div className="library-command-actions">
-          {activeGameTitle && <div className="library-running-session"><span /><b>{activeGameTitle}</b><small>{activeGameClock}</small><button type="button" onClick={onStop} aria-label="Stop current session"><Square size={12} fill="currentColor" /></button></div>}
           <div className="library-view-switch" role="group" aria-label="Collection layout">
             <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}><span className="view-focus-glyph" />Focus</button>
             <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={14} />Grid</button>
           </div>
           <button type="button" onClick={onRefresh} className="library-toolbar-icon" aria-label="Refresh library" title="Refresh library"><RefreshCw size={16} /></button>
           <button type="button" onClick={onSettings} className="library-toolbar-icon" aria-label="Open settings" title="Settings"><SettingsIcon size={17} /></button>
+          {showMusic && <MusicButton sound={settings.sound} onChange={onSoundChange} showBars={showMusicBars} onOpenSettings={onMusicSettings} />}
         </div>
       </div>
 
