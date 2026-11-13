@@ -323,7 +323,7 @@
 .library-filter-choice:hover, .library-filter-choice.is-active { border-color: rgb(235 242 239 / 10%); background: rgb(240 245 242 / 7%); color: #eff2f0; }
 .library-filter-choice small { margin-left: auto; color: #8f9995; font-size: 9px; }
 .library-filter-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #9aa39f; }
-.filter-playing { background: #5bd19b; }
+.filter-all, .filter-playing { background: #5bd19b; }
 .filter-completed { background: #69aef2; }
 .filter-backlog, .filter-unplayed { background: #9b8bec; }
 .filter-dropped { background: #e58085; }
