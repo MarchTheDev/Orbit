@@ -83,6 +83,7 @@ export function BacklogView({
   onBacklogMembership,
   myOrder,
   setMyOrder,
+  embedded = false,
 }: {
   games: Game[];
   onSelect: (id: string, readOnlyMoves?: boolean) => void;
@@ -110,6 +111,8 @@ export function BacklogView({
   /** The player's own order for this page, as ids. */
   myOrder: string[];
   setMyOrder: (ids: string[]) => void;
+  /** Drawn inside Statistics, where the page header belongs to that page. */
+  embedded?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [order, setOrder] = useState<Order>('mine');
@@ -280,24 +283,26 @@ export function BacklogView({
   const unknown = backlog.filter((g) => !g.hltb?.main).length;
 
   return (
-    <div className="space-y-8 px-6 pb-10 pt-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="orbit-kicker">On the horizon</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Backlog</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
-            <span>{backlog.length} on the Backlog</span>
-            {backlogHours > 0 && (
-              <span className="flex items-center gap-1">
-                <Hourglass className="size-3.5" />
-                about {Math.round(backlogHours)}h of main story
-              </span>
-            )}
-            {unknown > 0 && <span title="HowLongToBeat has no time for these yet">· {unknown} unknown</span>}
-            {planned.length > 0 && <span>· {planned.length} not owned yet</span>}
-          </p>
-        </div>
-      </header>
+    <div className={embedded ? 'space-y-6' : 'space-y-8 px-6 pb-10 pt-6'}>
+      {!embedded && (
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="orbit-kicker">On the horizon</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">Backlog</h1>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+              <span>{backlog.length} on the Backlog</span>
+              {backlogHours > 0 && (
+                <span className="flex items-center gap-1">
+                  <Hourglass className="size-3.5" />
+                  about {Math.round(backlogHours)}h of main story
+                </span>
+              )}
+              {unknown > 0 && <span title="HowLongToBeat has no time for these yet">· {unknown} unknown</span>}
+              {planned.length > 0 && <span>· {planned.length} not owned yet</span>}
+            </p>
+          </div>
+        </header>
+      )}
 
       {/* The shelf's own toolbar: the search takes the room it needs, while the
           reading controls and the action for planning a new game sit together. */}

@@ -44,10 +44,13 @@ export function SessionsView({
   games,
   onChanged,
   onOpenGame,
+  embedded = false,
 }: {
   games: Game[];
   onChanged: () => void;
   onOpenGame: (id: string) => void;
+  /** Drawn inside Statistics, where the page header belongs to that page. */
+  embedded?: boolean;
 }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -180,26 +183,34 @@ export function SessionsView({
         ]
     : [];
 
+  const logButton = (
+    <button
+      className={`${btnPrimary} flex shrink-0 items-center gap-2 ${embedded ? '' : 'ml-auto'}`}
+      onClick={() => {
+        setLoggingGameId(null);
+        setLogging(true);
+      }}
+      disabled={games.length === 0}
+    >
+      <Plus className="size-4" />
+      Log time by hand
+    </button>
+  );
+
   return (
-    <div className="mx-auto max-w-[1500px] space-y-5 px-6 py-6">
-      <header className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0">
-          <p className="orbit-kicker">Playtime</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Sessions</h1>
-          <p className="mt-1 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
-        </div>
-        <button
-          className={`${btnPrimary} ml-auto flex shrink-0 items-center gap-2`}
-          onClick={() => {
-            setLoggingGameId(null);
-            setLogging(true);
-          }}
-          disabled={games.length === 0}
-        >
-          <Plus className="size-4" />
-          Log time by hand
-        </button>
-      </header>
+    <div className={embedded ? 'space-y-4' : 'mx-auto max-w-[1500px] space-y-5 px-6 py-6'}>
+      {embedded ? (
+        <div className="flex justify-end">{logButton}</div>
+      ) : (
+        <header className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0">
+            <p className="orbit-kicker">Playtime</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">Sessions</h1>
+            <p className="mt-1 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
+          </div>
+          {logButton}
+        </header>
+      )}
 
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">

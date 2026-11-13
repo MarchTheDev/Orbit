@@ -281,8 +281,8 @@ export interface Game {
 export type ViewMode = 'focus' | 'grid' | 'list';
 export type SortKey = 'title' | 'lastPlayed' | 'playtime' | 'added' | 'size' | 'manual';
 
-/** The three top-level screens; Settings is reached from the gear. */
-export type Page = 'library' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'saves' | 'settings';
+/** The top-level screens; Settings is reached from the menu. */
+export type Page = 'library' | 'statistics' | 'sessions' | 'backlog' | 'logs' | 'storage' | 'saves' | 'settings';
 
 /** A game imported from a Steam library. */
 /** One achievement, as the game's Steam Community page lists it. */

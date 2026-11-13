@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   ArrowRight,
+  ChartNoAxesColumn,
+  FolderOpen,
+  Gamepad2,
   HardDrive,
   Library,
   ListOrdered,
@@ -10,7 +13,6 @@ import {
   ScrollText,
   Search,
   Settings as SettingsIcon,
-  Tv,
 } from 'lucide-react';
 import type { Game, Page } from '../types';
 import { Cover } from './ui/Cover';
@@ -42,6 +44,7 @@ export function CommandPalette({
   onGame,
   onSettings,
   onAdd,
+  onAddFolder,
   onTv,
 }: {
   open: boolean;
@@ -52,6 +55,7 @@ export function CommandPalette({
   onGame: (id: string) => void;
   onSettings: () => void;
   onAdd: () => void;
+  onAddFolder?: () => void;
   onTv: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -72,6 +76,7 @@ export function CommandPalette({
   const commands = useMemo<Command[]>(() => {
     const pages: Command[] = [
       { id: 'page-library', label: 'Library', hint: 'Everything you own', Icon: Library, group: 'Pages', run: () => onPage('library') },
+      { id: 'page-statistics', label: 'Statistics', hint: 'Playtime, journal, backlog', Icon: ChartNoAxesColumn, group: 'Pages', run: () => onPage('statistics') },
       { id: 'page-sessions', label: 'Sessions', hint: 'Tracked playtime', Icon: ListOrdered, group: 'Pages', run: () => onPage('sessions') },
       { id: 'page-logs', label: 'Journal', hint: 'Notes and progress', Icon: ScrollText, group: 'Pages', run: () => onPage('logs') },
       { id: 'page-backlog', label: 'Backlog', hint: 'What comes next', Icon: NotebookPen, group: 'Pages', run: () => onPage('backlog') },
@@ -81,10 +86,13 @@ export function CommandPalette({
     ];
     const actions: Command[] = [
       { id: 'action-add', label: 'Add a game', hint: 'A program or a folder', Icon: Plus, group: 'Actions', run: onAdd },
-      { id: 'action-tv', label: 'TV mode', hint: 'Read the library from the couch', Icon: Tv, group: 'Actions', run: onTv },
+      ...(onAddFolder
+        ? [{ id: 'action-add-folder', label: 'Add from folder', hint: 'Find the games in a folder', Icon: FolderOpen, group: 'Actions' as const, run: onAddFolder }]
+        : []),
+      { id: 'action-tv', label: 'Console mode', hint: 'Read the library from the couch', Icon: Gamepad2, group: 'Actions', run: onTv },
     ];
     return [...pages, ...actions];
-  }, [onAdd, onPage, onSettings, onTv]);
+  }, [onAdd, onAddFolder, onPage, onSettings, onTv]);
 
   const needle = query.trim().toLowerCase();
   const matches = (label: string, hint = '') =>

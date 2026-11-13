@@ -1,24 +1,21 @@
+import { useEffect, useRef, useState } from 'react';
 import {
+  ChartNoAxesColumn,
+  FolderOpen,
+  Gamepad2,
+  HardDrive,
   Library,
   ListOrdered,
   NotebookPen,
-  Orbit,
+  Plus,
   Save,
-  Settings as SettingsIcon,
   ScrollText,
-  Tv,
-  HardDrive,
+  Search,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
-import { cn } from '../utils/cn';
-
-/** Whole hours, the way the profile card reads: `248 hours`. */
-function fmtHours(secs: number): string {
-  const h = Math.round(Math.max(0, secs) / 3600);
-  return `${h} ${h === 1 ? 'hour' : 'hours'}`;
-}
 
 // Sessions follows the library, with Journal before Backlog in the default
 // order. The order can be rearranged in Settings, so this list is the default
@@ -69,140 +66,171 @@ export function orderedTabs(order: Page[] | undefined): Tab[] {
 }
 
 /**
- * The player's space, along the left edge of the window.
+ * One bar across the top of the window.
  *
- * The design the player drew in Figma is one column: the brand, the rooms of
- * the library under "Your space", and at the bottom the controls that belong
- * to the room (TV, sound, Settings) above a small card that says how much
- * library there is. The page itself never carries navigation.
+ * The app's rooms live behind the burger rather than along an edge, so the
+ * library gets the whole width. The search in the middle opens the palette
+ * instead of owning a field: one field over every page and game is faster than
+ * a field per page. Sound stays out here because a switch for something you can
+ * hear belongs where the sound is.
  */
 export function TopNav({
   page,
-  setPage,
-  order,
-  gamesCount,
-  backlogCount,
-  totalSecs,
+  onNavigate,
+  onOpenPalette,
   sound,
   setSound,
   showMusic,
   showBars,
   onOpenSettings,
+  onAdd,
+  onAddFolder,
   onTv,
-  open,
-  onClose,
 }: {
   page: Page;
-  setPage: (p: Page) => void;
-  /** The player's order for the pages. */
-  order?: Page[];
-  /** How many games the library holds, for the profile card. */
-  gamesCount: number;
-  /** How many entries wait on the Backlog page, for the nav badge. */
-  backlogCount: number;
-  /** Everything played, in seconds, for the profile card. */
-  totalSecs: number;
-  /** The background music, so the shelf can play it, hush it and set its level. */
+  onNavigate: (next: Page) => void;
+  onOpenPalette: () => void;
+  /** The background music, so the bar can play it, hush it and set its level. */
   sound: Settings['sound'];
   setSound: (next: Settings['sound']) => void;
-  /** Whether the controls are drawn at all. Settings decides. */
+  /** Whether the sound controls are drawn at all. Settings decides. */
   showMusic: boolean;
   /** Whether the controls dance while the music plays. */
   showBars: boolean;
-  /**
-   * Opens Settings, optionally at one of its cards.
-   *
-   * Settings is a long page, and somebody pressing a button about the music
-   * wants to arrive at the music rather than at the top of everything.
-   */
-  onOpenSettings: (at?: string) => void;
-  /** Fills the screen with TV mode, the library as a couch sees it. */
+  onOpenSettings: () => void;
+  onAdd: () => void;
+  onAddFolder: () => void;
+  /** Fills the screen with console mode, the library as a couch sees it. */
   onTv: () => void;
-  /** Below the drawer breakpoint the sidebar slides in over the page. */
-  open?: boolean;
-  onClose?: () => void;
 }) {
-  const tabs = orderedTabs(order);
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const burger = useRef<HTMLButtonElement>(null);
+
+  // The menu belongs to the page it was opened on; navigating is how it closes.
+  useEffect(() => setOpen(false), [page]);
+
+  useEffect(() => {
+    if (!open) return;
+    const first = window.requestAnimationFrame(() => {
+      menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menu.current?.contains(target) || burger.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      burger.current?.focus();
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.cancelAnimationFrame(first);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const go = (next: Page) => {
+    onNavigate(next);
+    setOpen(false);
+  };
+  const act = (run: () => void) => {
+    setOpen(false);
+    run();
+  };
 
   return (
     <>
-      {open && <div className="orbit-side-veil md:hidden" onClick={onClose} aria-hidden />}
-      <aside className={cn('orbit-side', open && 'is-open')} aria-label="Sidebar">
-        <button
-          onClick={() => {
-            setPage('library');
-            onClose?.();
-          }}
-          className="orbit-side-brand"
-          title="Orbit"
-          aria-label="Orbit"
-        >
-          <Logo className="size-7 shrink-0 text-accent" animated />
-          <span>ORBIT</span>
+      <header className="orbit-topbar">
+        <div className="orbit-topbar-left">
+          <button className="orbit-brand" onClick={() => go('library')} title="Orbit" aria-label="Orbit">
+            <Logo className="size-7 shrink-0 text-accent" animated />
+            <span>ORBIT</span>
+          </button>
+          <button
+            ref={burger}
+            className="orbit-burger"
+            onClick={() => setOpen((current) => !current)}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            title={open ? 'Close menu' : 'Menu'}
+          >
+            <i /><i /><i />
+          </button>
+        </div>
+
+        <button className="orbit-search" onClick={onOpenPalette} aria-label="Search games, pages and actions">
+          <Search className="size-4 shrink-0" strokeWidth={1.8} />
+          <span>Search games, pages and actions</span>
+          <kbd>Ctrl K</kbd>
         </button>
 
-        <nav className="orbit-side-nav" aria-label="Main">
-          <p className="orbit-side-caption">Your space</p>
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              data-tab-id={tab.id}
-              aria-current={page === tab.id ? 'page' : undefined}
-              onClick={() => {
-                setPage(tab.id);
-                onClose?.();
-              }}
-              className="orbit-side-item"
-            >
-              <tab.Icon className="size-[17px] shrink-0" strokeWidth={1.8} />
-              <span>{tab.label}</span>
-              {tab.id === 'backlog' && <span className="orbit-side-count">{backlogCount}</span>}
-            </button>
-          ))}
-        </nav>
+        <div className="orbit-topbar-right">
+          {showMusic && (
+            <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={onOpenSettings} />
+          )}
+        </div>
+      </header>
 
-        <div className="orbit-side-bottom">
-          <div className="orbit-side-tools">
-            {/* Beside the sound, because both are about the room rather than
-                the library: one is what you hear and the other is what you sit
-                back for. */}
-            <button
-              onClick={onTv}
-              aria-label="TV mode"
-              title="TV mode"
-              className="orbit-side-item"
-            >
-              <Tv className="size-[17px] shrink-0" strokeWidth={1.8} />
-              <span>TV mode</span>
-            </button>
-            {showMusic && (
-              <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
-            )}
-          </div>
-          <button
-            onClick={() => {
-              onOpenSettings();
-              onClose?.();
-            }}
-            aria-current={page === 'settings' ? 'page' : undefined}
-            className="orbit-side-item"
-          >
-            <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
-            <span>Settings</span>
+      {open && (
+        <div ref={menu} className="orbit-menu" role="menu" aria-label="Orbit">
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'library' ? 'page' : undefined} onClick={() => go('library')}>
+            <Library className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Library
           </button>
-          <div className="orbit-side-profile">
-            <div className="orbit-side-avatar" aria-hidden>
-              <Orbit className="size-4" strokeWidth={2} />
-            </div>
-            <div>
-              <strong>My library</strong>
-              <span>
-                {gamesCount} {gamesCount === 1 ? 'game' : 'games'} · {fmtHours(totalSecs)} played
-              </span>
-            </div>
+          <button
+            role="menuitem"
+            className="orbit-menu-item"
+            aria-current={page === 'statistics' ? 'page' : undefined}
+            onClick={() => go('statistics')}
+          >
+            <ChartNoAxesColumn className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Statistics
+            <small>Playtime, journal, backlog</small>
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onAdd)}>
+            <Plus className="size-[17px] shrink-0" strokeWidth={1.9} />
+            Add game
+          </button>
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onAddFolder)}>
+            <FolderOpen className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Add from folder
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button
+            role="menuitem"
+            className="orbit-menu-item"
+            onClick={onTv}
+            aria-label="Console mode"
+            title="Console mode"
+          >
+            <Gamepad2 className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Console mode
+          </button>
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onOpenSettings)}>
+            <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Settings
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+          {/* Two rooms the menu deliberately leaves out: Saves and Storage are
+              picked up when needed rather than browsed. */}
+          <div className="orbit-menu-more">
+            <button onClick={() => go('saves')} aria-current={page === 'saves' ? 'page' : undefined}>Saves</button>
+            <button onClick={() => go('storage')} aria-current={page === 'storage' ? 'page' : undefined}>Storage</button>
           </div>
         </div>
-      </aside>
+      )}
     </>
   );
 }

@@ -196,7 +196,7 @@ check('up from the buttons reaches the top bar, where the way out is',
   document.activeElement?.closest('[data-tv-topbar]') !== null);
 check('and there is a button there that leaves TV mode',
   [...document.querySelectorAll('[data-tv-topbar] button')].some(
-    (button) => button.getAttribute('aria-label') === 'Leave TV mode',
+    (button) => button.getAttribute('aria-label') === 'Leave console mode',
   ));
 await key('ArrowRight');
 check('right in the bar stays in the bar instead of walking the rail',
@@ -405,7 +405,7 @@ await key('ArrowRight');
 check('right moves along the bar rather than into the rail',
   inBar() && document.activeElement !== sound && selected() === '0');
 check('and the way out is one of the stops on it',
-  document.activeElement?.getAttribute('aria-label') === 'Leave TV mode',
+  document.activeElement?.getAttribute('aria-label') === 'Leave console mode',
   String(document.activeElement?.getAttribute('aria-label')));
 
 played.length = 0;
@@ -570,17 +570,17 @@ padHost.remove();
 delete dom.window.__TAURI__;
 dom.window.document.hasFocus = hadFocus;
 
-console.log('the button is in the top bar, beside the sound');
+console.log('the bar keeps its rooms behind the menu, and console mode is one of them');
 
 const nav = await import('../src/components/TopNav.tsx');
 const source = await import('node:fs').then((fs) =>
   fs.readFileSync(new URL('../src/components/TopNav.tsx', import.meta.url), 'utf8'),
 );
-check('the bar has a TV control that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
-check('it sits beside the music control rather than at the far corner',
-  source.indexOf('onClick={onTv}') < source.indexOf('<MusicButton'));
-check('the TV button is a plain television, drawn like the icons beside it',
-  /aria-label="TV mode"/.test(source) &&
+check('the bar has a console-mode entry that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
+check('console mode lives in the burger menu rather than on the bar itself',
+  source.indexOf('aria-label="Console mode"') > source.indexOf('className="orbit-menu"'));
+check('the console-mode row is a plain gamepad, drawn like the rows beside it',
+  /aria-label="Console mode"/.test(source) &&
     !/orbit-tv-button|box-shadow|gradient/.test(source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400)),
   source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400));
 

@@ -77,7 +77,7 @@ import {
   type ReleaseInfo,
 } from '../services/updates';
 import { orderedTabs } from './TopNav';
-import { LIBRARY_FILTERS, orderedLibraryFilters, type Filter } from './Toolbar';
+import { LIBRARY_FILTERS, orderedLibraryFilters, type Filter } from '../data/libraryFilters';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
 

@@ -32,6 +32,7 @@ export function LogsView({
   onEditGame,
   order = [],
   onOrder,
+  embedded = false,
 }: {
   /** The games currently included in the Journal. */
   games: Game[];
@@ -44,6 +45,8 @@ export function LogsView({
   order?: string[];
   /** Called with the whole list once one has been dragged somewhere. */
   onOrder?: (ids: string[]) => void;
+  /** Drawn inside Statistics, where the page header belongs to that page. */
+  embedded?: boolean;
 }) {
   const [logs, setLogs] = useState<GameLog[]>([]);
   /** How many there are in total, which can be more than were read. */
@@ -264,30 +267,37 @@ export function LogsView({
   const selectedRun = selected ? runOf(selected.id) : null;
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6">
-      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="orbit-kicker flex items-center gap-1.5">
-            <NotebookPen className="size-3 text-accent" />
-            Field notes
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Logs</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            Everything you have written down, game by game. Orbit also writes the first entry itself: the moment a game
-            is played for the first time, a line saying so appears here.
-          </p>
-        </div>
-        {/* Counts, not clocks: the Journal is read for what was written, and the
-            hours and minutes beside every date were a second set of numbers to
-            skip past. */}
-        <div className="flex items-center gap-3">
-          <p className="text-right text-[11px] text-muted">
-            {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
-            {gamesWithLogs === 1 ? 'game' : 'games'}
-            {games.length === allGames.length && total > logs.length && ` · the latest ${logs.length} of ${total}`}
-          </p>
-        </div>
-      </header>
+    <div className={embedded ? '' : 'mx-auto max-w-[1400px] p-6'}>
+      {embedded ? (
+        <p className="mb-3 text-right text-[11px] text-muted">
+          {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
+          {gamesWithLogs === 1 ? 'game' : 'games'}
+        </p>
+      ) : (
+        <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="orbit-kicker flex items-center gap-1.5">
+              <NotebookPen className="size-3 text-accent" />
+              Field notes
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">Journal</h1>
+            <p className="mt-1 max-w-2xl text-sm text-muted">
+              Everything you have written down, game by game. Orbit also writes the first entry itself: the moment a game
+              is played for the first time, a line saying so appears here.
+            </p>
+          </div>
+          {/* Counts, not clocks: the Journal is read for what was written, and the
+              hours and minutes beside every date were a second set of numbers to
+              skip past. */}
+          <div className="flex items-center gap-3">
+            <p className="text-right text-[11px] text-muted">
+              {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
+              {gamesWithLogs === 1 ? 'game' : 'games'}
+              {games.length === allGames.length && total > logs.length && ` · the latest ${logs.length} of ${total}`}
+            </p>
+          </div>
+        </header>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
         <aside className="space-y-3">

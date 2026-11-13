@@ -16,7 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, LauncherGame, OtherLauncher, Page, Settings, SortKey, ViewMode } from './types';
+import type { Game, LauncherGame, OtherLauncher, Page, Settings, SortKey } from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { useGamepad } from './hooks/useGamepad';
@@ -56,18 +56,14 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
-import { WorkspaceBar } from './components/WorkspaceBar';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import { Hero } from './components/Hero';
-import { Toolbar, type Filter } from './components/Toolbar';
 import { Logo } from './components/ui/Logo';
-import { GameGrid } from './components/GameGrid';
-import { GameList } from './components/GameList';
-import { FocusView } from './components/FocusView';
+import { LibraryView, type LibraryMode, type ShelfLayout } from './components/LibraryView';
+import { StatisticsView } from './components/StatisticsView';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
@@ -88,7 +84,8 @@ import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
-import { inLibraryShelf, libraryCount, onBacklogPage, onDisk, onJournalPage } from './utils/library';
+import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
+import { LIBRARY_FILTERS, type Filter } from './data/libraryFilters';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -106,7 +103,7 @@ function FilledStar({ className }: { className?: string }) {
 }
 
 const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
-const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
+const LIBRARY_FILTER_KEYS: Filter[] = LIBRARY_FILTERS.map((filter) => filter.id);
 
 function savedSort(): SortKey {
   const value = localStorage.getItem('orbit.sort');
@@ -116,6 +113,15 @@ function savedSort(): SortKey {
 function savedFilter(): Filter {
   const value = localStorage.getItem('orbit.filter');
   return LIBRARY_FILTER_KEYS.includes(value as Filter) ? value as Filter : 'all';
+}
+
+/** Details puts the game's page beside the shelf; Grid is the cover wall. */
+function savedMode(): LibraryMode {
+  return localStorage.getItem('orbit.library.mode') === 'grid' ? 'grid' : 'details';
+}
+
+function savedRail(): ShelfLayout {
+  return localStorage.getItem('orbit.library.rail') === 'list' ? 'list' : 'covers';
 }
 
 export default function App() {
@@ -162,15 +168,10 @@ export default function App() {
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  // Focus is the front door for a new library. A saved choice from the older
-  // launcher wins after the first look at this redesign, so somebody who had
-  // left it on Grid sees the new game page instead of a library that still
-  // looks like the one they replaced.
-  const [view, setView] = useState<ViewMode>(() => {
-    if (!localStorage.getItem('orbit.view.redesign')) return 'focus';
-    const saved = localStorage.getItem('orbit.view');
-    return saved === 'grid' || saved === 'list' || saved === 'focus' ? saved : 'focus';
-  });
+  /** How the library is read: the shelf plus game page, or the cover wall. */
+  const [mode, setMode] = useState<LibraryMode>(savedMode);
+  /** How the Details shelf is drawn: artwork, or a compact list. */
+  const [rail, setRail] = useState<ShelfLayout>(savedRail);
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
@@ -188,8 +189,6 @@ export default function App() {
   const [booted, setBooted] = useState(false);
   /** Ctrl K: one field over every page, game and action. */
   const [palette, setPalette] = useState(false);
-  /** Below its breakpoint the sidebar waits off screen for the menu button. */
-  const [navOpen, setNavOpen] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
   const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
   const settingsJumpToken = useRef(0);
@@ -236,10 +235,8 @@ export default function App() {
   /** The newer release, if one has been found. Settings shows and installs it. */
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem('orbit.view', view);
-    localStorage.setItem('orbit.view.redesign', '1');
-  }, [view]);
+  useEffect(() => localStorage.setItem('orbit.library.mode', mode), [mode]);
+  useEffect(() => localStorage.setItem('orbit.library.rail', rail), [rail]);
   useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
   useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
@@ -929,7 +926,6 @@ export default function App() {
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
-    setNavOpen(false);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
@@ -1089,16 +1085,8 @@ export default function App() {
   // than these, and nothing is counted twice.
   const runningGame = played.find((g) => g.id === session?.gameId) ?? null;
 
-  // The numbers the sidebar's profile card and the library heading read:
-  // the shelf itself, the Backlog's waiting entries, and everything played.
+  // The library's own size, which the shelf header and the All chip read.
   const libraryTotal = libraryCount(games);
-  const backlogTotal = games.filter(
-    (g) =>
-      g.planned ||
-      onBacklogPage(g, settings?.syncBacklog === true, settings?.backlogOn ?? [], settings?.backlogOff ?? []) ||
-      (inLibraryShelf(g) && g.status === 'backlog'),
-  ).length;
-  const totalPlaySecs = played.reduce((sum, g) => sum + g.playSecs, 0);
 
   const startGame = async (g: Game) => {
     if (session?.gameId === g.id) return;
@@ -1335,8 +1323,6 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', report);
   }, []);
 
-  const showHome = page === 'library' && !query;
-
   // A native startup command rejecting used to leave only the dark empty
   // background on screen. Keep its real error visible and give the player a
   // retry instead of making a broken launch indistinguishable from a blank app.
@@ -1422,33 +1408,25 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
-      <div className="orbit-shell">
+      <div className="orbit-app">
       <TopNav
         page={page}
-        setPage={(next) => {
+        onNavigate={(next) => {
           setShowThemeManager(false);
           setPage(next);
         }}
-        order={settings.tabOrder}
-        gamesCount={libraryTotal}
-        backlogCount={backlogTotal}
-        totalSecs={totalPlaySecs}
-        onOpenSettings={openSettings}
+        onOpenPalette={() => setPalette(true)}
+        onOpenSettings={() => openSettings()}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
         showBars={settings.musicBars !== false}
-        onTv={enterTv}
-        open={navOpen}
-        onClose={() => setNavOpen(false)}
-      />
-
-      <div className="orbit-work">
-      <WorkspaceBar
-        onMenu={() => setNavOpen(true)}
-        onOpenPalette={() => setPalette(true)}
-        runningTitle={runningGame?.title ?? null}
         onAdd={() => setShowAdd(true)}
+        onAddFolder={() => {
+          setImportFolder(settings.scanPath?.trim() || null);
+          setShowImport(true);
+        }}
+        onTv={enterTv}
       />
 
       {dragOver && !showAdd && (
@@ -1461,7 +1439,8 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-tab-enter min-w-0 flex-1 pb-24">
+      <main key={page} className="orbit-main orbit-tab-enter">
+        <div className="orbit-main-inner">
         {!settings ? null : showThemeManager ? (
           <ThemeManagerPage
             settings={settings}
@@ -1543,114 +1522,59 @@ export default function App() {
           />
         ) : page === 'saves' ? (
           <SavesView games={games} settings={settings} setSettings={setSettings} />
+        ) : page === 'statistics' ? (
+          <StatisticsView
+            games={played}
+            journalGames={games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? []))}
+            allGames={games}
+            settings={settings}
+            setSettings={setSettings}
+            onChanged={() => void reload()}
+            onOpenGame={openDetail}
+            onEditGame={openGameEditor}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onAddPlanned={(game) => addGames([game])}
+            onRemove={(id) => removeGame(id)}
+            onBacklogStatus={(id, status) => updateGame(id, { status })}
+            onBacklogMembership={setBacklogMembership}
+            onJournalMembership={setJournalMembership}
+            fetchMetadata={settings.fetchMetadata !== false}
+          />
         ) : (
-          <>
-            <header className="orbit-page-head">
-              <div>
-                <p className="orbit-eyebrow">Welcome back</p>
-                <h1 className="orbit-page-title">Library</h1>
-              </div>
-              <div className="orbit-head-meta">
-                <div>
-                  <strong>{Math.round(totalPlaySecs / 3600)}h</strong>
-                  <span>total playtime</span>
-                </div>
-                <div>
-                  <strong>{libraryTotal}</strong>
-                  <span>games tracked</span>
-                </div>
-              </div>
-            </header>
-
-            {showHome && view !== 'focus' && settings.showHero !== false && heroGame && (
-              <Hero
-                game={heroGame}
-                running={runningGame?.id === heroGame.id}
-                onPlay={() => void startGame(heroGame)}
-                onDetails={() => setSelectedId(heroGame.id)}
-              />
-            )}
-            <Toolbar
-              count={visible.length}
-              total={libraryCount(games)}
-              filter={activeFilter}
-              setFilter={setFilter}
-              query={query}
-              setQuery={setQuery}
-              view={view}
-              setView={setView}
-              sort={sort}
-              setSort={setSort}
-              onAdd={() => setShowAdd(true)}
-              showHero={settings.showHero !== false}
-              onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
-              scale={scale}
-              setScale={(n) => setSettings({ coverScale: n })}
-              filterOrder={settings.libraryFilterOrder}
-              hiddenFilters={settings.hiddenLibraryFilters}
-            />
-            <div>
-              {!ready ? null : visible.length === 0 ? (
-                <div className="orbit-empty">
-                  <Logo className="mb-1 size-12 opacity-60" />
-                  <h2>{games.length === 0 ? 'Nothing in this orbit yet' : 'No games found'}</h2>
-                  <p>
-                    {games.length === 0
-                      ? 'Drop a game program on the window, or use Add game.'
-                      : 'Try another title or clear the current filter.'}
-                  </p>
-                  {games.length > 0 && (
-                    <button
-                      onClick={() => {
-                        setQuery('');
-                        setFilter('all');
-                      }}
-                    >
-                      Clear search
-                    </button>
-                  )}
-                </div>
-              ) : view === 'focus' ? (
-                <FocusView
-                  games={visible}
-                  heroGame={heroGame ?? null}
-                  runningId={runningGame?.id ?? null}
-                  onPlay={(g) => void startGame(g)}
-                  onStop={() => void stop()}
-                  onDetails={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onDiscoverSteam={() => setShowSteam(true)}
-                />
-              ) : view === 'grid' ? (
-                <GameGrid
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                  coverTint={settings.coverTint !== false}
-                />
-              ) : (
-                <GameList
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                />
-              )}
-            </div>
-          </>
+          <LibraryView
+            games={visible}
+            total={libraryTotal}
+            filter={activeFilter}
+            setFilter={setFilter}
+            filterOrder={settings.libraryFilterOrder}
+            hiddenFilters={hiddenLibraryFilters}
+            query={query}
+            setQuery={setQuery}
+            sort={sort}
+            setSort={setSort}
+            scale={scale}
+            setScale={(next) => setSettings({ coverScale: next })}
+            coverTint={settings.coverTint !== false}
+            setCoverTint={(next) => setSettings({ coverTint: next })}
+            mode={mode}
+            setMode={setMode}
+            rail={rail}
+            setRail={setRail}
+            runningId={runningGame?.id ?? null}
+            session={session}
+            onPlay={(game) => void startGame(game)}
+            onStop={() => void stop()}
+            onEdit={(id) => openGameEditor(id)}
+            onOpenDetails={openDetail}
+            onToggleFavorite={toggleFavorite}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onDiscoverSteam={() => setShowSteam(true)}
+            onAdd={() => setShowAdd(true)}
+            onReorder={sort === 'manual' ? reorder : undefined}
+          />
         )}
+        </div>
       </main>
-      </div>
       </div>
 
       {session && runningGame && (
@@ -1970,6 +1894,10 @@ export default function App() {
           onGame={openDetail}
           onSettings={() => openSettings()}
           onAdd={() => setShowAdd(true)}
+          onAddFolder={() => {
+            setImportFolder(settings.scanPath?.trim() || null);
+            setShowImport(true);
+          }}
           onTv={enterTv}
         />
       )}

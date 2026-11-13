@@ -574,8 +574,8 @@ export function TvMode({
 
         <button
           onClick={exit}
-          title="Leave TV mode (Esc)"
-          aria-label="Leave TV mode"
+          title="Leave console mode (Esc)"
+          aria-label="Leave console mode"
           className="grid size-9 place-items-center rounded-full text-white/50 transition hover:bg-accent/15 hover:text-white focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Minimize2 className="size-5" />
@@ -602,7 +602,7 @@ export function TvMode({
             <div>
               <p className="text-2xl font-bold">Nothing to play yet</p>
               <p className="mt-1.5 max-w-md text-sm text-muted">
-                TV mode shows the games Orbit can start. Add one - or mark a plan as owned - and it
+                Console mode shows the games Orbit can start. Add one - or mark a plan as owned - and it
                 turns up here.
               </p>
             </div>
