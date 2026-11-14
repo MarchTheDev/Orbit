@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, BookOpen, CalendarDays, Clock, Flame, Gamepad2, ListOrdered, NotebookPen, Trophy } from 'lucide-react';
+import { ArrowUpRight, BarChart3, BookOpen, CalendarDays, Clock, Flame, Gamepad2, Images, ListOrdered, NotebookPen, Trophy } from 'lucide-react';
 import type { Game, GameStatus, Session, Settings } from '../types';
-import { listSessions } from '../services/native';
+import { listSessions, overlayGallery, overlayOpen, type GalleryItem } from '../services/native';
+import { fileSrc } from '../services/desktop';
 import { fmtDate, fmtMinutes } from '../utils/format';
 import { wideArt } from '../utils/art';
 import { Cover } from './ui/Cover';
+import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, captureFolderName, isCaptureKind, type CaptureKind } from './Captures';
 import { SessionsView } from './SessionsView';
 import { BacklogView } from './BacklogView';
 import { LogsView } from './LogsView';
 
 type Period = 'month' | 'year' | 'all';
-type StatsTab = 'overview' | 'sessions' | 'journal' | 'backlog';
+export type StatsTab = 'overview' | 'sessions' | 'album' | 'journal' | 'backlog';
 
 const PERIOD_LABEL: Record<Period, string> = {
   month: 'in the last 30 days',
@@ -153,6 +155,8 @@ export function StatisticsView({
   onBacklogMembership,
   onJournalMembership,
   fetchMetadata,
+  tab,
+  onTab,
 }: {
   /** The library as the app reads it, live session included. */
   games: Game[];
@@ -170,11 +174,16 @@ export function StatisticsView({
   onBacklogMembership: (id: string, on: boolean) => void;
   onJournalMembership: (id: string, on: boolean) => void;
   fetchMetadata: boolean;
+  /** Which room is open, so the palette can land straight on the Album. */
+  tab: StatsTab;
+  onTab: (tab: StatsTab) => void;
 }) {
-  const [tab, setTab] = useState<StatsTab>('overview');
   const [period, setPeriod] = useState<Period>('month');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
+  const [albumKind, setAlbumKind] = useState<CaptureKind | 'all'>('all');
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   // The library is passed live, so playtime ticks every second while a game
   // runs. The session list only changes when a session ends, which the count
@@ -196,6 +205,60 @@ export function StatisticsView({
       alive = false;
     };
   }, [sessionCount]);
+
+  // Captures are read for the tab counts, and again when the window comes back
+  // from a game that was filming.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void overlayGallery()
+        .then((rows) => {
+          if (alive) setCaptures(rows.filter((item) => isCaptureKind(item.kind)));
+        })
+        .catch(() => {
+          if (alive) setCaptures([]);
+        });
+    };
+    load();
+    window.addEventListener('focus', load);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', load);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLightbox(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
+
+  const byFolder = useMemo(() => {
+    const map = new Map<string, Game>();
+    for (const game of games) map.set(captureFolderName(game.title), game);
+    return map;
+  }, [games]);
+
+  const albumCounts = captureCounts(captures ?? []);
+  // Items arrive newest first, so a game appears in the order it was last
+  // played back to.
+  const albumGroups = useMemo(() => {
+    const map = new Map<string, { title: string; game?: Game; items: GalleryItem[] }>();
+    for (const item of captures ?? []) {
+      if (albumKind !== 'all' && item.kind !== albumKind) continue;
+      const known = map.get(item.game) ?? {
+        title: byFolder.get(item.game)?.title ?? item.game,
+        game: byFolder.get(item.game),
+        items: [],
+      };
+      known.items.push(item);
+      map.set(item.game, known);
+    }
+    return [...map.values()];
+  }, [captures, albumKind, byFolder]);
 
   const now = Date.now() / 1000;
   const byGame = useMemo(() => new Map(games.map((game) => [game.id, game])), [games]);
@@ -241,6 +304,7 @@ export function StatisticsView({
   const tabCounts: Record<StatsTab, number> = {
     overview: 0,
     sessions: sessions.length,
+    album: captures?.length ?? 0,
     journal: journalGames.length,
     backlog: allGames.filter((game) => game.planPlatform || game.planned).length,
   };
@@ -260,15 +324,15 @@ export function StatisticsView({
           [
             ['overview', 'Overview', BarChart3],
             ['sessions', 'Sessions', ListOrdered],
+            ['album', 'Album', Images],
             ['journal', 'Journal', BookOpen],
             ['backlog', 'Backlog', NotebookPen],
           ] as const
         ).map(([id, label, Icon]) => (
-          <button key={id} role="tab" aria-pressed={tab === id} onClick={() => setTab(id)}>
+          <button key={id} role="tab" aria-pressed={tab === id} onClick={() => onTab(id)}>
             <Icon className="size-3.5" strokeWidth={1.9} />
             {label}
-            {id === 'sessions' && sessions.length > 0 && <span className="orbit-num opacity-60">{sessions.length}</span>}
-            {id === 'journal' && journalGames.length > 0 && <span className="orbit-num opacity-60">{tabCounts.journal}</span>}
+            {tabCounts[id] > 0 && <span className="orbit-num opacity-60">{tabCounts[id]}</span>}
           </button>
         ))}
       </div>
@@ -426,6 +490,76 @@ export function StatisticsView({
         </>
       ) : tab === 'sessions' ? (
         <SessionsView games={games} onChanged={onChanged} onOpenGame={onOpenGame} embedded />
+      ) : tab === 'album' ? (
+        <>
+          <section className="orbit-stats-panel">
+            <div className="orbit-stats-panel-head">
+              <h2>Album</h2>
+              <span>
+                {captures === null
+                  ? 'Reading captures…'
+                  : `${captures.length} ${captures.length === 1 ? 'item' : 'items'} across ${albumGroups.length} ${albumGroups.length === 1 ? 'game' : 'games'}`}
+              </span>
+            </div>
+            <div className="orbit-minichips mt-3">
+              <button aria-pressed={albumKind === 'all'} onClick={() => setAlbumKind('all')}>
+                Everything <span className="opacity-60">{captures?.length ?? 0}</span>
+              </button>
+              {CAPTURE_KINDS.map((kind) => (
+                <button key={kind} aria-pressed={albumKind === kind} onClick={() => setAlbumKind(kind)}>
+                  {CAPTURE_LABELS[kind].many} <span className="opacity-60">{albumCounts[kind]}</span>
+                </button>
+              ))}
+            </div>
+            {captures === null ? null : captures.length === 0 ? (
+              <div className="orbit-gallery-empty mt-4">
+                No captures yet. Screenshots, recordings and replays taken with the overlay are kept here,
+                grouped by the game they came from.
+              </div>
+            ) : albumGroups.length === 0 ? (
+              <div className="orbit-gallery-empty mt-4">Nothing of that kind yet.</div>
+            ) : (
+              <div className="orbit-album">
+                {albumGroups.map((group) => (
+                  <div key={group.title} className="orbit-album-group">
+                    <div className="orbit-album-head">
+                      <i style={{ background: group.game ? `hsl(${group.game.hue} 58% 56%)` : 'var(--c-muted)' }} aria-hidden />
+                      <div className="min-w-0">
+                        <h3 className="truncate">{group.title}</h3>
+                        <p>
+                          {group.items.length} {group.items.length === 1 ? 'capture' : 'captures'}
+                          {group.game ? ` · ${fmtMinutes(group.game.playSecs / 60)} played` : ''}
+                        </p>
+                      </div>
+                      {group.game && (
+                        <button type="button" className="orbit-album-open" onClick={() => onOpenGame(group.game!.id)}>
+                          Open game
+                          <ArrowUpRight className="size-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="orbit-gallery">
+                      {group.items.map((item) => (
+                        <button
+                          key={item.path}
+                          onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path))}
+                          title={item.name}
+                        >
+                          <CaptureThumb item={item} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          {lightbox && (
+            <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
+              <img src={lightbox} alt="" />
+            </div>
+          )}
+        </>
       ) : tab === 'journal' ? (
         <LogsView
           games={journalGames}

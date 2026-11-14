@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   Check,
@@ -11,16 +11,18 @@ import {
   Pencil,
   Play,
   Search,
+  SlidersHorizontal,
   Square,
   Star,
   Timer,
+  X,
 } from 'lucide-react';
+import { isSteamGame } from '../utils/steam';
 import type {
   ActiveSession,
   CoverCorners,
   CoverShape,
   Game,
-  GameFacts,
   GameSection,
   GridLabel,
   ShelfSize,
@@ -29,7 +31,8 @@ import type {
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
-import { gameFacts } from '../services/native';
+import { overlayGallery, overlayOpen, type GalleryItem } from '../services/native';
+import { fileSrc } from '../services/desktop';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { wideArt } from '../utils/art';
 import { driveLabel } from '../utils/drive';
@@ -42,6 +45,7 @@ import { GameGrid } from './GameGrid';
 import { HltbCard } from './detail/HltbCard';
 import { AchievementsTab } from './detail/AchievementsTab';
 import { GameLogView } from './detail/GameLogView';
+import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, capturesOf, type CaptureKind } from './Captures';
 
 export type LibraryMode = 'details' | 'grid';
 /** How the left shelf is drawn in Details: artwork, or a compact list. */
@@ -82,7 +86,63 @@ const SECTIONS: { value: GameSection; label: string }[] = [
 
 const DEFAULT_SHAPE: CoverShape = '3:4';
 const DEFAULT_LABEL: GridLabel = 'title-info';
-const DEFAULT_SCALE = 100;
+/** Grid covers, the way Heronite sizes them: a pixel width, 110 to 240. */
+const DEFAULT_COVER_WIDTH = 150;
+const MIN_COVER_WIDTH = 110;
+const MAX_COVER_WIDTH = 240;
+
+/** The "Only" switches that narrow the shelf on top of the chips. */
+type OnlyFacet = 'played' | 'unplayed' | 'notes' | 'installed';
+type StartFacet = 'any' | 'steam' | 'local' | 'tracked';
+interface LibraryFacets {
+  only: OnlyFacet[];
+  start: StartFacet;
+}
+
+const NO_FACETS: LibraryFacets = { only: [], start: 'any' };
+
+const FACET_CHOICES: { value: OnlyFacet; label: string }[] = [
+  { value: 'played', label: 'Played' },
+  { value: 'unplayed', label: 'Never played' },
+  { value: 'installed', label: 'Can be started' },
+  { value: 'notes', label: 'Has notes' },
+];
+
+const START_CHOICES: { value: StartFacet; label: string }[] = [
+  { value: 'any', label: 'Any' },
+  { value: 'steam', label: 'Through Steam' },
+  { value: 'local', label: 'On this PC' },
+  { value: 'tracked', label: 'Timed by hand' },
+];
+
+/** One game against the facets; every switch has to agree. */
+function matchesFacets(game: Game, facets: LibraryFacets): boolean {
+  const played = game.playSecs > 0 || game.sessionCount > 0;
+  for (const only of facets.only) {
+    if (only === 'played' && !played) return false;
+    if (only === 'unplayed' && played) return false;
+    if (only === 'installed' && game.launch.kind === 'none') return false;
+    if (only === 'notes' && game.notes.trim() === '') return false;
+  }
+  if (facets.start === 'steam' && !isSteamGame(game)) return false;
+  if (facets.start === 'local' && game.launch.kind !== 'executable' && game.launch.kind !== 'wine') return false;
+  if (facets.start === 'tracked' && game.launch.kind !== 'none') return false;
+  return true;
+}
+
+function savedFacets(): LibraryFacets {
+  try {
+    const raw = JSON.parse(localStorage.getItem('orbit.library.facets') ?? 'null') as Partial<LibraryFacets> | null;
+    if (!raw) return NO_FACETS;
+    const only = (Array.isArray(raw.only) ? raw.only : []).filter((value): value is OnlyFacet =>
+      FACET_CHOICES.some((choice) => choice.value === value),
+    );
+    const start = START_CHOICES.some((choice) => choice.value === raw.start) ? (raw.start as StartFacet) : 'any';
+    return { only, start };
+  } catch {
+    return NO_FACETS;
+  }
+}
 
 function savedCorners(): CoverCorners {
   const value = localStorage.getItem('orbit.library.corners');
@@ -107,7 +167,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ];
 
 /** Screenshots read once per store app id, kept for the rest of the session. */
-const shotCache = new Map<number, GameFacts['screenshots']>();
 
 /**
  * The library, one shelf deep.
@@ -129,8 +188,8 @@ export function LibraryView({
   setQuery,
   sort,
   setSort,
-  scale,
-  setScale,
+  coverWidth,
+  setCoverWidth,
   coverTint,
   setCoverTint,
   mode,
@@ -169,8 +228,9 @@ export function LibraryView({
   setQuery: (next: string) => void;
   sort: SortKey;
   setSort: (next: SortKey) => void;
-  scale: number;
-  setScale: (next: number) => void;
+  /** The cover's width in pixels, as Heronite sizes them. */
+  coverWidth: number;
+  setCoverWidth: (next: number) => void;
   coverTint: boolean;
   setCoverTint: (next: boolean) => void;
   mode: LibraryMode;
@@ -201,25 +261,60 @@ export function LibraryView({
 }) {
   const [focusId, setFocusId] = useState<string | null>(games[0]?.id ?? null);
   const [viewMenu, setViewMenu] = useState<LibraryMode | null>(null);
+  const [facets, setFacets] = useState<LibraryFacets>(savedFacets);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [corners, setCorners] = useState<CoverCorners>(savedCorners);
   const [lift, setLift] = useState(savedLift);
   /** Whether a grid click opens the game's full page instead of the drawer. */
   const [gridOpen, setGridOpen] = useState(savedGridOpen);
   const viewSwitch = useRef<HTMLDivElement>(null);
+  const filterBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => localStorage.setItem('orbit.library.corners', corners), [corners]);
   useEffect(() => localStorage.setItem('orbit.library.lift', lift ? 'on' : 'off'), [lift]);
   useEffect(() => localStorage.setItem('orbit.library.openselect', gridOpen ? 'on' : 'off'), [gridOpen]);
+  useEffect(() => localStorage.setItem('orbit.library.facets', JSON.stringify(facets)), [facets]);
+
+  // The facets narrow the chips' result rather than replace them: the chips are
+  // whose shelf it is, the facets are which corner of it is being looked at.
+  const shown = useMemo(() => games.filter((game) => matchesFacets(game, facets)), [games, facets]);
+  const facetCount = facets.only.length + (facets.start === 'any' ? 0 : 1);
+
+  // Esc clears the page on purpose; the next filter or click brings one back.
+  const cleared = useRef(false);
+  const gameKey = shown.map((game) => game.id).join('\u0000');
+
+  useEffect(() => {
+    cleared.current = false;
+  }, [gameKey]);
 
   // A filter that removes the open game moves the page to the first one left,
   // rather than leaving a blank page beside a shelf of other games.
   useEffect(() => {
-    if (games.length === 0) {
+    if (shown.length === 0) {
       setFocusId(null);
       return;
     }
-    if (!focusId || !games.some((game) => game.id === focusId)) setFocusId(games[0].id);
-  }, [games, focusId]);
+    if (focusId && !shown.some((game) => game.id === focusId)) {
+      setFocusId(shown[0].id);
+      return;
+    }
+    if (!focusId && !cleared.current) setFocusId(shown[0].id);
+  }, [shown, focusId]);
+
+  // Esc lets the page go blank without leaving the library.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || viewMenu) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName))) return;
+      if (!focusId) return;
+      cleared.current = true;
+      setFocusId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusId, viewMenu]);
 
   useEffect(() => {
     if (!viewMenu) return;
@@ -238,11 +333,37 @@ export function LibraryView({
     };
   }, [viewMenu]);
 
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (filterBox.current?.contains(event.target as Node)) return;
+      setFiltersOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFiltersOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [filtersOpen]);
+
+  const toggleOnly = (value: OnlyFacet) => {
+    setFacets((current) => ({
+      ...current,
+      only: current.only.includes(value)
+        ? current.only.filter((item) => item !== value)
+        : [...current.only, value],
+    }));
+  };
+
   const hidden = new Set(hiddenFilters ?? []);
   const filters: FilterDefinition[] = (orderedLibraryFilters(filterOrder).filter((item) => !hidden.has(item.id)));
   const chips = filters.length > 0 ? filters : [LIBRARY_FILTERS[0]];
-  const focus = games.find((game) => game.id === focusId) ?? null;
-  const playedSecs = games.reduce((sum, game) => sum + game.playSecs, 0);
+  const focus = shown.find((game) => game.id === focusId) ?? null;
+  const playedSecs = shown.reduce((sum, game) => sum + game.playSecs, 0);
 
   // The switch changes the view; the view you are already in opens its
   // settings. Doing both on one click made changing views feel like it had
@@ -270,7 +391,7 @@ export function LibraryView({
   };
 
   const resetGrid = () => {
-    setScale(DEFAULT_SCALE);
+    setCoverWidth(DEFAULT_COVER_WIDTH);
     setGridLabel(DEFAULT_LABEL);
     setShape(DEFAULT_SHAPE);
     setCorners('soft');
@@ -305,6 +426,77 @@ export function LibraryView({
         </div>
 
         <div className="orbit-libtools-right">
+          <div className="orbit-filter" ref={filterBox}>
+            <button
+              type="button"
+              className="chip shrink-0"
+              aria-expanded={filtersOpen}
+              aria-label="Narrow the shelf"
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              <SlidersHorizontal className="mr-1.5 size-3.5" />
+              Filters
+              {facetCount > 0 && (
+                <span className="orbit-num ml-1.5 rounded-md bg-accent/20 px-1.5 py-px text-[9.5px] text-fg">
+                  {facetCount}
+                </span>
+              )}
+            </button>
+            {filtersOpen && (
+              <div className="orbit-viewmenu orbit-filterpop" role="dialog" aria-label="Filters">
+                <div className="flex items-center justify-between gap-3 px-1">
+                  <span className="orbit-viewmenu-label !mb-0">Narrow the shelf</span>
+                  {facetCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFacets(NO_FACETS)}
+                      className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-fg"
+                    >
+                      <X className="size-3" /> Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="orbit-viewmenu-block">
+                  <span className="orbit-viewmenu-sublabel">Only</span>
+                  <div className="orbit-minichips" role="group" aria-label="Only">
+                    {FACET_CHOICES.map((choice) => (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        aria-pressed={facets.only.includes(choice.value)}
+                        onClick={() => toggleOnly(choice.value)}
+                      >
+                        {choice.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="orbit-viewmenu-block">
+                  <span className="orbit-viewmenu-sublabel">How it starts</span>
+                  <div className="orbit-minichips" role="group" aria-label="How it starts">
+                    {START_CHOICES.map((choice) => (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        aria-pressed={facets.start === choice.value}
+                        onClick={() => setFacets((current) => ({ ...current, start: choice.value }))}
+                      >
+                        {choice.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="orbit-viewmenu-note">
+                  {shown.length === total
+                    ? `${total} ${total === 1 ? 'game' : 'games'} in this shelf.`
+                    : `${shown.length} of ${total} ${total === 1 ? 'game' : 'games'} shown.`}
+                </p>
+              </div>
+            )}
+          </div>
           <SearchField value={query} onChange={setQuery} placeholder="Find a game" />
           <Select
             value={sort}
@@ -318,11 +510,11 @@ export function LibraryView({
               className="orbit-viewbtn"
               aria-pressed={mode === 'details'}
               aria-expanded={viewMenu === 'details'}
-              title={mode === 'details' ? 'Details view options' : 'Switch to Details'}
+              title={mode === 'details' ? 'Observatory options' : 'Switch to Observatory'}
               onClick={() => chooseMode('details')}
             >
               <List className="size-3.5" strokeWidth={2} />
-              Details
+              Observatory
             </button>
             <button
               className="orbit-viewbtn"
@@ -336,7 +528,7 @@ export function LibraryView({
             </button>
 
             {viewMenu === 'details' && (
-              <div className="orbit-viewmenu" role="dialog" aria-label="Details settings">
+              <div className="orbit-viewmenu" role="dialog" aria-label="Observatory settings">
                 <span className="orbit-viewmenu-label">Shelf</span>
                 <button
                   className="orbit-menu-item"
@@ -403,9 +595,6 @@ export function LibraryView({
                 <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
                 </div>
-                <p className="orbit-viewmenu-note">
-                  The shelf follows the filters above; the game page never leaves it. A game's own cover is picked in Edit.
-                </p>
                 <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
                   Reset to defaults
                 </button>
@@ -416,15 +605,15 @@ export function LibraryView({
               <div className="orbit-viewmenu" role="dialog" aria-label="Grid settings">
                 <div className="orbit-viewmenu-row">
                   <span>Cover size</span>
-                  <span className="orbit-viewmenu-value">{Math.round(170 * (scale / 100))} px</span>
+                  <span className="orbit-viewmenu-value">{coverWidth} px</span>
                 </div>
                 <input
                   type="range"
-                  min={70}
-                  max={170}
+                  min={MIN_COVER_WIDTH}
+                  max={MAX_COVER_WIDTH}
                   step={5}
-                  value={scale}
-                  onChange={(event) => setScale(Number(event.target.value))}
+                  value={coverWidth}
+                  onChange={(event) => setCoverWidth(Number(event.target.value))}
                   className="orbit-range w-full cursor-pointer"
                   aria-label="Cover size"
                 />
@@ -459,9 +648,6 @@ export function LibraryView({
 
                 <div className="orbit-viewmenu-block">
                   <CheckboxInline checked={gridOpen} onChange={setGridOpen} label="Open details on select" />
-                  <p className="orbit-viewmenu-note">
-                    A click opens the game's full page; off, it opens the details drawer.
-                  </p>
                 </div>
                 {sort === 'manual' && (
                   <p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>
@@ -477,15 +663,15 @@ export function LibraryView({
 
       {mode === 'grid' ? (
         <div className="orbit-gridwrap">
-          {games.length === 0 ? (
+          {shown.length === 0 ? (
             <Blank
               title={total === 0 ? 'Nothing in this orbit yet' : 'No games match'}
               body={total === 0 ? 'Add a game, or drop a program on the window.' : 'Try another title or clear the current filter.'}
-              action={total === 0 ? { label: 'Add game', onClick: onAdd } : { label: 'Clear search', onClick: () => { setQuery(''); setFilter('all'); }}}
+              action={total === 0 ? { label: 'Add game', onClick: onAdd } : { label: 'Clear filters', onClick: () => { setQuery(''); setFilter('all'); setFacets(NO_FACETS); }}}
             />
           ) : (
             <GameGrid
-              games={games}
+              games={shown}
               selectedId={null}
               onSelect={(id) => {
                 if (!gridOpen) {
@@ -498,7 +684,7 @@ export function LibraryView({
               onEdit={onEdit}
               onToggleFavorite={onToggleFavorite}
               onPlay={onPlay}
-              scale={scale}
+              width={coverWidth}
               onReorder={sort === 'manual' ? onReorder : undefined}
               coverTint={coverTint}
               shape={shape}
@@ -507,23 +693,23 @@ export function LibraryView({
             />
           )}
         </div>
-      ) : games.length === 0 ? (
+      ) : shown.length === 0 ? (
         <Blank
           title={total === 0 ? 'Nothing in this orbit yet' : 'No games match'}
           body={total === 0 ? 'Add a game, or drop a program on the window.' : 'Try another title or clear the current filter.'}
-          action={total === 0 ? { label: 'Add game', onClick: onAdd } : { label: 'Clear search', onClick: () => { setQuery(''); setFilter('all'); }}}
+          action={total === 0 ? { label: 'Add game', onClick: onAdd } : { label: 'Clear filters', onClick: () => { setQuery(''); setFilter('all'); setFacets(NO_FACETS); }}}
         />
       ) : (
         <div className={cn('orbit-lib', `is-shelf-${shelfSize}`)}>
           <aside className="orbit-shelf" aria-label="Games">
             <div className="orbit-shelf-head">
               <h2>Shelf</h2>
-              <span>{games.length} of {total}</span>
+              <span>{shown.length} of {total}</span>
             </div>
             <div className="orbit-shelf-scroll">
               {rail === 'covers' ? (
                 <div className="orbit-shelf-grid">
-                  {games.map((game) => (
+                  {shown.map((game) => (
                     <button
                       key={game.id}
                       className="orbit-shelf-tile"
@@ -544,7 +730,7 @@ export function LibraryView({
                 </div>
               ) : (
                 <div className="orbit-shelf-rows">
-                  {games.map((game) => (
+                  {shown.map((game) => (
                     <button
                       key={game.id}
                       className="orbit-shelf-row"
@@ -587,9 +773,8 @@ export function LibraryView({
               onDiscoverSteam={onDiscoverSteam}
             />
           ) : (
-            <div className="orbit-blank">
-              <h2>Pick a game</h2>
-              <p>The shelf on the left has everything Orbit can start.</p>
+            <div className="orbit-blank orbit-blank-quiet">
+              <p>No game selected</p>
             </div>
           )}
         </div>
@@ -707,35 +892,31 @@ function GamePage({
       .finally(() => setHltbBusy(false));
   };
 
-  const [shots, setShots] = useState<GameFacts['screenshots'] | null>(null);
-  const [shotError, setShotError] = useState<string | null>(null);
+  // Captures are filed by the overlay while the game runs, so the room is
+  // read again whenever the page is looked at and whenever the window comes
+  // back from the game.
+  const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
+  const [captureKind, setCaptureKind] = useState<CaptureKind | 'all'>('all');
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const appId = game.meta?.steamAppId ?? null;
 
   useEffect(() => {
-    if (!appId) {
-      setShots(null);
-      return;
-    }
-    const known = shotCache.get(appId);
-    if (known) {
-      setShots(known);
-      return;
-    }
     let alive = true;
-    setShotError(null);
-    void gameFacts(appId)
-      .then((facts) => {
-        shotCache.set(appId, facts.screenshots ?? []);
-        if (alive) setShots(facts.screenshots ?? []);
-      })
-      .catch((error) => {
-        if (alive) setShotError(error instanceof Error ? error.message : String(error));
-      });
+    const load = () => {
+      void overlayGallery()
+        .then((rows) => {
+          if (alive) setCaptures(capturesOf(rows, game.title));
+        })
+        .catch(() => {
+          if (alive) setCaptures([]);
+        });
+    };
+    load();
+    window.addEventListener('focus', load);
     return () => {
       alive = false;
+      window.removeEventListener('focus', load);
     };
-  }, [appId]);
+  }, [game.title]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -745,6 +926,15 @@ function GamePage({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [lightbox]);
+
+  const captureTotal = captures?.length ?? 0;
+  const kindCounts = captureCounts(captures ?? []);
+  const shownCaptures = (captures ?? []).filter((item) => captureKind === 'all' || item.kind === captureKind);
+
+  const openCapture = (item: GalleryItem) => {
+    if (item.kind === 'screenshot') setLightbox(fileSrc(item.path));
+    else void overlayOpen(item.path);
+  };
 
   return (
     <div className="orbit-gamepage">
@@ -856,25 +1046,37 @@ function GamePage({
             <h2>
               <Images className="size-3.5" />
               Gallery
-              {shots && shots.length > 0 && <span className="count">{shots.length}</span>}
+              {captureTotal > 0 && <span className="count">{captureTotal}</span>}
             </h2>
             <div className="orbit-section-body">
-              {!appId ? (
+              {captures === null ? (
+                <div className="orbit-gallery-empty">Looking through this game's captures…</div>
+              ) : captureTotal === 0 ? (
                 <div className="orbit-gallery-empty">
-                  Screenshots come from the game's store page. Add a Steam app id in Edit to bring them in.
+                  Screenshots, recordings and replays taken with the overlay are filed here under this game.
                 </div>
-              ) : shots === null ? (
-                <div className="orbit-gallery-empty">{shotError ? 'The store could not be reached for screenshots.' : 'Looking up screenshots…'}</div>
-              ) : shots.length === 0 ? (
-                <div className="orbit-gallery-empty">The store has no screenshots for this game.</div>
               ) : (
-                <div className="orbit-gallery">
-                  {shots.slice(0, 9).map((shot) => (
-                    <button key={shot.full} onClick={() => setLightbox(shot.full)} title="Open the screenshot">
-                      <img src={shot.thumb} alt="" loading="lazy" decoding="async" />
-                    </button>
-                  ))}
-                </div>
+                <>
+                  {captures.length > 1 && (
+                    <div className="orbit-minichips mb-2.5">
+                      <button aria-pressed={captureKind === 'all'} onClick={() => setCaptureKind('all')}>
+                        All <span className="opacity-60">{captureTotal}</span>
+                      </button>
+                      {CAPTURE_KINDS.filter((kind) => kindCounts[kind] > 0).map((kind) => (
+                        <button key={kind} aria-pressed={captureKind === kind} onClick={() => setCaptureKind(kind)}>
+                          {CAPTURE_LABELS[kind].many} <span className="opacity-60">{kindCounts[kind]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="orbit-gallery">
+                    {shownCaptures.map((item) => (
+                      <button key={item.path} onClick={() => openCapture(item)} title={item.name}>
+                        <CaptureThumb item={item} />
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </section>

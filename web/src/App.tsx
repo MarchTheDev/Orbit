@@ -3,14 +3,20 @@ import {
   Check,
   CircleAlert,
   CircleCheck,
+  Download,
   Eye,
   EyeOff,
   FolderOpen,
+  Images,
   Info,
+  LayoutGrid,
+  List,
   LoaderCircle,
   MoveRight,
+  Palette,
   Pencil,
   Play,
+  ScrollText,
   Square,
   Star,
   Trash2,
@@ -58,6 +64,9 @@ import {
   overlayShowPins,
   setClockOffset,
   addGameLog,
+  dataDir,
+  logsDir,
+  overlayOpenKind,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -74,7 +83,7 @@ import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Logo } from './components/ui/Logo';
 import { LibraryView, type LibraryMode, type ShelfLayout } from './components/LibraryView';
-import { StatisticsView } from './components/StatisticsView';
+import { StatisticsView, type StatsTab } from './components/StatisticsView';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
@@ -152,6 +161,19 @@ function savedGridLabel(): GridLabel {
 
 const ALL_SECTIONS: GameSection[] = ['overview', 'gallery', 'journal', 'achievements'];
 
+/**
+ * The grid's cover width, from a setting that used to be a percentage.
+ *
+ * Older copies stored 70-170 (percent of a 150px tile) under the same key, and
+ * a percentage is never a sensible pixel width below 110, so anything smaller
+ * is read the old way. The result is what Heronite offers: 110 to 240 pixels.
+ */
+function coverWidthFromSetting(value?: number): number {
+  if (!value) return 150;
+  const pixels = value < 110 ? Math.round(150 * (value / 100)) : Math.round(value);
+  return Math.min(240, Math.max(110, pixels));
+}
+
 function savedSections(): GameSection[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem('orbit.library.sections') ?? 'null');
@@ -184,6 +206,8 @@ export default function App() {
   // Keep the rest of Orbit available and leave the overlay settings untouched.
   const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
+  /** Which room of Statistics is open, so the palette can land on the Album. */
+  const [statsTab, setStatsTab] = useState<StatsTab>('overview');
   /** TV mode: the library fullscreen, read from a couch. */
   const [tv, setTv] = useState(false);
 
@@ -274,7 +298,7 @@ export default function App() {
    * someone made is still there tomorrow and survives a cleared browser profile.
    */
   const order = settings?.sortOrder ?? [];
-  const scale = settings?.coverScale ?? 100;
+  const coverWidth = coverWidthFromSetting(settings?.coverScale);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudClose, setCloudClose] = useState<'backup' | 'restore' | null>(null);
   const [cloudJob, setCloudJob] = useState<CloudPulse | null>(null);
@@ -1314,6 +1338,95 @@ export default function App() {
     setPage('settings');
   }, []);
 
+  /** Show one of Orbit's own folders in Explorer, from the palette. */
+  const revealFolder = useCallback(async (which: 'data' | 'logs') => {
+    const dir = which === 'data' ? await dataDir() : await logsDir();
+    if (dir) await revealInExplorer(dir);
+  }, []);
+
+  /** Every way into a page goes through here, so Statistics opens on its front. */
+  const goPage = useCallback((next: Page) => {
+    setShowThemeManager(false);
+    if (next === 'statistics') setStatsTab('overview');
+    setPage(next);
+  }, []);
+
+  /**
+   * Where the window has been, for the mouse's Back and Forward buttons.
+   *
+   * Orbit has no URLs to hand to a webview history, so the steps are kept
+   * here: opening a game or changing page is one. A replayed step is not
+   * recorded again, or Back would bounce straight back to where it came from.
+   */
+  const backSteps = useRef<{ page: Page; selectedId: string | null }[]>([]);
+  const aheadSteps = useRef<{ page: Page; selectedId: string | null }[]>([]);
+  const replaying = useRef(false);
+  const shownStep = useRef<{ page: Page; selectedId: string | null }>({ page, selectedId });
+
+  useEffect(() => {
+    const step = { page, selectedId };
+    const previous = shownStep.current;
+    if (replaying.current) {
+      replaying.current = false;
+    } else if (previous.page !== step.page || previous.selectedId !== step.selectedId) {
+      backSteps.current.push(previous);
+      if (backSteps.current.length > 60) backSteps.current.shift();
+      aheadSteps.current = [];
+    }
+    shownStep.current = step;
+  }, [page, selectedId]);
+
+  const goHistory = useCallback(
+    (direction: -1 | 1) => {
+      const from = direction === -1 ? backSteps : aheadSteps;
+      const to = direction === -1 ? aheadSteps : backSteps;
+      let step = from.current.pop();
+      // Two entries can describe the same place when a page and its drawer
+      // change together; skipping them is what makes one press one step.
+      while (step && step.page === page && step.selectedId === selectedId) step = from.current.pop();
+      if (!step) return;
+      to.current.push({ page, selectedId });
+      replaying.current = true;
+      setPalette(false);
+      setPage(step.page);
+      setSelectedId(step.selectedId);
+    },
+    [page, selectedId],
+  );
+
+  // The side buttons on a mouse, and the keyboard's own pair. The default is
+  // suppressed: a webview that keeps its own history would leave Orbit for a
+  // page it never had.
+  useEffect(() => {
+    const move = (direction: -1 | 1) => {
+      if (!tv) goHistory(direction);
+    };
+    const onMouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      move(event.button === 3 ? -1 : 1);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === 'ArrowLeft' || event.key === 'BrowserBack') {
+        event.preventDefault();
+        move(-1);
+      } else if (event.key === 'ArrowRight' || event.key === 'BrowserForward') {
+        event.preventDefault();
+        move(1);
+      }
+    };
+    window.addEventListener('mousedown', onMouse);
+    window.addEventListener('auxclick', onMouse);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onMouse);
+      window.removeEventListener('auxclick', onMouse);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [goHistory, tv]);
+
   // A new page starts at its top. Without this, opening a long page from a
   // scrolled library lands halfway down it and the change reads as a glitch.
   useEffect(() => {
@@ -1460,8 +1573,7 @@ export default function App() {
       <TopNav
         page={page}
         onNavigate={(next) => {
-          setShowThemeManager(false);
-          setPage(next);
+          goPage(next);
         }}
         onOpenPalette={() => setPalette(true)}
         onOpenSettings={() => openSettings()}
@@ -1517,6 +1629,8 @@ export default function App() {
               onLibraryChanged={() => void reload()}
               update={update}
               onFoundUpdate={setUpdate}
+              onOpenAlbum={() => setPage('statistics')}
+              section={settingsJump?.id}
             />
           </div>
         ) : page === 'backlog' ? (
@@ -1587,6 +1701,8 @@ export default function App() {
             onBacklogMembership={setBacklogMembership}
             onJournalMembership={setJournalMembership}
             fetchMetadata={settings.fetchMetadata !== false}
+            tab={statsTab}
+            onTab={setStatsTab}
           />
         ) : (
           <LibraryView
@@ -1600,8 +1716,8 @@ export default function App() {
             setQuery={setQuery}
             sort={sort}
             setSort={setSort}
-            scale={scale}
-            setScale={(next) => setSettings({ coverScale: next })}
+            coverWidth={coverWidth}
+            setCoverWidth={(next) => setSettings({ coverScale: next })}
             coverTint={settings.coverTint !== false}
             setCoverTint={(next) => setSettings({ coverTint: next })}
             mode={mode}
@@ -1943,10 +2059,7 @@ export default function App() {
           open={palette}
           games={games}
           onClose={() => setPalette(false)}
-          onPage={(next) => {
-            setShowThemeManager(false);
-            setPage(next);
-          }}
+          onPage={goPage}
           onGame={openDetail}
           onSettings={() => openSettings()}
           onAdd={() => setShowAdd(true)}
@@ -1955,6 +2068,99 @@ export default function App() {
             setShowImport(true);
           }}
           onTv={enterTv}
+          extra={[
+            {
+              id: 'page-album',
+              label: 'Album',
+              hint: 'Screenshots, recordings, replays',
+              Icon: Images,
+              group: 'Pages',
+              run: () => {
+                goPage('statistics');
+                setStatsTab('album');
+              },
+            },
+            {
+              id: 'view-details',
+              label: 'Details view',
+              hint: 'The shelf and the game page',
+              Icon: List,
+              group: 'Actions',
+              run: () => {
+                goPage('library');
+                setMode('details');
+              },
+            },
+            {
+              id: 'view-grid',
+              label: 'Grid view',
+              hint: 'Every cover on one wall',
+              Icon: LayoutGrid,
+              group: 'Actions',
+              run: () => {
+                goPage('library');
+                setMode('grid');
+              },
+            },
+            ...(session && runningGame
+              ? [{
+                  id: 'stop-session',
+                  label: `Stop ${runningGame.title}`,
+                  hint: 'End the session and keep the time',
+                  Icon: Square,
+                  group: 'Actions' as const,
+                  run: () => void stop(),
+                }]
+              : []),
+            {
+              id: 'import-steam',
+              label: 'Import from Steam',
+              hint: 'Your installed Steam games',
+              Icon: Download,
+              group: 'Actions',
+              run: () => setShowSteam(true),
+            },
+            {
+              id: 'themes',
+              label: 'Themes',
+              hint: 'Colours, type and wallpapers',
+              Icon: Palette,
+              group: 'Actions',
+              run: () => setShowThemeManager(true),
+            },
+            {
+              id: 'settings-logs',
+              label: 'Watch the app log',
+              hint: 'What Orbit has been doing',
+              Icon: ScrollText,
+              group: 'Actions',
+              run: () => openSettings('orbit-logs'),
+            },
+            {
+              id: 'folder-captures',
+              label: 'Open the captures folder',
+              hint: 'Screenshots, recordings and replays',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void overlayOpenKind('screenshots'),
+            },
+            {
+              id: 'folder-data',
+              label: "Open Orbit's data folder",
+              hint: 'Where the library and saves live',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void revealFolder('data'),
+            },
+            {
+              id: 'folder-logs',
+              label: 'Open the logs folder',
+              hint: 'The files the app writes',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void revealFolder('logs'),
+            },
+          ]}
         />
       )}
 

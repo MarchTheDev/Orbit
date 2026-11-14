@@ -507,9 +507,26 @@ html.orbit-pad [data-orbit-journal-game].orbit-pad-focus {
   overflow-wrap: anywhere;
 }
 
-/* ------------------------------------------------------------ the calendar */
+/* The newest log, read in place. A log is a column of same-width lines, so it
+ * gets the one place in the app that scrolls sideways rather than wrapping
+ * every stack trace into a paragraph. */
+.orbit-logtail {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--c-panel2) 55%, transparent);
+  padding: 0.85rem 1rem;
+  font-family: var(--font-mono, ui-monospace, 'Cascadia Mono', Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--c-muted);
+  white-space: pre;
+  tab-size: 2;
+}
 
-/*
+/* ------------------------------------------------------------ the calendar *//*
  * Dates use Orbit's own month grid so the popup follows the current theme on
  * every platform. The clock is still a native time field, drawn in dark mode
  * and given the same accent as the rest of the controls.
@@ -1122,6 +1139,67 @@ html.orbit-linux .orbit-topbar {
 }
 .orbit-topbar-right { justify-content: flex-end; }
 
+/* The frame's own buttons, drawn here because on Windows Orbit owns the frame.
+   They sit flush with the corner and are as tall as the bar, the way every
+   other window on the desktop does it. */
+.orbit-wincontrols {
+  display: flex;
+  align-self: stretch;
+  align-items: stretch;
+  height: 100%;
+  margin-right: -18px;
+}
+.orbit-wincontrols button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--c-text) 70%, transparent);
+  cursor: default;
+  transition: background .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-wincontrols button:hover { background: color-mix(in srgb, var(--c-text) 9%, transparent); color: var(--c-text); }
+.orbit-wincontrols .orbit-win-close:hover { background: #c42b1c; color: #fff; }
+.orbit-win-glyph { position: relative; display: block; }
+.orbit-win-min { width: 10px; height: 1px; background: currentColor; }
+.orbit-win-max { width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 1px; }
+.orbit-win-restore {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  transform: translate(-1px, 1px);
+}
+.orbit-win-restore::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: -4px;
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0 1px 0 0;
+}
+.orbit-win-x { width: 10px; height: 10px; }
+.orbit-win-x::before,
+.orbit-win-x::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4.5px;
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+.orbit-win-x::before { transform: rotate(45deg); }
+.orbit-win-x::after { transform: rotate(-45deg); }
+
 .orbit-brand {
   display: flex;
   align-items: center;
@@ -1503,6 +1581,20 @@ html.orbit-linux .orbit-topbar {
   line-height: 1.45;
   color: var(--c-muted);
 }
+
+/* The Filters button and its panel: the chips pick whose shelf it is, this
+   picks which corner of it is being looked at. Anchored under the button so
+   the two read as one control. */
+.orbit-filter {
+  position: relative;
+  display: flex;
+}
+.orbit-filterpop {
+  width: 288px;
+}
+.orbit-filterpop .orbit-viewmenu-block {
+  padding-top: 10px;
+}
 .orbit-viewmenu-reset {
   margin-top: 2px;
   padding: 9px 4px 2px;
@@ -1572,7 +1664,8 @@ html.orbit-linux .orbit-topbar {
 .orbit-shelf-scroll {
   min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  /* Room for the selected cover's ring: the scroller would cut it otherwise. */
+  padding: 4px 6px 4px 4px;
 }
 .orbit-shelf-grid {
   display: grid;
@@ -1906,6 +1999,41 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
   color: var(--c-muted);
   text-align: center;
 }
+
+/* Album: one block per game, the game captured most recently first. */
+.orbit-album { display: grid; gap: 12px; margin-top: 14px; }
+.orbit-album-group {
+  padding: 12px 13px 13px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c-text) 2%, transparent);
+}
+.orbit-album-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.orbit-album-head > i { flex: none; width: 9px; height: 9px; border-radius: 3px; }
+.orbit-album-head h3 { font-size: 13px; font-weight: 700; line-height: 1.2; }
+.orbit-album-head p { margin-top: 2px; font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+.orbit-album-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-album-open:hover {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-accent) 45%, transparent);
+}
+.orbit-album .orbit-gallery { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+
 .orbit-lightbox {
   position: fixed;
   inset: 0;
@@ -1936,6 +2064,14 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
 }
 .orbit-blank h2 { font-size: 16px; font-weight: 650; color: var(--c-text); }
 .orbit-blank p { font-size: 12.5px; line-height: 1.55; max-width: 42ch; }
+.orbit-blank-quiet { min-height: 240px; height: 100%; }
+.orbit-blank-quiet p {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-text) 26%, transparent);
+}
 .orbit-blank button {
   margin-top: 8px;
   height: 32px;
@@ -2271,6 +2407,8 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
 
 @media (max-width: 680px) {
   .orbit-topbar { padding: 0 12px; gap: 10px; }
+  .orbit-wincontrols { margin-right: -12px; }
+  .orbit-wincontrols button { width: 40px; }
   .orbit-search kbd { display: none; }
   .orbit-main { padding: 14px 12px 90px; }
   .orbit-pagehead { flex-wrap: wrap; gap: 10px; }

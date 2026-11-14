@@ -45,6 +45,7 @@ import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { AppMixer } from './AppMixer';
 import { MediaPlayer } from './MediaPlayer';
+import { CAPTURE_KINDS, CAPTURE_LABELS, captureCounts, type CaptureKind } from './Captures';
 
 type BoxId = OverlayBoxId;
 type Place = { x: number; y: number; w?: number; h?: number; pinned?: boolean };
@@ -264,7 +265,7 @@ export function OverlayView() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [items, setItems] = useState<GalleryItem[]>([]);
-  const [tab, setTab] = useState<GalleryItem['kind']>('screenshot');
+  const [tab, setTab] = useState<CaptureKind>('screenshot');
   const [ready, setReady] = useState(false);
   const [linux, setLinux] = useState(false);
   const [resting, setResting] = useState(false);
@@ -1199,10 +1200,13 @@ export function OverlayView() {
   }, [wantStats, wantFps, fpsArmed]);
 
   useEffect(() => {
-    const count = items.filter((item) => item.kind === tab).length;
+    // The panel only deals in the running game's captures, so the page count
+    // is the scoped count too.
+    const folder = status?.playing ? status.game : '';
+    const count = items.filter((item) => item.kind === tab && (!folder || item.game === folder)).length;
     const last = Math.max(0, Math.ceil(count / PAGE_SIZE) - 1);
     setPage((current) => (current > last ? last : current));
-  }, [items, tab]);
+  }, [items, tab, status?.playing, status?.game]);
 
   const wantClock = awake && !hidden.includes('clock') && (!resting || places.clock.pinned);
   useEffect(() => {
@@ -1233,7 +1237,10 @@ export function OverlayView() {
   const lengths = overlayLengths(status?.lengths);
   const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
   const fps = status?.fps === 60 ? 60 : 30;
-  const shownItems = items.filter((item) => item.kind === tab);
+  const runningFolder = status?.playing ? status.game : '';
+  const scopedItems = runningFolder ? items.filter((item) => item.game === runningFolder) : items;
+  const shownItems = scopedItems.filter((item) => item.kind === tab);
+  const tabCounts = captureCounts(scopedItems);
   const pages = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const pageItems = shownItems.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
@@ -1319,7 +1326,7 @@ export function OverlayView() {
         <Box
           id="gallery"
           padSelected={padOn('gallery')}
-          title="Gallery"
+          title={runningFolder ? `Gallery · ${runningFolder}` : 'Gallery'}
           place={places.gallery}
           front={front === 'gallery'}
           onDrag={drag}
@@ -1339,28 +1346,30 @@ export function OverlayView() {
           )}
         >
           <div className="mb-2 flex gap-1">
-            {([
-              ['screenshot', 'Shots'],
-              ['recording', 'Recordings'],
-              ['replay', 'Replays'],
-            ] as const).map(([kind, label]) => (
+            {CAPTURE_KINDS.map((kind) => (
               <button
                 key={kind}
                 type="button"
                 data-overlay
+                aria-pressed={tab === kind}
                 onClick={() => { setTab(kind); setPage(0); }}
                 className={cn(
-                  'rounded-full border px-2.5 py-1 text-[11px]',
-                  tab === kind ? 'border-white bg-white text-black' : 'border-white/20 text-white/75 hover:border-white/50',
+                  'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+                  tab === kind
+                    ? 'border-accent bg-accent/15 text-white'
+                    : 'border-white/15 bg-black/30 text-white/70 hover:border-white/35 hover:text-white',
                 )}
               >
-                {label}
+                {CAPTURE_LABELS[kind].many}
+                {tabCounts[kind] > 0 && <span className="ml-1 tabular-nums text-white/45">{tabCounts[kind]}</span>}
               </button>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-2">
             {shownItems.length === 0 && (
-              <p className="col-span-2 px-1 py-6 text-center text-[11px] leading-relaxed text-white/45">Nothing here yet. A capture is filed under the game it came from.</p>
+              <p className="col-span-2 px-1 py-6 text-center text-[11px] leading-relaxed text-white/45">
+                {runningFolder ? `No ${CAPTURE_LABELS[tab].many.toLowerCase()} of this game yet.` : 'Nothing captured yet.'}
+              </p>
             )}
             {pageItems.map((item) => (
               <button

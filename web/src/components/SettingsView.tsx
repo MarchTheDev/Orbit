@@ -13,12 +13,14 @@ import {
   GitBranch,
   GripVertical,
   Heart,
+  Images,
   ListChecks,
   Monitor,
   MonitorPlay,
   Palette,
   Piano,
   RefreshCw,
+  ScrollText,
   ArrowLeftRight,
   Save,
   Search,
@@ -35,11 +37,16 @@ import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/laun
 import { desktopOs } from '../utils/platform';
 import { scrollSettingsSectionToTop } from '../utils/settingsNavigation';
 import {
+  cacheClear,
+  cacheSize,
   cloudAutoOn,
   dataDir,
   dataDirSize,
   dataPortable,
   isNative,
+  logsDir,
+  logsTail,
+  overlayGallery,
   savesWithClouds,
   listDrives,
   rememberMusic,
@@ -54,6 +61,7 @@ import {
   setLaunchOnStartup,
   type CaptureDirs,
   type DriveInfo,
+  type GalleryItem,
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { playShutter } from '../services/shutter';
@@ -66,7 +74,7 @@ import { driveLabel } from '../utils/drive';
 import { btnBrowse, inputCls } from './ui/Modal';
 import { Checkbox, CheckboxInline } from './ui/Checkbox';
 import { Select } from './ui/Select';
-import { btnAccent } from './ui/buttons';
+import { btnAccent, btnDanger } from './ui/buttons';
 import { LauncherIcon } from './ui/LauncherIcon';
 import { APP_VERSION } from '../version';
 import {
@@ -130,16 +138,19 @@ function Section({
   icon: Icon,
   title,
   lead,
+  active = true,
   children,
 }: {
   id: string;
   icon: typeof Palette;
   title: string;
   lead?: string;
+  /** One card is on screen at a time: the rail is the page, not a short cut. */
+  active?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="orbit-panel scroll-mt-28 p-5 transition-colors sm:p-6">
+    <section id={id} hidden={!active} className="orbit-panel scroll-mt-28 p-5 transition-colors sm:p-6">
       <div className="flex items-start gap-3.5">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-panel2 text-accent">
           <Icon className="size-[18px]" strokeWidth={1.9} />
@@ -285,22 +296,26 @@ const SECTIONS = [
   { id: 'orbit-library', label: 'Library' },
   { id: 'orbit-playing', label: 'Playing' },
   { id: 'orbit-overlay', label: 'Overlay' },
+  { id: 'orbit-captures', label: 'Captures' },
   { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
   { id: 'orbit-tabs', label: 'Tabs' },
   { id: 'orbit-sound', label: 'Sound' },
   { id: 'orbit-copy', label: 'Export' },
+  { id: 'orbit-advanced', label: 'Advanced' },
+  { id: 'orbit-logs', label: 'Logs' },
   { id: 'orbit-tools', label: 'Tools' },
   { id: 'orbit-updates', label: 'Updates' },
   { id: 'orbit-about', label: 'About' },
 ];
 
-/** Every card grouped into the three rooms the page is read in. */
+/** Every card grouped into the rooms the page is read in. */
 const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
-  { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-overlay', 'orbit-sound'] },
-  { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-details', 'orbit-tabs', 'orbit-backups'] },
-  { label: 'System', ids: ['orbit-copy', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
+  { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
+  { label: 'Games', ids: ['orbit-details', 'orbit-captures', 'orbit-overlay'] },
+  { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-tabs', 'orbit-backups'] },
+  { label: 'System', ids: ['orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
 ];
 
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
@@ -325,6 +340,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Capture notes', section: 'orbit-overlay', keywords: 'overlay toast screenshot recording replay saved notification' },
   { label: 'Game start note', section: 'orbit-overlay', keywords: 'overlay working popup banner start game notice' },
   { label: 'Capture folder', section: 'orbit-overlay', keywords: 'overlay screenshots recordings replays save location path directory folder' },
+  { label: 'Screenshots, recordings and replays', section: 'orbit-captures', keywords: 'gallery album captures screenshots recordings replays browse per game' },
+  { label: 'Data folder and portable copy', section: 'orbit-advanced', keywords: 'advanced folders cache data directory portable beside program' },
+  { label: 'Log files', section: 'orbit-logs', keywords: 'logs diagnostics errors support folder tail report' },
   { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes resize' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
@@ -740,6 +758,8 @@ export function SettingsView({
   onLibraryChanged,
   update,
   onFoundUpdate,
+  onOpenAlbum,
+  section,
 }: {
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
@@ -761,7 +781,21 @@ export function SettingsView({
   update: ReleaseInfo | null;
   /** Reports what a check from in here found, so the offer travels with the app. */
   onFoundUpdate: (info: ReleaseInfo | null) => void;
+  /** Takes the player to the album in Statistics, where every capture is grouped by game. */
+  onOpenAlbum?: () => void;
+  /** A card another page asked for, so a deep link lands on it. */
+  section?: string;
 }) {
+  /** Which card is on screen. One at a time, picked from the rail. */
+  const [activeSection, setActiveSection] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('orbit.settings.section');
+      if (saved && SECTIONS.some((item) => item.id === saved)) return saved;
+    } catch {
+      /* A private profile has no storage; the first card is a fine start. */
+    }
+    return SECTIONS[0].id;
+  });
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [folder, setFolder] = useState('');
   const [where, setWhere] = useState<{ path: string; size: number } | null>(null);
@@ -778,6 +812,14 @@ export function SettingsView({
   const [exeContextMenuError, setExeContextMenuError] = useState<string | null>(null);
   const [musicError, setMusicError] = useState<string | null>(null);
   const [musicBusy, setMusicBusy] = useState(false);
+  const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
+  const [captureRoots, setCaptureRoots] = useState<CaptureDirs | null>(null);
+  const [logPath, setLogPath] = useState<string | null>(null);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logBusy, setLogBusy] = useState(false);
+  const [cacheBytes, setCacheBytes] = useState<number | null>(null);
+  const [cacheNote, setCacheNote] = useState('');
+  const [cacheBusy, setCacheBusy] = useState(false);
   const native = isNative();
   const overlayUnavailable = native && desktopOs() === 'linux';
   const searchItems = overlayUnavailable
@@ -887,12 +929,92 @@ export function SettingsView({
 
   /** Take the page to one of its own cards, and mark it for a moment. */
   const jump = (id: string) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    scrollSettingsSectionToTop(el);
-    el.classList.add('settings-spot');
-    window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
+    setActiveSection(id);
+    // The card has to be on screen before it can be measured, so the scroll
+    // waits for the frame that paints it.
+    window.requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      // Cards swap in place, so the page goes back to its own top rather than
+      // sliding to the card: the heading and the search stay where they were.
+      el.closest<HTMLElement>('.orbit-scroll')?.scrollTo({ top: 0 });
+      scrollSettingsSectionToTop(el);
+      el.classList.add('settings-spot');
+      window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
+    });
   };
+
+  /** The album's index, and where each kind of capture is written. */
+  const loadCaptures = async () => {
+    const [items, roots] = await Promise.all([
+      overlayGallery().catch(() => [] as GalleryItem[]),
+      overlayCaptureDirs().catch(() => null),
+    ]);
+    setCaptures(items);
+    setCaptureRoots(roots);
+  };
+
+  /** The last lines of the newest log, and the folder it came from. */
+  const loadLogs = async () => {
+    setLogBusy(true);
+    try {
+      const [dir, lines] = await Promise.all([logsDir(), logsTail(160)]);
+      setLogPath(dir);
+      setLogLines(lines);
+    } finally {
+      setLogBusy(false);
+    }
+  };
+
+  /** Both numbers on the Advanced card: the whole folder, and its cache. */
+  const measureStorage = async () => {
+    setCacheBusy(true);
+    try {
+      const [path, total, cache] = await Promise.all([dataDir(), dataDirSize(), cacheSize()]);
+      if (path) setWhere({ path, size: total });
+      setCacheBytes(cache);
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const clearCache = async () => {
+    setCacheBusy(true);
+    setCacheNote('');
+    try {
+      const freed = await cacheClear();
+      setCacheBytes(0);
+      setCacheNote(freed > 0 ? `Freed ${fmtBytes(freed)}.` : 'The replay workspace was already empty.');
+    } catch (reason) {
+      setCacheNote(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  // The three cards that ask the desktop side something only do it when they
+  // are the card on screen: Settings opens on one card, and the rest cost
+  // nothing until they are looked at.
+  useEffect(() => {
+    if (activeSection === 'orbit-captures' && captures === null) void loadCaptures();
+    if (activeSection === 'orbit-logs' && logLines.length === 0 && !logBusy) void loadLogs();
+    if (activeSection === 'orbit-advanced' && cacheBytes === null) void measureStorage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection]);
+
+  // A deep link from another page (the overlay's own settings button, the
+  // palette) names the card it wants; the rail inside the page does the rest.
+  useEffect(() => {
+    if (section && SECTIONS.some((item) => item.id === section)) setActiveSection(section);
+  }, [section]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('orbit.settings.section', activeSection);
+    } catch {
+      /* Nothing to remember it with. */
+    }
+  }, [activeSection]);
 
   const featuredCustomTheme = settings.customThemes?.find((theme) => theme.id === settings.theme) ?? settings.customThemes?.[0] ?? null;
 
@@ -946,21 +1068,28 @@ export function SettingsView({
   );
 
   const settingsNav = (compact: boolean) => (
-    <nav className={compact ? 'flex gap-1 overflow-x-auto pb-1' : 'space-y-5'} aria-label="Settings sections">
+    <nav className={compact ? 'flex gap-1 overflow-x-auto pb-1' : 'space-y-4'} aria-label="Settings sections">
       {SETTINGS_GROUPS.map((group) => (
         <div key={group.label}>
-          {!compact && <p className="orbit-kicker mb-2 px-2.5">{group.label}</p>}
+          {!compact && <p className="orbit-kicker mb-1.5 px-2.5">{group.label}</p>}
           <div className={compact ? 'flex gap-1' : 'space-y-0.5'}>
             {group.ids.map((id) => {
               const section = SECTIONS.find((item) => item.id === id);
               if (!section) return null;
+              const chosen = activeSection === id;
               return (
                 <button
                   key={id}
                   onClick={() => jump(id)}
+                  aria-current={chosen ? 'page' : undefined}
                   className={compact
-                    ? 'shrink-0 rounded-lg border border-line/70 px-2.5 py-1.5 text-[11.5px] font-medium text-muted transition hover:text-fg'
-                    : 'orbit-nav-item !py-2'}
+                    ? cn(
+                        'shrink-0 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition',
+                        chosen
+                          ? 'border-accent/50 bg-accent/10 text-fg'
+                          : 'border-line/70 text-muted hover:text-fg',
+                      )
+                    : 'orbit-nav-item !py-1.5'}
                 >
                   {section.label}
                 </button>
@@ -987,9 +1116,9 @@ export function SettingsView({
         </div>
       </header>
 
-      <div className="mt-7 grid items-start gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="mt-7 grid gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <div className="sticky top-24 space-y-5">
+          <div className="sticky top-24 max-h-[calc(100vh-8rem)] space-y-5 overflow-y-auto pr-1">
             {settingsSearch}
             {settingsNav(false)}
           </div>
@@ -1003,6 +1132,7 @@ export function SettingsView({
 
       <Section
         id="orbit-appearance"
+        active={activeSection === 'orbit-appearance'}
         icon={Palette}
         title="Appearance"
         lead="Choose a theme, tune the library's look, and decide what happens when Orbit opens."
@@ -1137,6 +1267,7 @@ export function SettingsView({
 
       <Section
         id="orbit-library"
+        active={activeSection === 'orbit-library'}
         icon={LibraryIcon}
         title="Library and Backlog"
         lead="Choose where new games appear and which folders Orbit keeps track of."
@@ -1238,6 +1369,7 @@ export function SettingsView({
 
       <Section
         id="orbit-playing"
+        active={activeSection === 'orbit-playing'}
         icon={Monitor}
         title="Playing"
         lead="Choose what Orbit does with its window when a game starts or closes."
@@ -1311,6 +1443,7 @@ export function SettingsView({
 
       <Section
         id="orbit-overlay"
+        active={activeSection === 'orbit-overlay'}
         icon={MonitorPlay}
         title="Overlay"
         lead={overlayUnavailable
@@ -1330,7 +1463,89 @@ export function SettingsView({
       </Section>
 
       <Section
+        id="orbit-captures"
+        active={activeSection === 'orbit-captures'}
+        icon={Images}
+        title="Captures"
+        lead="Everything the overlay saved: screenshots, recordings and replays. They live in three folders on this PC, and the album in Statistics shows all of them grouped by game."
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          {([
+            { kind: 'screenshot', label: 'Screenshots' },
+            { kind: 'recording', label: 'Recordings' },
+            { kind: 'replay', label: 'Replays' },
+          ] as const).map((item) => {
+            const count = captures?.filter((entry) => entry.kind === item.kind).length;
+            return (
+              <div key={item.kind} className="rounded-xl border border-line/70 bg-panel2/40 p-4">
+                <p className="text-2xl font-semibold tabular-nums text-fg">{count ?? '—'}</p>
+                <p className="mt-1 text-xs text-muted">{item.label}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="space-y-2">
+          {([
+            { kind: 'screenshots', label: 'Screenshots' },
+            { kind: 'recordings', label: 'Recordings' },
+            { kind: 'replays', label: 'Replays' },
+          ] as const).map((folder) => {
+            const path = captureRoots?.[folder.kind] ?? '';
+            return (
+              <div
+                key={folder.kind}
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-line/70 bg-panel2/40 px-3.5 py-2.5"
+              >
+                <FolderOpen className="size-4 shrink-0 text-accent" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{folder.label}</p>
+                  <p className="truncate text-[11px] text-muted" title={path || undefined}>
+                    {path || (native ? 'Reading the folder…' : 'The folders live on this PC, in the desktop app.')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!path}
+                  onClick={() => void revealInExplorer(path)}
+                  className="rounded-lg border border-line px-2.5 py-1.5 text-[11px] font-medium text-muted transition hover:border-accent hover:text-fg disabled:opacity-40"
+                >
+                  Show in Explorer
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void loadCaptures()} className={cn(btnBrowse, 'inline-flex items-center gap-2')}>
+            <RefreshCw className="size-3.5" /> Scan again
+          </button>
+          {onOpenAlbum && (
+            <button
+              type="button"
+              onClick={onOpenAlbum}
+              className={cn(btnAccent, 'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs')}
+            >
+              <Images className="size-3.5" /> Open the album
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => jump('orbit-overlay')}
+            className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
+          >
+            Where captures are saved
+          </button>
+        </div>
+        <p className="text-xs leading-relaxed text-muted">
+          Orbit never moves or renames a file it did not write. A folder can be changed on the Overlay card; anything already saved stays where it is.
+        </p>
+      </Section>
+
+      <Section
         id="orbit-backups"
+        active={activeSection === 'orbit-backups'}
         icon={Save}
         title="Backups"
         lead="Add a cloud here. Disconnect one here too."
@@ -1348,6 +1563,7 @@ export function SettingsView({
 
       <Section
         id="orbit-libraries"
+        active={activeSection === 'orbit-libraries'}
         icon={LibraryIcon}
         title="Libraries"
         lead="Scan launchers or a drive and review the games Orbit finds before adding anything."
@@ -1421,9 +1637,10 @@ export function SettingsView({
 
       <Section
         id="orbit-details"
+        active={activeSection === 'orbit-details'}
         icon={Sparkles}
         title="Artwork and details"
-        lead="Orbit can use Steam's public catalogue for artwork and details. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
+        lead="Orbit can use Steam's public catalogue for artwork and details, SteamGridDB when a key is added, and a plain web image search when neither has a portrait. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
       >
         <div className="rounded-2xl border border-line bg-panel/40 p-3">
           <label className="block text-sm font-semibold text-fg" htmlFor="sgdb-key">
@@ -1477,7 +1694,7 @@ export function SettingsView({
         />
       </Section>
 
-      <Section id="orbit-tabs" icon={GripVertical} title="Statistics pages" lead="Choose the order of the tabs inside Statistics. The library and the bar itself stay where they are, so a page can never be lost.">
+      <Section id="orbit-tabs" active={activeSection === 'orbit-tabs'} icon={GripVertical} title="Statistics pages" lead="Choose the order of the tabs inside Statistics. The library and the bar itself stay where they are, so a page can never be lost.">
         <TabOrder
           order={orderedTabs(settings.tabOrder).map((t) => t.id).filter((id) => id !== 'library')}
           onChange={(next) => setSettings({ tabOrder: next })}
@@ -1486,6 +1703,7 @@ export function SettingsView({
 
       <Section
         id="orbit-sound"
+        active={activeSection === 'orbit-sound'}
         icon={Piano}
         title="Sound"
         lead="A quiet chord, made in the app. Nothing is downloaded. A file you pick replaces it, and Restore brings the chord back."
@@ -1582,6 +1800,7 @@ export function SettingsView({
 
       <Section
         id="orbit-copy"
+        active={activeSection === 'orbit-copy'}
         icon={ArrowLeftRight}
         title="Export and import"
         lead="Save this Orbit to a file you keep, and bring that file back later. Settings always go in. The journal and the sessions go in only if you tick them. This is not a copy of the games' save files."
@@ -1589,7 +1808,133 @@ export function SettingsView({
         <CopySettings settings={settings} replaceSettings={replaceSettings} onLibraryChanged={onLibraryChanged} />
       </Section>
 
-      <Section id="orbit-tools" icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">
+      <Section
+        id="orbit-advanced"
+        active={activeSection === 'orbit-advanced'}
+        icon={HardDrive}
+        title="Advanced"
+        lead="Where Orbit keeps its files, how much room they take, and the one folder that is only a cache."
+      >
+        <div className="rounded-xl border border-line/70 bg-panel2/40 p-4">
+          <div className="flex flex-wrap items-start gap-3">
+            <FolderOpen className="mt-0.5 size-4 shrink-0 text-accent" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Data folder</p>
+              <p className="truncate text-[11px] text-muted" title={where?.path || undefined}>
+                {where?.path || (native ? 'Reading the folder…' : 'Orbit’s files live on this PC, in the desktop app.')}
+              </p>
+            </div>
+            <span className="text-sm tabular-nums text-muted">{where ? fmtBytes(where.size) : '—'}</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!where?.path}
+              onClick={() => where && void revealInExplorer(where.path)}
+              className={cn(btnBrowse, 'py-1.5 text-xs disabled:opacity-40')}
+            >
+              Show in Explorer
+            </button>
+            <button
+              type="button"
+              disabled={cacheBusy}
+              onClick={() => void measureStorage()}
+              className={cn(btnBrowse, 'inline-flex items-center gap-2 py-1.5 text-xs disabled:opacity-40')}
+            >
+              <RefreshCw className={cn('size-3.5', cacheBusy && 'animate-spin')} /> Measure again
+            </button>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            The database, the stats, the settings, the backups and the replay workspace all live in this one folder.
+            {portable
+              ? ' This is a portable copy, so the folder sits beside the program and moves with it.'
+              : ' A portable copy keeps the same folder beside the program instead.'}
+          </p>
+        </div>
+
+        <Group>
+          <div className="flex flex-wrap items-start gap-3">
+            <Trash2 className="mt-0.5 size-4 shrink-0 text-accent" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Replay cache</p>
+              <p className="text-xs text-muted">
+                The rolling buffer a game session writes to. It is emptied when the game stops, so what is here is left
+                over from a session that ended badly. {cacheBytes !== null ? `${fmtBytes(cacheBytes)} right now.` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={cacheBusy}
+              onClick={() => void clearCache()}
+              className={cn(btnDanger, 'rounded-lg px-3 py-1.5 text-xs disabled:opacity-40')}
+            >
+              Clear the cache
+            </button>
+            {cacheNote && <span className="text-xs text-muted">{cacheNote}</span>}
+          </div>
+        </Group>
+
+        <p className="text-xs leading-relaxed text-muted">
+          Clearing the cache never touches the library, the journal, the sessions, the settings or a saved capture.
+          It is refused while a game is running, because the buffer is what a replay is cut from.
+        </p>
+      </Section>
+
+      <Section
+        id="orbit-logs"
+        active={activeSection === 'orbit-logs'}
+        icon={ScrollText}
+        title="Logs"
+        lead="What Orbit wrote down while it ran. If something went wrong, the last lines here and the newest log file are what to send along with a report."
+      >
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line/70 bg-panel2/40 px-3.5 py-2.5">
+          <ScrollText className="size-4 shrink-0 text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Log folder</p>
+            <p className="truncate text-[11px] text-muted" title={logPath || undefined}>
+              {logPath || (native ? 'Looking for the newest log…' : 'Logs are written by the desktop app only.')}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!logPath}
+            onClick={() => logPath && void revealInExplorer(logPath)}
+            className="rounded-lg border border-line px-2.5 py-1.5 text-[11px] font-medium text-muted transition hover:border-accent hover:text-fg disabled:opacity-40"
+          >
+            Show in Explorer
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={logBusy}
+            onClick={() => void loadLogs()}
+            className={cn(btnBrowse, 'inline-flex items-center gap-2 py-1.5 text-xs disabled:opacity-40')}
+          >
+            <RefreshCw className={cn('size-3.5', logBusy && 'animate-spin')} /> Read again
+          </button>
+          <button
+            type="button"
+            disabled={logLines.length === 0}
+            onClick={() => void navigator.clipboard?.writeText(logLines.join('\n'))}
+            className={cn(btnBrowse, 'inline-flex items-center gap-2 py-1.5 text-xs disabled:opacity-40')}
+          >
+            Copy the last lines
+          </button>
+          <span className="text-[11px] text-muted">{logLines.length > 0 ? `${logLines.length} lines` : ''}</span>
+        </div>
+        <pre className="orbit-logtail" aria-label="The newest log, last lines">
+          {logLines.length > 0
+            ? logLines.join('\n')
+            : native
+              ? 'Nothing has been written yet. Start a game, take a capture, or open a page; Orbit writes the log as it runs.'
+              : 'No log to read in the browser. The desktop app writes one as it runs.'}
+        </pre>
+      </Section>
+
+      <Section id="orbit-tools" active={activeSection === 'orbit-tools'} icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">
         <button
           onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
           className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
@@ -1604,6 +1949,7 @@ export function SettingsView({
 
       <Section
         id="orbit-updates"
+        active={activeSection === 'orbit-updates'}
         icon={Download}
         title="Updates"
         lead="One request to GitHub's public releases page when Orbit opens. No account, no identifier, and nothing about your library is sent."
@@ -1670,6 +2016,7 @@ export function SettingsView({
 
       <Section
         id="orbit-about"
+        active={activeSection === 'orbit-about'}
         icon={Database}
         title="About"
         lead={`Orbit ${APP_VERSION}, ${isNative() ? 'the desktop app' : 'a browser preview'}. Your library is a file on this machine, and nothing here needs an account.`}

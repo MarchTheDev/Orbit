@@ -16,6 +16,7 @@ import {
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
+import { closeWindow, customTitleBar, minimizeWindow, toggleMaximizeWindow, watchMaximized } from '../services/windowChrome';
 
 // Sessions follows the library, with Journal before Backlog in the default
 // order. The order can be rearranged in Settings, so this list is the default
@@ -100,12 +101,22 @@ export function TopNav({
   onOpenSettings: () => void;
   onAdd: () => void;
   onAddFolder: () => void;
-  /** Fills the screen with console mode, the library as a couch sees it. */
+  /** Fills the screen with Cockpit, the library as a couch sees it. */
   onTv: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  /** Whether the frame is filling the screen, so the middle button can offer to put it back. */
+  const [maximized, setMaximized] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
   const burger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let stop = () => {};
+    void watchMaximized(setMaximized).then((unlisten) => {
+      stop = unlisten;
+    });
+    return () => stop();
+  }, []);
 
   // The menu belongs to the page it was opened on; navigating is how it closes.
   useEffect(() => setOpen(false), [page]);
@@ -145,8 +156,11 @@ export function TopNav({
 
   return (
     <>
-      <header className="orbit-topbar">
-        <div className="orbit-topbar-left">
+      <header
+        className={customTitleBar ? 'orbit-topbar orbit-topbar-native' : 'orbit-topbar'}
+        data-tauri-drag-region={customTitleBar || undefined}
+      >
+        <div className="orbit-topbar-left" data-tauri-drag-region={customTitleBar || undefined}>
           <button className="orbit-brand" onClick={() => go('library')} title="Orbit" aria-label="Orbit">
             <Logo className="size-7 shrink-0 text-accent" animated />
             <span>ORBIT</span>
@@ -170,9 +184,33 @@ export function TopNav({
           <kbd>Ctrl K</kbd>
         </button>
 
-        <div className="orbit-topbar-right">
+        <div className="orbit-topbar-right" data-tauri-drag-region={customTitleBar || undefined}>
           {showMusic && (
             <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={onOpenSettings} />
+          )}
+          {customTitleBar && (
+            <div className="orbit-wincontrols" role="group" aria-label="Window">
+              <button type="button" onClick={() => void minimizeWindow()} title="Minimize" aria-label="Minimize">
+                <span className="orbit-win-glyph orbit-win-min" aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => void toggleMaximizeWindow()}
+                title={maximized ? 'Restore' : 'Maximize'}
+                aria-label={maximized ? 'Restore' : 'Maximize'}
+              >
+                <span className={maximized ? 'orbit-win-glyph orbit-win-restore' : 'orbit-win-glyph orbit-win-max'} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="orbit-win-close"
+                onClick={() => void closeWindow()}
+                title="Close"
+                aria-label="Close"
+              >
+                <span className="orbit-win-glyph orbit-win-x" aria-hidden />
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -210,11 +248,11 @@ export function TopNav({
             role="menuitem"
             className="orbit-menu-item"
             onClick={onTv}
-            aria-label="Console mode"
-            title="Console mode"
+            aria-label="Cockpit"
+            title="Cockpit"
           >
             <Gamepad2 className="size-[17px] shrink-0" strokeWidth={1.8} />
-            Console mode
+            Cockpit
           </button>
 
           <div className="orbit-menu-sep" role="separator" />

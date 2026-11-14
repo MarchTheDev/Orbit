@@ -18,12 +18,12 @@ import type { Game, Page } from '../types';
 import { Cover } from './ui/Cover';
 import { cn } from '../utils/cn';
 
-interface Command {
+export interface PaletteCommand {
   id: string;
   label: string;
   hint?: string;
   Icon: typeof Search;
-  group: 'Pages' | 'Actions';
+  group: 'Pages' | 'Actions' | 'Files';
   run: () => void;
 }
 
@@ -46,6 +46,7 @@ export function CommandPalette({
   onAdd,
   onAddFolder,
   onTv,
+  extra = [],
 }: {
   open: boolean;
   games: Game[];
@@ -57,6 +58,8 @@ export function CommandPalette({
   onAdd: () => void;
   onAddFolder?: () => void;
   onTv: () => void;
+  /** App-specific actions and folders, so this file stays about the frame. */
+  extra?: PaletteCommand[];
 }) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -73,8 +76,8 @@ export function CommandPalette({
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
-  const commands = useMemo<Command[]>(() => {
-    const pages: Command[] = [
+  const commands = useMemo<PaletteCommand[]>(() => {
+    const pages: PaletteCommand[] = [
       { id: 'page-library', label: 'Library', hint: 'Everything you own', Icon: Library, group: 'Pages', run: () => onPage('library') },
       { id: 'page-statistics', label: 'Statistics', hint: 'Playtime, journal, backlog', Icon: ChartNoAxesColumn, group: 'Pages', run: () => onPage('statistics') },
       { id: 'page-sessions', label: 'Sessions', hint: 'Tracked playtime', Icon: ListOrdered, group: 'Pages', run: () => onPage('sessions') },
@@ -84,21 +87,26 @@ export function CommandPalette({
       { id: 'page-storage', label: 'Storage', hint: 'Drives and files', Icon: HardDrive, group: 'Pages', run: () => onPage('storage') },
       { id: 'page-settings', label: 'Settings', hint: 'Themes, sound, folders', Icon: SettingsIcon, group: 'Pages', run: onSettings },
     ];
-    const actions: Command[] = [
+    const actions: PaletteCommand[] = [
       { id: 'action-add', label: 'Add a game', hint: 'A program or a folder', Icon: Plus, group: 'Actions', run: onAdd },
       ...(onAddFolder
         ? [{ id: 'action-add-folder', label: 'Add from folder', hint: 'Find the games in a folder', Icon: FolderOpen, group: 'Actions' as const, run: onAddFolder }]
         : []),
-      { id: 'action-tv', label: 'Console mode', hint: 'Read the library from the couch', Icon: Gamepad2, group: 'Actions', run: onTv },
+      { id: 'action-tv', label: 'Cockpit', hint: 'Read the library from the couch', Icon: Gamepad2, group: 'Actions', run: onTv },
     ];
-    return [...pages, ...actions];
-  }, [onAdd, onAddFolder, onPage, onSettings, onTv]);
+    return [...pages, ...actions, ...extra];
+  }, [extra, onAdd, onAddFolder, onPage, onSettings, onTv]);
 
   const needle = query.trim().toLowerCase();
   const matches = (label: string, hint = '') =>
     needle === '' || label.toLowerCase().includes(needle) || hint.toLowerCase().includes(needle);
 
-  const visibleCommands = commands.filter((command) => matches(command.label, command.hint));
+  // Rows render grouped, so the run order has to be grouped too, or the index
+  // a click carries points at a different command than the one under it.
+  const groupRank: Record<PaletteCommand['group'], number> = { Pages: 0, Actions: 1, Files: 2 };
+  const visibleCommands = commands
+    .filter((command) => matches(command.label, command.hint))
+    .sort((a, b) => groupRank[a.group] - groupRank[b.group]);
   // Games only once there is something to match: an empty palette should be a
   // short menu, not the whole library.
   const visibleGames = needle
@@ -151,9 +159,10 @@ export function CommandPalette({
     }
   };
 
-  const groups: { title: string; rows: Command[] }[] = [
+  const groups: { title: string; rows: PaletteCommand[] }[] = [
     { title: 'Pages', rows: visibleCommands.filter((command) => command.group === 'Pages') },
     { title: 'Actions', rows: visibleCommands.filter((command) => command.group === 'Actions') },
+    { title: 'Files', rows: visibleCommands.filter((command) => command.group === 'Files') },
   ];
 
   let row = 0;

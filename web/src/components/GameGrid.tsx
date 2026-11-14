@@ -22,7 +22,9 @@ interface Props {
   onToggleFavorite: (id: string) => void;
   onPlay: (g: Game) => void;
   /** Drawn at this percentage of the base tile, from the toolbar's slider. */
-  scale: number;
+  scale?: number;
+  /** The cover's own width in pixels; wins over `scale` when it is given. */
+  width?: number;
   /** Set while the library is in the player's own order. */
   onReorder?: (fromId: string, toId: string, after: boolean) => void;
 
@@ -51,7 +53,8 @@ export function GameGrid({
   onEdit,
   onToggleFavorite,
   onPlay,
-  scale,
+  scale = 100,
+  width,
   onReorder,
   coverTint = true,
   shape = '3:4',
@@ -59,11 +62,12 @@ export function GameGrid({
   lift = true,
 }: Props) {
   const { bind, dragging, over } = useDragReorder(onReorder);
+  const tileWidth = width ?? Math.round(170 * (scale / 100));
 
   return (
     <div
       className="grid gap-x-5 gap-y-7 p-6"
-      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${Math.round(170 * (scale / 100))}px, 1fr))` }}
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tileWidth}px, 1fr))` }}
     >
       {games.map((g) => (
         <Tile
@@ -74,7 +78,7 @@ export function GameGrid({
           onEdit={onEdit}
           onToggleFavorite={onToggleFavorite}
           onPlay={onPlay}
-          scale={scale}
+          width={tileWidth}
           coverTint={coverTint}
           shape={shape}
           label={label}
@@ -104,7 +108,7 @@ function Tile({
   onEdit,
   onToggleFavorite,
   onPlay,
-  scale,
+  width,
   coverTint,
   shape,
   label,
@@ -119,7 +123,8 @@ function Tile({
   onEdit: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onPlay: (g: Game) => void;
-  scale: number;
+  /** The tile's own width, so the title reads at the size the cover is drawn. */
+  width: number;
   coverTint: boolean;
   shape: CoverShape;
   label: GridLabel;
@@ -243,7 +248,7 @@ function Tile({
         </button>
       </div>
       {showTitle && (
-        <p className="mt-2.5 truncate font-medium" style={{ fontSize: `${Math.max(12, Math.round(13 * (scale / 100)))}px` }}>
+        <p className="mt-2.5 truncate font-medium" style={{ fontSize: `${Math.max(12, Math.round(13 * (width / 170)))}px` }}>
           {game.title}
         </p>
       )}
