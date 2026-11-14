@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   CalendarDays,
   Check,
@@ -622,6 +622,38 @@ export function LibraryView({
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count }));
   }, [games]);
 
+  /**
+   * The divider between the shelf and the game beside it.
+   *
+   * A shelf whose size is only reachable through a menu three presses away is a
+   * shelf people leave at whatever it was. This is the direct version: press the
+   * seam and drag, and the column follows the pointer. The width is clamped to
+   * the same range the menu offers, held on the window while dragging so the
+   * pointer can leave the seam without letting go, and written through the same
+   * setter the menu uses so the two can never disagree.
+   */
+  const dragShelf = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = shelfWidth;
+    const scroller = document.querySelector('.orbit-scroll');
+    const limit = Math.min(MAX_SHELF_WIDTH, Math.round((window.innerWidth || 1400) * 0.46));
+    const move = (moveEvent: PointerEvent) => {
+      const next = Math.max(MIN_SHELF_WIDTH, Math.min(limit, startWidth + (moveEvent.clientX - startX)));
+      setShelfWidth(next);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('is-resizing');
+      scroller?.classList.remove('is-resizing');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    document.body.classList.add('is-resizing');
+    scroller?.classList.add('is-resizing');
+  };
+
   return (
     <div className="orbit-library" data-corners={corners} data-lift={lift ? 'on' : 'off'}>
       <header className="orbit-pagehead">
@@ -1032,8 +1064,14 @@ export function LibraryView({
         />
       ) : (
         <div
-          className={cn('orbit-lib', `is-shelf-${shelfRows}`)}
-          style={{ ['--orbit-shelf-columns' as string]: shelfRows, ['--orbit-shelf-width' as string]: `${shelfWidth}px` }}
+          className={cn('orbit-lib', `is-shelf-${shelfRows}`, rail === 'list' && 'is-list')}
+          style={{
+            ['--orbit-shelf-columns' as string]: shelfRows,
+            ['--orbit-shelf-width' as string]: `${shelfWidth}px`,
+            // The column itself, so the seam and the shelf agree about where
+            // the divisions are no matter which rail is inside it.
+            ['--orbit-shelf-column' as string]: `${shelfWidth * shelfRows + (shelfRows - 1) * 10 + 40}px`,
+          }}
         >
           <aside className="orbit-shelf" aria-label="Games">
             <div className="orbit-shelf-head">
@@ -1101,6 +1139,29 @@ export function LibraryView({
               )}
             </div>
           </aside>
+
+          {/* The seam. A wide hit target with a hairline in the middle of it: the
+              line is what the eye sees, the width is what the hand can find. */}
+          <div
+            className="orbit-shelf-grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the shelf"
+            aria-valuenow={shelfWidth}
+            aria-valuemin={MIN_SHELF_WIDTH}
+            aria-valuemax={MAX_SHELF_WIDTH}
+            tabIndex={0}
+            onPointerDown={dragShelf}
+            onDoubleClick={() => setShelfWidth(DEFAULT_SHELF_WIDTH)}
+            onKeyDown={(event) => {
+              const step = event.shiftKey ? 32 : 8;
+              if (event.key === 'ArrowLeft') setShelfWidth((w) => Math.max(MIN_SHELF_WIDTH, w - step));
+              else if (event.key === 'ArrowRight') setShelfWidth((w) => Math.min(MAX_SHELF_WIDTH, w + step));
+              else return;
+              event.preventDefault();
+            }}
+            title="Drag to resize the shelf. Double-click to reset."
+          />
 
           {focus ? (
             <GamePage

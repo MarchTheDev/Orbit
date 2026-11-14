@@ -2511,11 +2511,47 @@ html.orbit-linux .orbit-topbar {
 .orbit-lib {
   --orbit-shelf-columns: 3;
   --orbit-shelf-width: 132px;
+  --orbit-shelf-column: 446px;
   display: grid;
-  grid-template-columns: minmax(0, calc(var(--orbit-shelf-columns) * var(--orbit-shelf-width) + (var(--orbit-shelf-columns) - 1) * 10px + 34px)) minmax(0, 1fr);
+  grid-template-columns: var(--orbit-shelf-column) 1px minmax(0, 1fr);
   align-items: start;
   border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
 }
+/* A list is one column however wide the shelf is set, so the seam sizes it
+   rather than the cover options. */
+.orbit-lib.is-list { --orbit-shelf-column: min(360px, 46vw); }
+
+/* The seam between the shelf and the game: a hairline that can be found with
+   the hand. It is wider than it looks, and it says so under the pointer. */
+.orbit-shelf-grip {
+  position: sticky;
+  top: 62px;
+  align-self: stretch;
+  height: calc(100vh - 62px);
+  margin-left: -5px;
+  width: 11px;
+  flex: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+.orbit-shelf-grip::before {
+  content: "";
+  position: absolute;
+  inset: 0 5px;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+  transition: background-color .12s var(--ease-snap), box-shadow .12s var(--ease-snap);
+}
+.orbit-shelf-grip:hover::before,
+.orbit-shelf-grip:focus-visible::before {
+  background: var(--c-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-accent) 40%, transparent);
+  outline: none;
+}
+/* Nothing on the page should be selectable mid-drag, or the drag turns into a
+   text selection halfway across the window. */
+body.is-resizing,
+body.is-resizing * { cursor: col-resize !important; user-select: none !important; }
+.orbit-scroll.is-resizing { overflow-anchor: none; }
 
 .orbit-shelf {
   position: sticky;
@@ -2661,14 +2697,18 @@ html.orbit-linux .orbit-topbar {
   isolation: isolate;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-columns: 210px minmax(0, 1fr);
   align-items: end;
-  gap: 24px;
-  padding: 26px 22px 24px;
+  gap: 28px;
+  /* The hero is where the game is: tall enough for the art to be the subject of
+     the page rather than a strip above it, and the cover large enough that the
+     Play button belongs to a picture instead of sitting beside a thumbnail. */
+  min-height: 320px;
+  padding: 34px 26px 26px;
   border-radius: 18px;
 }
 .orbit-gamepage-art {
-  --stage-art-opacity: .6;
+  --stage-art-opacity: .72;
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -2684,7 +2724,7 @@ html.orbit-linux .orbit-topbar {
   from { opacity: 0; }
   to { opacity: var(--stage-art-opacity); }
 }
-html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
+html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
 .orbit-gamepage-hero::before {
   content: "";
   position: absolute;
@@ -2698,13 +2738,13 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
 }
 .orbit-gamepage-hero > *:not(.orbit-gamepage-art) { position: relative; z-index: 2; }
 .orbit-gamepage-cover {
-  width: 150px;
+  width: 210px;
   aspect-ratio: 2 / 3;
   border-radius: var(--orbit-cover-radius, 12px);
   box-shadow: 0 20px 44px -22px rgba(0, 0, 0, .85);
 }
 .orbit-gamepage-title {
-  font-size: clamp(27px, 3.2vw, 42px);
+  font-size: clamp(30px, 3.6vw, 52px);
   font-weight: 800;
   line-height: .98;
   letter-spacing: -.035em;
@@ -2738,9 +2778,10 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
 .orbit-play {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 22px;
+  gap: 9px;
+  height: 46px;
+  padding: 0 26px;
+  font-size: 13.5px;
   border: 0;
   border-radius: 999px;
   background: var(--c-text);
@@ -3474,6 +3515,7 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   .orbit-brand span { display: none; }
   .orbit-main { padding: 16px 18px 90px; }
   .orbit-lib { display: block; border-top: 0; }
+  .orbit-shelf-grip { display: none; }
   .orbit-shelf {
     position: static;
     max-height: none;
@@ -3487,8 +3529,8 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   .orbit-shelf-rows { flex-direction: row; overflow-x: auto; }
   .orbit-shelf-row { flex: 0 0 220px; width: 220px; }
   .orbit-gamepage { padding: 18px 0 0; }
-  .orbit-gamepage-hero { grid-template-columns: 116px minmax(0, 1fr); gap: 16px; padding: 16px 16px 18px; }
-  .orbit-gamepage-cover { width: 116px; }
+  .orbit-gamepage-hero { grid-template-columns: 124px minmax(0, 1fr); gap: 16px; min-height: 0; padding: 16px 16px 18px; }
+  .orbit-gamepage-cover { width: 124px; }
   .orbit-stats-hero { min-height: 230px; padding: 20px; }
   .orbit-chart { height: 150px; }
 }
@@ -3501,8 +3543,8 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   .orbit-main { padding: 14px 12px 90px; }
   .orbit-pagehead { flex-wrap: wrap; gap: 10px; }
   .orbit-pagehead-meta { display: none; }
-  .orbit-gamepage-hero { grid-template-columns: 92px minmax(0, 1fr); }
-  .orbit-gamepage-cover { width: 92px; border-radius: 9px; }
+  .orbit-gamepage-hero { grid-template-columns: 104px minmax(0, 1fr); }
+  .orbit-gamepage-cover { width: 104px; border-radius: 9px; }
   .orbit-gamepage-desc { display: none; }
   .orbit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .orbit-metric { padding: 10px 12px; }
