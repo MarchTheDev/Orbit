@@ -18,6 +18,7 @@ import type { Game, Settings } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { inLibraryShelf } from '../utils/library';
 import { cn } from '../utils/cn';
+import { wideArt } from '../utils/art';
 import { Cover, warmCover, warmImage } from './ui/Cover';
 import { Logo } from './ui/Logo';
 import { TvDetails } from './TvDetails';
@@ -74,6 +75,8 @@ export interface StardeckPrefs {
   grain: boolean;
   /** The clock's seconds, for anyone who sits there watching one. */
   seconds: boolean;
+  /** The game's own wide art behind the stage, rather than a wash of its colour. */
+  backdrop: boolean;
 }
 
 const STARDECK_KEY = 'orbit.stardeck';
@@ -93,6 +96,7 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   scope: 'all',
   grain: true,
   seconds: false,
+  backdrop: true,
 };
 
 /**
@@ -122,6 +126,7 @@ function savedStardeck(): StardeckPrefs {
         clock: value.clock !== false,
         logo: value.logo !== false,
         cinema: value.cinema === true,
+        backdrop: value.backdrop !== false,
       };
     }
   } catch {
@@ -1365,26 +1370,34 @@ export function TvMode({
           </div>
         ) : (
           <div className={cn('orbit-deck', prefs.stage === 'side' && 'is-side')}>
-            {/* The stage: the chosen game, named and measured, on its own
-                artwork. On a television this is the far end of the room, so it
-                is the biggest thing on screen and nothing else competes. */}
+            {/* The stage: the chosen game, filling the screen on its own wide
+                art. A television is watched from across a room, so the game is
+                the picture and the words sit on it - not a card with the game
+                drawn in it. The art is the backdrop, dimmed and vignetted at the
+                bottom and left so the type has somewhere to live. */}
             <section className="orbit-deck-stage" data-deck-stage>
+              {prefs.backdrop !== false && wideArt(active) ? (
+                <div
+                  aria-hidden
+                  key={`${active.id}-art`}
+                  className="orbit-deck-stageart"
+                  style={{ backgroundImage: `url("${wideArt(active)}")` }}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  className="orbit-deck-stageart is-quiet"
+                  style={{ background: `radial-gradient(120% 130% at 24% 0%, hsl(${active.hue} 52% 34% / .55), transparent 66%)` }}
+                />
+              )}
+              <div aria-hidden className="orbit-deck-stagescrim" />
               <div
                 aria-hidden
                 className="orbit-deck-stagewash"
-                style={{ background: `radial-gradient(120% 140% at 18% 0%, hsl(${active.hue} 55% 40% / .45), transparent 68%)` }}
+                style={{ background: `radial-gradient(90% 120% at 12% 8%, hsl(${active.hue} 60% 42% / .3), transparent 62%)` }}
               />
-              <div className="orbit-deck-stageinner">
-                <div className="orbit-deck-art">
-                  <Cover
-                    game={active}
-                    className={cn('orbit-deck-cover', prefs.art === 'banner' && 'is-banner')}
-                    fit="cover"
-                    loading="eager"
-                  />
-                  <div className="orbit-deck-artglow" style={{ background: `hsl(${active.hue} 65% 46% / .35)` }} aria-hidden />
-                </div>
 
+              <div className="orbit-deck-stageinner">
                 <div className="orbit-deck-copy">
                   <p className="orbit-deck-kicker">
                     {running ? (
@@ -1478,6 +1491,20 @@ export function TvMode({
                       Details
                     </button>
                   </div>
+                </div>
+
+                {/* The art again, small, as a card: on a wide screen the game is
+                    recognised by its poster, and the wide art behind it is the
+                    mood rather than the label. Hidden when the deck is beside
+                    the stage, where there is no room. */}
+                <div className="orbit-deck-art" aria-hidden={prefs.art !== 'poster'}>
+                  <Cover
+                    game={active}
+                    className={cn('orbit-deck-cover', prefs.art === 'banner' && 'is-banner')}
+                    fit="cover"
+                    loading="eager"
+                  />
+                  <div className="orbit-deck-artglow" style={{ background: `hsl(${active.hue} 65% 46% / .35)` }} aria-hidden />
                 </div>
               </div>
             </section>

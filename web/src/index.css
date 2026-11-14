@@ -4081,71 +4081,113 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   gap: 22px;
 }
 
-/* The stage. */
+/* The stage. A wide screen is watched from across a room, so the game is the
+   picture: its own wide art fills the panel, the type sits on it at the bottom
+   left, and nothing is drawn around it that a console would not draw. The
+   poster comes last, small, because a game is recognised by its poster even
+   when its art is what fills the wall. */
 .orbit-deck-stage {
   position: relative;
   min-width: 0;
   flex: 1 1 auto;
+  isolation: isolate;
   overflow: hidden;
-  border-radius: 20px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
-  background: color-mix(in srgb, var(--c-bg) 88%, transparent);
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, #fff 9%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 92%, transparent);
+  box-shadow: 0 40px 90px -50px rgba(0, 0, 0, .95);
 }
 .orbit-deck.is-side .orbit-deck-stage { flex: 1 1 auto; }
 .orbit-deck.is-side .orbit-deck-index {
-  flex: 0 0 min(46%, 40rem);
+  flex: 0 0 min(44%, 38rem);
   flex-direction: column;
   align-items: stretch;
+}
+/* The art itself: fixed, cover, and slowly still, so the screen does not move
+   about under a game nobody is touching. */
+.orbit-deck-stageart {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center 28%;
+  transform: scale(1.04);
+  opacity: .92;
+  animation: deck-art-in .5s var(--ease-out) both;
+}
+@keyframes deck-art-in {
+  from { opacity: 0; transform: scale(1.08); }
+  to { opacity: .92; transform: scale(1.04); }
+}
+.orbit-deck-stageart.is-quiet { background-size: cover; }
+.orbit-deck-stagescrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--c-bg) 92%, transparent) 0%, color-mix(in srgb, var(--c-bg) 46%, transparent) 44%, transparent 78%),
+    linear-gradient(0deg, var(--c-bg) 2%, color-mix(in srgb, var(--c-bg) 62%, transparent) 34%, transparent 68%),
+    linear-gradient(180deg, color-mix(in srgb, var(--c-bg) 40%, transparent) 0%, transparent 24%);
 }
 .orbit-deck-stagewash {
   position: absolute;
   inset: 0;
-  opacity: .8;
+  z-index: 2;
+  opacity: .75;
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 .orbit-deck-stageinner {
   position: relative;
+  z-index: 3;
   display: flex;
   height: 100%;
   align-items: flex-end;
+  justify-content: space-between;
   gap: clamp(18px, 3vw, 40px);
-  padding: clamp(18px, 3vw, 34px);
+  padding: clamp(20px, 3.4vw, 44px);
 }
 .orbit-deck-art {
   position: relative;
   flex: none;
   align-self: flex-end;
+  order: 2;
 }
+/* Beside the stage there is no room for two pictures, so the poster goes. */
+.orbit-deck.is-side .orbit-deck-art { display: none; }
 .orbit-deck-artglow {
   position: absolute;
   inset: -18px;
   border-radius: 26px;
   filter: blur(26px);
-  opacity: .55;
+  opacity: .45;
   z-index: -1;
 }
 .orbit-deck-cover {
   display: block;
-  /* Sized by the height of the screen, not its width: the stage is a band
-     across the bottom of a television, and the artwork has to fit under the
-     same 720 lines whatever the aspect ratio of the screen is. */
-  height: clamp(7.5rem, 34vh, 16rem);
+  height: clamp(8rem, 38vh, 18rem);
   width: auto;
   aspect-ratio: 2 / 3;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, #fff 16%, transparent);
-  box-shadow: 0 26px 60px -18px rgba(0, 0, 0, .8);
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, .85);
 }
 .orbit-deck-cover.is-banner {
   height: clamp(6rem, 24vh, 11.3rem);
   width: auto;
   aspect-ratio: 16 / 9;
-  border-radius: 12px;
+  border-radius: 10px;
 }
 .orbit-deck-copy {
   min-width: 0;
-  max-width: 46rem;
+  max-width: 44rem;
   padding-bottom: 2px;
+  text-shadow: 0 1px 24px rgba(0, 0, 0, .5);
 }
+/* The title and the facts sit on the art rather than beside it, so the type has
+   to hold up against a bright sky as well as a dark corridor: one soft shadow,
+   never a second copy of the text. */
+.orbit-deck-copy :is(h1, h2, p, span) { text-shadow: 0 1px 22px color-mix(in srgb, var(--c-bg) 80%, transparent); }
 .orbit-deck-kicker {
   display: flex;
   align-items: center;
@@ -4374,11 +4416,11 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
 
 .orbit-deck-cards {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: flex-end;
+  gap: 10px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4px 2px 6px;
+  padding: 8px 4px 6px;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
@@ -4416,8 +4458,8 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   position: relative;
   display: block;
   overflow: hidden;
-  border-radius: 11px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #fff 10%, transparent);
   transition: border-color .16s var(--ease-snap), transform .16s var(--ease-snap), box-shadow .16s var(--ease-snap);
 }
 .orbit-deck-frame.is-poster { aspect-ratio: 2 / 3; }
@@ -4567,34 +4609,48 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
 /* A console's home button is a place, not a key that quits. Escape slides this
    in from the left over the deck, holding the way out and everything about how
    the mode looks - so nothing leaves the room by accident. */
+/* The menu is a panel the deck slides up over its lower third, not a drawer
+   down one side: from a couch the bottom of the screen is where the hands are,
+   and a panel that comes up from there reads as something the deck did rather
+   than as another window that opened. Escape closes it, and it never leaves
+   Stardeck. */
 .orbit-deckmenu-wrap {
   position: fixed;
   inset: 0;
   z-index: 60;
   display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: clamp(10px, 2.2vw, 26px);
 }
 .orbit-deckmenu-scrim {
   position: absolute;
   inset: 0;
   border: 0;
   padding: 0;
-  background: color-mix(in srgb, var(--c-bg) 55%, transparent);
-  backdrop-filter: blur(2px);
+  background:
+    radial-gradient(120% 80% at 50% 100%, color-mix(in srgb, var(--c-bg) 78%, transparent), color-mix(in srgb, var(--c-bg) 52%, transparent));
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   cursor: default;
 }
 .orbit-deckmenu {
   position: relative;
   display: flex;
-  width: min(21.5rem, 88vw);
+  width: min(64rem, 94vw);
+  max-height: min(78vh, 40rem);
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
-  background: color-mix(in srgb, var(--c-panel) 97%, transparent);
-  box-shadow: 30px 0 80px -40px rgba(0, 0, 0, .95);
-  animation: deckmenu-in .18s var(--ease-out) both;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 96%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
+    0 -20px 90px -40px rgba(0, 0, 0, .95);
+  animation: deckmenu-in .2s var(--ease-out) both;
 }
 @keyframes deckmenu-in {
-  from { transform: translate3d(-14px, 0, 0); opacity: 0; }
+  from { transform: translate3d(0, 26px, 0) scale(.985); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -4606,7 +4662,7 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   justify-content: space-between;
   gap: 10px;
   flex: none;
-  padding: 14px 14px 12px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
 }
 .orbit-deckmenu-mark {
@@ -4650,12 +4706,26 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   color: var(--c-text);
 }
 .orbit-deckmenu-body {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 12px 18px;
+  padding: 14px 18px 18px;
+  overscroll-behavior: contain;
+}
+/* On a wide screen the menu's own choices sit in two columns, so the sheet is a
+   band across the bottom rather than a tall list somebody has to read down. */
+@media (min-width: 760px) {
+  .orbit-deckmenu-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    column-gap: 12px;
+  }
+  .orbit-deckmenu-body > .orbit-deckmenu-sep,
+  .orbit-deckmenu-body > .orbit-deckmenu-note,
+  .orbit-deckmenu-body > .orbit-deckmenu-leave,
+  .orbit-deckmenu-body > .orbit-deckmenu-label { grid-column: 1 / -1; }
 }
 
 /* A row on the home page: icon, name, what it holds, and a chevron. */
