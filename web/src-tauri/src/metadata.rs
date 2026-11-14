@@ -453,6 +453,8 @@ struct BonkerImages {
     library_hero: Option<String>,
     library_600x900: Option<String>,
     logo: Option<String>,
+    /// The wide hero under Bonker's older name.
+    hero: Option<String>,
 }
 
 /// Portrait covers for a title whose old Steam file names came back empty.
@@ -496,6 +498,161 @@ fn push_portrait(picks: &mut Vec<ArtworkPick>, url: Option<&str>, label: &str) {
         kind: "portrait".into(),
         label: label.into(),
     });
+}
+
+// ------------------------------------------------------------ wide artwork
+
+/// The open SteamGridDB catalogue: the community's grids and heroes, answered
+/// without a key. The keyed API is a different host, in `sgdb.rs`.
+const OPEN_SGDB: &str = "https://www.steamgriddb.com";
+
+/// One wide picture of a game, with where it came from.
+struct Wide {
+    url: String,
+    /// The provider's own word for it, which is what the Artwork menu shows.
+    label: String,
+}
+
+/// Wide art for a game, from the open catalogues in order of quality.
+///
+/// The store's own artwork is first: it is the picture the game ships with, it
+/// needs no key and no account, and on Steam it is already what the store page
+/// and the library tile draw. What it does not have is a *choice*, which is what
+/// the two community catalogues below exist for - one wide picture per game is a
+/// coin toss on a television, and the artist who spent a day on a title's banner
+/// usually did better than the marketing department.
+///
+/// Both of the community catalogues are open: no key, no account, no sign-in.
+/// SteamGridDB's API needs a key, and its key is somebody's personal one, so it
+/// is offered separately and with a key rather than pretended to be open.
+///
+/// Every step is allowed to fail. A game nobody has drawn for comes back with
+/// the store's header and nothing else, which is precisely the picture the
+/// television had before this existed.
+pub async fn wide_art(app_id: Option<u64>, title: &str) -> Vec<ArtworkPick> {
+    let Ok(client) = client() else {
+        return Vec::new();
+    };
+    // The three catalogues are asked at once: they are independent, and the
+    // television wants a backdrop now rather than after three timeouts.
+    let store_client = client.clone();
+    let steam_client = client.clone();
+    let grid_client = client.clone();
+    let name = title.to_string();
+    let (store, steam, grid) = tokio::join!(
+        async move {
+            match app_id {
+                Some(id) => steam_wide(&store_client, id).await,
+                None => None,
+            }
+        },
+        async move { hero_file(&steam_client, app_id).await },
+        async move { sgdb_open_hero(&grid_client, &name).await },
+    );
+
+    let mut picks: Vec<ArtworkPick> = Vec::new();
+    let mut push = |wide: Option<Wide>, kind: &str| {
+        let Some(wide) = wide else { return };
+        if picks.iter().any(|have| have.url == wide.url) {
+            return;
+        }
+        picks.push(ArtworkPick { url: wide.url, kind: kind.into(), label: wide.label });
+    };
+    push(store, "hero");
+    push(steam, "hero");
+    push(grid, "hero");
+    picks
+}
+
+/// The store's own wide picture: the hashed asset path first, then the older
+/// fixed name every Steam header has had for fifteen years.
+async fn steam_wide(client: &reqwest::Client, app_id: u64) -> Option<Wide> {
+    let Ok(page) = bonker_full(client, app_id).await else { return None };
+    let images = page.images.clone().unwrap_or_default();
+    let url = [images.library_hero.clone(), images.hero.clone(), images.header.clone()]
+        .into_iter()
+        .flatten()
+        .map(|url| url.trim().to_string())
+        .find(|url| !url.is_empty())?;
+    Some(Wide { url, label: "Steam, the store's own".into() })
+}
+
+/// SteamGridDB's grid art, without a key.
+///
+/// A different service from the SteamGridDB API below: this one is the open
+/// mirror the SteamGridDB community runs for tools that cannot ask a person for
+/// a key. It answers with heroes in the order the community voted for them.
+async fn sgdb_open_hero(client: &reqwest::Client, title: &str) -> Option<Wide> {
+    let id = open_sgdb_id(client, title).await?;
+    let url = format!("{OPEN_SGDB}/api/public/heroes/{id}");
+    let reply = client
+        .get(url)
+        .timeout(std::time::Duration::from_secs(4))
+        .send()
+        .await
+        .ok()?
+        .json::<OpenGridHeroes>()
+        .await
+        .ok()?;
+    reply
+        .data
+        .into_iter()
+        .map(|hero| hero.url)
+        .find(|url| !url.is_empty())
+        .map(|url| Wide { url, label: "SteamGridDB, community".into() })
+}
+
+/// The open SteamGridDB mirror's id for a title, which is its search answer.
+async fn open_sgdb_id(client: &reqwest::Client, title: &str) -> Option<u64> {
+    let url = format!("{OPEN_SGDB}/api/public/search/autocomplete/{}", path_term(title));
+    let reply = client.get(url).send().await.ok()?.json::<OpenGridSearch>().await.ok()?;
+    let wanted = title.trim().to_lowercase();
+    reply
+        .data
+        .into_iter()
+        .max_by_key(|item| if item.name.trim().to_lowercase() == wanted { 2 } else { 1 })
+        .map(|item| item.id)
+}
+
+/// The library hero at its own file name, which newer titles publish before
+/// the cache has indexed them.
+async fn hero_file(client: &reqwest::Client, app_id: Option<u64>) -> Option<Wide> {
+    let id = app_id?;
+    let url = format!("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{id}/library_hero.jpg");
+    client
+        .head(url.clone())
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await
+        .ok()
+        .filter(|response| response.status().is_success())
+        .map(|_| Wide { url, label: "Steam, library hero".into() })
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenGridSearch {
+    #[serde(default)]
+    data: Vec<OpenGridSearchItem>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenGridSearchItem {
+    #[serde(default)]
+    id: u64,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenGridHeroes {
+    #[serde(default)]
+    data: Vec<OpenGridHero>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpenGridHero {
+    #[serde(default)]
+    url: String,
 }
 
 // ------------------------------------------------------------ the full sheet

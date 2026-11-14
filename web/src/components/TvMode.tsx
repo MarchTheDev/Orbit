@@ -25,7 +25,7 @@ import { TvDetails } from './TvDetails';
 import { MusicButton } from './MusicButton';
 import { padJustActivated } from '../hooks/useGamepad';
 import { tvLite } from '../services/tv';
-import { findTvBackdrop, isNative } from '../services/native';
+import { findTvBackdrop } from '../services/native';
 
 const lite = tvLite;
 
@@ -266,7 +266,16 @@ function logoFor(game: Game): string | null {
  * so a late state update from the previous selection cannot flash its picture.
  * A failed picture steps down the list rather than leaving a hole.
  */
-function Backdrop({ game, dim }: { game: Game; dim: StardeckDim }) {
+function Backdrop({
+  game,
+  dim,
+  onFound,
+}: {
+  game: Game;
+  dim: StardeckDim;
+  /** The picture the catalogues answered with, for the stage to draw too. */
+  onFound?: (url: string | null) => void;
+}) {
   const [failure, setFailure] = useState<{ gameId: string; step: number }>({ gameId: game.id, step: 0 });
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [sgdbBackdrop, setSgdbBackdrop] = useState<{ gameId: string; url: string | null }>({ gameId: '', url: null });
@@ -279,8 +288,10 @@ function Backdrop({ game, dim }: { game: Game; dim: StardeckDim }) {
     ? [...localBackdrops.slice(0, 1), communityUrl, ...localBackdrops.slice(1)]
     : localBackdrops;
 
+  // Asked for whether or not the desktop shell answers: `findTvBackdrop` falls
+  // back to nothing in a browser, and a picture it does find is the whole point
+  // of the stage.
   useEffect(() => {
-    if (!isNative()) return;
     let current = true;
     // Moving quickly along the rail should not turn each transient selection
     // into a separate community-art request.
@@ -288,6 +299,7 @@ function Backdrop({ game, dim }: { game: Game; dim: StardeckDim }) {
       void findTvBackdrop(game.id).then((url) => {
         if (!current) return;
         setSgdbBackdrop({ gameId: game.id, url });
+        onFound?.(url);
         // If a local fallback already failed while SGDB was answering, step
         // back to its newly inserted slot instead of accidentally skipping it.
         if (url && !backdropsFor(game).includes(url)) {
@@ -886,6 +898,14 @@ export function TvMode({
    * key that quits.
    */
   const [menu, setMenu] = useState(false);
+  /**
+   * Wide art found for the selected game by the catalogues, kept by id.
+   *
+   * The deck's own `Backdrop` asks for one picture for the wall behind
+   * everything; the stage asks for the same game's picture to fill itself. They
+   * share this, so a game is asked about once.
+   */
+  const [heroes, setHeroes] = useState<Record<string, string | null>>({});
   const [menuPage, setMenuPage] = useState<'home' | 'look' | 'library' | 'about'>('home');
   const menuBox = useRef<HTMLDivElement>(null);
 
@@ -1236,7 +1256,7 @@ export function TvMode({
         prefs.grain && !tvLite && 'tv-grain',
       )}
     >
-      {active && <Backdrop game={active} dim={prefs.dim} />}
+      {active && <Backdrop game={active} dim={prefs.dim} onFound={(url) => setHeroes((have) => (have[active.id] ? have : { ...have, [active.id]: url }))} />}
 
       {/* A wash under the top bar, so its few words stay readable over a game
           whose artwork happens to be bright exactly there. */}
@@ -1376,12 +1396,12 @@ export function TvMode({
                 drawn in it. The art is the backdrop, dimmed and vignetted at the
                 bottom and left so the type has somewhere to live. */}
             <section className="orbit-deck-stage" data-deck-stage>
-              {prefs.backdrop !== false && wideArt(active) ? (
+              {prefs.backdrop !== false && (heroes[active.id] || wideArt(active)) ? (
                 <div
                   aria-hidden
                   key={`${active.id}-art`}
                   className="orbit-deck-stageart"
-                  style={{ backgroundImage: `url("${wideArt(active)}")` }}
+                  style={{ backgroundImage: `url("${heroes[active.id] || wideArt(active)}")` }}
                 />
               ) : (
                 <div
