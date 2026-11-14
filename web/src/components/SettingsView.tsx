@@ -25,7 +25,6 @@ import {
   ArrowLeftRight,
   Save,
   Search,
-  SlidersHorizontal,
   Sparkles,
   Trash2,
   Trophy,
@@ -78,6 +77,7 @@ import { Checkbox, CheckboxInline } from './ui/Checkbox';
 import { Select } from './ui/Select';
 import { btnAccent, btnDanger } from './ui/buttons';
 import { LauncherIcon } from './ui/LauncherIcon';
+import { PageHead } from './ui/Page';
 import { APP_VERSION } from '../version';
 import {
   RELEASES_URL,
@@ -1150,19 +1150,12 @@ export function SettingsView({
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-6 sm:px-7">
-      <header className="flex items-start gap-4">
-        <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-line bg-panel text-accent">
-          <SlidersHorizontal className="size-5" strokeWidth={1.8} />
-        </span>
-        <div>
-          <p className="orbit-kicker">System</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight">Settings</h1>
-          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">
-            Make Orbit feel right for you. Changes save as you make them — there is no Save button to hunt for.
-          </p>
-        </div>
-      </header>
+    <div className="orbit-page mx-auto max-w-6xl px-5 py-6 sm:px-7">
+      <PageHead
+        kicker="System"
+        title="Settings"
+        lead="Make Orbit feel right for you. Changes save as you make them — there is no Save button to hunt for."
+      />
 
       <div className="mt-7 grid gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
