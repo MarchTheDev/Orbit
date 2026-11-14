@@ -135,3 +135,32 @@ Keep the couch-first structure. Match the accent and type; do not add chrome.
   icons; italic serif headings; side-tab borders; centered hero text.
 - Removing platform fallbacks or theme variables for the sake of a screenshot.
 - Any change that makes a game harder to find, start, or correct.
+
+## The Stardeck
+
+Couch mode is a deck, not a carousel. A named stage carries the chosen game -
+its artwork, its name, what has been played of it - and one ordered index of
+every game that can be started runs under it. The stage is the subject; the
+index is what you move.
+
+- The stage never moves. Moving the index changes what the stage shows, so the
+  layout is still while the choice changes.
+- Two orientations (`stage: 'top' | 'side'`) and two artwork kinds
+  (`art: 'poster' | 'banner'`). A banner is 16:9, so it is laid out at twice a
+  poster's width rather than stretched into a poster's frame.
+- Nothing in the chrome takes the selected game's colour. The accent is the
+  theme's, the rules are hairlines, and the artwork is the only thing that
+  changes hue as the index moves.
+- Escape does not leave the mode. Leaving it is a choice made with a button.
+
+## The overlay
+
+The in-game overlay is drawn over somebody else's game, so it must read at a
+glance and then leave. It wears the app's own panel - solid, one hairline, no
+glass - and the theme's accent for what is chosen. It is not a copy of
+Heronite's white-on-black pills, and it does not blur: a blurred panel over a
+moving game is the most expensive thing on the screen and is almost never why
+somebody opened it.
+
+- The gallery is the running game's gallery. With no game running it says so
+  instead of showing the whole library under a heading that names one game.
