@@ -326,11 +326,20 @@ check('TV mode preserves the animated top-bar music visualizer', /prefers-reduce
 console.log('the rail can be read by name instead of by memory');
 
 await render(library);
+// The order now lives in the side menu, with the rest of the choices about what
+// the deck holds. Escape is the way in, and it is the only way in from a pad.
+await key('Escape');
+await act(async () => {
+  [...document.querySelectorAll('[data-orbit-tv] [role="dialog"] button')]
+    .find((button) => button.textContent?.trim().startsWith('Library'))
+    ?.click();
+});
+await wait(10);
 const sortButton = buttonWith('Recent');
 check('the order the rail is in is on the page, and can be changed', !!sortButton);
-check('the sort sits with the rail, not up in the top bar',
-  sortButton.parentElement.closest('header') === null &&
-    sortButton.closest('section') !== null);
+check('the sort sits in the mode\'s own menu, not up in the top bar',
+  sortButton.closest('[role="dialog"]') !== null &&
+    sortButton.closest('header') === null);
 await act(async () => {
   buttonWith('A–Z').click();
 });
@@ -339,6 +348,9 @@ check('A–Z puts the rail in name order',
     'Also Half Done,Middle Of It,Put Down,Timed By Hand',
   covers().map((cover) => cover.getAttribute('aria-label')).join());
 check('and says which order it is in', !!buttonWith('A–Z'));
+// Back out of the menu so the rest of the checks are looking at the deck.
+await key('Escape');
+await key('Escape');
 check('switching order does not lose the rail', covers().length === 4);
 // A long name is the one thing a rail cannot guess at: it gets two lines rather
 // than an ellipsis on the first.

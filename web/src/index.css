@@ -3548,6 +3548,291 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
   .orbit-deck-progress { display: none; }
 }
 
+/* Beside the artwork: the facts, and the numbers if they are asked for. */
+.orbit-deck-facts {
+  margin-top: 9px;
+  max-width: 62ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--c-text) 52%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-deck-stats[hidden] { display: none; }
+
+/* A grain over the artwork. It is one tiny repeating half-transparent pattern
+   rather than an image, so it costs a paint and not a download, and it is off
+   in the light renderer. */
+.tv-grain::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  opacity: .16;
+  mix-blend-mode: overlay;
+  background-image: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    rgba(255, 255, 255, .5) 0deg 1deg,
+    rgba(0, 0, 0, .5) 1deg 2deg
+  );
+  background-size: 3px 3px;
+}
+
+/* The step buttons beside the deck's count. */
+.orbit-deck-step {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 45%, transparent);
+  color: color-mix(in srgb, var(--c-text) 55%, transparent);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-deck-step:hover {
+  border-color: color-mix(in srgb, var(--c-text) 32%, transparent);
+  color: var(--c-text);
+}
+.orbit-deck-indexhead > .orbit-deck-customise { margin-left: 0; }
+
+/* ------------------------------------------------------ the side menu (Escape) */
+
+/* A console's home button is a place, not a key that quits. Escape slides this
+   in from the left over the deck, holding the way out and everything about how
+   the mode looks - so nothing leaves the room by accident. */
+.orbit-deckmenu-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+}
+.orbit-deckmenu-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--c-bg) 55%, transparent);
+  backdrop-filter: blur(2px);
+  cursor: default;
+}
+.orbit-deckmenu {
+  position: relative;
+  display: flex;
+  width: min(21.5rem, 88vw);
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 97%, transparent);
+  box-shadow: 30px 0 80px -40px rgba(0, 0, 0, .95);
+  animation: deckmenu-in .18s var(--ease-out) both;
+}
+@keyframes deckmenu-in {
+  from { transform: translate3d(-14px, 0, 0); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-deckmenu { animation: none; }
+}
+.orbit-deckmenu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-deckmenu-mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--c-text);
+}
+.orbit-deckmenu-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.orbit-deckmenu-back:hover { color: var(--c-accent); }
+.orbit-deckmenu-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: color-mix(in srgb, var(--c-text) 55%, transparent);
+  cursor: pointer;
+}
+.orbit-deckmenu-close:hover {
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+  color: var(--c-text);
+}
+.orbit-deckmenu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 18px;
+}
+
+/* A row on the home page: icon, name, what it holds, and a chevron. */
+.orbit-deckmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 3%, transparent);
+  text-align: left;
+  color: var(--c-text);
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-deckmenu-item:hover {
+  border-color: color-mix(in srgb, var(--c-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
+}
+.orbit-deckmenu-itemicon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  color: var(--c-accent);
+}
+.orbit-deckmenu-itemlabel { display: block; font-size: 13px; font-weight: 650; }
+.orbit-deckmenu-itemhint {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--c-muted);
+}
+.orbit-deckmenu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-deckmenu-note {
+  font-size: 11px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--c-muted) 92%, transparent);
+  text-wrap: pretty;
+}
+.orbit-deckmenu-label {
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-muted) 85%, transparent);
+}
+.orbit-deckmenu-leave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.orbit-deckmenu-leave:hover { background: color-mix(in srgb, var(--c-accent) 20%, transparent); }
+.orbit-deckmenu-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.orbit-deckmenu-chip:hover { border-color: var(--c-accent); color: var(--c-text); }
+.orbit-deckmenu-running {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, #4ade80 35%, transparent);
+  background: color-mix(in srgb, #4ade80 8%, transparent);
+}
+.orbit-deckmenu-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.orbit-deckmenu-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: color-mix(in srgb, var(--c-text) 85%, transparent);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.orbit-deckmenu-row:hover { background: color-mix(in srgb, var(--c-text) 6%, transparent); color: var(--c-text); }
+.orbit-deckmenu-row:disabled { opacity: .4; cursor: default; }
+.orbit-deckmenu-keys { display: flex; flex-direction: column; gap: 5px; margin: 0; }
+.orbit-deckmenu-keys > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.orbit-deckmenu-keys dt {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10.5px;
+  color: var(--c-accent);
+}
+.orbit-deckmenu-keys dd { margin: 0; color: var(--c-muted); }
+
+/* A run of on/off rows inside the menu: a rule, then the rows. */
+.orbit-deckmenu-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+
+/* The menu's own headings label a run of choices. */
+.orbit-deckmenu-body .orbit-panelchoice-label,
+.orbit-deckmenu-body > div > p:first-child { color: var(--c-muted); }
+
 /* The mode is a cut, in and out, on a slow renderer and a fast one alike. */
 .orbit-deck,
 .orbit-deck * { transition-duration: .16s; }

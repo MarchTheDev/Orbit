@@ -3,10 +3,10 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Gamepad2,
   Info,
   ListOrdered,
+  Menu,
   Minimize2,
   Play,
   RotateCcw,
@@ -64,6 +64,16 @@ export interface StardeckPrefs {
   logo: boolean;
   /** The shelf of covers. Off leaves the stage on its own. */
   cinema: boolean;
+  /** The facts under the title: year, developer, the time left in the story. */
+  facts: boolean;
+  /** The bar of numbers along the bottom of the stage. */
+  stats: boolean;
+  /** What the index holds: every game, or only what can be started. */
+  scope: 'all' | 'startable';
+  /** A subtle grain over the artwork, so a flat cover does not look like a hole. */
+  grain: boolean;
+  /** The clock's seconds, for anyone who sits there watching one. */
+  seconds: boolean;
 }
 
 const STARDECK_KEY = 'orbit.stardeck';
@@ -78,6 +88,11 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   clock: true,
   logo: true,
   cinema: false,
+  facts: true,
+  stats: true,
+  scope: 'all',
+  grain: true,
+  seconds: false,
 };
 
 /**
@@ -98,6 +113,11 @@ function savedStardeck(): StardeckPrefs {
         dim: value.dim === 'soft' || value.dim === 'deep' ? value.dim : 'balanced',
         stage: value.stage === 'side' ? 'side' : 'top',
         art: value.art === 'banner' ? 'banner' : 'poster',
+        facts: value.facts !== false,
+        stats: value.stats !== false,
+        scope: value.scope === 'startable' ? 'startable' : 'all',
+        grain: value.grain !== false,
+        seconds: value.seconds === true,
         summary: value.summary !== false,
         clock: value.clock !== false,
         logo: value.logo !== false,
@@ -418,8 +438,8 @@ function PanelChoice({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <p className="text-[11.5px] font-semibold text-white/55">{label}</p>
-      <div className="flex shrink-0 rounded-lg border border-white/10 bg-white/[0.05] p-0.5">
+      <p className="text-[11.5px] font-semibold text-fg/60">{label}</p>
+      <div className="flex shrink-0 rounded-lg border border-line bg-fg/[0.05] p-0.5">
         {options.map((option) => (
           <button
             key={option.id}
@@ -428,8 +448,8 @@ function PanelChoice({
             className={cn(
               'rounded-md px-2.5 py-1 text-[11px] font-semibold transition',
               value === option.id
-                ? 'bg-white/[0.14] text-white'
-                : 'text-white/40 hover:text-white',
+                ? 'bg-accent/25 text-fg'
+                : 'text-fg/40 hover:text-fg',
             )}
           >
             {option.label}
@@ -457,14 +477,14 @@ function PanelToggle({
       onClick={() => onChange(!on)}
       aria-pressed={on}
       title={hint}
-      className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-white/[0.05]"
+      className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/[0.05]"
     >
-      <span className="text-[12px] font-semibold text-white/75">{label}</span>
+      <span className="text-[12px] font-semibold text-fg/80">{label}</span>
       <span
         aria-hidden
         className={cn(
           'relative h-4 w-8 shrink-0 rounded-full border transition',
-          on ? 'border-accent bg-accent/70' : 'border-white/15 bg-white/[0.08]',
+          on ? 'border-accent bg-accent/70' : 'border-line bg-fg/[0.08]',
         )}
       >
         <span
@@ -479,131 +499,329 @@ function PanelToggle({
 }
 
 /**
- * The hub's own settings, opened from the shelf it is describing.
+ * The side menu.
  *
- * These are the choices a person makes once while looking at the screen: how
- * wide the covers are, how much of the artwork the words sit on, whether the
- * shelf is there at all. Nothing here needs a trip to the desktop Settings
- * page, which would mean leaving the couch to change the couch.
+ * Escape opens it, Escape closes it, and the way out of the mode is one of the
+ * things inside it rather than a button in the corner of the screen. That is
+ * what a console does and what makes this a room instead of a page: nothing
+ * leaves the room by accident, and everything that could is in one place.
+ *
+ * It is a column of choices, not a settings dialog. Home is what somebody on a
+ * couch needs - leave, read the controls - and Look, Library and About are one
+ * step in from it. Every choice is applied the moment it is made, so the menu
+ * can be closed while looking at the thing it changed.
  */
-function StardeckPanel({
+function StardeckMenu({
   prefs,
   onChange,
+  page,
+  onPage,
   onClose,
   onReset,
+  onExit,
+  running,
+  library,
+  onPlay,
+  onStop,
 }: {
   prefs: StardeckPrefs;
   onChange: (next: StardeckPrefs) => void;
+  page: 'home' | 'look' | 'library' | 'about';
+  onPage: (next: 'home' | 'look' | 'library' | 'about') => void;
   onClose: () => void;
   onReset: () => void;
+  onExit: () => void;
+  running: Game | null;
+  library: Game[];
+  onPlay: (game: Game) => void;
+  onStop: () => void;
 }) {
   const set = <K extends keyof StardeckPrefs>(key: K, value: StardeckPrefs[K]) =>
     onChange({ ...prefs, [key]: value });
 
+  const titles = {
+    home: 'Stardeck',
+    look: 'Look',
+    library: 'Library',
+    about: 'About',
+  } as const;
+
   return (
     <div
+      ref={undefined}
       role="dialog"
-      aria-label="Stardeck settings"
-      className="orbit-scroll absolute bottom-full right-0 z-40 mb-3 max-h-[calc(100vh-6.5rem)] w-[21rem] overflow-y-auto rounded-2xl border border-white/15 bg-[#0b0917]/95 p-4 text-white shadow-[0_30px_80px_rgba(0,0,0,.7)] backdrop-blur-xl"
+      aria-label="Stardeck menu"
+      className="orbit-deckmenu orbit-scroll"
     >
-      <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-sm font-bold">
-          <SlidersHorizontal className="size-4 text-accent" />
-          Stardeck settings
-        </p>
-        <button
-          onClick={onClose}
-          aria-label="Close settings"
-          className="grid size-7 shrink-0 place-items-center rounded-full text-white/40 transition hover:bg-white/10 hover:text-white"
-        >
+      <div className="orbit-deckmenu-head">
+        {page === 'home' ? (
+          <span className="orbit-deckmenu-mark">
+            <Logo className="size-5" animated={false} />
+            {titles[page]}
+          </span>
+        ) : (
+          <button type="button" onClick={() => onPage('home')} className="orbit-deckmenu-back">
+            <ArrowLeft className="size-3.5" />
+            {titles[page]}
+          </button>
+        )}
+        <button type="button" onClick={onClose} aria-label="Close menu" className="orbit-deckmenu-close">
           <X className="size-4" />
         </button>
       </div>
 
-      <div className="mt-3 space-y-1.5">
-        <PanelChoice
-          label="The shelf"
-          value={prefs.cinema ? 'cinema' : 'rail'}
-          options={[
-            { id: 'rail', label: 'Covers' },
-            { id: 'cinema', label: 'Stage only' },
-          ]}
-          onChange={(next) => set('cinema', next === 'cinema')}
-        />
-        <PanelChoice
-          label="Cover size"
-          value={prefs.cover}
-          options={[
-            { id: 'compact', label: 'Small' },
-            { id: 'standard', label: 'Medium' },
-            { id: 'large', label: 'Large' },
-          ]}
-          onChange={(next) => set('cover', next as StardeckCover)}
-        />
-        <PanelChoice
-          label="Backdrop"
-          value={prefs.dim}
-          options={[
-            { id: 'soft', label: 'Bright' },
-            { id: 'balanced', label: 'Balanced' },
-            { id: 'deep', label: 'Deep' },
-          ]}
-          onChange={(next) => set('dim', next as StardeckDim)}
-        />
-        <PanelChoice
-          label="Stage"
-          value={prefs.stage}
-          options={[
-            { id: 'top', label: 'Above' },
-            { id: 'side', label: 'Beside' },
-          ]}
-          onChange={(next) => set('stage', next as StardeckPrefs['stage'])}
-        />
-        <PanelChoice
-          label="Artwork"
-          value={prefs.art}
-          options={[
-            { id: 'poster', label: 'Posters' },
-            { id: 'banner', label: 'Banners' },
-          ]}
-          onChange={(next) => set('art', next as DeckArt)}
-        />
-      </div>
+      <div className="orbit-deckmenu-body">
+        {page === 'home' && (
+          <>
+            <MenuButton
+              icon={SlidersHorizontal}
+              label="Look"
+              hint="Artwork, stage, backdrop"
+              onClick={() => onPage('look')}
+            />
+            <MenuButton
+              icon={ListOrdered}
+              label="Library"
+              hint="What the deck holds and how it is ordered"
+              onClick={() => onPage('library')}
+            />
+            <MenuButton icon={Info} label="About" hint="What Stardeck is" onClick={() => onPage('about')} />
 
-      <div className="mt-3 space-y-0.5 border-t border-white/10 pt-2">
-        <PanelToggle
-          label="Description"
-          hint="A couple of lines about the game, under its facts."
-          on={prefs.summary}
-          onChange={(next) => set('summary', next)}
-        />
-        <PanelToggle
-          label="Store logo"
-          hint="The game's wordmark in place of its title, when there is one."
-          on={prefs.logo}
-          onChange={(next) => set('logo', next)}
-        />
-        <PanelToggle
-          label="Clock"
-          hint="The time in the corner of the top bar."
-          on={prefs.clock}
-          onChange={(next) => set('clock', next)}
-        />
-      </div>
+            {running && (
+              <MenuButton
+                icon={Square}
+                label="Stop this session"
+                hint={running.title}
+                onClick={() => {
+                  onStop();
+                  onClose();
+                }}
+              />
+            )}
 
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-2.5">
-        <p className="max-w-[12.5rem] text-[10.5px] leading-snug text-white/30">
-          Escape stays in Stardeck. Leave with the button up top.
-        </p>
-        <button
-          onClick={onReset}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-white/70 transition hover:border-white/30 hover:text-white"
-        >
-          <RotateCcw className="size-3.5" />
-          Reset
-        </button>
+            <div className="orbit-deckmenu-sep" />
+            <p className="orbit-deckmenu-note">
+              Escape opens and closes this menu. It never leaves Stardeck: leaving is the row below.
+            </p>
+            <button type="button" onClick={onExit} className="orbit-deckmenu-leave">
+              <Minimize2 className="size-4" />
+              Leave Stardeck
+            </button>
+          </>
+        )}
+
+        {page === 'look' && (
+          <>
+            <PanelChoice
+              label="Shelf"
+              value={prefs.cinema ? 'cinema' : 'rail'}
+              options={[
+                { id: 'rail', label: 'Covers' },
+                { id: 'cinema', label: 'Stage only' },
+              ]}
+              onChange={(next) => set('cinema', next === 'cinema')}
+            />
+            <PanelChoice
+              label="Stage"
+              value={prefs.stage}
+              options={[
+                { id: 'top', label: 'Above' },
+                { id: 'side', label: 'Beside' },
+              ]}
+              onChange={(next) => set('stage', next as StardeckPrefs['stage'])}
+            />
+            <PanelChoice
+              label="Artwork"
+              value={prefs.art}
+              options={[
+                { id: 'poster', label: 'Posters' },
+                { id: 'banner', label: 'Banners' },
+              ]}
+              onChange={(next) => set('art', next as DeckArt)}
+            />
+            <PanelChoice
+              label="Cover size"
+              value={prefs.cover}
+              options={[
+                { id: 'compact', label: 'Small' },
+                { id: 'standard', label: 'Medium' },
+                { id: 'large', label: 'Large' },
+              ]}
+              onChange={(next) => set('cover', next as StardeckCover)}
+            />
+            <PanelChoice
+              label="Backdrop"
+              value={prefs.dim}
+              options={[
+                { id: 'soft', label: 'Bright' },
+                { id: 'balanced', label: 'Balanced' },
+                { id: 'deep', label: 'Deep' },
+              ]}
+              onChange={(next) => set('dim', next as StardeckDim)}
+            />
+            <div className="orbit-deckmenu-toggles">
+              <PanelToggle
+                label="Facts"
+                hint="Year, developer and the time left, under the title."
+                on={prefs.facts}
+                onChange={(next) => set('facts', next)}
+              />
+              <PanelToggle
+                label="Numbers"
+                hint="The bar of readings along the bottom of the stage."
+                on={prefs.stats}
+                onChange={(next) => set('stats', next)}
+              />
+              <PanelToggle
+                label="Description"
+                hint="A couple of lines about the game, under its facts."
+                on={prefs.summary}
+                onChange={(next) => set('summary', next)}
+              />
+              <PanelToggle
+                label="Store logo"
+                hint="The game's wordmark in place of its title, when there is one."
+                on={prefs.logo}
+                onChange={(next) => set('logo', next)}
+              />
+              <PanelToggle
+                label="Grain"
+                hint="A fine texture over the artwork, so a flat cover is not a hole."
+                on={prefs.grain}
+                onChange={(next) => set('grain', next)}
+              />
+              <PanelToggle
+                label="Clock"
+                hint="The time in the corner of the top bar."
+                on={prefs.clock}
+                onChange={(next) => set('clock', next)}
+              />
+              <PanelToggle
+                label="Seconds"
+                hint="The clock counts seconds as well as minutes."
+                on={prefs.seconds}
+                onChange={(next) => set('seconds', next)}
+              />
+            </div>
+          </>
+        )}
+
+        {page === 'library' && (
+          <>
+            <PanelChoice
+              label="Order"
+              value={prefs.order}
+              options={[
+                { id: 'recent', label: 'Recent' },
+                { id: 'az', label: 'A–Z' },
+              ]}
+              onChange={(next) => set('order', next as TvOrder)}
+            />
+            <PanelChoice
+              label="Deck holds"
+              value={prefs.scope}
+              options={[
+                { id: 'all', label: 'Everything' },
+                { id: 'startable', label: 'Playable' },
+              ]}
+              onChange={(next) => set('scope', next as StardeckPrefs['scope'])}
+            />
+            <p className="orbit-deckmenu-note">
+              {library.length} {library.length === 1 ? 'game' : 'games'} on the deck.
+            </p>
+            <div className="orbit-deckmenu-sep" />
+            <p className="orbit-deckmenu-label">Playing now</p>
+            {running ? (
+              <div className="orbit-deckmenu-running">
+                <Cover game={running} className="h-10 w-8 shrink-0 overflow-hidden rounded" fit="cover" />
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{running.title}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStop();
+                    onClose();
+                  }}
+                  className="orbit-deckmenu-chip"
+                >
+                  Stop
+                </button>
+              </div>
+            ) : (
+              <p className="orbit-deckmenu-note">Nothing is running.</p>
+            )}
+            <p className="orbit-deckmenu-label">Start something</p>
+            <ul className="orbit-deckmenu-list">
+              {library.slice(0, 8).map((game) => (
+                <li key={game.id}>
+                  <button
+                    type="button"
+                    disabled={game.id === running?.id}
+                    onClick={() => {
+                      onPlay(game);
+                      onClose();
+                    }}
+                    className="orbit-deckmenu-row"
+                  >
+                    <Cover game={game} className="h-7 w-6 shrink-0 overflow-hidden rounded" fit="cover" />
+                    <span className="min-w-0 flex-1 truncate">{game.title}</span>
+                    <Play className="size-3 shrink-0 opacity-50" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {page === 'about' && (
+          <>
+            <p className="orbit-deckmenu-note">
+              Stardeck is Orbit read from a couch: one game at a time, on its own artwork, with the
+              rest of the library one press away. Left and right walk the deck, Enter plays what is
+              on screen, and Escape brings this menu back.
+            </p>
+            <p className="orbit-deckmenu-label">Controls</p>
+            <dl className="orbit-deckmenu-keys">
+              <div><dt>← →</dt><dd>Another game</dd></div>
+              <div><dt>↑ ↓</dt><dd>Play, details, the bar</dd></div>
+              <div><dt>Enter</dt><dd>Play what is on screen</dd></div>
+              <div><dt>Escape</dt><dd>This menu</dd></div>
+              <div><dt>C</dt><dd>Look, directly</dd></div>
+            </dl>
+            <div className="orbit-deckmenu-sep" />
+            <button type="button" onClick={onReset} className="orbit-deckmenu-chip w-full justify-center">
+              <RotateCcw className="size-3.5" />
+              Reset Stardeck to its defaults
+            </button>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+/** One row on the menu's home page. */
+function MenuButton({
+  icon: Icon,
+  label,
+  hint,
+  onClick,
+}: {
+  icon: typeof SlidersHorizontal;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="orbit-deckmenu-item">
+      <span className="orbit-deckmenu-itemicon">
+        <Icon className="size-4" strokeWidth={1.9} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="orbit-deckmenu-itemlabel">{label}</span>
+        <span className="orbit-deckmenu-itemhint">{hint}</span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 opacity-40" />
+    </button>
   );
 }
 
@@ -654,10 +872,29 @@ export function TvMode({
   onOpenSettings: () => void;
 }) {
   const [prefs, setPrefs] = useState<StardeckPrefs>(savedStardeck);
-  const [customizing, setCustomizing] = useState(false);
-  const settingsBox = useRef<HTMLDivElement>(null);
+  /**
+   * The side menu.
+   *
+   * Escape opens it and Escape closes it. It holds the way out, the settings and
+   * the two things a couch cannot reach through the top bar - which is the whole
+   * reason the mode has a menu at all: a console's home button is a place, not a
+   * key that quits.
+   */
+  const [menu, setMenu] = useState(false);
+  const [menuPage, setMenuPage] = useState<'home' | 'look' | 'library' | 'about'>('home');
+  const menuBox = useRef<HTMLDivElement>(null);
 
-  const list = useMemo(() => orderedForTv(games, prefs.order), [games, prefs.order]);
+  const list = useMemo(() => {
+    const ordered = orderedForTv(games, prefs.order);
+    // "Playable" keeps only what actually has something to start. Everything
+    // else on the deck is a game that was added by hand and can only be timed,
+    // which is not what somebody sitting down with a controller wants first.
+    if (prefs.scope !== 'startable') return ordered;
+    const startable = ordered.filter((game) => game.launch.kind !== 'none');
+    // An empty result would be a mode with no games in it, so the wider deck
+    // stands in rather than a blank stage.
+    return startable.length > 0 ? startable : ordered;
+  }, [games, prefs.order, prefs.scope]);
 
   /** The game being read on its own page, if one is. */
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -762,28 +999,35 @@ export function TvMode({
   // popovers behave. The chip that opened it is part of "inside", so a second
   // press on it toggles rather than closes and reopens.
   useEffect(() => {
-    if (!customizing) return;
+    if (!menu) return;
     const away = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
-      if (!settingsBox.current?.contains(event.target)) setCustomizing(false);
+      if (!menuBox.current?.contains(event.target)) setMenu(false);
     };
     window.addEventListener('pointerdown', away);
     return () => window.removeEventListener('pointerdown', away);
-  }, [customizing]);
+  }, [menu]);
 
   // While the sheet is open its own keys own the mode: Escape (or C again)
   // closes it and does nothing else, which is the one rule Escape has here.
   useEffect(() => {
-    if (!customizing) return;
+    if (!menu) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' && event.key.toLowerCase() !== 'c') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setCustomizing(false);
+      if (event.key === 'Escape' || event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        event.stopPropagation();
+        // Escape walks back through the menu's own pages before it closes it,
+        // so a settings page is one press from the game and two from the shelf.
+        if (event.key === 'Escape' && menuPage !== 'home') {
+          setMenuPage('home');
+          return;
+        }
+        setMenu(false);
+      }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [customizing]);
+  }, [menu, menuPage]);
 
   const start = useCallback(() => {
     if (!active) return;
@@ -812,7 +1056,7 @@ export function TvMode({
     const onKey = (event: KeyboardEvent) => {
       // A game's own page reads its own keys, a dialog over the hub owns them
       // outright, and the settings sheet answers Escape itself.
-      if (detailed || customizing || document.querySelector('[role="dialog"]')) return;
+      if (detailed || menu || document.querySelector('[role="dialog"]')) return;
       const inActions = onAction(document.activeElement);
       const inBar = inTopbar(document.activeElement);
       // Nothing is focused yet - the first press of a controller lands here.
@@ -828,15 +1072,20 @@ export function TvMode({
       }
       switch (event.key) {
         case 'Escape':
-          // Escape never drops the player onto the desktop. On the rail it is
-          // simply the key that does nothing; a game's page closes itself.
+          // Escape never drops the player onto the desktop: it opens the side
+          // menu, where leaving is one of the things that can be chosen. This
+          // is the console convention and the reason the mode feels like a
+          // room rather than a page - there is always a way back to the shelf.
           event.preventDefault();
           event.stopPropagation();
+          setMenuPage('home');
+          setMenu(true);
           return;
         case 'c':
         case 'C':
           event.preventDefault();
-          setCustomizing(true);
+          setMenuPage('look');
+          setMenu(true);
           return;
         case 'ArrowLeft':
         case 'ArrowRight': {
@@ -916,7 +1165,7 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, customizing, detailed, select, start]);
+  }, [at, detailed, menu, select, start]);
 
   /**
    * The controller.
@@ -930,7 +1179,7 @@ export function TvMode({
    */
   useEffect(() => {
     const onPadPlay = () => {
-      if (customizing) return;
+      if (menu) return;
       if (detailed) {
         if (detailed.id === runningId) onStop();
         else onPlay(detailed);
@@ -943,8 +1192,15 @@ export function TvMode({
       // is on the rail, on a game's page or inside its settings. The rail is
       // where the night stays, so Back there has nothing to step out of.
       event.stopImmediatePropagation();
-      if (customizing) setCustomizing(false);
+      // Back closes the menu, then a game's page, and finally opens the menu:
+      // the last press is the one that offers the way out, never one that
+      // drops somebody onto the desktop without asking.
+      if (menu) setMenu(false);
       else if (detailed) setDetailId(null);
+      else {
+        setMenuPage('home');
+        setMenu(true);
+      }
     };
     window.addEventListener('orbit-pad-play', onPadPlay);
     window.addEventListener('orbit-pad-back', onPadBack, true);
@@ -952,7 +1208,7 @@ export function TvMode({
       window.removeEventListener('orbit-pad-play', onPadPlay);
       window.removeEventListener('orbit-pad-back', onPadBack, true);
     };
-  }, [customizing, detailed, onPlay, onStop, runningId, start]);
+  }, [detailed, menu, onPlay, onStop, runningId, start]);
 
   const left =
     active?.hltb?.main && active.hltb.main > 0
@@ -969,6 +1225,10 @@ export function TvMode({
       className={cn(
         'tv-root fixed inset-0 z-50 flex flex-col overflow-hidden bg-bg text-fg',
         tvLite && 'tv-lite',
+        // The grain is a second layer over the artwork; the light renderer
+        // skips it, because a noise overlay on a machine that is already
+        // dropping frames is the first thing that should go.
+        prefs.grain && !tvLite && 'tv-grain',
       )}
     >
       {active && <Backdrop game={active} dim={prefs.dim} />}
@@ -1013,7 +1273,11 @@ export function TvMode({
         {prefs.clock && (
           <span className="hidden flex-col items-end leading-tight sm:flex">
             <span className="font-mono text-sm text-white/85">
-              {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {now.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                ...(prefs.seconds ? { second: '2-digit' as const } : {}),
+              })}
             </span>
             <span className="text-[10px] uppercase tracking-[0.16em] text-white/40">
               {now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
@@ -1040,6 +1304,31 @@ export function TvMode({
           Leave Stardeck
         </button>
       </header>
+
+      {menu && (
+        <div ref={menuBox} className="orbit-deckmenu-wrap">
+          <button
+            type="button"
+            aria-label="Close menu"
+            tabIndex={-1}
+            onClick={() => setMenu(false)}
+            className="orbit-deckmenu-scrim"
+          />
+          <StardeckMenu
+            prefs={prefs}
+            onChange={setPrefs}
+            page={menuPage}
+            onPage={setMenuPage}
+            onClose={() => setMenu(false)}
+            onReset={() => setPrefs(STARDECK_DEFAULT)}
+            onExit={exit}
+            running={playingNow}
+            library={list}
+            onPlay={onPlay}
+            onStop={onStop}
+          />
+        </div>
+      )}
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col">
         {detailed ? (
@@ -1114,7 +1403,20 @@ export function TvMode({
 
                   <GameTitle game={active} logo={prefs.logo} />
 
-                  <div className="orbit-deck-stats">
+                  {prefs.facts && (
+                    <p className="orbit-deck-facts">
+                      {[
+                        active.meta?.releaseYear ? String(active.meta.releaseYear) : null,
+                        active.meta?.developer || null,
+                        active.meta?.genres?.slice(0, 2).join(' · ') || null,
+                        left !== null ? (left > 0 ? `${left}h of story left` : 'story almost done') : null,
+                      ]
+                        .filter(Boolean)
+                        .join('  ·  ')}
+                    </p>
+                  )}
+
+                  <div className="orbit-deck-stats" hidden={!prefs.stats}>
                     <Stat label="played">{fmtMinutes(active.playSecs / 60)}</Stat>
                     {active.lastPlayed && (
                       <>
@@ -1190,54 +1492,26 @@ export function TvMode({
                   {at + 1} / {list.length}
                 </span>
 
-                <div className="orbit-deck-order" role="group" aria-label="How the deck is ordered">
-                  {(
-                    [
-                      ['recent', 'Recent', Clock],
-                      ['az', 'A–Z', ListOrdered],
-                    ] as const
-                  ).map(([id, label, Icon]) => (
-                    <button
-                      key={id}
-                      onClick={() => setPrefs((current) => ({ ...current, order: id }))}
-                      aria-pressed={prefs.order === id}
-                      title={id === 'recent' ? 'Ordered by what you played last' : 'Ordered by name'}
-                    >
-                      <Icon className="size-3" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
+                  <ChevronLeft className="size-4" />
+                </button>
+                <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game" className="orbit-deck-step">
+                  <ChevronRight className="size-4" />
+                </button>
 
-                <div className="orbit-deck-steps">
-                  <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game">
-                    <ChevronLeft className="size-4" />
-                  </button>
-                  <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game">
-                    <ChevronRight className="size-4" />
-                  </button>
-                </div>
-
-                <div className="relative" ref={settingsBox}>
-                  <button
-                    onClick={() => setCustomizing((open) => !open)}
-                    aria-expanded={customizing}
-                    title="Stardeck settings (C)"
-                    className="orbit-deck-customise"
-                    data-open={customizing || undefined}
-                  >
-                    <SlidersHorizontal className="size-3.5" />
-                    Customize
-                  </button>
-                  {customizing && (
-                    <StardeckPanel
-                      prefs={prefs}
-                      onChange={setPrefs}
-                      onClose={() => setCustomizing(false)}
-                      onReset={() => setPrefs(STARDECK_DEFAULT)}
-                    />
-                  )}
-                </div>
+                <button
+                  onClick={() => {
+                    setMenuPage('home');
+                    setMenu(true);
+                  }}
+                  aria-expanded={menu}
+                  title="Menu (Escape)"
+                  className="orbit-deck-customise"
+                  data-open={menu || undefined}
+                >
+                  <Menu className="size-3.5" />
+                  Menu
+                </button>
               </div>
 
               <ul
