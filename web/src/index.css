@@ -197,18 +197,31 @@ body {
    by section: a heading, a line saying what the section is for, then the
    fields. The old version was four tinted cards of equal weight, which made an
    artwork picker look as important as the game's status. */
-.orbit-edit { display: flex; flex-direction: column; gap: 22px; }
-.orbit-edit-head {
+.orbit-edit { display: flex; flex-direction: column; gap: 4px; }
+
+/* The record's own face: the cover at reading size, the title as type rather
+   than as an input box, and what the library already knows under it. */
+.orbit-edit-face {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px 13px;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--c-accent) 22%, transparent);
+  align-items: flex-end;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
   background:
-    linear-gradient(150deg, color-mix(in srgb, var(--c-accent) 7%, transparent), transparent 62%),
-    color-mix(in srgb, var(--c-panel2) 70%, transparent);
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--c-accent) 10%, transparent), transparent 58%),
+    color-mix(in srgb, var(--c-panel2) 60%, transparent);
 }
+.orbit-edit-faceart {
+  flex: none;
+  width: 78px;
+  height: 104px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  box-shadow: 0 14px 28px -14px rgba(0, 0, 0, .8);
+}
+.orbit-edit-facecopy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 .orbit-edit-kicker {
   display: flex;
   align-items: center;
@@ -219,41 +232,61 @@ body {
   text-transform: uppercase;
   color: color-mix(in srgb, var(--c-accent) 82%, var(--c-text));
 }
+.orbit-edit-title {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  color: var(--c-text);
+  outline: none;
+  transition: border-color .12s var(--ease-snap);
+}
+.orbit-edit-title:hover { border-bottom-color: color-mix(in srgb, var(--c-text) 14%, transparent); }
+.orbit-edit-title:focus-visible { border-bottom-color: var(--c-accent); }
 .orbit-edit-headmeta {
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--c-muted);
 }
-.orbit-edit-headfoot {
-  padding-top: 11px;
-  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  font-size: 11px;
-  color: var(--c-muted);
+.orbit-edit-saved {
+  align-self: flex-start;
+  flex: none;
+  font-size: 10px;
+  color: color-mix(in srgb, var(--c-muted) 80%, transparent);
 }
-.orbit-edit-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr);
-}
-@media (min-width: 640px) {
-  .orbit-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+
+/* A section is a named run of the record with a rule over it, numbered in the
+   margin so a long form has a shape when it is scrolled. */
 .orbit-editsection {
+  counter-increment: editsection;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-top: 18px;
+  padding: 18px 0 6px;
   border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
 }
-.orbit-editsection-head { display: flex; flex-direction: column; gap: 4px; }
+.orbit-edit { counter-reset: editsection; }
+.orbit-editsection-head { display: flex; flex-direction: column; gap: 3px; }
 .orbit-editsection-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 12.5px;
   font-weight: 680;
   letter-spacing: -.005em;
   color: var(--c-text);
+}
+.orbit-editsection-title::before {
+  content: counter(editsection, decimal-leading-zero);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: color-mix(in srgb, var(--c-accent) 65%, var(--c-muted));
 }
 .orbit-editsection-title svg { color: color-mix(in srgb, var(--c-accent) 78%, var(--c-text)); }
 .orbit-editsection-note {
@@ -262,6 +295,54 @@ body {
   line-height: 1.6;
   color: var(--c-muted);
   text-wrap: pretty;
+}
+/* Fields keep to a reading width: a text input the width of a dialog is a line
+   nobody's eye can follow back to its label. */
+.orbit-edit-facts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 46rem;
+}
+@media (min-width: 640px) {
+  .orbit-edit-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.orbit-edit-artrow { display: flex; gap: 14px; align-items: flex-start; }
+.orbit-edit-artpreview {
+  flex: none;
+  width: 66px;
+  height: 88px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+}
+.orbit-edit-times {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 30rem;
+}
+.orbit-edit-choices { display: grid; gap: 8px; max-width: 34rem; }
+.orbit-editchoice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 2.5%, transparent);
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap);
+}
+.orbit-editchoice:hover { border-color: color-mix(in srgb, var(--c-text) 18%, transparent); }
+.orbit-editchoice b { display: block; font-size: 12.5px; font-weight: 620; color: var(--c-text); }
+.orbit-editchoice i {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.5;
+  color: var(--c-muted);
 }
 .orbit-editrow {
   display: flex;
@@ -282,6 +363,32 @@ body {
   color: var(--c-muted);
   text-wrap: pretty;
 }
+.orbit-edit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-edit-footbtn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-edit-footbtn:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-accent) 50%, transparent); }
+.orbit-edit-footbtn.is-danger { margin-left: 0; }
+.orbit-edit-footbtn.is-danger:hover { color: #fca5a5; border-color: color-mix(in srgb, #f87171 50%, transparent); }
+.orbit-edit-path { font-family: var(--font-mono, ui-monospace); font-size: 10.5px; color: var(--c-muted); word-break: break-all; }
 
 /* -------------------------------------------------------------------- dialogs
 

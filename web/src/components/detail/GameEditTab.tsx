@@ -161,38 +161,44 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
 
   return (
     <section className="orbit-edit">
-      <div className="orbit-edit-head">
-        <div className="flex items-start gap-4">
-          <PortraitFrame
-            src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
-            className="border border-line shadow-lg"
-          />
-          <div className="min-w-0 flex-1 space-y-1">
-            <span className="orbit-edit-kicker">
-              <Pencil className="size-3" />
-              Editing this game
-            </span>
-            <label className="block">
-              <span className="sr-only">Title</span>
-              <input
-                className="w-full bg-transparent text-base font-semibold text-fg outline-none placeholder:text-muted focus-visible:ring-1 focus-visible:ring-accent/50"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                spellCheck={false}
-                aria-label="Game title"
-              />
-            </label>
-            <p className="orbit-edit-headmeta">
-              {developer || releaseYear || genres
-                ? [developer, releaseYear, genres].filter(Boolean).join(' · ')
-                : 'Anything the store got wrong, or Orbit guessed from a file name, can be fixed below.'}
-            </p>
-          </div>
+      {/* The game's own face, at the top of its own record. A form whose first
+          field is "Author / developer" asks somebody to type before it tells
+          them which game they opened. */}
+      <header className="orbit-edit-face">
+        <PortraitFrame
+          src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
+          className="orbit-edit-faceart"
+        />
+        <div className="orbit-edit-facecopy">
+          <span className="orbit-edit-kicker">
+            <Pencil className="size-3" />
+            Editing
+          </span>
+          <label className="block">
+            <span className="sr-only">Title</span>
+            <input
+              className="orbit-edit-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              spellCheck={false}
+              aria-label="Game title"
+            />
+          </label>
+          <p className="orbit-edit-headmeta">
+            {developer || releaseYear || genres
+              ? [developer, releaseYear, genres].filter(Boolean).join(' · ')
+              : 'Anything the store got wrong, or Orbit guessed from a file name, can be fixed below.'}
+          </p>
         </div>
-        <p className="orbit-edit-headfoot">Changes are kept as you make them. There is no save button.</p>
-      </div>
+        <p className="orbit-edit-saved">Saved as you type · there is no save button</p>
+      </header>
 
-      <div className="orbit-edit-grid">
+      <section className="orbit-editsection">
+        <header className="orbit-editsection-head">
+          <h4 className="orbit-editsection-title">What it is</h4>
+          <p className="orbit-editsection-note">The facts the library sorts and searches by.</p>
+        </header>
+      <div className="orbit-edit-facts">
 
         <label className="block">
           <span className={labelCls}>Author / developer</span>
@@ -247,6 +253,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
           />
         </label>
       </div>
+      </section>
 
       <section className="orbit-editsection">
         <header className="orbit-editsection-head">
@@ -260,10 +267,10 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
           </p>
         </header>
 
-        <div className="flex gap-3">
+        <div className="orbit-edit-artrow">
           <PortraitFrame
             src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || null}
-            className="rounded-lg"
+            className="orbit-edit-artpreview"
           />
           <div className="min-w-0 flex-1 space-y-2">
             <label className="block">
@@ -391,14 +398,20 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
             ]}
           />
         </label>
-        <div className="flex flex-wrap gap-2">
-          <label className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm">
-            <input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} className="accent-[var(--c-accent)]" />
-            Favorite
+        <div className="orbit-edit-choices">
+          <label className="orbit-editchoice">
+            <input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} className="size-4 accent-[var(--c-accent)]" />
+            <span>
+              <b>Favorite</b>
+              <i>Kept at the front of the shelf.</i>
+            </span>
           </label>
-          <label className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm">
-            <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} className="accent-[var(--c-accent)]" />
-            Hide from Library
+          <label className="orbit-editchoice">
+            <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} className="size-4 accent-[var(--c-accent)]" />
+            <span>
+              <b>Hide from Library</b>
+              <i>Still findable by search and in the Journal.</i>
+            </span>
           </label>
         </div>
       </section>
@@ -418,7 +431,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
             is known.
           </p>
         </header>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="orbit-edit-times">
           <label className="block">
             <span className={labelCls}>Main story</span>
             <input className={inputCls} value={main} onChange={(e) => setMain(e.target.value)} inputMode="decimal" />
@@ -439,7 +452,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </div>
         <button
           type="button"
-          className={`${btnGhost} flex items-center gap-2 text-xs`}
+          className={`${btnGhost} flex w-fit items-center gap-2 text-xs`}
           onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}
         >
           <RotateCcw className="size-3.5" />
@@ -447,7 +460,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </button>
       </section>
 
-      <div className="block">
+      <section className="orbit-editsection">
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
@@ -460,20 +473,20 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
           rows={6}
           placeholder="Anything you want to remember."
         />
-      </div>
+      </section>
 
       {game.installDir && (
-        <p className="break-all font-mono text-[11px] text-muted">
+        <p className="orbit-edit-path">
           {game.installDir}
           {game.sizeBytes > 0 ? ` · ${fmtBytes(game.sizeBytes)}` : ''}
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
+      <div className="orbit-edit-foot">
         <button
           type="button"
           onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}
-          className="ml-auto flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs text-muted hover:border-accent"
+          className="orbit-edit-footbtn"
           title="Ask HowLongToBeat for the times again"
         >
           <RotateCcw className="size-3.5" />
@@ -487,7 +500,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
               onUpdate({ notes: '' });
             }
           }}
-          className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-xs text-muted hover:border-rose-400 hover:text-rose-400"
+          className="orbit-edit-footbtn is-danger"
         >
           <Trash2 className="size-3.5" />
           Clear notes
