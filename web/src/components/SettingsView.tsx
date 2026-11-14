@@ -1206,10 +1206,14 @@ export function SettingsView({
               className="orbit-themecard"
               data-chosen={settings.theme === t.id || undefined}
             >
-              <span className="orbit-themecard-swatch" style={{ background: t.bg }}>
-                <i style={{ background: t.panel2 }} />
-                <i style={{ background: t.accent }} />
-                <i style={{ background: t.accent2 }} />
+              {/* The preview is a small piece of the theme itself: its room, a
+                  raised panel on it, the accent as a button and the second
+                  signal as a dot. Four colours in a row said "palette"; this
+                  says what the room looks like. */}
+              <span className="orbit-themecard-stage" style={{ background: t.bg }}>
+                <span className="orbit-themecard-panel" style={{ background: t.panel2, borderColor: t.border }} />
+                <span className="orbit-themecard-pill" style={{ background: t.accent }} />
+                <span className="orbit-themecard-dot" style={{ background: t.accent2 }} />
               </span>
               <span className="orbit-themecard-name">
                 {t.name}
@@ -1221,17 +1225,19 @@ export function SettingsView({
             <button
               type="button"
               onClick={() => onOpenThemeManager?.()}
-              className="overflow-hidden rounded-xl border-2 border-accent/45 text-left transition hover:border-accent hover:shadow-[0_0_0_1px_var(--c-accent)]"
+              className="orbit-themecard"
+              data-chosen
               aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
             >
-              <div className="flex h-16 items-center justify-center gap-2" style={{ background: featuredCustomTheme.bg }}>
-                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${featuredCustomTheme.accent}, ${featuredCustomTheme.accent2})` }} />
-                <span className="h-3 w-16 rounded" style={{ background: featuredCustomTheme.panel2 }} />
-              </div>
-              <div className="bg-panel px-3 py-2">
-                <span className="block truncate text-sm font-medium">{featuredCustomTheme.name}</span>
-                <span className="block text-[10px] text-muted">Edit custom themes</span>
-              </div>
+              <span className="orbit-themecard-stage" style={{ background: featuredCustomTheme.bg }}>
+                <span className="orbit-themecard-panel" style={{ background: featuredCustomTheme.panel2, borderColor: featuredCustomTheme.border }} />
+                <span className="orbit-themecard-pill" style={{ background: featuredCustomTheme.accent }} />
+                <span className="orbit-themecard-dot" style={{ background: featuredCustomTheme.accent2 }} />
+              </span>
+              <span className="orbit-themecard-name">
+                {featuredCustomTheme.name}
+                <span className="text-[10px] font-normal text-muted">Edit</span>
+              </span>
             </button>
           ) : (
             <button

@@ -3751,21 +3751,53 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
 }
 .orbit-themecard:hover { border-color: color-mix(in srgb, var(--c-text) 26%, transparent); }
 .orbit-themecard[data-chosen] { border-color: color-mix(in srgb, var(--c-accent) 65%, transparent); }
-.orbit-themecard-swatch {
-  display: flex;
-  align-items: flex-end;
-  gap: 5px;
-  height: 44px;
-  padding: 7px;
-  filter: saturate(.85);
-}
-.orbit-themecard-swatch > i {
+/* The preview is a piece of the theme's own room: its background, one raised
+   panel sitting on it, the accent as a button and the second signal as a dot.
+   The picture is what the theme looks like, rather than a row of its colours. */
+.orbit-themecard-stage {
+  position: relative;
   display: block;
-  border-radius: 2px;
+  height: 58px;
+  overflow: hidden;
 }
-.orbit-themecard-swatch > i:nth-child(1) { height: 12px; flex: 1; }
-.orbit-themecard-swatch > i:nth-child(2) { width: 14px; height: 14px; }
-.orbit-themecard-swatch > i:nth-child(3) { width: 7px; height: 14px; }
+.orbit-themecard-panel {
+  position: absolute;
+  left: 8px;
+  right: 34%;
+  top: 11px;
+  bottom: -6px;
+  border-radius: 7px 7px 0 0;
+  border: 1px solid;
+  border-bottom: 0;
+}
+.orbit-themecard-pill {
+  position: absolute;
+  left: 15px;
+  top: 22px;
+  width: 26px;
+  height: 9px;
+  border-radius: 3px;
+}
+.orbit-themecard-pill::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .22);
+}
+.orbit-themecard-dot {
+  position: absolute;
+  right: 12px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+.orbit-themecard:hover .orbit-themecard-stage .orbit-themecard-panel { transform: translateY(-2px); }
+.orbit-themecard-panel { transition: transform .14s var(--ease-snap); }
 .orbit-themecard-name {
   display: flex;
   align-items: center;
