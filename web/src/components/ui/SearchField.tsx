@@ -16,6 +16,7 @@ export function SearchField({
   placeholder = 'Search',
   className,
   inputClassName,
+  inputWrapperClassName,
   children,
 }: {
   value: string;
@@ -24,12 +25,14 @@ export function SearchField({
   /** Wraps the field, for a width or a margin. */
   className?: string;
   inputClassName?: string;
+  /** Optional sizing for the wrapper around the input. */
+  inputWrapperClassName?: string;
   /** Anything that belongs on the right, such as a count or a button. */
   children?: ReactNode;
 }) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <div className="relative">
+      <div className={cn('relative', inputWrapperClassName)}>
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}

@@ -113,6 +113,13 @@ export function SessionsView({
         .slice(0, 8),
     [games],
   );
+  const selectableGames = useMemo(
+    () => games.filter((game) => game.sessionCount > 0).sort((a, b) => a.title.localeCompare(b.title)),
+    [games],
+  );
+  useEffect(() => {
+    if (gameFilter && !selectableGames.some((game) => game.id === gameFilter)) setGameFilter('');
+  }, [gameFilter, selectableGames]);
 
   const beginPlaytimeEdit = (game: Game) => {
     setPlaytimeGame(game);
@@ -218,7 +225,7 @@ export function SessionsView({
             className="w-56"
             menuClassName="w-56"
             ariaLabel="Which game's sessions to show"
-            options={[{ value: '', label: 'Every game' }, ...games.map((g) => ({ value: g.id, label: g.title }))]}
+            options={[{ value: '', label: 'Every game' }, ...selectableGames.map((game) => ({ value: game.id, label: game.title }))]}
           />
         </div>
 
@@ -341,7 +348,7 @@ export function SessionsView({
                       <span className="font-mono text-xs text-muted">{fmtClock(game.playSecs)}</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-panel2">
-                      <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]" style={{ width: `${fraction}%` }} />
+                      <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${fraction}%` }} />
                     </div>
                     <p className="mt-1 text-[10px] text-muted">{game.sessionCount > 0 ? `${game.sessionCount} sessions recorded` : 'Manually tracked playtime'}</p>
                   </div>

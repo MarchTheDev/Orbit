@@ -4,7 +4,7 @@ import type { Game, GameLog, Playthrough } from '../../types';
 import { addGameLog, addPlaythrough, deleteGameLog, deletePlaythrough, listGameLogs, listPlaythroughs, renamePlaythrough, reorderGameLogs, setCurrentPlaythrough, updateGameLog } from '../../services/native';
 import { rememberPlaythrough } from '../../services/playthroughs';
 import { useDragReorder } from '../../hooks/useDragReorder';
-import { fmtClock, fmtDate, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
+import { fmtClock, fmtDateTime, fromLocalInput, parseDuration, toLocalInput } from '../../utils/format';
 import { inputCls } from '../ui/Modal';
 import { DateTimePicker } from '../ui/DateTimePicker';
 import { Select } from '../ui/Select';
@@ -23,13 +23,16 @@ interface Draft {
 }
 
 /**
- * A new entry starts with neither date nor length filled in.
- *
- * Both are optional and both have an obvious default: today, and no time at
- * all. Somebody writing "beat the last boss" should not have to answer two
- * questions about numbers they never counted.
+ * A new entry needs a day, but not a time of day or a play duration.
  */
 const blank = (): Draft => ({ id: null, at: '', secs: '', note: '', details: '' });
+
+function displayLogDate(unixSeconds: number, withClock: boolean): string {
+  if (unixSeconds <= 0) return 'No date';
+  const date = new Date(unixSeconds * 1000);
+  if (withClock && (date.getHours() !== 0 || date.getMinutes() !== 0)) return fmtDateTime(unixSeconds);
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 /** How the entries are read. `mine` is the order they were dragged into. */
 type Order = 'mine' | 'newest' | 'oldest' | 'longest' | 'shortest';
@@ -49,10 +52,8 @@ const QUICK_NOTES = ['Finished main story', 'Finished the DLC', '100% complete',
  * The player's own log for one game.
  *
  * Deliberately separate from sessions: nothing here is tracked or measured by
- * Orbit. The player writes what happened, picks the date it happened on, and
- * says how long it took, and every field can be corrected later. That is what
- * makes "10h · 08-12-26 · finished main story" a thing they typed rather than a
- * thing the tracker guessed at.
+ * Orbit. The player writes what happened and picks the day; clock time and play
+ * duration are optional, and every field can be corrected later.
  *
  * The game's own notes live underneath the entries rather than above them: the
  * entries are the record, and a box of loose notes is what you read after them.
@@ -140,7 +141,11 @@ export function GameLogView({
   useEffect(() => {
     const onImport = () => load();
     window.addEventListener('orbit-imported', onImport);
-    return () => window.removeEventListener('orbit-imported', onImport);
+    window.addEventListener('orbit-journal-changed', onImport);
+    return () => {
+      window.removeEventListener('orbit-imported', onImport);
+      window.removeEventListener('orbit-journal-changed', onImport);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -209,16 +214,20 @@ export function GameLogView({
 
   const save = async () => {
     if (!draft) return;
-    // Left empty means "today" and "no time to add", which is what most short
-    // entries want; only a value that is there and unreadable is an error.
+    if (!draft.at.trim()) {
+      setError('Choose a day for this entry.');
+      return;
+    }
+    // Clock time and play duration are optional; the picker represents an
+    // omitted clock time as midnight on the selected day.
     const secs = draft.secs.trim() === '' ? 0 : parseDuration(draft.secs);
     if (secs === null) {
       setError('That is not a length of time. Try 10h, 45m, or 90, or leave it empty.');
       return;
     }
-    const at = draft.at.trim() === '' ? Math.floor(Date.now() / 1000) : fromLocalInput(draft.at);
+    const at = fromLocalInput(draft.at);
     if (at === null) {
-      setError('That is not a date.');
+      setError('Choose a valid day or time.');
       return;
     }
     setError(null);
@@ -257,7 +266,7 @@ export function GameLogView({
     setError(null);
     setDraft({
       id: row.id,
-      at: toLocalInput(row.at),
+      at: row.at > 0 ? toLocalInput(row.at) : '',
       secs: fmtShort(row.secs),
       note: row.note,
       details: row.details ?? '',
@@ -398,17 +407,18 @@ export function GameLogView({
         <div className="mb-4 space-y-2 rounded-xl border border-accent/40 bg-accent/5 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">When (optional)</span>
+              <span className="text-[11px] uppercase tracking-widest text-muted">Day (required) · time optional</span>
               <DateTimePicker
                 value={draft.at}
                 onChange={(at) => setDraft({ ...draft, at })}
-                placeholder="Leave empty for today"
-                title="Choose when it happened, or leave it empty for today"
+                placeholder="Choose a day"
+                title="Choose the day; clock time is optional"
+                optionalTime
                 clearable
               />
             </label>
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">How long (optional)</span>
+              <span className="text-[11px] uppercase tracking-widest text-muted">Play duration (optional)</span>
               <input
                 className={inputCls}
                 value={draft.secs}
@@ -547,7 +557,7 @@ export function GameLogView({
                       </span>
                     )}
                     <span className={`shrink-0 font-mono text-xs text-muted ${withClock ? 'w-32' : 'w-20'}`}>
-                      {withClock ? fmtDateTime(r.at) : fmtDate(new Date(r.at * 1000).toISOString())}
+                      {displayLogDate(r.at, withClock)}
                     </span>
                     <span className="min-w-0 flex-1 truncate">
                       {r.note || <span className="text-muted">no note</span>}

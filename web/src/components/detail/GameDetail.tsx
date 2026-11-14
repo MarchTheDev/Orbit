@@ -48,8 +48,6 @@ interface Props {
    * somebody is deciding to play, so nothing about launching belongs in it.
    */
   context?: 'library' | 'backlog';
-  /** A duplicate Favorites shelf: show details, but do not offer status moves. */
-  readOnlyMoves?: boolean;
   /** The running session, if it is for this game. */
   session: ActiveSession | null;
   now: number;
@@ -72,7 +70,6 @@ interface Props {
 export function GameDetail({
   game,
   context = 'library',
-  readOnlyMoves = false,
   session,
   now,
   onUpdate,
@@ -476,7 +473,7 @@ export function GameDetail({
               drawer want first. The word is spelled out rather than drawn from
               the database's own name for it. */}
           <div className="flex items-stretch gap-2 text-xs">
-            <label className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg bg-panel2 px-3 py-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg bg-panel2 px-3 py-2">
               <span className="text-muted">Status</span>
               <Select
                 value={game.status}
@@ -491,7 +488,7 @@ export function GameDetail({
                   { value: 'dropped', label: 'Dropped' },
                 ]}
               />
-            </label>
+            </div>
             <div className="w-24 shrink-0 rounded-lg bg-panel2 px-3 py-2">
               <p className="text-muted">Rating</p>
               <p className="font-medium">{game.meta?.rating ?? '-'}</p>
@@ -512,32 +509,6 @@ export function GameDetail({
               Hidden from the library. Its sessions, notes and playtime are all still here, and the Hidden chip on the
               library page is where it can be found again.
             </p>
-          )}
-
-          {backlog && !readOnlyMoves && (
-            <div className="flex flex-wrap gap-1.5 rounded-xl border border-line bg-panel2/40 p-2">
-              {(
-                [
-                  ['playing', 'Move to playing now'],
-                  ['backlog', 'Move to Backlog'],
-                  ['completed', 'Move to completed'],
-                  ['dropped', 'Move to dropped'],
-                ] as const
-              ).map(([status, label]) => (
-                <button
-                  key={status}
-                  onClick={() => onUpdate({ status })}
-                  disabled={game.status === status}
-                  className={`rounded-full border px-3 py-1 text-[11px] ${
-                    game.status === status
-                      ? 'border-accent bg-accent/15 text-fg'
-                      : 'border-line text-muted hover:border-accent hover:text-fg'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           )}
 
           <TimeTracker

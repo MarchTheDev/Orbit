@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FolderOpen, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
+import { Download, FolderOpen, HardDrive, LoaderCircle, Plus, Search, TriangleAlert, X } from 'lucide-react';
 import type { Game, GameSuggestion, LaunchTarget, LauncherId, MetaData } from '../../types';
-import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan } from '../../data/launchers';
+import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../../data/launchers';
 import { exeInfo, findArtworkChoices, folderPrograms, isNative } from '../../services/native';
 import { fetchMetadata, searchGames } from '../../services/metadata';
 import { fileSrc, pickAnyFile, pickFile } from '../../services/desktop';
 import { fmtBytes, hashHue, uid } from '../../utils/format';
-import { launchForAddedProgram } from '../../utils/platform';
+import { desktopOs, launchForAddedProgram } from '../../utils/platform';
 import { gameFolderFromExecutable, gameTitleFromExecutable, gameTitleFromPath } from '../../utils/gameTitle';
 import type { FolderProgram } from '../../types';
 import { Modal, btnBrowse, btnGhost, btnPrimary, inputCls, labelCls } from '../ui/Modal';
@@ -82,12 +82,15 @@ export function AddGameModal({
   onClose,
   onAdd,
   onImportLauncher,
+  onScanFolder,
   initialPaths,
 }: {
   onClose: () => void;
   onAdd: (g: Game, fetchMeta: boolean) => void;
   /** Opens one named launcher library over this Add Game form. */
   onImportLauncher: (launcher: LauncherId) => void;
+  /** Opens the path-selectable scan and review flow over this form. */
+  onScanFolder: () => void;
   /** Programs dropped on the window before the dialog was opened. */
   initialPaths?: string[] | null;
 }) {
@@ -279,7 +282,9 @@ export function AddGameModal({
     : details.coverUrl.trim() || meta?.coverUrl || match?.coverUrl || (match ? portraitOf(match.appId) : null);
 
   const browseExe = async () => {
-    const picked = await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
+    const picked = desktopOs() === 'linux'
+      ? await pickAnyFile('Choose the game program', d.installDir || undefined)
+      : await pickFile('Choose the game program', ['exe', 'bat', 'cmd'], d.installDir || undefined);
     if (picked) await takePaths([picked]);
   };
 
@@ -352,13 +357,13 @@ export function AddGameModal({
         {/* What Orbit made of the drop, before anything is saved. The title is
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
-          <section className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+          <section className="space-y-3 rounded-2xl border border-accent/20 bg-panel2 p-4">
             <div className="flex items-start gap-3">
               <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
                 <span
                   className="grid size-full place-items-center text-sm font-black text-white/90"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(title || 'Orbit')} 80% 55%), hsl(${(hashHue(title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `hsl(${hashHue(title || 'Orbit')} 24% 31%)`,
                   }}
                 >
                   {initials(title || 'Orbit')}
@@ -593,7 +598,7 @@ export function AddGameModal({
                 <div
                   className="grid h-12 w-9 shrink-0 place-items-center rounded text-xs font-black text-white/90"
                   style={{
-                    background: `radial-gradient(circle at 30% 20%, hsl(${hashHue(d.title || 'Orbit')} 80% 55%), hsl(${(hashHue(d.title || 'Orbit') + 60) % 360} 70% 22%) 70%)`,
+                    background: `hsl(${hashHue(d.title || 'Orbit')} 24% 31%)`,
                   }}
                   title="The placeholder used until artwork is found"
                 >
@@ -659,14 +664,25 @@ export function AddGameModal({
 
         <button type="submit" className="hidden" />
 
-        {/* Every local game library lives in the same picker, including Steam. */}
+        {/* Every local game library, including a reviewable drive scan, lives in one picker. */}
         <section className="space-y-3 border-t border-line pt-4">
           <div>
-            <p className="text-sm font-semibold text-fg">Scan a game library</p>
-            <p className="mt-0.5 text-xs text-muted">Choose a launcher, then select which games to add.</p>
+            <p className="text-sm font-semibold text-fg">Game libraries</p>
+            <p className="mt-0.5 text-xs text-muted">Choose a library to review its games before adding them.</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            {LAUNCHERS.map((launcher) => (
+            <button
+              type="button"
+              onClick={onScanFolder}
+              className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+                <HardDrive className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">Drive or folder</span>
+              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+            </button>
+            {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => (
               <button
                 key={launcher.id}
                 type="button"

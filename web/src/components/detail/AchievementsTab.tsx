@@ -107,7 +107,7 @@ export function AchievementsTab({
           {rows.length > 0 && (
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-bg">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-accent to-accent2 transition-[width]"
+                className="h-full rounded-full bg-accent transition-[width]"
                 style={{ width: `${pct}%` }}
               />
             </div>

@@ -161,7 +161,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
 
   return (
     <section className="space-y-4">
-      <div className="space-y-3 rounded-2xl border border-accent/20 bg-gradient-to-br from-panel2/60 to-panel/60 p-4">
+      <div className="space-y-3 rounded-2xl border border-accent/20 bg-panel2 p-4">
         <div className="flex items-start gap-3">
           <PortraitFrame
             src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}

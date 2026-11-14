@@ -1,176 +1,81 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
-import type { Page, Settings } from '../types';
+import { BarChart3, FolderOpen, Gamepad2, Library, Plus, Settings as SettingsIcon, X } from 'lucide-react';
+import { useEffect } from 'react';
+import type { Page } from '../types';
 import { Logo } from './ui/Logo';
-import { MusicButton } from './MusicButton';
 
-// Sessions follows the library, with Journal before Backlog in the default
-// order. The theme button is gone: themes live in Settings.
-//
-// The order can be rearranged in Settings, so this list is the default and the
-// place every tab is defined; `orderedTabs` turns it into whatever order the
-// player arranged.
-export type Tab = { id: Page; label: string; Icon: typeof Library };
-
-export const TABS: Tab[] = [
+/** The small set of routes shown in the main menu. */
+export const TABS: { id: Page; label: string; Icon: typeof Library }[] = [
   { id: 'library', label: 'Library', Icon: Library },
-  { id: 'sessions', label: 'Sessions', Icon: ListOrdered },
-  { id: 'logs', label: 'Journal', Icon: ScrollText },
-  { id: 'backlog', label: 'Backlog', Icon: NotebookPen },
-  { id: 'saves', label: 'Saves', Icon: Save },
-  { id: 'storage', label: 'Storage', Icon: HardDrive },
+  { id: 'sessions', label: 'Statistics', Icon: BarChart3 },
 ];
 
-/**
- * The tabs, in the order the player put them.
- *
- * A saved order that does not mention a tab (because that tab was added later,
- * or the setting is from an older version) leaves it where it was defined rather
- * than dropping it, and an id that no longer exists is ignored, so a stale
- * setting can never hide a page.
- */
-const PREVIOUS_DEFAULTS: Page[][] = [
-  // The original default had Backlog before Journal and Storage before Saves.
-  ['library', 'sessions', 'backlog', 'logs', 'storage', 'saves'],
-  // Saves was moved ahead of Storage before the Journal/Backlog change.
-  ['library', 'sessions', 'backlog', 'logs', 'saves', 'storage'],
-];
-
-export function orderedTabs(order: Page[] | undefined): Tab[] {
-  // A saved copy of either previous default is still the default list, not a
-  // player choice, so migrate it to the current Journal-before-Backlog order.
-  if (!order || order.length === 0 || PREVIOUS_DEFAULTS.some((previous) => order.join() === previous.join())) return TABS;
-  const known = new Map(TABS.map((t) => [t.id, t]));
-  const seen = new Set<Page>();
-  const out: Tab[] = [];
-  for (const id of order) {
-    const tab = known.get(id);
-    if (tab && !seen.has(id)) {
-      out.push(tab);
-      seen.add(id);
-    }
-  }
-  for (const tab of TABS) if (!seen.has(tab.id)) out.push(tab);
-  return out;
+/** Old saved orders migrate to the new single Statistics entry. */
+export function orderedTabs(order?: Page[]) {
+  const next = [...TABS];
+  if (!order?.length) return next;
+  const rank = new Map(order.map((id, index) => [id, index]));
+  return next.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
 }
 
 export function TopNav({
   page,
   setPage,
   order,
-  sound,
-  setSound,
-  showMusic,
-  showBars,
-  onOpenSettings,
+  drawerOpen = false,
+  onClose = () => {},
+  onAddGame,
+  onAddFolder,
+  onConsole,
 }: {
   page: Page;
-  setPage: (p: Page) => void;
-  /**
-   * Opens Settings, optionally at one of its cards.
-   *
-   * Settings is a long page, and somebody pressing a button about the music
-   * wants to arrive at the music rather than at the top of everything.
-   */
-  onOpenSettings: (at?: string) => void;
-  /** The player's own tab order from Settings; the default when absent. */
+  setPage: (page: Page) => void;
   order?: Page[];
-  /** The background music, so the bar can play it, hush it and set its level. */
-  sound: Settings['sound'];
-  setSound: (next: Settings['sound']) => void;
-  /** Whether the controls are drawn at all. Settings decides. */
-  showMusic: boolean;
-  /** Whether the controls dance while the music plays. */
-  showBars: boolean;
+  drawerOpen?: boolean;
+  onClose?: () => void;
+  onAddGame: () => void;
+  onAddFolder: () => void;
+  onConsole: () => void;
 }) {
   const tabs = orderedTabs(order);
-  const tabKey = tabs.map((tab) => tab.id).join('|');
-  const navRef = useRef<HTMLElement>(null);
-  const [indicator, setIndicator] = useState({ x: 0, y: 0, width: 0, height: 0, visible: false });
-  const activeTab = tabs.some((tab) => tab.id === page) ? page : null;
 
-  useLayoutEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const update = () => {
-      const button = activeTab ? nav.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`) : null;
-      if (!button) {
-        setIndicator((current) => ({ ...current, visible: false }));
-        return;
-      }
-      const bounds = button.getBoundingClientRect();
-      const navBounds = nav.getBoundingClientRect();
-      setIndicator({
-        x: bounds.left - navBounds.left,
-        y: bounds.top - navBounds.top,
-        width: bounds.width,
-        height: bounds.height,
-        visible: true,
-      });
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
     };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [activeTab, tabKey]);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen, onClose]);
+
+  const go = (next: Page) => {
+    setPage(next);
+    onClose();
+  };
+  const action = (callback: () => void) => {
+    onClose();
+    callback();
+  };
 
   return (
-    <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
-      {/* The bar is the one thing that spans the whole window rather than sitting
-          in a column: on a wide screen the logo belongs at the left edge and the
-          settings button at the right, not both of them a hand's width in. */}
-      <div className="flex w-full items-center gap-5 px-6 py-3">
-        <button
-          onClick={() => setPage('library')}
-          className="orbit-logo flex items-center gap-2.5 rounded-full px-2 py-1"
-          title="Orbit"
-          aria-label="Orbit"
-        >
-          <Logo className="size-7 drop-shadow-[0_2px_8px_var(--c-accent)]" animated />
-          <span className="text-lg font-bold tracking-tight">Orbit</span>
-        </button>
-
-        <nav ref={navRef} className="relative flex items-center gap-1">
-          <span
-            aria-hidden
-            className="topnav-indicator pointer-events-none absolute left-0 top-0 rounded-full border border-accent/35 bg-panel2 shadow-sm"
-            style={{
-              width: indicator.width,
-              height: indicator.height,
-              opacity: indicator.visible ? 1 : 0,
-              transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0)`,
-            }}
-          />
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              data-tab-id={t.id}
-              aria-current={page === t.id ? 'page' : undefined}
-              onClick={() => setPage(t.id)}
-              className={`relative z-10 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                page === t.id ? 'text-fg' : 'text-muted hover:bg-panel/70 hover:text-fg'
-              }`}
-            >
-              <t.Icon className="size-4" strokeWidth={1.8} />
-              {t.label}
-            </button>
-          ))}
+    <>
+      {drawerOpen && <button type="button" className="orbit-menu-scrim" aria-label="Close Orbit menu" onClick={onClose} />}
+      <aside className={`orbit-menu-panel${drawerOpen ? ' is-open' : ''}`} aria-label="Orbit menu" aria-hidden={!drawerOpen}>
+        <header className="orbit-menu-heading">
+          <div className="orbit-menu-brand"><Logo className="size-8 shrink-0" animated /><span><b>Orbit</b><small>GAME COLLECTION</small></span></div>
+          <button type="button" onClick={onClose} className="orbit-menu-close" aria-label="Close menu"><X size={17} /></button>
+        </header>
+        <nav className="orbit-menu-nav" aria-label="Main menu">
+          {tabs.map(({ id, label, Icon }) => <button type="button" key={id} onClick={() => go(id)} aria-current={page === id ? 'page' : undefined} className={`orbit-menu-link${page === id ? ' is-active' : ''}`}><Icon size={17} strokeWidth={1.8} /><span>{label}</span></button>)}
+          <div className="orbit-menu-divider" />
+          <button type="button" onClick={() => action(onAddGame)} className="orbit-menu-link"><Plus size={17} strokeWidth={1.8} /><span>Add game</span></button>
+          <button type="button" onClick={() => action(onAddFolder)} className="orbit-menu-link"><FolderOpen size={17} strokeWidth={1.8} /><span>Add from folder</span></button>
+          <div className="orbit-menu-divider" />
+          <button type="button" onClick={() => action(onConsole)} className="orbit-menu-link"><Gamepad2 size={17} strokeWidth={1.8} /><span>Launchpad</span></button>
         </nav>
-
-        <div className="flex-1" />
-        {showMusic && (
-          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
-        )}
-        <button
-          onClick={() => setPage('settings')}
-          aria-label="Settings"
-          title="Settings"
-          className={`rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg ${
-            page === 'settings' ? 'text-fg ring-1 ring-accent/40' : ''
-          }`}
-        >
-          <SettingsIcon className="size-5" strokeWidth={1.8} />
-        </button>
-      </div>
-    </header>
+        <div className="orbit-menu-footer">
+          <button type="button" onClick={() => go('settings')} aria-current={page === 'settings' ? 'page' : undefined} className={`orbit-menu-link${page === 'settings' ? ' is-active' : ''}`}><SettingsIcon size={17} strokeWidth={1.8} /><span>Settings</span></button>
+        </div>
+      </aside>
+    </>
   );
 }

@@ -1,10 +1,11 @@
 import { RefreshCw, Timer } from 'lucide-react';
 import type { Game } from '../../types';
+import { HltbExtraEstimate } from './HltbExtraEstimate';
 
 /**
  * How far the player has got, as a colour.
  *
- * The bars used to be one gradient whatever the game: a game barely started and
+ * The bars used to share one colour whatever the game: a game barely started and
  * one finished twice looked identical. These bands colour the bar by how far the
  * played time has got towards that estimate. The band is also the tooltip, so
  * the meaning of the colour is there for anyone who cannot separate them.
@@ -114,6 +115,8 @@ export function HltbCard({
               </div>
             );
           })}
+
+          <HltbExtraEstimate hours={h.mainExtra} className="border-t border-line pt-2" />
 
           {/* A game played past every estimate is worth saying plainly: the
               numbers are other people's averages, not a rule. */}

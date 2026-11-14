@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  Search,
   CircleAlert,
   CircleCheck,
   Eye,
@@ -45,28 +46,32 @@ import {
   overlayReadyNotice,
   overlayQuality,
   overlayShowPins,
+  setClockOffset,
+  addGameLog,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
 import { desktopOs } from './utils/platform';
+import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { MusicButton } from './components/MusicButton';
+import { SearchField } from './components/ui/SearchField';
+import { StatisticsView } from './components/StatisticsView';
+import { CommandPalette } from './components/CommandPalette';
+import { TvMode } from './components/TvMode';
+import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import { Hero } from './components/Hero';
-import { Toolbar, type Filter } from './components/Toolbar';
+import { LIBRARY_FILTERS, type Filter } from './components/Toolbar';
+import { LibraryWorkspace } from './components/LibraryWorkspace';
 import { Logo } from './components/ui/Logo';
-import { GameGrid } from './components/GameGrid';
-import { GameList } from './components/GameList';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
-import { SessionsView } from './components/SessionsView';
-import { BacklogView } from './components/BacklogView';
 import { StorageView } from './components/StorageView';
-import { LogsView } from './components/LogsView';
 import { SteamImportModal, gameFromSteam } from './components/SteamImportModal';
 import { OtherLauncherImportModal } from './components/OtherLauncherImportModal';
 import { AddGameModal } from './components/modals/AddGameModal';
@@ -76,6 +81,7 @@ import { MoveProgressOrb } from './components/MoveProgressOrb';
 import { CloudTransferOrb } from './components/CloudTransferOrb';
 import { useGameMove } from './hooks/useGameMove';
 import { SettingsView } from './components/SettingsView';
+import { ThemeManagerPage } from './components/ThemeManagerPage';
 import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
@@ -96,11 +102,23 @@ function FilledStar({ className }: { className?: string }) {
   return <Star className={className} fill="currentColor" strokeWidth={0} />;
 }
 
+const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
+function savedSort(): SortKey {
+  const value = localStorage.getItem('orbit.sort');
+  return SORT_KEYS.includes(value as SortKey) ? value as SortKey : 'title';
+}
+
+function savedFilter(): Filter {
+  const value = localStorage.getItem('orbit.filter');
+  return LIBRARY_FILTERS.some(({ id }) => id === value) ? value as Filter : 'all';
+}
+
 export default function App() {
   const {
     games,
     settings,
     setSettings,
+    replaceSettings,
     updateGame,
     adoptNotes,
     addGame,
@@ -110,20 +128,68 @@ export default function App() {
     flush,
     resetEverything,
     ready,
+    startupError,
+    retryStartup,
   } = useLibrary();
+  // The current native Linux build has no reliable game-overlay surface.
+  // Keep the rest of Orbit available and leave the overlay settings untouched.
+  const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
-  const [filter, setFilter] = useState<Filter>('all');
+  const backHistory = useRef<Array<{ page: Page; selectedId: string | null; view: ViewMode }>>([]);
+  const forwardHistory = useRef<Array<{ page: Page; selectedId: string | null; view: ViewMode }>>([]);
+  const historyReplay = useRef(false);
+  const lastHistoryPlace = useRef<{ page: Page; selectedId: string | null; view: ViewMode } | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [page]);
+  /** TV mode: the library fullscreen, read from a couch. */
+  const [tv, setTv] = useState(false);
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k' || tv) return;
+      event.preventDefault();
+      setCommandPaletteOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, [tv]);
+
+  /**
+   * Fill the screen, and give it back.
+   *
+   * The window is made fullscreen by whoever asked for TV mode, not by the page
+   * itself, because a browser only honours the request while a click is still
+   * being handled. A refusal is not a failure: the hub works in the window it
+   * has, so nothing is undone and nothing is said about it.
+   */
+  const enterTv = useCallback(() => {
+    setTv(true);
+    void enterFullscreen();
+  }, []);
+
+  const leaveTv = useCallback(() => {
+    setTv(false);
+    void leaveFullscreen();
+  }, []);
+  const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
-  const [sort, setSort] = useState<SortKey>('title');
+  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'list');
+  const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailContext, setDetailContext] = useState<'library' | 'backlog'>('library');
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
+  const [backlogRemovalTarget, setBacklogRemovalTarget] = useState<Game | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showThemeManager, setShowThemeManager] = useState(false);
+  /** True while a launcher/drive picker was opened from the Add Game form. */
+  const addTabImport = useRef(false);
   /** Whether the opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
@@ -142,7 +208,6 @@ export default function App() {
   const move = useGameMove((gameId, paths) => updateGame(gameId, paths));
   /** Where the right-click menu is, which game it is about, and whether moves are disabled. */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string; readOnlyMoves?: boolean } | null>(null);
-  const [detailReadOnlyMoves, setDetailReadOnlyMoves] = useState(false);
   /** Forces the details drawer to reopen when its current game is requested again. */
   const [detailNonce, setDetailNonce] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -174,6 +239,65 @@ export default function App() {
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+  useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
+  useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
+
+  // Orbit has no routes to put in the webview history. Keep the places the
+  // player actually visited so mouse Back/Forward and Alt+Arrow navigate the
+  // app instead of sending the webview to an empty document.
+  useEffect(() => {
+    const place = { page, selectedId, view };
+    const previous = lastHistoryPlace.current;
+    if (historyReplay.current) {
+      historyReplay.current = false;
+    } else if (previous && (previous.page !== place.page || previous.selectedId !== place.selectedId || previous.view !== place.view)) {
+      backHistory.current.push(previous);
+      if (backHistory.current.length > 80) backHistory.current.shift();
+      forwardHistory.current = [];
+    }
+    lastHistoryPlace.current = place;
+  }, [page, selectedId, view]);
+
+  useEffect(() => {
+    const goHistory = (direction: -1 | 1) => {
+      const source = direction < 0 ? backHistory : forwardHistory;
+      const destination = direction < 0 ? forwardHistory : backHistory;
+      const current = { page, selectedId, view };
+      let next = source.current.pop();
+      while (next && next.page === current.page && next.selectedId === current.selectedId && next.view === current.view) next = source.current.pop();
+      if (!next) return;
+      destination.current.push(current);
+      historyReplay.current = true;
+      setDetailOpen(false);
+      setPage(next.page);
+      setSelectedId(next.selectedId);
+      setView(next.view);
+    };
+    const onMouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      goHistory(event.button === 3 ? -1 : 1);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === 'ArrowLeft' || event.key === 'BrowserBack') {
+        event.preventDefault();
+        goHistory(-1);
+      } else if (event.key === 'ArrowRight' || event.key === 'BrowserForward') {
+        event.preventDefault();
+        goHistory(1);
+      }
+    };
+    window.addEventListener('mousedown', onMouse);
+    window.addEventListener('auxclick', onMouse);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onMouse);
+      window.removeEventListener('auxclick', onMouse);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [page, selectedId, view]);
 
   useEffect(() => {
     if (!isNative()) return;
@@ -184,6 +308,7 @@ export default function App() {
     let stopPulse = () => {};
     let stopOverlayNote = () => {};
     let stopOverlaySettings = () => {};
+    let stopCovered = () => {};
     let stopNotes = () => {};
     void listen<{ gameId?: string; notes?: string }>('playthrough-notes', (event) => {
       const gameId = event.payload?.gameId;
@@ -191,32 +316,33 @@ export default function App() {
     }).then((unlisten) => {
       stopNotes = unlisten;
     }).catch(() => undefined);
-    void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
-      setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
-    }).then((unlisten) => {
-      stopOverlaySettings = unlisten;
-    }).catch(() => undefined);
-    void listen<string>('overlay-toast', (event) => {
-      if (event.payload) say(event.payload);
-    }).then((unlisten) => {
-      stopOverlayNote = unlisten;
-    }).catch(() => undefined);
+    if (overlayAvailable) {
+      void listen<Partial<NonNullable<Settings['overlay']>>>('overlay-settings', (event) => {
+        setSettings((current) => ({ overlay: { ...current.overlay, ...event.payload } }));
+      }).then((unlisten) => {
+        stopOverlaySettings = unlisten;
+      }).catch(() => undefined);
+      void listen<string>('overlay-toast', (event) => {
+        if (event.payload) say(event.payload);
+      }).then((unlisten) => {
+        stopOverlayNote = unlisten;
+      }).catch(() => undefined);
+      // The panel was drawn over by the game itself. Nothing Orbit can draw is
+      // visible at that moment, so the words land here, where the player will be
+      // as soon as the game lets go.
+      void listen<string>('overlay-covered', () => {
+        toast({
+          text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then use your overlay shortcut again.",
+          tone: 'error',
+        });
+      }).then((unlisten) => {
+        stopCovered = unlisten;
+      }).catch(() => undefined);
+    }
     void listen('cloud-transfer-close', () => {
       setCloudClose(currentCloudTransfer() ?? 'backup');
     }).then((unlisten) => {
       stopAsk = unlisten;
-    }).catch(() => undefined);
-    // The panel was drawn over by the game itself. Nothing Orbit can draw is
-    // visible at that moment, so the words land here, where the player will be
-    // as soon as the game lets go.
-    let stopCovered = () => {};
-    void listen<string>('overlay-covered', () => {
-      toast({
-        text: "The game is drawn over Orbit's overlay. Switch the game to borderless windowed fullscreen, then press Alt+X again.",
-        tone: 'error',
-      });
-    }).then((unlisten) => {
-      stopCovered = unlisten;
     }).catch(() => undefined);
     void listen<CloudPulse>('cloud-transfer', (event) => {
       if (!cloudTransferActive()) return;
@@ -646,7 +772,7 @@ export default function App() {
   useGamepad();
 
   useEffect(() => {
-    if (!isNative() || !settings) return;
+    if (!isNative() || !overlayAvailable || !settings) return;
     const overlay = settings.overlay;
     void overlayConfigure({
       enabled: overlay?.enabled !== false,
@@ -659,12 +785,14 @@ export default function App() {
       screenshotDirectory: overlay?.screenshotDirectory ?? '',
       recordingDirectory: overlay?.recordingDirectory ?? '',
       replayDirectory: overlay?.replayDirectory ?? '',
+      gameOnly: overlay?.gameOnly === true,
+      captureShortcutsOutsideOverlay: overlay?.captureShortcutsOutsideOverlay === true,
     });
   }, [settings]);
 
   const pinsShown = useRef(false);
   useEffect(() => {
-    if (!booted || !isNative() || !settings) return;
+    if (!booted || !isNative() || !overlayAvailable || !settings) return;
     if (settings.overlay?.enabled === false) {
       pinsShown.current = false;
       return;
@@ -681,7 +809,7 @@ export default function App() {
   // away again, and say why so the switch can be found.
   const statsChecked = useRef(false);
   useEffect(() => {
-    if (!isNative() || !booted || !settings || statsChecked.current) return;
+    if (!isNative() || !overlayAvailable || !booted || !settings || statsChecked.current) return;
     statsChecked.current = true;
     if (settings.overlay?.liveStats === false) return;
     void liveStatsSuspect().then((suspected) => {
@@ -696,7 +824,7 @@ export default function App() {
   }, [booted, settings, setSettings, toast]);
 
   useEffect(() => {
-    if (!isNative() || !session || session.manual) return;
+    if (!isNative() || !overlayAvailable || !session || session.manual) return;
     void overlayPlaying(session.gameTitle);
   }, [session]);
 
@@ -741,7 +869,7 @@ export default function App() {
 
   const hiddenLibraryFilters = settings?.hiddenLibraryFilters ?? [];
   // If a selected chip is hidden in Settings, fall back to All immediately.
-  const activeFilter: Filter = hiddenLibraryFilters.includes(filter) ? 'all' : filter;
+  const activeFilter: Filter = hiddenLibraryFilters.includes(filter) || !LIBRARY_FILTERS.some(({ id }) => id === filter) ? 'all' : filter;
 
   // The game that is playing is marked, so the grid can show it at a glance.
   const visible = useMemo(() => {
@@ -854,22 +982,35 @@ export default function App() {
     setShowSteam(false);
     setShowOtherLaunchers(null);
     setMenu(null);
-    setDetailReadOnlyMoves(false);
     setRemoveConfirmId(null);
     setRemoveSteamConfirm(false);
     setMoveId(null);
+    setDetailOpen(false);
   }, [page]);
 
   /** Open the read-only details drawer, even if this game is already selected. */
-  const openDetail = (id: string, readOnlyMoves = false) => {
-    setDetailReadOnlyMoves(readOnlyMoves);
+  const openDetail = (id: string, context: 'library' | 'backlog' = 'library') => {
     setDetailNonce((n) => n + 1);
     setSelectedId(id);
+    setDetailContext(context);
+    setDetailOpen(true);
+  };
+
+  const openPaletteGameDetails = (id: string) => {
+    setShowThemeManager(false);
+    if (page === 'library') {
+      openDetail(id);
+      return;
+    }
+    setPage('library');
+    // Let the page-change cleanup finish before opening the requested record.
+    window.setTimeout(() => openDetail(id), 0);
   };
 
   /** The pencil opens the full, centered editor rather than an Edit drawer tab. */
   const openGameEditor = (id: string, hideLaunchSettings = false) => {
-    setSelectedId(null);
+    setDetailOpen(false);
+    setSelectedId(id);
     setEditingHideLaunchSettings(hideLaunchSettings);
     setEditingGameId(id);
   };
@@ -877,6 +1018,45 @@ export default function App() {
   const toggleFavorite = (id: string) => {
     const game = games.find((candidate) => candidate.id === id);
     if (game) updateGame(id, { favorite: !game.favorite });
+  };
+
+  const setBacklogMembership = (id: string, on: boolean) => {
+    setSettings((current) => {
+      const currentOn = current.backlogOn ?? [];
+      const currentOff = current.backlogOff ?? [];
+      return {
+        backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  const setJournalMembership = (id: string, on: boolean) => {
+    const game = games.find((item) => item.id === id);
+    if (on && (!game || game.planned || !inLibraryShelf(game))) return;
+    setSettings((current) => {
+      const currentOn = current.journalOn ?? [];
+      const currentOff = current.journalOff ?? [];
+      return {
+        journalOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
+        journalOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
+      };
+    });
+  };
+
+  /** Remove only this game's Backlog membership, or its planned-only record. */
+  const removeFromBacklog = (game: Game, confirmed = false): boolean => {
+    if (!confirmed) {
+      setBacklogRemovalTarget(game);
+      return false;
+    }
+    if (inLibraryShelf(game)) {
+      setBacklogMembership(game.id, false);
+      return true;
+    }
+    removeGame(game.id);
+    setSelectedId((current) => (current === game.id ? null : current));
+    return true;
   };
 
   /**
@@ -892,7 +1072,7 @@ export default function App() {
     : page === 'backlog'
       ? [
           { kind: 'label', label: menuGame.title },
-          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id, menuReadOnlyMoves) },
+          { label: 'Open details', icon: Info, onSelect: () => openDetail(menuGame.id) },
           ...(menuReadOnlyMoves ? [] : [
             { label: 'Edit game…', icon: Pencil, onSelect: () => openGameEditor(menuGame.id, true) },
             { kind: 'sep' as const },
@@ -921,10 +1101,10 @@ export default function App() {
           },
           { kind: 'sep' },
           {
-            label: 'Delete from Orbit…',
+            label: 'Remove from Backlog',
             icon: Trash2,
             danger: true,
-            onSelect: () => setRemoveConfirmId(menuGame.id),
+            onSelect: () => removeFromBacklog(menuGame),
           },
         ]
       : [
@@ -988,8 +1168,16 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
+    // A playthrough start is worth a Journal entry even if the game is not in
+    // the Journal yet. Its session timestamp is the moment the game started,
+    // not when the player later adds it to the Journal.
+    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
+      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
+      .catch(() => {
+        toast({ text: `Could not save the Journal entry for ${g.title}.` });
+      });
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
-    if (launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
+    if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
       if (isNative()) void overlayReadyNotice().catch(fallbackNotice);
       else fallbackNotice();
@@ -1007,6 +1195,13 @@ export default function App() {
    * title the store does not know still gets its HowLongToBeat time, and the
    * other way round.
    */
+  const closeAddTabAfterLibraryImport = () => {
+    if (!addTabImport.current) return;
+    addTabImport.current = false;
+    setShowAdd(false);
+    setDroppedPaths(null);
+  };
+
   const handleAdd = async (g: Game, fetchMeta: boolean) => {
     addGame(g);
     setSelectedId(g.id);
@@ -1053,7 +1248,11 @@ export default function App() {
   // clears a selection, then leaves the page. Escape, which the pad also
   // sends, already closes a dialog that is open.
   useEffect(() => {
+    // TV mode has its own keys, and the shelf it is on is not this page's
+    // selection. Anything the pad does there is answered by the hub, so the
+    // library's own handlers step aside rather than starting a second game.
     const onPlay = () => {
+      if (tv) return;
       if (session) {
         void stop();
         return;
@@ -1069,10 +1268,16 @@ export default function App() {
       if (picked) void startGame(picked);
     };
     const onBack = () => {
-      if (selectedId) setDetailClose((n) => n + 1);
+      // Back in TV mode is answered by the hub, which knows whether it should
+      // step out of a game's page or out of the mode itself.
+      if (tv) return;
+      if (detailOpen) setDetailClose((n) => n + 1);
       else if (page !== 'library') setPage('library');
+      else setSelectedId(null);
     };
     const onPage = (event: Event) => {
+      // The shoulders page the library, which is not what is on screen.
+      if (tv) return;
       // The details drawer listens too, but both listeners are on the window, and
       // a capture listener added later does not run first. While the drawer is
       // open the shoulders belong to its tabs, not to these pages.
@@ -1095,7 +1300,7 @@ export default function App() {
       window.removeEventListener('orbit-pad-back', onBack);
       window.removeEventListener('orbit-pad-page', onPage);
     };
-  }, [session, stop, selectedId, games, heroGame, page, settings?.tabOrder]);
+  }, [session, stop, selectedId, detailOpen, games, heroGame, page, settings?.tabOrder, tv]);
   // The hero stays on screen while the category chips are used. That is the
   // point of it being "jump back in" rather than a summary of the current
   // filter. Only a search takes it away, because then the player is looking for
@@ -1104,9 +1309,8 @@ export default function App() {
    * Scroll to a requested Settings card after the new page has committed.
    *
    * Two animation frames are more reliable than a fixed timeout: the first
-   * renders Settings, the next lets layout settle before the scroll position is
-   * calculated. The card's scroll margin leaves room below the sticky top bar
-   * and the quick-jump row.
+   * renders Settings, the next lets layout settle before the shared scroll
+   * helper measures the app scroller and the sticky category bar.
    */
   useEffect(() => {
     if (page !== 'settings' || !settingsJump) return;
@@ -1115,7 +1319,7 @@ export default function App() {
       secondFrame = window.requestAnimationFrame(() => {
         const card = document.getElementById(settingsJump.id);
         if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          scrollSettingsSectionToTop(card);
           card.classList.add('settings-spot');
           window.setTimeout(() => card.classList.remove('settings-spot'), 2400);
         }
@@ -1129,20 +1333,78 @@ export default function App() {
   }, [page, settingsJump]);
 
   const openSettings = useCallback((at?: string) => {
+    setShowThemeManager(false);
     setSettingsJump(at ? { id: at, token: ++settingsJumpToken.current } : null);
     setPage('settings');
   }, []);
 
   useEffect(() => {
-    if (!isNative()) return;
+    if (!isNative() || !overlayAvailable) return;
     let stop = () => {};
+    let stopToast = () => {};
+    // The panel speaks through these when it cannot speak for itself - it is
+    // the very window that is going away, so the words have to land here.
+    void listen('overlay-toast', (event) => {
+      const text = typeof event.payload === 'string' ? event.payload : '';
+      if (text) say(text, 'error');
+    }).then((unlisten) => {
+      stopToast = unlisten;
+    }).catch(() => undefined);
     void listen('overlay-open-settings', () => openSettings('orbit-overlay')).then((unlisten) => {
       stop = unlisten;
     }).catch(() => undefined);
-    return () => stop();
+    return () => {
+      stop();
+      stopToast();
+    };
   }, [openSettings]);
 
-  const showHome = page === 'library' && !query;
+  /**
+   * Tell the desktop side what time it is here.
+   *
+   * A capture taken by a keyboard shortcut is named there, not here: with a
+   * game in front this window is minimised, and a minimised web view is exactly
+   * the thing that does not run. Rust has no time zone of its own, so it is
+   * given this one, once - and again whenever the window comes back, because a
+   * laptop can be carried across one.
+   */
+  useEffect(() => {
+    if (!isNative()) return;
+    const report = () => void setClockOffset(new Date().getTimezoneOffset()).catch(() => undefined);
+    report();
+    document.addEventListener('visibilitychange', report);
+    return () => document.removeEventListener('visibilitychange', report);
+  }, []);
+
+  // A native startup command rejecting used to leave only the dark empty
+  // background on screen. Keep its real error visible and give the player a
+  // retry instead of making a broken launch indistinguishable from a blank app.
+  if (startupError) {
+    return (
+      <main className="grid h-full place-items-center overflow-auto bg-bg p-6 text-fg">
+        <section role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-panel p-7 shadow-2xl">
+          <div className="mb-5 flex items-center gap-3">
+            <Logo className="size-9 shrink-0" animated={false} />
+            <h1 className="text-2xl font-semibold">Orbit couldn’t finish starting</h1>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">
+            The library or settings request failed. The details below can help identify why this installation opened without its interface.
+          </p>
+          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-red-200">{startupError}</pre>
+          <button
+            type="button"
+            onClick={retryStartup}
+            className="mt-5 rounded-xl bg-accent px-5 py-2.5 font-semibold text-white hover:brightness-110"
+          >
+            Retry startup
+          </button>
+          <p className="mt-4 text-xs leading-relaxed text-muted">
+            If this repeats, launch <code>orbit</code> from a terminal and include its error output when reporting the problem.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   // Nothing can be drawn until the settings have loaded, which also decides the
   // theme. Every hook above has already run, so this is safe. While that
@@ -1153,6 +1415,32 @@ export default function App() {
         {!booted && <Startup onDone={() => setBooted(true)} />}
         <div className="h-full bg-bg" />
       </>
+    );
+  }
+
+  // TV mode is the whole window, not a panel over it: the app's own shell is
+  // not drawn at all while it is on, so nothing behind it can take focus, be
+  // clicked through, or keep the controller ring wandering off the shelves.
+  if (tv) {
+    return (
+      <TvMode
+        games={played}
+        runningId={runningGame?.id ?? null}
+        sound={settings.sound}
+        setSound={(sound) => setSettings({ sound })}
+        showMusic={settings.topbarMusic !== false}
+        showBars={settings.musicBars !== false}
+        onPlay={(game) => void startGame(game)}
+        onStop={() => void stop()}
+        // Details is a page of the hub: the game is read in TV mode, at the
+        // size TV mode is read, and Back returns to the rail.
+        onDetails={() => undefined}
+        onExit={leaveTv}
+        onOpenSettings={() => {
+          leaveTv();
+          openSettings('orbit-sound');
+        }}
+      />
     );
   }
 
@@ -1170,19 +1458,38 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-app-frame relative h-full overflow-hidden text-fg${focused ? '' : ' orbit-idle'}${page === 'library' ? ' orbit-library-shell' : ''}`
         }
       >
       <TopNav
         page={page}
-        setPage={setPage}
-        onOpenSettings={openSettings}
+        setPage={(next) => {
+          setShowThemeManager(false);
+          setPage(next);
+        }}
+        drawerOpen={navOpen}
+        onClose={() => setNavOpen(false)}
         order={settings?.tabOrder}
-        sound={settings.sound}
-        setSound={(sound) => setSettings({ sound })}
-        showMusic={settings.topbarMusic !== false}
-        showBars={settings.musicBars !== false}
+        onAddGame={() => setShowAdd(true)}
+        onAddFolder={() => {
+          setImportFolder(null);
+          setShowImport(true);
+        }}
+        onConsole={enterTv}
       />
+      <header className="orbit-appbar">
+        <div className="orbit-appbar-brand">
+          <button type="button" className="orbit-burger-button" onClick={() => setNavOpen(true)} aria-label="Open Orbit menu" aria-expanded={navOpen}>
+            <span /><span /><span />
+          </button>
+          <button type="button" className="orbit-logo-button" onClick={() => { setShowThemeManager(false); setPage('library'); }} aria-label="Orbit Library"><Logo className="size-8" animated /><b>Orbit</b></button>
+        </div>
+        <div className="orbit-appbar-search"><SearchField value={query} onChange={setQuery} placeholder="Search your games" className="w-full" inputClassName="w-full" /></div>
+        <div className="orbit-appbar-actions">
+          <button type="button" className="orbit-command-button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open command palette" title="Search commands and games (Ctrl+K)"><Search size={16} /><kbd>Ctrl K</kbd></button>
+          {settings.topbarMusic !== false && <MusicButton sound={settings.sound} onChange={(sound) => setSettings({ sound })} showBars={settings.musicBars !== false} onOpenSettings={() => openSettings('orbit-sound')} />}
+        </div>
+      </header>
 
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
@@ -1194,15 +1501,27 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-tab-enter pb-24">
-        {!settings ? null : page === 'settings' ? (
-          <div className="glass mx-6 mt-5 rounded-3xl">
+      <main key={page} className={`orbit-main-scroll page-${page} orbit-tab-enter pb-8`}>
+        {!settings ? null : showThemeManager ? (
+          <ThemeManagerPage
+            settings={settings}
+            setSettings={setSettings}
+            onBack={() => setShowThemeManager(false)}
+          />
+        ) : page === 'settings' ? (
+          <div className="mx-5 my-5 rounded-2xl border border-line bg-panel">
             <SettingsView
               settings={settings}
               setSettings={setSettings}
+              replaceSettings={replaceSettings}
               onImportLauncher={(launcher) => {
                 if (launcher === 'Steam') setShowSteam(true);
                 else setShowOtherLaunchers(launcher);
+              }}
+              onOpenThemeManager={() => setShowThemeManager(true)}
+              onScanDrive={() => {
+                setImportFolder(settings.scanPath?.trim() || null);
+                setShowImport(true);
               }}
               onClearLibrary={() => {
                 void clearLibrary().then(() => location.reload());
@@ -1213,49 +1532,21 @@ export default function App() {
               onFoundUpdate={setUpdate}
             />
           </div>
-        ) : page === 'backlog' ? (
-          <BacklogView
-            games={played}
-            onSelect={openDetail}
-            onEdit={(id) => openGameEditor(id, true)}
-            onStatus={(id, status) => updateGame(id, { status })}
-            onAdd={(game) => addGames([game])}
-            onUpdate={(id, patch) => updateGame(id, patch)}
-            onRemove={(id) => removeGame(id)}
-            fetchMetadata={settings.fetchMetadata}
-            // Off by default: a game the player added to the library by hand
-            // stays there, and only crosses over to this page when asked for.
-            syncLibrary={settings.syncBacklog === true}
-            backlogOn={settings.backlogOn ?? []}
-            backlogOff={settings.backlogOff ?? []}
-            onBacklogMembership={(id, on) => {
-              setSettings((current) => {
-                const currentOn = current.backlogOn ?? [];
-                const currentOff = current.backlogOff ?? [];
-                return {
-                  backlogOn: on ? [...currentOn.filter((item) => item !== id), id] : currentOn.filter((item) => item !== id),
-                  backlogOff: on ? currentOff.filter((item) => item !== id) : [...currentOff.filter((item) => item !== id), id],
-                };
-              });
-            }}
-            myOrder={settings.backlogOrder}
-            setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
-          />
-        ) : page === 'sessions' ? (
-          <SessionsView
-            games={games}
+        ) : page === 'sessions' || page === 'backlog' || page === 'logs' ? (
+          <StatisticsView
+            games={played.filter((game) => !query.trim() || game.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))}
+            settings={settings}
             onChanged={() => void reload()}
             onOpenGame={openDetail}
-          />
-        ) : page === 'logs' ? (
-          <LogsView
-            games={games}
-            onUpdate={(id, patch) => updateGame(id, patch)}
             onEditGame={openGameEditor}
-            // The Journal is read for the game being written about, so it can be
-            // arranged in whatever order that reading wants.
-            order={settings.logOrder ?? []}
-            onOrder={(ids) => setSettings({ logOrder: ids })}
+            onStatus={(id, status) => updateGame(id, { status })}
+            onAddPlanned={(game) => addGames([game])}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onRemove={(id) => removeGame(id)}
+            onBacklogMembership={setBacklogMembership}
+            onJournalMembership={setJournalMembership}
+            onBacklogOrder={(ids) => setSettings({ backlogOrder: ids })}
+            onJournalOrder={(ids) => setSettings({ logOrder: ids })}
           />
         ) : page === 'storage' ? (
           <StorageView
@@ -1273,87 +1564,41 @@ export default function App() {
           <SavesView games={games} settings={settings} setSettings={setSettings} />
         ) : (
           <>
-            {showHome && settings.showHero !== false && heroGame && (
-              <Hero
-                game={heroGame}
-                running={runningGame?.id === heroGame.id}
-                onPlay={() => void startGame(heroGame)}
-                onDetails={() => setSelectedId(heroGame.id)}
+            {!ready ? null : (
+              <LibraryWorkspace
+                games={visible}
+                collection={played.filter(inLibraryShelf)}
+                settings={settings}
+                filter={activeFilter}
+                setFilter={setFilter}
+                query={query}
+                setQuery={setQuery}
+                sort={sort}
+                setSort={setSort}
+                view={view}
+                setView={setView}
+                scale={scale}
+                setScale={(next) => setSettings({ coverScale: next })}
+                onSettingsUpdate={(patch) => setSettings(patch)}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onDetails={openDetail}
+                onEdit={openGameEditor}
+                onToggleFavorite={toggleFavorite}
+                onPlay={(game) => void startGame(game)}
+                onStop={() => void stop()}
+                onAdd={() => setShowAdd(true)}
+                onUpdate={(id, patch) => updateGame(id, patch)}
+                onRefresh={() => void reload()}
+                activeGameTitle={session && runningGame ? runningGame.title : null}
+                activeGameClock={session ? fmtClock(Math.floor((now - session.startedAtMs) / 1000)) : null}
+                runningId={runningGame?.id ?? null}
+                onReorder={sort === 'manual' ? reorder : undefined}
               />
             )}
-            <Toolbar
-              count={visible.length}
-              total={games.length}
-              filter={activeFilter}
-              setFilter={setFilter}
-              query={query}
-              setQuery={setQuery}
-              view={view}
-              setView={setView}
-              sort={sort}
-              setSort={setSort}
-              onAdd={() => setShowAdd(true)}
-              showHero={settings.showHero !== false}
-              onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
-              scale={scale}
-              setScale={(n) => setSettings({ coverScale: n })}
-              filterOrder={settings.libraryFilterOrder}
-              hiddenFilters={settings.hiddenLibraryFilters}
-            />
-            <div>
-              {!ready ? null : visible.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted">
-                  <Logo className="size-16 opacity-50" />
-                  <p>{games.length === 0 ? 'Nothing in this orbit yet.' : 'Nothing matches that.'}</p>
-                  {games.length === 0 && (
-                    <p className="text-xs">Drop a game program on the window, or use Add game.</p>
-                  )}
-                </div>
-              ) : view === 'grid' ? (
-                <GameGrid
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                  coverTint={settings.coverTint !== false}
-                />
-              ) : (
-                <GameList
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                />
-              )}
-            </div>
           </>
         )}
       </main>
-
-      {session && runningGame && (
-        <div className="glass fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-5 pr-2 text-sm shadow-2xl">
-          <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
-          <span>
-            Playing <b>{runningGame.title}</b>
-          </span>
-          <span className="font-mono text-muted">{fmtClock(Math.floor((now - session.startedAtMs) / 1000))}</span>
-          <button
-            onClick={() => void stop()}
-            className="flex items-center gap-1.5 rounded-full bg-rose-500 px-4 py-1.5 text-xs font-bold text-white"
-          >
-            <Square className="size-3" fill="currentColor" strokeWidth={0} />
-            Stop
-          </button>
-        </div>
-      )}
 
       {error && (
         <p className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full bg-rose-500/90 px-4 py-1.5 text-xs text-white">
@@ -1374,8 +1619,10 @@ export default function App() {
       )}
 
       {/* Bottom left, the way the app talks to the player: out of the way of the
-          player bar in the middle and the Stop button at the top right. */}
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
+          player bar in the middle and the Stop button at the top right. It also
+          sits above any dialog, because a "download is ready" that lands behind
+          the dialog it came from is a secret. */}
+      <div className="pointer-events-none fixed bottom-4 left-4 z-[80] flex w-fit max-w-[19rem] flex-col items-start gap-1.5">
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1439,6 +1686,22 @@ export default function App() {
         />
       )}
 
+      {backlogRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${backlogRemovalTarget.title} from the Backlog?`}
+          description={inLibraryShelf(backlogRemovalTarget)
+            ? 'The game will leave the Backlog but remain in your Library with its files, sessions and notes.'
+            : 'This deletes only the planned Backlog entry. It does not affect any Library game.'}
+          confirmLabel="Remove from Backlog"
+          onCancel={() => setBacklogRemovalTarget(null)}
+          onConfirm={() => {
+            const target = backlogRemovalTarget;
+            setBacklogRemovalTarget(null);
+            removeFromBacklog(target, true);
+          }}
+        />
+      )}
+
       {removeSteamConfirm && steamRemovalIds.length > 0 && (
         <ConfirmDialog
           title={`Remove ${steamRemovalIds.length} Steam ${steamRemovalIds.length === 1 ? 'game' : 'games'}?`}
@@ -1454,14 +1717,13 @@ export default function App() {
         />
       )}
 
-      {selected && (
+      {selected && detailOpen && (
         <GameDetail
           key={`${selected.id}:${detailNonce}`}
           game={selected}
           // The same drawer, read two ways: from the Backlog it is a page about
           // deciding what to play, with nothing in it that starts anything.
-          context={page === 'backlog' ? 'backlog' : 'library'}
-          readOnlyMoves={detailReadOnlyMoves}
+          context={detailContext}
           session={session}
           now={now}
           onUpdate={(p) => updateGame(selected.id, p)}
@@ -1473,7 +1735,7 @@ export default function App() {
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
           onLeaveBacklog={
-            page === 'backlog' && inLibraryShelf(selected)
+            detailContext === 'backlog' && inLibraryShelf(selected)
               ? () => {
                   const id = selected.id;
                   setSettings((current) => {
@@ -1489,7 +1751,7 @@ export default function App() {
               : undefined
           }
           closeRequest={detailClose}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setDetailOpen(false)}
         />
       )}
 
@@ -1498,6 +1760,11 @@ export default function App() {
           game={editingGame}
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
           hideLaunchSettings={editingHideLaunchSettings}
+          onRemoveFromBacklog={editingHideLaunchSettings ? () => {
+            removeFromBacklog(editingGame, true);
+            setEditingGameId(null);
+            setEditingHideLaunchSettings(false);
+          } : undefined}
           onClose={() => {
             setEditingGameId(null);
             setEditingHideLaunchSettings(false);
@@ -1510,10 +1777,17 @@ export default function App() {
           initialPaths={droppedPaths}
           // The selected library opens over this form; closing it returns here.
           onImportLauncher={(launcher) => {
+            addTabImport.current = true;
             if (launcher === 'Steam') setShowSteam(true);
             else setShowOtherLaunchers(launcher);
           }}
+          onScanFolder={() => {
+            addTabImport.current = true;
+            setImportFolder(settings.scanPath?.trim() || null);
+            setShowImport(true);
+          }}
           onClose={() => {
+            addTabImport.current = false;
             setShowAdd(false);
             setDroppedPaths(null);
           }}
@@ -1525,9 +1799,15 @@ export default function App() {
           existing={games}
           initialFolder={importFolder}
           fetchMetadata={settings.fetchMetadata}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
-          onClose={() => setShowImport(false)}
+          onClose={() => {
+            setShowImport(false);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showOtherLaunchers && (
@@ -1535,13 +1815,20 @@ export default function App() {
           existing={games}
           launcher={showOtherLaunchers}
           path={settings?.launcherPaths?.[showOtherLaunchers]}
+          fetchArtwork={settings?.fetchMetadata !== false}
           onPath={(picked) =>
             setSettings({
               launcherPaths: { ...settings?.launcherPaths, [showOtherLaunchers]: picked },
             })
           }
-          onAdd={addGames}
-          onClose={() => setShowOtherLaunchers(null)}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
+          onClose={() => {
+            setShowOtherLaunchers(null);
+            addTabImport.current = false;
+          }}
         />
       )}
       {showSteam && settings && (
@@ -1549,10 +1836,16 @@ export default function App() {
           existing={games}
           fetchMeta={settings.fetchMetadata}
           from={page === 'backlog' ? 'backlog' : 'library'}
-          onAdd={addGames}
+          onAdd={(incoming) => {
+            addGames(incoming);
+            closeAddTabAfterLibraryImport();
+          }}
           onUpdate={(id, patch) => updateGame(id, patch)}
           onRemoveSteam={() => setRemoveSteamConfirm(true)}
-          onClose={() => setShowSteam(false)}
+          onClose={() => {
+            setShowSteam(false);
+            addTabImport.current = false;
+          }}
           steamPath={settings.steamPath}
           onSteamPath={(steamPath) => setSettings({ steamPath })}
         />
@@ -1594,6 +1887,19 @@ export default function App() {
       {cloudJob && (
         <CloudTransferOrb job={cloudJob} lift={!!move.job && moveId !== move.job.gameId} />
       )}
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        games={played}
+        onClose={() => setCommandPaletteOpen(false)}
+        onPage={(next) => { setShowThemeManager(false); setPage(next); }}
+        onAdd={() => setShowAdd(true)}
+        onAddFolder={() => { setImportFolder(null); setShowImport(true); }}
+        onSettings={() => { setShowThemeManager(false); setPage('settings'); }}
+        onConsole={enterTv}
+        onLaunch={(game) => { setPage('library'); void startGame(game); }}
+        onGameDetails={openPaletteGameDetails}
+      />
 
       {!isNative() && (
         <p className="pointer-events-none fixed bottom-2 left-2 rounded-full bg-panel/80 px-3 py-1 text-[10px] text-muted">

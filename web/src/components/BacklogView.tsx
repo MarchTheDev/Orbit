@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Check,
   CircleCheck,
@@ -6,7 +6,6 @@ import {
   Clock,
   GripVertical,
   Hourglass,
-  LoaderCircle,
   Play,
   Plus,
   Pencil,
@@ -16,17 +15,21 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import type { Game, GameStatus, GameSuggestion } from '../types';
-import { fetchMetadata, searchGames } from '../services/metadata';
+import type { Game, GameStatus, MetaData } from '../types';
+import { fetchMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtDate, fmtMinutes, hashHue, uid } from '../utils/format';
 import { moveInOrder } from '../utils/reorder';
 import { inLibraryShelf, onBacklogPage, onDisk } from '../utils/library';
 import { useDragReorder } from '../hooks/useDragReorder';
+import { PlanDialog } from './detail/PlanDialog';
+import { HltbExtraEstimate } from './detail/HltbExtraEstimate';
+import type { PlanPick } from './detail/PlanDialog';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
 import { cn } from '../utils/cn';
-import { Modal, inputCls } from './ui/Modal';
+import { Modal } from './ui/Modal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { btnAccent } from './ui/buttons';
 
 /**
@@ -110,12 +113,10 @@ export function BacklogView({
 }) {
   const [query, setQuery] = useState('');
   const [order, setOrder] = useState<Order>('mine');
-  /** The title being put on the list, while it is being typed. */
-  const [planning, setPlanning] = useState<string | null>(null);
+  /** True while the page for planning a game is open. */
+  const [planning, setPlanning] = useState(false);
+  const [planRemovalTarget, setPlanRemovalTarget] = useState<Game | null>(null);
   const [picking, setPicking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [suggestions, setSuggestions] = useState<GameSuggestion[]>([]);
-  const [looking, setLooking] = useState(false);
   /** True while the times each game takes are being compared. */
   const [showTimes, setShowTimes] = useState(false);
 
@@ -145,91 +146,91 @@ export function BacklogView({
   );
 
   /**
-   * Suggestions with their covers, while a title is being typed.
+   * Write a game down, with the details that are known about it.
    *
-   * A search runs a moment after typing stops rather than on every keystroke:
-   * the store is happy to answer, but not twenty times a second, and a list that
-   * flickers between answers is worse than one that arrives late.
+   * What the planning page already fetched travels with the game, so a game
+   * added from its own page is on the list in the same frame and nothing is
+   * asked of the store twice. A name typed in by hand has no such answers yet,
+   * and those arrive afterwards: a game that is written down is already
+   * written down, whatever the store says about it later.
    */
-  const timer = useRef<number | null>(null);
-  useEffect(() => {
-    const text = (planning ?? '').trim();
-    if (text.length < 2) {
-      setSuggestions([]);
-      setLooking(false);
-      return;
-    }
-    setLooking(true);
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      void searchGames(text)
-        .then((found) => setSuggestions(found))
-        .catch(() => setSuggestions([]))
-        .finally(() => setLooking(false));
-    }, 350);
-    return () => {
-      if (timer.current) window.clearTimeout(timer.current);
+  const plan = ({ name, appId, coverUrl, facts, hltb: times, platform }: PlanPick) => {
+    const title = name.trim();
+    if (!title) return;
+    const meta: MetaData | undefined = facts
+      ? {
+          name: facts.name || title,
+          summary: facts.summary,
+          genres: facts.genres,
+          developer: facts.developer ?? '',
+          releaseYear: facts.releaseYear,
+          rating: null,
+          coverUrl: facts.portraitUrl ?? coverUrl ?? null,
+          headerUrl: facts.headerUrl ?? facts.heroUrl ?? null,
+          steamAppId: appId ?? null,
+          source: 'steam',
+        }
+      : appId || coverUrl
+        ? {
+            summary: '',
+            genres: [],
+            developer: '',
+            releaseYear: null,
+            rating: null,
+            coverUrl: coverUrl ?? null,
+            headerUrl: null,
+            steamAppId: appId ?? null,
+            source: 'steam',
+          }
+        : undefined;
+
+    const game: Game = {
+      id: uid(),
+      title,
+      launch: { kind: 'none' },
+      exePath: null,
+      installDir: null,
+      drive: '',
+      sizeBytes: 0,
+      sizeGb: 0,
+      status: 'backlog',
+      favorite: false,
+      manualPlaySecs: 0,
+      playSecs: 0,
+      lastPlayed: null,
+      addedAt: new Date().toISOString(),
+      notes: '',
+      hue: hashHue(title),
+      coverPath: null,
+      planned: true,
+      planPlatform: platform ?? 'Steam',
+      ...(meta ? { meta } : {}),
+      ...(times ? { hltb: times } : {}),
+      sessionCount: 0,
+      longestSecs: 0,
+      running: false,
+      companions: [],
     };
-  }, [planning]);
+    onAdd(game);
+    setPlanning(false);
 
-  /** Write a game down, with the details that are known about it. */
-  const plan = async (title: string, appId?: number, coverUrl?: string, hltbHint?: boolean) => {
-    const name = title.trim();
-    if (!name) return;
-    setBusy(true);
-    try {
-      const game: Game = {
-        id: uid(),
-        title: name,
-        launch: { kind: 'none' },
-        exePath: null,
-        installDir: null,
-        drive: '',
-        sizeBytes: 0,
-        sizeGb: 0,
-        status: 'backlog',
-        favorite: false,
-        manualPlaySecs: 0,
-        playSecs: 0,
-        lastPlayed: null,
-        addedAt: new Date().toISOString(),
-        notes: '',
-        hue: hashHue(name),
-        coverPath: null,
-        planned: true,
-        meta: appId || coverUrl
-          ? {
-              summary: '',
-              genres: [],
-              developer: '',
-              releaseYear: null,
-              rating: null,
-              coverUrl: coverUrl ?? null,
-              headerUrl: null,
-              steamAppId: appId ?? null,
-              source: 'steam',
-            }
-          : undefined,
-        sessionCount: 0,
-        longestSecs: 0,
-        running: false,
-        companions: [],
-      };
-      onAdd(game);
-      setPlanning(null);
-      setSuggestions([]);
-
-      // Details are a bonus, so they arrive after the game is on the list and a
-      // failure in either source leaves it exactly as it was written.
-      if (fetchMeta || hltbHint) {
-        const [meta, hltb] = await Promise.allSettled([fetchMetadata(name, appId), fetchHltb(name)]);
+    // Whatever the page could not answer is filled in quietly, and a failure
+    // in either source leaves the game exactly as it was written.
+    const needMeta = !meta && fetchMeta;
+    if (needMeta || !times) {
+      const wanted = meta?.name || title;
+      void Promise.allSettled([
+        needMeta ? fetchMetadata(wanted, appId) : Promise.resolve(null),
+        times ? Promise.resolve(null) : fetchHltb(wanted),
+      ]).then(([found, timed]) => {
+        const better = found.status === 'fulfilled' ? found.value : null;
+        const clocked = timed.status === 'fulfilled' ? timed.value : null;
+        if (!better && !clocked) return;
         onUpdate(game.id, {
-          ...(meta.status === 'fulfilled' ? { meta: meta.value, title: meta.value.name || name } : {}),
-          ...(hltb.status === 'fulfilled' ? { hltb: hltb.value } : {}),
+          ...(better ? { meta: better, title: better.name || title } : {}),
+          ...(clocked ? { hltb: clocked } : {}),
         });
-      }
-    } finally {
-      setBusy(false);
+      });
     }
   };
 
@@ -346,7 +347,7 @@ export function BacklogView({
           From the library
         </button>
         <button
-          onClick={() => setPlanning(planning === null ? '' : null)}
+          onClick={() => setPlanning(true)}
           className={cn(btnAccent, 'flex items-center gap-2 rounded-full py-2 pl-3 pr-4 text-sm')}
           title="Add something you plan to play, even if you do not own it yet"
         >
@@ -412,66 +413,32 @@ export function BacklogView({
         </section>
       )}
 
-      {planning !== null && (
-        <form
-          className="glass rounded-2xl p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void plan(planning, suggestions[0]?.appId, suggestions[0]?.coverUrl ?? undefined, true);
-          }}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Plus className="size-4 shrink-0 text-accent" />
-            <input
-              autoFocus
-              className={`${inputCls} min-w-[14rem] flex-1`}
-              value={planning}
-              onChange={(e) => setPlanning(e.target.value)}
-              placeholder="A game you plan to play, owned or not"
-              spellCheck={false}
-            />
-            <button className={`${btnAccent} flex items-center gap-2 rounded-lg px-4 py-2 text-sm`} disabled={busy || !planning.trim()}>
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}
-              {busy ? 'Adding…' : 'Add to backlog'}
-            </button>
-            <button type="button" className="px-2 text-xs text-muted hover:text-fg" onClick={() => setPlanning(null)}>
-              <X className="size-4" />
-            </button>
-          </div>
+      {/* One place, in the middle of the window, for the whole decision: the
+          search, and then the game's own page in the same frame - rather than a
+          row of fields at the top of this page and a panel sliding in from the
+          side. It stays out of the way of the page underneath until it is
+          wanted, and leaves the page exactly as it found it. */}
+      {planning && (
+        <PlanDialog
+          games={games}
+          initialQuery={query}
+          onAdd={plan}
+          onClose={() => setPlanning(false)}
+        />
+      )}
 
-          {/* The games the store suggests, with their pictures: picking the right
-              one out of a row of similar titles is much easier with the cover in
-              front of you. */}
-          {(suggestions.length > 0 || looking) && (
-            <ul className="mt-3 flex flex-wrap gap-2">
-              {looking && suggestions.length === 0 && (
-                <li className="flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-xs text-muted">
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Looking through the store…
-                </li>
-              )}
-              {suggestions.map((s) => (
-                <li key={s.appId}>
-                  <button
-                    type="button"
-                    onClick={() => void plan(s.name, s.appId, s.coverUrl ?? undefined, true)}
-                    title={`Add ${s.name} to the backlog`}
-                    className="flex items-center gap-2 rounded-xl border border-line bg-panel2/40 py-1.5 pl-1.5 pr-3 text-left transition hover:border-accent"
-                  >
-                    {s.coverUrl ? (
-                      <img src={s.coverUrl} alt="" className="h-10 w-16 shrink-0 rounded-lg object-cover" />
-                    ) : (
-                      <span className="grid h-10 w-16 shrink-0 place-items-center rounded-lg bg-panel2 text-muted">
-                        <CircleDashed className="size-4" />
-                      </span>
-                    )}
-                    <span className="max-w-[13rem] truncate text-sm">{s.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </form>
+      {planRemovalTarget && (
+        <ConfirmDialog
+          title={`Remove ${planRemovalTarget.title} from the Backlog?`}
+          description="This removes only the planned entry. It does not delete or change any game in your Library."
+          confirmLabel="Remove planned game"
+          onCancel={() => setPlanRemovalTarget(null)}
+          onConfirm={() => {
+            const target = planRemovalTarget;
+            setPlanRemovalTarget(null);
+            onRemove(target.id);
+          }}
+        />
       )}
 
       <Section
@@ -490,7 +457,7 @@ export function BacklogView({
         title="Backlog"
         icon={CircleDashed}
         games={backlog}
-        empty="Nothing on the Backlog. Write one down above, or add a game from the Library."
+        empty="Nothing on the Backlog. Plan a game, or add one from the Library."
         onSelect={onSelect}
         onEdit={onEdit}
         onStatus={onStatus}
@@ -516,7 +483,7 @@ export function BacklogView({
           onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
           onRemove={(id) => {
             const game = games.find((g) => g.id === id);
-            if (game && confirm(`Take ${game.title} off the list?`)) onRemove(id);
+            if (game) setPlanRemovalTarget(game);
           }}
         />
       )}
@@ -606,9 +573,13 @@ function Section({
   /** Comparing times: each card says how long it takes, three ways. */
   showTimes?: boolean;
 }) {
-  // The same pointer-based reordering the library uses: a webview that keeps
-  // file drags for itself never delivers a browser drag here either.
-  const { bind, dragging, over } = useDragReorder(movable && onMove ? onMove : undefined);
+  // A grid needs its own measured drop targets: elementFromPoint alone can lose
+  // the gesture in card gaps or after the pointer leaves the original card.
+  const list = useRef<HTMLUListElement>(null);
+  const { bind, dragging, over } = useDragReorder(
+    movable && onMove ? onMove : undefined,
+    { container: list, grid: true },
+  );
 
   return (
     <section>
@@ -619,7 +590,7 @@ function Section({
       {games.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-muted">{empty}</p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <ul ref={list} className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {games.map((g) => {
             const main = g.hltb?.main ?? 0;
             const left = Math.max(0, main - g.playSecs / 3600);
@@ -634,9 +605,23 @@ function Section({
                   over === g.id ? 'ring-2 ring-accent' : ''
                 } ${dragging === g.id ? 'opacity-60' : ''}`}
               >
-                {movable && <GripVertical className="size-4 shrink-0 text-muted" />}
+                {movable ? (
+                  <button
+                    type="button"
+                    data-orbit-drag-handle=""
+                    aria-label={`Drag ${g.title} to rearrange`}
+                    title="Drag to rearrange"
+                    className="grid size-8 shrink-0 touch-none cursor-grab place-items-center rounded-lg border border-accent/35 bg-accent/10 text-accent shadow-sm transition hover:border-accent hover:bg-accent/20 active:cursor-grabbing"
+                  >
+                    <GripVertical className="size-4" />
+                  </button>
+                ) : (
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-transparent text-muted/45" aria-hidden="true">
+                    <GripVertical className="size-4" />
+                  </span>
+                )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button
@@ -646,7 +631,10 @@ function Section({
                     {g.title}
                   </button>
                   {isNotOwned ? (
-                    <p className="mt-0.5 text-xs text-muted">{g.planned ? 'not owned yet' : 'not installed here'}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                      <span>{g.planned ? 'not owned yet' : 'not installed here'}</span>
+                      {g.planPlatform && <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px]">{g.planPlatform}</span>}
+                    </p>
                   ) : (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
                       <span>{fmtMinutes(g.playSecs / 60)} played</span>
@@ -704,6 +692,7 @@ function Section({
                       ))}
                     </div>
                   )}
+                  {showTimes && <HltbExtraEstimate hours={g.hltb?.mainExtra ?? 0} className="mt-1" />}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   {!readOnlyMoves && (
@@ -733,7 +722,7 @@ function Section({
                         onClick={() => onRemove?.(g.id)}
                         title="Take this off the list"
                         aria-label={`Take ${g.title} off the list`}
-                        className="rounded-md border border-line bg-panel p-1 text-muted hover:border-rose-400 hover:text-rose-400"
+                        className="rounded-md border border-rose-500/30 bg-rose-500/10 p-1 text-rose-300 transition hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200"
                       >
                         <X className="size-3" />
                       </button>

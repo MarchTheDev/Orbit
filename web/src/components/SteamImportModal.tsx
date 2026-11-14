@@ -10,6 +10,7 @@ import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
 import { SearchField } from './ui/SearchField';
 import { isSteamGame } from '../utils/steam';
+import { ArtworkThumb } from './ui/ArtworkThumb';
 
 /**
  * Bring games over from the Steam library installed on this PC.
@@ -145,8 +146,10 @@ export function SteamImportModal({
       // the second argument here is what decides whether a game is a plan.
       const games = chosen.map((r) => gameFromSteam(r, from === 'backlog'));
       onAdd(games);
-      await enrich(games);
       onClose();
+      // Metadata and playtime are enrichment, not part of adding. Let the modal
+      // close as soon as the selected library entries are saved.
+      void enrich(games);
     } finally {
       setSaving(false);
     }
@@ -170,9 +173,9 @@ export function SteamImportModal({
         meta: meta ?? undefined,
       };
       onAdd([game]);
-      if (fetchMeta) await enrich([game]);
       setManual('');
       onClose();
+      if (fetchMeta) void enrich([game]);
     } finally {
       setSaving(false);
     }
@@ -315,6 +318,7 @@ export function SteamImportModal({
                       disabled={known}
                       title={known ? 'Already in the library' : r.name}
                     />
+                    <ArtworkThumb title={r.name} appId={r.appId} lookup />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{r.name}</p>
                       <p className="truncate font-mono text-[11px] text-muted">

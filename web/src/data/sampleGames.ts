@@ -63,6 +63,7 @@ export const SAMPLE_GAMES: Game[] = [
 /** What Orbit assumes before anything has been saved. */
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
+  customThemes: [],
   fontFamily: 'system',
   libraryFilterOrder: ['all', 'playing', 'completed', 'dropped', 'favorites', 'unplayed', 'hidden'],
   hiddenLibraryFilters: [],
@@ -78,6 +79,10 @@ export const DEFAULT_SETTINGS: Settings = {
   tabOrder: [],
   logOrder: [],
   backlogOrder: [],
+  syncJournal: true,
+  journalOn: [],
+  journalOff: [],
+  scanPath: '',
   window: {
     // Nothing happens to the window unless the player asks for it, which is the
     // only safe default: minimising or closing somebody's window on their behalf

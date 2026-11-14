@@ -1,8 +1,17 @@
 Orbit, portable
 ===============
 
-Nothing is installed and nothing is written next to this folder. The library
-and settings live in ~/.local/share/com.orbit.launcher.
+Nothing is installed. Everything Orbit currently keeps lives in the data folder
+beside this file - the library, the settings, and the save backups - so the
+whole folder can be moved, copied, or carried on a stick and it takes the
+library with it.
+
+The in-game overlay and its screenshot, recording, and replay controls are
+temporarily unavailable in Linux builds. Existing overlay preferences and older
+capture files are left untouched.
+
+The orbit.portable file is what says so. Remove it and Orbit uses the usual
+~/.local/share/com.orbit.launcher instead, like an installed copy.
 
 To run it:
 

@@ -7,7 +7,7 @@ import { btnAccent } from './buttons';
  * The button that keeps a page of edits.
  *
  * It has to look like something that can be pressed, and then look like it was:
- * a lifted gradient at rest, a real press on the way down, and a moment of
+ * a clear solid surface at rest, a real press on the way down, and a moment of
  * check-marked confirmation afterwards. Saving quietly was the problem: a
  * button that never moves is a button nobody is sure they pressed.
  */
@@ -45,9 +45,8 @@ export function SaveButton({
       disabled={state === 'busy'}
       className={cn(
         'group relative flex items-center gap-2 overflow-hidden rounded-xl px-4 py-2 text-sm',
-        // The same gradient as every other button that does something, plus the
-        // extra press this one has earned: it sinks into the panel on the way
-        // down and the glow goes with it.
+        // The shared action style, plus the extra press this one has earned:
+        // it sinks into the panel on the way down.
         btnAccent,
         'active:scale-[0.98]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
@@ -56,9 +55,6 @@ export function SaveButton({
         className,
       )}
     >
-      {/* A highlight that sweeps across on hover, so the surface reads as a
-          thing with a top, rather than as a flat block of colour. */}
-      <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
       {state === 'busy' ? (
         <LoaderCircle className="relative size-4 animate-spin" />
       ) : (

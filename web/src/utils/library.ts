@@ -5,17 +5,30 @@ export function inLibraryShelf(game: Game): boolean {
   return !game.planned && (game.inLibrary || onDisk(game));
 }
 
+/** The Library total, excluding planned-only Backlog entries. */
+export function libraryCount(games: readonly Game[]): number {
+  return games.filter(inLibraryShelf).length;
+}
+
 /**
  * Whether the Backlog page lists this game.
  *
  * `backlogOff` wins, so taking a game off the page does not delete it.
  * `backlogOn` puts a library game back without changing how the Library works.
  */
-export function onBacklogPage(game: Game, syncLibrary: boolean, on: readonly string[] = [], off: readonly string[] = []): boolean {
+export function onBacklogPage(game: Game, _syncLibrary: boolean, on: readonly string[] = [], off: readonly string[] = []): boolean {
   if (game.planned) return false;
   if (off.includes(game.id)) return false;
   if (on.includes(game.id)) return true;
-  return onDisk(game) || !game.inLibrary || syncLibrary;
+  // Owned Backlog entries stay here independently. Library membership is now
+  // recorded when a new game is added, so switching sync off never removes old rows.
+  return !inLibraryShelf(game);
+}
+
+/** Whether a library game belongs in the Journal; plans are never journal entries. */
+export function onJournalPage(game: Game, _syncLibrary: boolean, on: readonly string[] = [], off: readonly string[] = []): boolean {
+  if (game.planned || !inLibraryShelf(game) || off.includes(game.id)) return false;
+  return on.includes(game.id);
 }
 
 /**

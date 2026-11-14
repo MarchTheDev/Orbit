@@ -65,6 +65,16 @@ on:
 permissions:
   contents: write
 
+# Every run feeds the same draft: its last step clears the draft's files and
+# uploads its own. Two runs at once - a quick one and one that hung for hours -
+# race that step, and the loser is whoever looks at the draft: a run cancelled
+# in the middle leaves it with half the files, which is how a complete draft
+# mysteriously empties. One release build at a time; the next push waits its
+# turn rather than killing an upload that is halfway through.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # ----------------------------------------------------------------- the number
   version:
@@ -167,12 +177,22 @@ jobs:
           $portable = "artifacts/portable"
           New-Item -ItemType Directory -Force -Path $portable | Out-Null
           Copy-Item $exe.FullName "$portable/Orbit.exe"
+          # The marker is what makes it portable: Orbit keeps everything in a
+          # `data` folder beside the program when this file is there, and in
+          # %APPDATA% when it is not. An ordinary install has nothing to say.
+          Set-Content -Path "$portable/orbit.portable" -NoNewline -Encoding ascii -Value "This file tells Orbit to keep its library, settings, backups and captures in the data folder beside the program."
           $readme = @(
             "Orbit $version, portable",
             "",
-            "Run Orbit.exe. Nothing is installed and nothing is written next to",
-            "it: your library and settings live in %APPDATA%\Orbit, and removing",
-            "this folder removes the program.",
+            "Run Orbit.exe. Nothing is installed. Everything Orbit keeps - the",
+            "library, the settings, the backups, the screenshots, the recordings",
+            "and the replays - goes in the 'data' folder beside the program, so",
+            "the whole folder can be moved or carried on a stick and it takes the",
+            "library with it.",
+            "",
+            "Delete the folder and Orbit is gone. The orbit.portable file is what",
+            "tells it to keep its files here; remove it and Orbit uses %APPDATA%",
+            "like an installed copy.",
             "",
             "Windows 10 and 11 already have the WebView2 runtime that Orbit draws",
             "its interface with. On an older or stripped-down Windows, install it",
@@ -260,6 +280,11 @@ jobs:
           # A tarball cannot declare dependencies, so it says what it needs
           # instead. The packaged builds ask for the same things themselves.
           cp packaging/linux/portable-readme.txt "$portable/README.txt"
+          # The marker that says this copy carries its own files. Orbit keeps
+          # the library, the settings, the backups and the captures in a `data`
+          # folder beside the program when it is there.
+          printf '%s\n' "This file tells Orbit to keep its library, settings, backups and captures in the data folder beside the program." \
+            > "$portable/orbit.portable"
           tar -czf "artifacts/$portable.tar.gz" "$portable"
 
           # The AppImage is assembled here rather than left to linuxdeploy.
@@ -573,8 +598,6 @@ jobs:
           cp packaging/arch/PKGBUILD "$work/"
           cp web/src-tauri/target/release/orbit "$work/orbit"
           cp packaging/linux/orbit.desktop "$work/orbit.desktop"
-          cp packaging/linux/orbit-x11 "$work/orbit-x11"
-          cp packaging/linux/orbit-x11.desktop "$work/orbit-x11.desktop"
           cp packaging/linux/com.orbit.launcher.desktop "$work/com.orbit.launcher.desktop"
           cp packaging/linux/60-orbit-controllers.rules "$work/60-orbit-controllers.rules"
           cp web/src-tauri/icons/128x128.png "$work/orbit.png"
@@ -591,12 +614,19 @@ jobs:
           sudo -u builder makepkg -f
           cp "$work"/*.pkg.tar.zst "$GITHUB_WORKSPACE/artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
 
-      - name: Check the X11 entry point reached the package
+      - name: Check the single Orbit entry point reached the package
         shell: bash
         run: |
           version="${ORBIT_VERSION#v}"
-          bash packaging/linux/check-x11.sh "The Arch package" "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" tar -tvf
-          bash packaging/linux/check-deps.sh "The Arch package" pacman "artifacts/orbit-${version}-1-x86_64.pkg.tar.zst" \
+          package="artifacts/orbit-${version}-1-x86_64.pkg.tar.zst"
+          listing="$(tar -tvf "$package")"
+          printf '%s\n' "$listing" | grep -E 'usr/bin/orbit$' | grep -q rwx
+          printf '%s\n' "$listing" | grep -qE 'usr/share/applications/orbit\.desktop$'
+          if printf '%s\n' "$listing" | grep -qE 'usr/bin/orbit-x11$|applications/orbit-x11\.desktop$'; then
+            echo "::error title=The Arch package::The Arch package should ship only the automatically selected Orbit entry point"
+            exit 1
+          fi
+          bash packaging/linux/check-deps.sh "The Arch package" pacman "$package" \
             gst-plugins-base gst-plugins-good gst-plugin-pipewire
 
       - uses: actions/upload-artifact@v4
@@ -617,14 +647,14 @@ jobs:
       ORBIT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       # Download only installable release bundles. Debug logs are separate
-      # artifacts and must never become public release files.
+      # artifacts and must never become public release files. The two core
+      # builds are not best-effort: a draft that silently misses them looks
+      # complete and is not, so their files missing fails here, loudly.
       - uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: windows
           path: files/windows
       - uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: linux
           path: files/linux

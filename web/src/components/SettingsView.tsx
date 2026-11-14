@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { emit } from '@tauri-apps/api/event';
 import {
   Database,
   Download,
   Eye,
   EyeOff,
   FolderOpen,
+  HardDrive,
   Library as LibraryIcon,
   Ghost,
   GitBranch,
@@ -31,28 +33,32 @@ import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, typ
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
 import { desktopOs } from '../utils/platform';
+import { scrollSettingsSectionToTop } from '../utils/settingsNavigation';
 import {
   cloudAutoOn,
   dataDir,
   dataDirSize,
+  dataPortable,
   isNative,
   savesWithClouds,
   listDrives,
   rememberMusic,
+  overlayCaptureDirs,
   overlayOpenKind,
   overlayFps,
   overlayQuality,
   clampOverlaySeconds,
   overlayLengths,
-  overlayStatus,
   revealInExplorer,
   setExeContextMenu,
   setLaunchOnStartup,
+  type CaptureDirs,
   type DriveInfo,
 } from '../services/native';
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { playShutter } from '../services/shutter';
 import { CopySettings } from './CopySettings';
+import { ShortcutEditor } from './ShortcutEditor';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
@@ -138,7 +144,7 @@ function Section({
       className="scroll-mt-28 rounded-3xl border border-line/65 bg-panel/25 p-5 transition-colors sm:p-6"
     >
       <div className="flex items-start gap-3.5">
-        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-gradient-to-br from-accent/20 to-accent2/10 text-accent shadow-inner">
+        <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent shadow-inner">
           <Icon className="size-[18px]" strokeWidth={1.9} />
         </span>
         <div className="min-w-0 pt-0.5">
@@ -294,13 +300,20 @@ const SECTIONS = [
   { id: 'orbit-about', label: 'About' },
 ];
 
+const SETTINGS_GROUPS: { label: string; sections: string[] }[] = [
+  { label: 'App', sections: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
+  { label: 'Games', sections: ['orbit-details', 'orbit-overlay'] },
+  { label: 'Library', sections: ['orbit-library', 'orbit-libraries', 'orbit-backups', 'orbit-tabs'] },
+  { label: 'System', sections: ['orbit-copy', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
+];
+
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
   { label: 'Fonts and typeface', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
-  { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
+  { label: 'Library focus artwork', section: 'orbit-library', keywords: 'selected game cover artwork hero recently played' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
   { label: 'Library filter categories', section: 'orbit-library', keywords: 'all playing completed dropped favorites unplayed hidden reorder show hide' },
@@ -322,6 +335,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
   { label: 'rclone', section: 'orbit-backups', keywords: 'rclone get update folder path check backups' },
   { label: 'Launcher library scans', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea import installed games scan launcher' },
+  { label: 'Drive or folder scan', section: 'orbit-libraries', keywords: 'drive folder executable scan review import path' },
   { label: 'Rescan libraries on launch', section: 'orbit-libraries', keywords: 'steam epic ubisoft gog ea automatic startup new games per launcher' },
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
@@ -338,51 +352,6 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
-
-/**
- * What became of the panel last time.
- *
- * The overlay cannot say why it left the screen: there is nothing on screen
- * left to say it in. So the panel writes one line as it goes, and this is where
- * the line is read - next to the switches that decide what the panel does.
- */
-function PanelDiag() {
-  const [lines, setLines] = useState<string[]>([]);
-  useEffect(() => {
-    if (!isNative()) return;
-    let alive = true;
-    const read = () => {
-      void overlayStatus().then((status) => {
-        if (alive) setLines(status.diag ?? []);
-      }).catch(() => undefined);
-    };
-    read();
-    const timer = window.setInterval(read, 3000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, []);
-  if (lines.length === 0) return null;
-  return (
-    <div className="rounded-2xl border border-line bg-panel2/30 p-3">
-      <p className="text-sm font-medium">What the overlay did</p>
-      {/* Newest last, the way it happened. One line was not enough: the close
-          that followed a reason used to overwrite the reason. */}
-      <ol className="mt-1.5 space-y-1">
-        {lines.map((line, i) => (
-          <li key={i} className="text-xs leading-relaxed text-muted">
-            <span className="mr-1.5 tabular-nums opacity-60">{i + 1}.</span>
-            {line}
-          </li>
-        ))}
-      </ol>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-        The same lines are in Orbit's log folder under <span className="font-mono">com.orbit.launcher/logs</span>.
-      </p>
-    </div>
-  );
-}
 
 function OverlaySettings({
   settings,
@@ -405,6 +374,7 @@ function OverlaySettings({
   const shutterVolume = overlay?.shutterVolume ?? 40;
   const [draft, setDraft] = useState('90');
   const [folderNote, setFolderNote] = useState<string | null>(null);
+  const [layoutNote, setLayoutNote] = useState<string | null>(null);
 
   const setOverlay = (patch: Partial<NonNullable<Settings['overlay']>>) => {
     setSettings({
@@ -440,13 +410,28 @@ function OverlaySettings({
   const captureRoot = trimmedRoot || (where.startsWith('/') ? '/' : '');
   const capturePath = (name: string) =>
     captureRoot ? `${captureRoot}${captureRoot.endsWith(sep) ? '' : sep}${name}` : '';
+  // The defaults are the machine's own Pictures and Videos folders, which only
+  // the desktop side can name - so they are asked for rather than assumed.
+  const [defaults, setDefaults] = useState<CaptureDirs | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void overlayCaptureDirs()
+      .then((dirs) => {
+        if (alive) setDefaults(dirs);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const captureFolders = ([
     { kind: 'screenshots', label: 'Screenshots', setting: 'screenshotDirectory' },
     { kind: 'recordings', label: 'Recordings', setting: 'recordingDirectory' },
     { kind: 'replays', label: 'Replays', setting: 'replayDirectory' },
   ] as const).map((folder) => {
     const custom = overlay?.[folder.setting]?.trim() ?? '';
-    return { ...folder, custom, path: custom || capturePath(folder.kind) };
+    const fallback = defaults?.[folder.kind] || capturePath(folder.kind);
+    return { ...folder, custom, path: custom || fallback };
   });
 
   return (
@@ -455,7 +440,13 @@ function OverlaySettings({
         checked={enabled}
         onChange={(on) => setOverlay({ enabled: on })}
         label="Overlay"
-        hint="Off means Alt+X and Start+Select do nothing."
+        hint="Off means your configured keyboard shortcut and Start + Select do nothing."
+      />
+      <Checkbox
+        checked={overlay?.gameOnly === true}
+        onChange={(on) => setOverlay({ gameOnly: on })}
+        label="Only open while a game session is active"
+        hint="Off by default. When on, the keyboard shortcut and Start + Select cannot open the overlay from the desktop. They can still close it. A game must be running in an Orbit session."
       />
       <Checkbox
         checked={replay}
@@ -588,7 +579,6 @@ function OverlaySettings({
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
-      <PanelDiag />
       <Checkbox
         checked={overlay?.captureToast !== false}
         onChange={(on) => setOverlay({ captureToast: on })}
@@ -611,14 +601,90 @@ function OverlaySettings({
             : 'The FPS box reads the picture the desktop presents. Turn this off if the overlay closes by itself over a game.'
         }
       />
-      <div className="rounded-2xl border border-line bg-panel2/30 p-3">
-        <p className="text-sm font-medium">Capture folders</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted">Choose a separate location for screenshots, recordings, and replays. Each one gets a subfolder for the game.</p>
+      <ShortcutEditor
+        value={overlay?.shortcuts}
+        onChange={(shortcuts, resetOpenShortcut) =>
+          setOverlay({ shortcuts, ...(resetOpenShortcut === undefined ? {} : { openShortcut: resetOpenShortcut }) })
+        }
+        openShortcut={overlay?.openShortcut ?? 'Alt+X'}
+        onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
+      />
+      <Checkbox
+        checked={overlay?.captureShortcutsOutsideOverlay === true}
+        onChange={(on) => setOverlay({ captureShortcutsOutsideOverlay: on })}
+        label="Allow capture shortcuts while the overlay is closed"
+        hint="Off by default: screenshot, recording, and replay shortcuts only work while the overlay is open. Turn this on to allow them over the game without opening the panel."
+      />
+      <p className="text-xs leading-relaxed text-muted">
+        The overlay takes focus and routes Orbit’s controls to its own UI. Some games can still read
+        controller input directly while it is open; blocking that device-level input requires an
+        operating-system driver, which Orbit does not install.
+      </p>
+      <div className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3">
+        <div>
+          <p className="text-sm font-medium">Capture folders</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            Screenshots go to your Pictures folder, recordings and replays to your Videos folder, each
+            in an Orbit folder with a subfolder for the game. Choose a folder here to put one somewhere
+            else.
+          </p>
+        </div>
+        {captureFolders.map((folder) => (
+          <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+            <span className="min-w-0">
+              <span className="block text-xs text-fg">{folder.label}</span>
+              <span className="block break-all font-mono text-[11px] text-muted">{folder.path || 'Choose a folder to set this location'}</span>
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {isNative() && (
+                <button
+                  type="button"
+                  onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || folder.path || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
+                  className={btnBrowse}
+                >
+                  <FolderOpen className="mr-1.5 inline size-3.5" />
+                  Choose folder…
+                </button>
+              )}
+              {folder.custom && (
+                <button
+                  type="button"
+                  onClick={() => setOverlay({ [folder.setting]: undefined } as Partial<NonNullable<Settings['overlay']>>)}
+                  className={btnBrowse}
+                >
+                  Use default folder
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!folder.path}
+                onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
+                className={btnBrowse}
+              >
+                Open
+              </button>
+            </div>
+          </div>
+        ))}
+        {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
       </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Overlay boxes</p>
         <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              // Version zero tells an unmounted panel to generate fresh,
+              // screen-sized defaults the next time it opens.
+              setOverlay({ layout: {}, layoutRevision: 0 });
+              setLayoutNote('Default positions will be restored now, or the next time you open the overlay.');
+              void emit('overlay-layout-reset');
+            }}
+            className={btnBrowse}
+          >
+            Restore default positions
+          </button>
           {OVERLAY_BOXES.map((box) => {
             const shown = !(overlay?.hidden ?? []).includes(box.id);
             return (
@@ -642,45 +708,8 @@ function OverlaySettings({
             );
           })}
         </div>
+        {layoutNote && <p role="status" className="text-xs text-muted">{layoutNote}</p>}
       </div>
-      {captureFolders.map((folder) => (
-        <div key={folder.kind} className="space-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
-          <span className="min-w-0">
-            <span className="block text-xs text-fg">{folder.label}</span>
-            <span className="block break-all font-mono text-[11px] text-muted">{folder.path || 'Choose a folder to set this location'}</span>
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {isNative() && (
-              <button
-                type="button"
-                onClick={() => void pickFolder(`Choose a folder for ${folder.label}`, folder.custom || (where || undefined)).then((path) => path && setOverlay({ [folder.setting]: path } as Partial<NonNullable<Settings['overlay']>>))}
-                className={btnBrowse}
-              >
-                <FolderOpen className="mr-1.5 inline size-3.5" />
-                Choose folder…
-              </button>
-            )}
-            {folder.custom && (
-              <button
-                type="button"
-                onClick={() => setOverlay({ [folder.setting]: undefined } as Partial<NonNullable<Settings['overlay']>>)}
-                className={btnBrowse}
-              >
-                Use default folder
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={!folder.path}
-              onClick={() => void overlayOpenKind(folder.kind).then(() => setFolderNote(null)).catch((error) => setFolderNote(error instanceof Error ? error.message : String(error)))}
-              className={btnBrowse}
-            >
-              Open
-            </button>
-          </div>
-        </div>
-      ))}
-      {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
     </>
   );
 }
@@ -703,10 +732,22 @@ function fileName(path: string): string {
   return cut >= 0 ? path.slice(cut + 1) : path;
 }
 
+
+function CoverageNote({ title, status, detail }: { title: string; status: 'Available' | 'Need work'; detail: string }) {
+  const done = status === 'Available';
+  return <article className="rounded-xl border border-line/70 bg-bg/30 p-3">
+    <div className="flex items-start justify-between gap-2"><h3 className="text-xs font-semibold text-fg">{title}</h3><span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide', done ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-amber-300/25 bg-amber-300/10 text-amber-200')}>{status}</span></div>
+    <p className="mt-1.5 text-[10px] leading-relaxed text-muted">{detail}</p>
+  </article>;
+}
+
 export function SettingsView({
   settings,
   setSettings,
+  replaceSettings,
   onImportLauncher,
+  onScanDrive,
+  onOpenThemeManager,
   onClearLibrary,
   onReset,
   onLibraryChanged,
@@ -716,8 +757,14 @@ export function SettingsView({
   settings: Settings;
   /** Takes a patch, so each field saves on its own. */
   setSettings: (patch: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void;
+  /** Replaces the full settings snapshot during import. */
+  replaceSettings: (settings: Partial<Settings>) => void;
   /** Opens a read-only scan for one specific launcher. */
   onImportLauncher: (launcher: LauncherId) => void;
+  /** Opens the review-first scan for the saved drive or folder path. */
+  onScanDrive?: () => void;
+  /** Open the in-app custom-theme editor page. */
+  onOpenThemeManager?: () => void;
   onClearLibrary: () => void;
   /** Games, sessions, notes and settings all returned to a fresh install. */
   onReset: () => void;
@@ -731,6 +778,8 @@ export function SettingsView({
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [folder, setFolder] = useState('');
   const [where, setWhere] = useState<{ path: string; size: number } | null>(null);
+  /** True when this copy keeps everything beside the program. */
+  const [portable, setPortable] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [installStep, setInstallStep] = useState<InstallStep | null>(null);
@@ -743,6 +792,10 @@ export function SettingsView({
   const [musicError, setMusicError] = useState<string | null>(null);
   const [musicBusy, setMusicBusy] = useState(false);
   const native = isNative();
+  const overlayUnavailable = native && desktopOs() === 'linux';
+  const searchItems = overlayUnavailable
+    ? SETTINGS_SEARCH_ITEMS.filter((item) => item.section !== 'orbit-overlay' || item.label === 'Overlay')
+    : SETTINGS_SEARCH_ITEMS;
 
   const chooseMusic = async () => {
     setMusicError(null);
@@ -833,6 +886,7 @@ export function SettingsView({
       if (!path) return;
       setWhere({ path, size: await dataDirSize() });
     });
+    void dataPortable().then(setPortable).catch(() => undefined);
   }, []);
 
   const addFolder = (path: string) => {
@@ -848,13 +902,15 @@ export function SettingsView({
   const jump = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    scrollSettingsSectionToTop(el);
     el.classList.add('settings-spot');
     window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
   };
 
+  const featuredCustomTheme = settings.customThemes?.find((theme) => theme.id === settings.theme) ?? settings.customThemes?.[0] ?? null;
+
   const searchResults = settingsQuery.trim()
-    ? SETTINGS_SEARCH_ITEMS.filter(
+    ? searchItems.filter(
         (item) =>
           (desktopOs() === 'windows' || desktopOs() === 'linux' || item.label !== 'Open in Orbit') &&
           `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
@@ -863,7 +919,7 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-5 sm:p-7 lg:p-8">
-      <header className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-panel via-panel/95 to-panel2/75 p-5 shadow-lg sm:p-6">
+      <header className="relative overflow-hidden rounded-3xl border border-line bg-panel p-5 shadow-lg sm:p-6">
         <div className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full bg-accent/10 blur-3xl" aria-hidden />
         <div className="relative flex items-start gap-4">
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent">
@@ -919,16 +975,11 @@ export function SettingsView({
       </div>
 
       {/* A quick map stays nearby while the longer cards scroll past. */}
-      <nav className="orbit-sticky sticky top-[4.25rem] z-10 flex flex-wrap justify-center gap-1.5 rounded-2xl border border-line bg-panel p-2 shadow-lg backdrop-blur-xl">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => jump(s.id)}
-            className="rounded-full border border-line/70 bg-bg/45 px-3 py-1.5 text-xs font-medium text-muted shadow-sm transition hover:border-accent/50 hover:bg-accent/10 hover:text-fg"
-          >
-            {s.label}
-          </button>
-        ))}
+      <nav className="orbit-sticky sticky top-[4.25rem] z-10 grid gap-2 rounded-2xl border border-line bg-panel p-3 shadow-lg backdrop-blur-xl sm:grid-cols-2 xl:grid-cols-4" aria-label="Settings categories">
+        {SETTINGS_GROUPS.map((group) => <div key={group.label} className="min-w-0 rounded-xl border border-line/45 bg-bg/25 p-2.5">
+          <h2 className="mb-2 px-1 text-[9px] font-bold uppercase tracking-[0.2em] text-accent">{group.label}</h2>
+          <div className="flex flex-wrap gap-1.5">{SECTIONS.filter((section) => group.sections.includes(section.id)).map((section) => <button key={section.id} type="button" onClick={() => jump(section.id)} className="rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[11px] font-semibold text-fg shadow-sm transition hover:border-accent/60 hover:bg-accent/10">{section.label}</button>)}</div>
+        </div>)}
       </nav>
 
       <Section
@@ -937,10 +988,13 @@ export function SettingsView({
         title="Appearance"
         lead="Choose a theme, tune the library's look, and decide what happens when Orbit opens."
       >
+        <SubHead>Orbit themes</SubHead>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
             <button
               key={t.id}
+              type="button"
+              aria-pressed={settings.theme === t.id}
               onClick={() => setSettings({ theme: t.id })}
               className={cn(
                 'overflow-hidden rounded-xl border-2 text-left transition',
@@ -948,14 +1002,39 @@ export function SettingsView({
               )}
             >
               <div className="flex h-16 items-center justify-center gap-2" style={{ background: t.bg }}>
-                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent2})` }} />
+                <span className="size-7 rounded-full" style={{ background: t.accent }} />
                 <span className="h-3 w-16 rounded" style={{ background: t.panel2 }} />
               </div>
               <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
             </button>
           ))}
+          {featuredCustomTheme ? (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="overflow-hidden rounded-xl border-2 border-accent/45 text-left transition hover:border-accent hover:shadow-[0_0_0_1px_var(--c-accent)]"
+              aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
+            >
+              <div className="flex h-16 items-center justify-center gap-2" style={{ background: featuredCustomTheme.bg }}>
+                <span className="size-7 rounded-full" style={{ background: featuredCustomTheme.accent }} />
+                <span className="h-3 w-16 rounded" style={{ background: featuredCustomTheme.panel2 }} />
+              </div>
+              <div className="bg-panel px-3 py-2">
+                <span className="block truncate text-sm font-medium">{featuredCustomTheme.name}</span>
+                <span className="block text-[10px] text-muted">Edit custom themes</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenThemeManager?.()}
+              className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent/40 bg-accent/5 px-3 text-sm font-semibold text-fg transition hover:border-accent hover:bg-accent/10"
+            >
+              <Wand2 className="size-5 text-accent" />
+              Create a custom theme
+            </button>
+          )}
         </div>
-
         <SubHead>Typeface</SubHead>
         <div className="grid gap-2 sm:grid-cols-2">
           {FONTS.map((font) => (
@@ -1047,16 +1126,22 @@ export function SettingsView({
         <Checkbox
           checked={settings.syncBacklog === true}
           onChange={(v) => setSettings({ syncBacklog: v })}
-          label="Also add new games to the Backlog"
-          hint="Also put title-only games on the Backlog. Off keeps them in the Library only."
+          label="Backlog sync"
+          hint="When on, newly added Library games also join the Backlog. Turning it off never removes games already there; you can still add or remove individual games."
+        />
+        <Checkbox
+          checked={settings.syncJournal !== false}
+          onChange={(v) => setSettings({ syncJournal: v })}
+          label="Journal sync"
+          hint="When on, newly added Library games also join the Journal. Turning it off never removes existing entries; you can still add or remove games manually. Backlog-only plans are never included."
         />
 
-        <SubHead>Jump back in</SubHead>
+        <SubHead>Library focus</SubHead>
         <Checkbox
           checked={settings.showHero !== false}
           onChange={(v) => setSettings({ showHero: v })}
-          label="Show the Jump back in panel"
-          hint="Keep the recently played game and its Play button at the top of the Library."
+          label="Show the selected game's cover"
+          hint="Show large cover artwork beside the game's overview and actions."
         />
 
         <SubHead>Library filters</SubHead>
@@ -1209,9 +1294,20 @@ export function SettingsView({
         id="orbit-overlay"
         icon={MonitorPlay}
         title="Overlay"
-        lead="A fullscreen panel over the game. Alt+X opens it, or Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured."
+        lead={overlayUnavailable
+          ? 'Orbit’s in-game overlay is temporarily unavailable in the Linux build.'
+          : 'A fullscreen panel over the game. Change its keyboard shortcut below, or open it with Start and Select together. Pictures, recordings, and replays are saved on this PC. Recordings and replays use system-output audio when available; the microphone is not captured.'}
       >
-        <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
+        {overlayUnavailable ? (
+          <div className="rounded-2xl border border-line bg-panel2/30 p-4 text-sm leading-relaxed text-muted">
+            <p className="font-medium text-fg">The in-game overlay is turned off on Linux for now.</p>
+            <p className="mt-2">
+              We’ll revisit a Linux-native implementation in a future version. Your existing overlay preferences are preserved, but they have no effect in this Linux build.
+            </p>
+          </div>
+        ) : (
+          <OverlaySettings settings={settings} setSettings={setSettings} where={where?.path ?? ''} />
+        )}
       </Section>
 
       <Section
@@ -1235,9 +1331,9 @@ export function SettingsView({
         id="orbit-libraries"
         icon={LibraryIcon}
         title="Libraries"
-        lead="Scan one launcher and choose games to add. Rescans on Orbit launch are off by default."
+        lead="Scan launchers or a drive and review the games Orbit finds before adding anything."
       >
-        {!native && <p className="text-xs text-muted">Local scans and startup rescans are available in the desktop app.</p>}
+        {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
         <div className="grid gap-3 sm:grid-cols-2">
           {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
             const scannable = canScan(launcher);
@@ -1245,7 +1341,8 @@ export function SettingsView({
               ? settings.steamOnLaunch
               : (settings.launcherScanOnLaunch ?? []).includes(launcher.id);
             return (
-              <div key={launcher.id} className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+              <Fragment key={launcher.id}>
+              <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
                 <button
                   type="button"
                   onClick={() => onImportLauncher(launcher.id)}
@@ -1277,6 +1374,27 @@ export function SettingsView({
                   />
                 </div>
               </div>
+              {launcher.id === 'Steam' && (
+                <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+                  <button
+                    type="button"
+                    onClick={onScanDrive}
+                    disabled={!native || !onScanDrive}
+                    className="group flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+                      <HardDrive className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-fg">Drive or folder</span>
+                      <span className="block text-[11px] text-muted">Scan manually</span>
+                    </span>
+                    <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                  </button>
+                  <div className="border-t border-line/70 px-3 py-2.5" aria-hidden="true" />
+                </div>
+              )}
+              </Fragment>
             );
           })}
         </div>
@@ -1338,6 +1456,15 @@ export function SettingsView({
           label="Fill in the gaps in the background"
           hint="Fill in missing details for older games in the background, a few at a time."
         />
+        <div className="rounded-2xl border border-line bg-panel/35 p-4">
+          <SubHead>Integration coverage</SubHead>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <CoverageNote title="Current library imports" status="Available" detail="Orbit can scan Steam, Epic, Ubisoft Connect, GOG, EA, Xbox, Heroic, Amazon Games (Nile), and Lutris where supported. Drive/folder discovery remains manual through Add a game." />
+            <CoverageNote title="Store clients and launcher parity" status="Need work" detail="Compared with Heronite’s Epic/GOG/Amazon/Xbox clients and Battle.net, EA, Ubisoft, Rockstar integrations plus Heroic/Lutris/Bottles/Faugus/Playnite imports, Orbit currently focuses on discovery and launch targets; it has no account-backed install/update queues and lacks several import sources." />
+            <CoverageNote title="Metadata sources" status="Need work" detail="Orbit uses Steam catalogue details and optional SteamGridDB portrait covers and wide heroes. Heronite offers multiple metadata sources (including IGDB, Lutris, LaunchBox and extensions), source selection and cover-family management; Orbit does not yet have equivalent provider/family controls." />
+            <CoverageNote title="Achievements" status="Need work" detail="Orbit reads Steam achievement lists and local Steam progress. Heronite also integrates GOG, Epic and RetroAchievements; those non-Steam achievement sources and account sync are not implemented in Orbit." />
+          </div>
+        </div>
       </Section>
 
       <Section id="orbit-tabs" icon={GripVertical} title="Tabs along the top" lead="Put the pages you use most first. Settings is always last, wherever it would have been.">
@@ -1449,7 +1576,7 @@ export function SettingsView({
         title="Export and import"
         lead="Save this Orbit to a file you keep, and bring that file back later. Settings always go in. The journal and the sessions go in only if you tick them. This is not a copy of the games' save files."
       >
-        <CopySettings settings={settings} setSettings={setSettings} onLibraryChanged={onLibraryChanged} />
+        <CopySettings settings={settings} replaceSettings={replaceSettings} onLibraryChanged={onLibraryChanged} />
       </Section>
 
       <Section id="orbit-tools" icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">
@@ -1550,6 +1677,11 @@ export function SettingsView({
             </button>
           </div>
         )}
+        <p className="text-xs leading-relaxed text-muted">
+          {portable
+            ? 'This is the portable copy: the library, the settings, the backups, the screenshots, the recordings and the replays all live in that folder, beside the program. Move the folder and they move with it.'
+            : 'The library, the settings, the backups and the captures live in that folder. A portable copy keeps them beside the program instead.'}
+        </p>
         <SubHead>Starting over</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Neither of these touches the games themselves: only what Orbit knows about them.

@@ -7,6 +7,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const capture = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'capture.rs'), 'utf8');
 const audio = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'audio.rs'), 'utf8');
 const overlay = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'overlay.rs'), 'utf8');
+const overlayView = readFileSync(path.join(root, 'web', 'src', 'components', 'OverlayView.tsx'), 'utf8');
+const mainPad = readFileSync(path.join(root, 'web', 'src', 'hooks', 'useGamepad.ts'), 'utf8');
 const settings = readFileSync(path.join(root, 'web', 'src', 'components', 'SettingsView.tsx'), 'utf8');
 const notice = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'notice.rs'), 'utf8');
 const stats = readFileSync(path.join(root, 'web', 'src-tauri', 'src', 'stats.rs'), 'utf8');
@@ -109,13 +111,23 @@ check('WASAPI interfaces are released before their COM apartment is uninitialize
 check('Windows audio polling balances every COM apartment initialization on early returns', /impl Drop for ComApartment[\s\S]*?CoUninitialize/.test(audio) && ['windows_list_inner', 'windows_set_inner', 'windows_devices', 'windows_use_device'].every((name) => new RegExp(`unsafe fn ${name}[\\s\\S]*?ComApartment::enter\(\)`).test(audio)));
 check('the FFmpeg recording maps the Linux system-output monitor to AAC', ffmpegRecording.includes('system_audio_monitor()') && ffmpegRecording.includes('"-f", "pulse", "-i"') && ffmpegRecording.includes('"-map", "1:a:0"') && ffmpegRecording.includes('"aac"'));
 check('the FFmpeg recording path does not explicitly disable audio', !ffmpegRecording.includes('"-an"'));
-check('the replay frame pipe is paced at the selected real-time frame rate', pipeBuffer.includes('format!("fps={},{}"') && capture.includes('while next_frame <= now') && capture.includes('next_frame += interval'));
+check('the Linux replay pipe is deliberately capped at 720p and 15 fps to keep the desktop responsive', pipeBuffer.includes('replay_spec().fps.max(1)') && pipeBuffer.includes('scale=1280:-2') && overlay.includes('spec.fps = spec.fps.min(15)') && capture.includes('while next_frame <= now') && capture.includes('next_frame += interval'));
+check('taking a screenshot no longer hides and remaps the live overlay', !overlay.slice(overlay.indexOf('pub fn shot('), overlay.indexOf('pub fn record(')).includes('conceal(') && !overlay.slice(overlay.indexOf('pub fn shot('), overlay.indexOf('pub fn record(')).includes('show_window('));
+check('Linux screenshots capture only the current monitor under the overlay pointer', overlay.includes('--current-monitor') && !overlay.includes('--fullscreen') && /fn take_shot[\s\S]{0,500}linux_shot\(&path\)/.test(overlay));
+check('Linux screenshots never fall back to full-desktop X11 or FFmpeg capture', overlay.includes('Spectacle could not capture the current monitor') && !overlay.includes('ffmpeg_shot(&ffmpeg, &path)'));
+check('Linux rolling replay uses FFmpeg rather than the Rust full-screen X11 readback', /fn start_buffer[\s\S]{0,900}#\[cfg\(target_os = \"linux\"\)\][\s\S]{0,220}return start_pipe_buffer\(\)/.test(overlay));
+check('Linux video encoding is bounded to 720p and one CPU worker', /fn push_encode[\s\S]{0,550}scale=1280:-2[\s\S]{0,300}\"-threads\", \"1\"/.test(overlay));
+check('Wayland recordings use the PipeWire-aware helper and explain the missing executable', /fn spawn_recording[\s\S]{0,260}spawn_wayland_recording\(stamp\)/.test(overlay) && /fn spawn_wayland_recording[\s\S]{0,350}gpu-screen-recorder/.test(overlay) && overlay.includes('PipeWire screen sharing is normally provided by Plasma') && /fn push_grab[\s\S]{0,700}FFmpeg's X11 grab cannot capture the Wayland desktop/.test(overlay));
 check('replay encoding combines buffered video and audio into one MP4', replayEncoder.includes('write_audio_wav') && replayEncoder.includes('"1:a:0"') && replayEncoder.includes('"aac"'));
 check('Windows recording interleaves loopback packets against the video timeline', capture.includes('queue_pending_audio(&mut pending_audio') && capture.includes('flush_audio_samples(') && capture.includes('audio_time >= video_end_ticks'));
 check('Windows replay interleaves MP4 samples in presentation-time order', capture.includes('if video_time <= audio_time'));
+check('overlay keyboard navigation consumes its handled key events',
+  /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*move\(1, false\)/.test(overlayView) && /event\.stopPropagation\(\);\s*void overlayHide\('Escape'\)/.test(overlayView));
+check('the main Orbit pad stays idle while the overlay owns controller input',
+  /mayHandleGamepadInput\([\s\S]{0,80}overlayOpen/.test(mainPad) && mainPad.includes("listen('overlay-visible'"));
 check(
-  'the overlay is left out of pictures and videos, so a recording shows the game',
-  overlay.includes('.content_protected(true)') &&
+  'Windows and macOS capture protection stays enabled without blacking out Linux captures',
+  overlay.includes('.content_protected(cfg!(any(windows, target_os = "macos")))') &&
     notice.includes('WDA_EXCLUDEFROMCAPTURE') &&
     !overlay.includes('exclude_from_capture('),
 );
@@ -188,10 +200,11 @@ check(
     /let icon = match kind \{[\s\S]*?"recording" => Icon::Record[\s\S]*?"replay" => Icon::Replay/.test(overlay),
 );
 check(
-  'LB is the capture modifier: LB+RB shoots, LB+d-pad records and replays',
-  overlay.includes('let shot = shoulder && trigger') &&
-    overlay.includes('let record = shoulder && dpad_left') &&
-    overlay.includes('let replay = shoulder && dpad_right') &&
+  'the capture chords are the ones the settings page draws, not a hardcoded trio',
+  overlay.includes('pub const SHIPPED_PAD: [Chord; 3]') &&
+    overlay.includes('Chord::new(Some(4), 5)') &&
+    overlay.includes('Chord::new(Some(4), 14)') &&
+    overlay.includes('Chord::new(Some(4), 15)') &&
     overlay.includes('Some(Capture::Shot)') &&
     overlay.includes('Some(Capture::Record)') &&
     overlay.includes('Some(Capture::Replay)') &&
@@ -200,15 +213,13 @@ check(
     overlay.includes('"capture-replay"'),
 );
 check(
-  'the pad capture shortcuts do nothing unless the panel is open',
-  // LB and RB are ordinary game buttons. A chord that also fired with the
-  // panel closed took a screenshot or stopped a replay in the middle of a
-  // match, so the whole handler sits behind `is_open()`.
-  /fn on_pad[\s\S]*?if !is_open\(\) \{\s*return;\s*\}[\s\S]*?if let Some\(capture\) = step\.capture/.test(overlay) &&
+  'capture shortcuts require the panel by default and can be allowed outside it in Settings',
+  overlay.includes('capture_shortcuts_outside_overlay: false') &&
+    /if !is_open\(\) && !lock\(\)\.capture_shortcuts_outside_overlay\s*\{\s*return;/.test(overlay) &&
+    overlay.includes('captureShortcutsOutsideOverlay') &&
+    overlay.includes('fn capture_from_shortcut(') &&
     !overlay.includes('fn spawn_capture(') &&
     !overlay.includes('orbit-pad-capture') &&
-    // Start+Select still opens and closes the panel with it closed; the toggle
-    // is answered before that gate.
     /if step\.toggle \{\s*request_toggle\("the pad's Start\+Select"\);\s*return;\s*\}[\s\S]*?if !is_open\(\)/.test(overlay),
 );
 check(

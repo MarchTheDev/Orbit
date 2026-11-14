@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, PackagePlus, X } from 'lucide-react';
 import type { FolderProgram, Game } from '../types';
-import { exeInfo, folderPrograms, knownExePaths } from '../services/native';
-import { pickFile, pickFolder } from '../services/desktop';
+import { findCover, folderPrograms, knownExePaths } from '../services/native';
+import { pickAnyFile, pickFile, pickFolder } from '../services/desktop';
 import { fetchMetadata as fetchGameMetadata } from '../services/metadata';
 import { fetchHltb } from '../services/hltb';
 import { fmtBytes, hashHue, uid } from '../utils/format';
-import { launchForAddedProgram } from '../utils/platform';
+import { desktopOs, launchForAddedProgram } from '../utils/platform';
+import { driveScanDepth } from '../utils/driveScan';
+import { gameFolderFromScan, gameTitleFromPath, gameTitleFromScannedProgram } from '../utils/gameTitle';
 import { Modal, btnGhost, btnPrimary, inputCls } from './ui/Modal';
 import { CheckboxBox } from './ui/Checkbox';
+import { ArtworkThumb } from './ui/ArtworkThumb';
 
 /** One game Orbit found, with every program it could be started from. */
 interface Candidate {
@@ -59,27 +62,25 @@ export function ImportModal({
 
   const inspect = useCallback(
     async (path: string, force = false) => {
-      // A scan walks the folder and measures every candidate, so the same folder
-      // is never scanned twice at once. StrictMode runs effects twice on mount,
-      // which would otherwise scan whatever the Storage page handed over twice.
+      // A scan is expensive enough that the same folder must never be walked
+      // twice at once. StrictMode runs effects twice on mount, which would
+      // otherwise scan whatever Storage handed over twice.
       if (!force && scanned.current === path) return;
       scanned.current = path;
       setBusy(true);
       setFolder(path);
       try {
-        const [programs, known] = await Promise.all([folderPrograms(path, 3), knownExePaths()]);
+        const [programs, known] = await Promise.all([folderPrograms(path, driveScanDepth(path)), knownExePaths()]);
         const already = new Set(known.map((p) => p.toLowerCase()));
         const chosen = new Set(existing.map((g) => g.exePath?.toLowerCase() ?? ''));
 
-        // Grouped by the game folder, which is the folder directly inside the one
-        // that was scanned: `D:\Games\Hollow Knight` is the game there, whatever
-        // depth its program actually sits at. Every program below it belongs to
-        // that game, so `bin\x64\game.exe` is offered as Hollow Knight's program
-        // rather than as a game called x64.
+        // Group candidates under their likely install folder. The scan helper
+        // understands drive roots and common Steam/Epic/GOG library containers,
+        // then folds nested `bin\\x64\\game.exe` paths into the actual game.
         const groups = new Map<string, FolderProgram[]>();
         for (const program of programs) {
           if (already.has(program.exePath.toLowerCase()) || chosen.has(program.exePath.toLowerCase())) continue;
-          const folder = gameFolderOf(program.exePath, path);
+          const folder = gameFolderFromScan(program.exePath, path);
           groups.set(folder, [...(groups.get(folder) ?? []), program]);
         }
 
@@ -91,19 +92,21 @@ export function ImportModal({
             (a, b) => depthOf(a.exePath, dir) - depthOf(b.exePath, dir) || b.sizeBytes - a.sizeBytes,
           );
           const top = ordered[0];
-          const info = await exeInfo(top.exePath).catch(() => null);
+          // A drive scan can yield hundreds of candidates. Avoid a native
+          // command per row here; the scanner already returns bounded sizes in
+          // one background walk, and catalogue art can load lazily.
           next.push({
             key: dir,
-            title: clean(lastSegment(dir)) || 'Untitled',
+            title: ordered.map((program) => gameTitleFromScannedProgram(program.exePath, dir)).find((title) => title && title !== gameTitleFromPath(dir)) || gameTitleFromPath(dir) || 'Untitled',
             installDir: dir,
-            drive: info?.drive ?? dir.slice(0, 2).toUpperCase(),
-            // The shallowest program's folder is the game folder, and a folder
-            // size counts everything under it, so this is the game's real size.
-            sizeBytes: top.folderBytes || info?.sizeBytes || 0,
-            coverPath: info?.coverPath ?? null,
+            drive: /^[a-z]:/i.exec(dir)?.[0].toUpperCase() ?? '',
+            sizeBytes: top.folderBytes || top.sizeBytes || 0,
+            coverPath: null,
             programs: ordered,
             exePath: top.exePath,
-            include: true,
+            // A path scan can return helper programs as well as games. Nothing
+            // is selected until the player reviews the candidates and chooses.
+            include: false,
           });
         }
 
@@ -128,20 +131,17 @@ export function ImportModal({
 
   /** Swap one candidate's program for another file the player picks. */
   const changeProgram = async (key: string, current: string) => {
-    const picked = await pickFile('Choose the program to run', ['exe', 'bat', 'cmd'], current || undefined);
+    const picked = desktopOs() === 'linux'
+      ? await pickAnyFile('Choose the program to run', current || undefined)
+      : await pickFile('Choose the program to run', ['exe', 'bat', 'cmd'], current || undefined);
     if (!picked) return;
     setScanning(true);
     try {
-      const info = await exeInfo(picked).catch(() => null);
+      const coverPath = await findCover(picked).catch(() => null);
       setRows((cur) =>
         cur.map((r) =>
           r.key === key
-            ? {
-                ...r,
-                exePath: picked,
-                coverPath: info?.coverPath ?? r.coverPath,
-                sizeBytes: r.sizeBytes || info?.sizeBytes || 0,
-              }
+            ? { ...r, exePath: picked, coverPath: coverPath ?? r.coverPath }
             : r,
         ),
       );
@@ -179,25 +179,27 @@ export function ImportModal({
         companions: [],
       }));
       onAdd(games);
+      // The import is complete. Close now; catalogue lookups are background
+      // enrichment and must not keep the modal (or the Add tab) open.
+      onClose();
 
-      // Artwork and completion times are a bonus, so they are fetched after the
-      // games are already saved. The two sources are independent, so whichever
-      // answers is kept and a failure in one never blocks the other.
+      // Artwork and completion times are a bonus, fetched independently after
+      // the games have been saved. A better store title also replaces a noisy
+      // folder-derived guess such as a repack suffix.
       if (fetchMetadata) {
-        await Promise.all(
+        void Promise.all(
           games.map(async (g) => {
             const [meta, hltb] = await Promise.allSettled([
               fetchGameMetadata(g.title),
               fetchHltb(g.title),
             ]);
             onUpdate(g.id, {
-              ...(meta.status === 'fulfilled' ? { meta: meta.value } : {}),
+              ...(meta.status === 'fulfilled' ? { meta: meta.value, title: meta.value.name || g.title } : {}),
               ...(hltb.status === 'fulfilled' ? { hltb: hltb.value } : {}),
             });
           }),
         );
       }
-      onClose();
     } finally {
       setSaving(false);
     }
@@ -205,14 +207,16 @@ export function ImportModal({
 
   const toggle = (key: string) =>
     setRows((current) => current.map((r) => (r.key === key ? { ...r, include: !r.include } : r)));
+  const allSelected = rows.length > 0 && rows.every((row) => row.include);
+  const toggleAll = () => setRows((current) => current.map((row) => ({ ...row, include: !allSelected })));
 
   const included = rows.filter((r) => r.include && r.exePath);
   const total = useMemo(() => included.reduce((s, r) => s + r.sizeBytes, 0), [included]);
 
   return (
     <Modal
-      title="Scan a folder for games"
-      subtitle="Orbit reads folders and never changes them. Pick the program to run for each game it finds."
+      title="Scan a drive or folder for games"
+      subtitle="Orbit reads folders and never changes them. Review the candidates and choose which programs to add."
       size="xl"
       onClose={onClose}
       footer={
@@ -248,6 +252,9 @@ export function ImportModal({
             spellCheck={false}
             readOnly
           />
+          <button className={btnGhost} onClick={toggleAll} disabled={rows.length === 0 || busy}>
+            {allSelected ? 'Clear selection' : 'Select all'}
+          </button>
           <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void browse()}>
             <FolderOpen className="size-4" />
             Browse…
@@ -259,12 +266,11 @@ export function ImportModal({
           )}
         </div>
 
-        {busy && <p className="text-sm text-muted">Looking through the folder, three levels deep…</p>}
+        {busy && <p className="text-sm text-muted">Looking for runnable programs… whole-drive scans go deeper than selected game folders.</p>}
 
         {!busy && folder && rows.length === 0 && (
           <p className="rounded-lg border border-line bg-panel2/50 px-3 py-2 text-sm text-muted">
-            Nothing in there looks like a game. Orbit looks three folders deep for a program it can run, and skips
-            redistributables and installers.
+            Nothing in there looks like a game. Orbit skips operating-system folders at a drive root, installers and common redistributables.
           </p>
         )}
 
@@ -275,6 +281,7 @@ export function ImportModal({
                 <div className="rounded-xl border border-line bg-panel2/40 px-3 py-2.5">
                   <div className="flex items-center gap-3">
                     <CheckboxBox checked={r.include} onChange={() => toggle(r.key)} title={r.title} />
+                    <ArtworkThumb title={r.title} lookup={fetchMetadata} />
                     <span className="min-w-0 flex-1">
                       <input
                         value={r.title}
@@ -340,39 +347,10 @@ export function ImportModal({
   );
 }
 
-/**
- * The game folder a program belongs to: the first folder below the scanned one.
- *
- * Scanning `D:\Games` makes `D:\Games\Hollow Knight` a game and everything under
- * it part of that game. Scanning the game's own folder makes that folder the
- * game. Anything outside the scanned folder is left where it is rather than
- * being folded into something it is not.
- */
-function gameFolderOf(exePath: string, root: string): string {
-  const trimmed = root.replace(/[\\/]+$/, '');
-  const inside = exePath.toLowerCase().startsWith(trimmed.toLowerCase() + '\\');
-  const parts = inside ? exePath.slice(trimmed.length + 1).split(/[\\/]+/).filter(Boolean) : [];
-  return parts.length > 1 ? `${trimmed}\\${parts[0]}` : trimmed;
-}
-
-/** The name of the last folder in a path. */
-function lastSegment(path: string): string {
-  const parts = path.split(/[\\/]+/).filter(Boolean);
-  return parts[parts.length - 1] ?? '';
-}
-
 /** How far below a game folder a program sits, for ordering the choices. */
 function depthOf(exePath: string, gameFolder: string): number {
   const relative = exePath.toLowerCase().startsWith(gameFolder.toLowerCase())
     ? exePath.slice(gameFolder.length)
     : exePath;
   return relative.split(/[\\/]+/).filter(Boolean).length;
-}
-
-/** Tidy a folder or file name into something worth showing. */
-function clean(name: string): string {
-  return name
-    .replace(/[._]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }

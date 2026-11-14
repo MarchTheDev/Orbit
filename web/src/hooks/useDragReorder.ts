@@ -140,7 +140,12 @@ export function useDragReorder(
           };
         });
         const id = cardAt(cards, x, y, heldId);
-        return id ? { id, after: false } : null;
+        if (!id) return null;
+        // Put the dragged card in the target card's existing slot. The array is
+        // in DOM/order sequence even when it is laid out in several columns.
+        const from = cards.findIndex((card) => card.id === heldId);
+        const to = cards.findIndex((card) => card.id === id);
+        return { id, after: from >= 0 && to >= 0 && from < to };
       }
       if (!container) {
         // Not a list: what is under the pointer is the answer, and which half of
@@ -225,8 +230,14 @@ export function useDragReorder(
             onPointerDown: (e: ReactPointerEvent) => {
               if (e.button !== 0) return;
               // A button inside the card is being pressed, not the card.
-              const interactive = (e.target as HTMLElement).closest('button, a, input, select, textarea');
-              if (interactive && !optionsRef.current?.fromButtons) return;
+              const target = e.target as HTMLElement;
+              const interactive = target.closest('button, a, input, select, textarea');
+              const explicitHandle = target.closest('[data-orbit-drag-handle]');
+              if (interactive && !optionsRef.current?.fromButtons && !explicitHandle) return;
+              if (explicitHandle) {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture?.(e.pointerId);
+              }
               if (optionsRef.current?.hold) {
                 // The dialog's scroller must not take this gesture, and the
                 // events have to keep arriving on the card even if the window

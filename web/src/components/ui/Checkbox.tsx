@@ -72,9 +72,13 @@ export function Checkbox({
       <span className="mt-0.5 flex">
         <CheckboxBox checked={checked} onChange={onChange} disabled={disabled} />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block">{label}</span>
-        {hint && <span className="mt-0.5 block text-[11px] leading-snug text-muted">{hint}</span>}
+      <span className="min-w-0 flex-1 overflow-visible">
+        <span className="block break-words">{label}</span>
+        {/* Hints carry tokens like PROTON_ENABLE_WAYLAND=1 that have no space
+            to wrap at: without break-words the token walks out of the card's
+            side, and against a narrow column it is the card that ends up
+            reading as broken. */}
+        {hint && <span className="mt-0.5 block overflow-visible break-words text-[11px] leading-snug text-muted">{hint}</span>}
       </span>
     </label>
   );
