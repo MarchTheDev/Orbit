@@ -334,7 +334,60 @@ export function AddGameModal({
         </div>
       }
     >
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="orbit-add">
+        {/* The game's own face first: what it will look like on the shelf, its
+            name as type rather than as a form field in a stack of them, and the
+            one action that fills the rest in. A dialog that opens with a blank
+            "Title" box and eight fields under it is a database entry form. */}
+        <header className="orbit-add-face">
+          <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="orbit-add-faceart">
+            <span
+              className="grid size-full place-items-center text-sm font-semibold text-fg/85"
+              style={{
+                background: `radial-gradient(circle at 32% 16%, hsl(${hashHue(title || 'Orbit')} 38% 38% / .42), transparent 64%), linear-gradient(165deg, var(--c-panel2), var(--c-panel))`,
+              }}
+            >
+              {initials(title || 'Orbit')}
+            </span>
+          </PortraitFrame>
+
+          <div className="orbit-add-facecopy">
+            <span className="orbit-add-kicker">
+              {looking ? 'Asking the catalogue' : match ? 'Found in the catalogue' : looked ? 'Your own details' : 'New game'}
+              {looking && <LoaderCircle className="size-3 animate-spin" />}
+            </span>
+            <label className="block">
+              <span className="sr-only">Title</span>
+              <input
+                className="orbit-add-title"
+                value={d.title}
+                onChange={(e) => editTitle(e.target.value)}
+                placeholder="Hollow Knight"
+                aria-label="Game title"
+              />
+            </label>
+            <p className="orbit-add-sub">
+              {details.developer || details.releaseYear || details.genres
+                ? [details.developer, details.releaseYear, details.genres].filter(Boolean).join(' · ')
+                : match
+                  ? 'The catalogue found a title. Check what it brought back below.'
+                  : 'Type a name, or point Orbit at the program, and it fills in what it can.'}
+            </p>
+            <div className="orbit-add-faceacts">
+              <button
+                type="button"
+                className="orbit-add-search"
+                onClick={() => void lookUp(d.title)}
+                disabled={looking || d.title.trim().length < 2}
+                title={match ? 'Search for a different match in the catalogue' : 'Search the catalogue for this title'}
+              >
+                {looking ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
+                {match ? 'Find another match' : 'Search catalogue'}
+              </button>
+              {match && <span className="orbit-add-tagline">{match.name} · app {match.appId}</span>}
+            </div>
+          </div>
+        </header>
         {dropped.length > 0 && (
           <div className="space-y-1 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
@@ -358,37 +411,17 @@ export function AddGameModal({
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
           <section className="orbit-addfound">
-            <div className="flex items-start gap-3">
-              <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
-                <span
-                  className="grid size-full place-items-center text-sm font-semibold text-fg/85"
-                  style={{
-                    background: `radial-gradient(circle at 32% 16%, hsl(${hashHue(title || 'Orbit')} 38% 38% / .42), transparent 64%), linear-gradient(165deg, var(--c-panel2), var(--c-panel))`,
-                  }}
-                >
-                  {initials(title || 'Orbit')}
-                </span>
-              </PortraitFrame>
-
-              <div className="min-w-0 flex-1 space-y-1">
-                <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
-                  {looking ? 'Checking the catalogue' : match ? 'Suggested match' : 'Review details'}
-                  {looking && <LoaderCircle className="size-3 animate-spin" />}
-                </span>
-                <p className="truncate text-base font-semibold text-fg">{title || 'Untitled game'}</p>
-                <p className="text-xs leading-relaxed text-muted">
-                  {details.developer || details.releaseYear || details.genres
-                    ? [details.developer, details.releaseYear, details.genres].filter(Boolean).join(' · ')
-                    : match
-                      ? 'The catalogue found a title. Check the details below before adding it.'
-                      : 'No exact catalogue match yet. You can still fill these details in yourself.'}
-                </p>
-              </div>
-            </div>
+            <p className="orbit-addfound-lede">
+              {looking
+                ? 'Checking the catalogue…'
+                : match
+                  ? 'What the catalogue said about this game. Every field can be corrected.'
+                  : 'No exact match. Fill in what you know, or search again above.'}
+            </p>
 
             {matches.length > 1 && (
               <div className="space-y-1.5 border-t border-line/70 pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Choose the right match</p>
+                <p className="orbit-add-kicker">Choose the right match</p>
                 <div className="flex flex-wrap gap-1.5">
                   {matches.slice(0, 5).map((m) => (
                     <button
@@ -410,7 +443,7 @@ export function AddGameModal({
               </div>
             )}
 
-            <div className="grid gap-3 border-t border-line/70 pt-3 sm:grid-cols-2">
+            <div className="orbit-addfound-grid">
               <label className="block">
                 <span className={labelCls}>Developer / author</span>
                 <input
@@ -482,28 +515,14 @@ export function AddGameModal({
           </section>
         )}
 
-        <div className="flex gap-2">
-          <label className="block flex-1">
-            <span className={labelCls}>Title</span>
-            <input
-              className={inputCls}
-              value={d.title}
-              onChange={(e) => editTitle(e.target.value)}
-              placeholder="Hollow Knight"
-            />
-          </label>
-          <button
-            type="button"
-            className={`${btnBrowse} mt-5 flex items-center gap-2`}
-            onClick={() => void lookUp(d.title)}
-            disabled={looking || d.title.trim().length < 2}
-            title={match ? 'Search for a different match in the catalogue' : 'Search the catalogue for this title'}
-          >
-            {looking ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
-            {match ? 'Find another match' : 'Search catalogue'}
-          </button>
-        </div>
-
+        <section className="orbit-addgroup">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Artwork</h4>
+            <p className="orbit-editsection-note">
+              A cover is a portrait poster; a backdrop is the wide picture behind the title. The catalogue&apos;s
+              covers are offered below, and either can be a file on this PC instead.
+            </p>
+          </header>
         <PortraitBrowser
           resetKey={title}
           disabled={title.trim().length < 2}
@@ -620,7 +639,16 @@ export function AddGameModal({
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        </section>
+
+        <section className="orbit-addgroup">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Where it sits</h4>
+            <p className="orbit-editsection-note">
+              How the library files it. Only the size is a guess: everything else is your call.
+            </p>
+          </header>
+        <div className="orbit-add-facts">
           <label className="block">
             <span className={labelCls}>Size (GB)</span>
             <input
@@ -654,6 +682,7 @@ export function AddGameModal({
             <input className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
           </label>
         </div>
+        </section>
 
         {!native && (
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">

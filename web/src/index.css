@@ -71,6 +71,82 @@ body {
    two lines of grey text in a bordered row; the review is the accent-tinted
    block it was, because that is the one thing on the dialog that is about to
    become a game. */
+.orbit-add { display: flex; flex-direction: column; gap: 14px; }
+/* The dialog's own face: the tile as the library will draw it, the title as
+   type, and the one action that fills the rest in. */
+.orbit-add-face {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--c-accent) 10%, transparent), transparent 58%),
+    color-mix(in srgb, var(--c-panel2) 60%, transparent);
+}
+.orbit-add-faceart {
+  flex: none;
+  width: 88px;
+  height: 118px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  box-shadow: 0 16px 32px -16px rgba(0, 0, 0, .85);
+}
+.orbit-add-facecopy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.orbit-add-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-accent) 82%, var(--c-text));
+}
+.orbit-add-title {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  color: var(--c-text);
+  outline: none;
+}
+.orbit-add-title:hover { border-bottom-color: color-mix(in srgb, var(--c-text) 14%, transparent); }
+.orbit-add-title:focus-visible { border-bottom-color: var(--c-accent); }
+.orbit-add-title::placeholder { color: color-mix(in srgb, var(--c-muted) 70%, transparent); }
+.orbit-add-sub { font-size: 11.5px; line-height: 1.55; color: var(--c-muted); }
+.orbit-add-faceacts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 6px; }
+.orbit-add-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 42%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  color: #141a06;
+  font-size: 11.5px;
+  font-weight: 660;
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-add-search { color: color-mix(in srgb, var(--c-accent) 92%, var(--c-text)); background: color-mix(in srgb, var(--c-accent) 10%, transparent); }
+.orbit-add-search:hover:not(:disabled) { background: color-mix(in srgb, var(--c-accent) 18%, transparent); border-color: var(--c-accent); }
+.orbit-add-search:disabled { opacity: .45; cursor: not-allowed; }
+.orbit-add-tagline { font-size: 10.5px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+.orbit-add-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 40rem; }
+@media (min-width: 640px) { .orbit-add-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.orbit-addfound-lede { font-size: 11.5px; line-height: 1.6; color: var(--c-muted); }
+.orbit-addfound-grid { display: grid; gap: 12px; max-width: 46rem; }
+@media (min-width: 640px) { .orbit-addfound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.orbit-addfound-grid > .sm\:col-span-2 { grid-column: 1 / -1; }
 .orbit-addgroup { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent); }
 .orbit-addgroup:first-child { padding-top: 0; border-top: 0; }
 .orbit-sourcecard {
