@@ -128,7 +128,7 @@ function savedShelfRows(): ShelfRows {
 }
 
 /** The "Only" switches that narrow the shelf on top of the chips. */
-type OnlyFacet = 'played' | 'unplayed' | 'notes' | 'installed';
+type OnlyFacet = 'played' | 'unplayed';
 type StartFacet = 'any' | 'steam' | 'local' | 'tracked';
 interface LibraryFacets {
   only: OnlyFacet[];
@@ -137,11 +137,12 @@ interface LibraryFacets {
 
 const NO_FACETS: LibraryFacets = { only: [], start: 'any' };
 
+// Only the two that read as a pair: whether a game has been played. The others -
+// "can be started", "has notes" - were two more switches in the same row that
+// answered questions the shelf already answers better by being looked at.
 const FACET_CHOICES: { value: OnlyFacet; label: string }[] = [
   { value: 'played', label: 'Played' },
   { value: 'unplayed', label: 'Never played' },
-  { value: 'installed', label: 'Can be started' },
-  { value: 'notes', label: 'Has notes' },
 ];
 
 const START_CHOICES: { value: StartFacet; label: string }[] = [
@@ -157,8 +158,6 @@ function matchesFacets(game: Game, facets: LibraryFacets): boolean {
   for (const only of facets.only) {
     if (only === 'played' && !played) return false;
     if (only === 'unplayed' && played) return false;
-    if (only === 'installed' && game.launch.kind === 'none') return false;
-    if (only === 'notes' && game.notes.trim() === '') return false;
   }
   if (facets.start === 'steam' && !isSteamGame(game)) return false;
   if (facets.start === 'local' && game.launch.kind !== 'executable' && game.launch.kind !== 'wine') return false;

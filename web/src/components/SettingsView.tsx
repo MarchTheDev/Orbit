@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
+  Check,
   Database,
   Download,
   Eye,
@@ -155,20 +156,20 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section id={id} hidden={!active} className="orbit-panel scroll-mt-28 p-5 transition-colors sm:p-6">
-      <div className="flex items-start gap-3.5">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-panel2 text-accent">
-          <Icon className="size-[18px]" strokeWidth={1.9} />
+    <section id={id} hidden={!active} className="orbit-setsec scroll-mt-28">
+      <header className="orbit-setsec-head">
+        <span className="orbit-setsec-icon">
+          <Icon className="size-[17px]" strokeWidth={1.9} />
         </span>
-        <div className="min-w-0 pt-0.5">
-          <h2 className="flex flex-wrap items-center gap-2.5 text-base font-semibold leading-6 text-fg">
+        <div className="min-w-0">
+          <h2>
             {title}
             <NeedsWork on={note === 'Need work'} />
           </h2>
-          {lead && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">{lead}</p>}
+          {lead && <p className="orbit-setsec-lead">{lead}</p>}
         </div>
-      </div>
-      <div className="mt-5 space-y-4">{children}</div>
+      </header>
+      <div className="orbit-setsec-body">{children}</div>
     </section>
   );
 }
@@ -176,7 +177,7 @@ function Section({
 /** A heading inside a card, with a hairline running out to the edge. */
 function SubHead({ children }: { children: ReactNode }) {
   return (
-    <h3 className="flex items-center gap-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">
+    <h3 className="orbit-setsubhead">
       {children}
       <span className="h-px flex-1 bg-line" aria-hidden />
     </h3>
@@ -184,8 +185,22 @@ function SubHead({ children }: { children: ReactNode }) {
 }
 
 /** A box inside a card, for the settings that belong closer together. */
-function Group({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('space-y-3 rounded-xl border border-line/70 bg-panel2/40 p-4', className)}>{children}</div>;
+function Group({
+  children,
+  title,
+  className,
+}: {
+  children: ReactNode;
+  /** The name of the block of settings, when it holds more than one. */
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn('orbit-setgroup', className)}>
+      {title && <p className="orbit-setgroup-title">{title}</p>}
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -1070,7 +1085,7 @@ export function SettingsView({
         }}
         placeholder="Search settings…"
         aria-label="Search settings"
-        className="w-full rounded-xl border border-line bg-panel py-2.5 pl-10 pr-3 text-sm text-fg outline-none transition placeholder:text-muted hover:border-muted/60 focus:border-accent"
+        className="orbit-setsearch"
       />
       {settingsQuery.trim() && (
         <div className="absolute inset-x-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
@@ -1137,7 +1152,6 @@ export function SettingsView({
                       )
                     : 'orbit-setnav-row'}
                 >
-                  <span className="orbit-setnav-tick" aria-hidden />
                   {compact ? section.label : <span className="min-w-0 flex-1 truncate">{section.label}</span>}
                   {NEEDS_WORK.has(id) && <span className="orbit-setnav-needs" title="Need work" />}
                 </button>
@@ -1157,15 +1171,15 @@ export function SettingsView({
         lead="Make Orbit feel right for you. Changes save as you make them — there is no Save button to hunt for."
       />
 
-      <div className="mt-7 grid gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="orbit-setlayout mt-7">
         <aside className="hidden lg:block">
-          <div className="sticky top-24 max-h-[calc(100vh-8rem)] space-y-5 overflow-y-auto pr-1">
+          <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
             {settingsSearch}
-            {settingsNav(false)}
+            <div className="mt-4">{settingsNav(false)}</div>
           </div>
         </aside>
 
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 flex flex-col gap-7">
           <div className="space-y-3 lg:hidden">
             {settingsSearch}
             {settingsNav(true)}
@@ -1186,16 +1200,19 @@ export function SettingsView({
               type="button"
               aria-pressed={settings.theme === t.id}
               onClick={() => setSettings({ theme: t.id })}
-              className={cn(
-                'overflow-hidden rounded-xl border-2 text-left transition',
-                settings.theme === t.id ? 'border-accent' : 'border-line hover:border-muted',
-              )}
+              aria-label={t.name}
+              className="orbit-themecard"
+              data-chosen={settings.theme === t.id || undefined}
             >
-              <div className="flex h-16 items-center justify-center gap-2" style={{ background: t.bg }}>
-                <span className="size-7 rounded-full" style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent2})` }} />
-                <span className="h-3 w-16 rounded" style={{ background: t.panel2 }} />
-              </div>
-              <div className="bg-panel px-3 py-2 text-sm font-medium">{t.name}</div>
+              <span className="orbit-themecard-swatch" style={{ background: t.bg }}>
+                <i style={{ background: t.panel2 }} />
+                <i style={{ background: t.accent }} />
+                <i style={{ background: t.accent2 }} />
+              </span>
+              <span className="orbit-themecard-name">
+                {t.name}
+                {settings.theme === t.id && <Check className="size-3.5 text-accent" />}
+              </span>
             </button>
           ))}
           {featuredCustomTheme ? (

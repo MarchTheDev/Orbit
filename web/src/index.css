@@ -1561,48 +1561,65 @@ html.orbit-linux .orbit-topbar {
 }
 .orbit-btnquiet:disabled { opacity: .4; cursor: default; }
 
-/* Settings: the rail, where a category's name and the cards in it are two
-   different things to look at. The name is a label; the cards are rows that
-   light up, carry a marker on the chosen one, and are indented under it. */
-.orbit-setnav { display: flex; flex-direction: column; gap: 18px; }
+/* ------------------------------------------------------------------ Settings */
+
+/*
+ * Settings is the one page in Orbit with two panes, and it had been drawn as one
+ * long card after another beside fifteen links of equal weight. The rail and the
+ * card are different objects now: the rail is a held index with a group name
+ * above each run of rows, and the card is a heading with its content under it
+ * rather than a bordered box inside a bordered column.
+ */
+
+.orbit-setlayout {
+  display: grid;
+  gap: 26px;
+}
+@media (min-width: 1024px) {
+  .orbit-setlayout { grid-template-columns: 236px minmax(0, 1fr); gap: 34px; }
+}
+
+/* The rail. */
+.orbit-setnav { display: flex; flex-direction: column; gap: 20px; }
 .orbit-setnav-group { min-width: 0; }
 .orbit-setnav-label {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 6px 10px;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: .18em;
+  margin: 0 0 6px;
+  padding-left: 10px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .2em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--c-muted) 82%, transparent);
+  color: color-mix(in srgb, var(--c-muted) 78%, transparent);
   white-space: nowrap;
 }
 .orbit-setnav-label > span {
   height: 1px;
   flex: 1;
-  background: color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
 }
 .orbit-setnav-rows {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding-left: 2px;
+  padding-left: 1px;
   border-left: 1px solid color-mix(in srgb, var(--c-text) 7%, transparent);
 }
 .orbit-setnav-row {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
   margin-left: -1px;
-  padding: 7px 10px 7px 11px;
+  padding: 6px 10px 6px 11px;
   border: 0;
-  border-left: 1px solid transparent;
-  border-radius: 0 8px 8px 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 7px 7px 0;
   background: none;
-  color: var(--c-muted);
+  color: color-mix(in srgb, var(--c-muted) 92%, transparent);
   font-size: 12.5px;
   font-weight: 500;
   text-align: left;
@@ -1615,19 +1632,11 @@ html.orbit-linux .orbit-topbar {
 }
 .orbit-setnav-row[aria-current='page'] {
   border-left-color: var(--c-accent);
-  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 9%, transparent);
   color: var(--c-text);
-  font-weight: 600;
+  font-weight: 650;
 }
-.orbit-setnav-tick {
-  width: 4px;
-  height: 4px;
-  flex: none;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c-text) 22%, transparent);
-  transition: background-color .12s var(--ease-snap);
-}
-.orbit-setnav-row[aria-current='page'] .orbit-setnav-tick { background: var(--c-accent); }
+.orbit-setnav-tick { display: none; }
 .orbit-setnav-needs {
   width: 4px;
   height: 4px;
@@ -2921,6 +2930,148 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
   transition: border-color .12s var(--ease-snap), color .12s var(--ease-snap);
 }
 .orbit-ovlink:hover { border-color: color-mix(in srgb, var(--c-accent) 60%, transparent); color: #fff; }
+
+/* A card: a name, a sentence, then the settings. No border, no nested panel -
+   the page has one column and the card's own rule is what separates it from the
+   next one. */
+.orbit-setsec {
+  min-width: 0;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  padding-top: 22px;
+}
+.orbit-setsec:first-of-type { border-top: 0; padding-top: 0; }
+.orbit-setsec-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.orbit-setsec-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 11%, transparent);
+  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  color: var(--c-accent);
+}
+.orbit-setsec-head h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -.01em;
+  line-height: 1.35;
+  color: var(--c-text);
+}
+.orbit-setsec-lead {
+  margin-top: 3px;
+  max-width: 64ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--c-muted);
+  text-wrap: pretty;
+}
+.orbit-setsec-body { display: flex; flex-direction: column; gap: 18px; }
+
+/* The theme cards. A small picture of the theme - its room, its panel and its
+   two signals - under its name. The chosen one is not a heavier border: it is
+   the one whose name carries a tick and whose swatch is at full strength. */
+.orbit-themecard {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap), transform .12s var(--ease-snap);
+}
+.orbit-themecard:hover { border-color: color-mix(in srgb, var(--c-text) 26%, transparent); }
+.orbit-themecard[data-chosen] { border-color: color-mix(in srgb, var(--c-accent) 65%, transparent); }
+.orbit-themecard-swatch {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 44px;
+  padding: 7px;
+  filter: saturate(.85);
+}
+.orbit-themecard-swatch > i {
+  display: block;
+  border-radius: 2px;
+}
+.orbit-themecard-swatch > i:nth-child(1) { height: 12px; flex: 1; }
+.orbit-themecard-swatch > i:nth-child(2) { width: 14px; height: 14px; }
+.orbit-themecard-swatch > i:nth-child(3) { width: 7px; height: 14px; }
+.orbit-themecard-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--c-muted);
+}
+.orbit-themecard[data-chosen] .orbit-themecard-name { color: var(--c-text); }
+
+/* The settings search: a quiet field above the rail, not a pill on a card. */
+.orbit-setsearch {
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 3%, transparent);
+  color: var(--c-text);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color .12s var(--ease-snap);
+}
+.orbit-setsearch::placeholder { color: color-mix(in srgb, var(--c-muted) 80%, transparent); }
+.orbit-setsearch:hover { border-color: color-mix(in srgb, var(--c-text) 20%, transparent); }
+.orbit-setsearch:focus { border-color: var(--c-accent); }
+
+/* A block of settings that belong together: a name, a rule, then rows. */
+.orbit-setgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-text) 2.4%, transparent);
+}
+.orbit-setgroup-title {
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-muted) 88%, transparent);
+}
+.orbit-setsubhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-muted) 88%, transparent);
+}
+.orbit-setsubhead::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+}
 
 /* ------------------------------------------------------------- the Stardeck */
 
