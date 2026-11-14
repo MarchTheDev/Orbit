@@ -15,12 +15,14 @@ import { StatisticsView, type StatsTab } from '../components/StatisticsView';
 import { SettingsView } from '../components/SettingsView';
 import { LogsView } from '../components/LogsView';
 import { GameEditDialog } from '../components/detail/GameEditDialog';
+import { AddGameModal } from '../components/modals/AddGameModal';
+import { TvMode } from '../components/TvMode';
 import '../index.css';
 
 const games = SAMPLE_GAMES;
 const settings: Settings = { ...DEFAULT_SETTINGS };
 
-const TABS = ['statistics', 'settings', 'journal', 'editor'] as const;
+const TABS = ['stardeck', 'statistics', 'settings', 'journal', 'editor', 'add'] as const;
 type Surface = (typeof TABS)[number];
 
 function Preview() {
@@ -43,6 +45,24 @@ function Preview() {
         </div>
         <span className="orbit-statsbar-lede">Development preview of the reworked surfaces, with sample data.</span>
       </div>
+
+      {surface === 'stardeck' && (
+        <div className="orbit-deck-preview" style={{ position: 'relative', height: '82vh', borderRadius: 18, overflow: 'hidden' }}>
+          <TvMode
+            games={games}
+            onPlay={() => undefined}
+            onStop={() => undefined}
+            onDetails={() => undefined}
+            onExit={() => setSurface('statistics')}
+            runningId={null}
+            sound={localSettings.sound}
+            setSound={(sound) => setLocalSettings((current) => ({ ...current, sound }))}
+            showMusic={false}
+            showBars={false}
+            onOpenSettings={() => setSurface('settings')}
+          />
+        </div>
+      )}
 
       {surface === 'statistics' && (
         <StatisticsView
@@ -109,6 +129,15 @@ function Preview() {
 
       {editing && (
         <GameEditDialog game={editing} onUpdate={() => undefined} onClose={() => setEditing(null)} />
+      )}
+
+      {surface === 'add' && (
+        <AddGameModal
+          onClose={() => setSurface('statistics')}
+          onAdd={() => undefined}
+          onImportLauncher={() => undefined}
+          onScanFolder={() => undefined}
+        />
       )}
     </div>
   );
