@@ -615,6 +615,17 @@ export interface Settings {
   /** How big the covers and rows are drawn, as a percentage. */
   coverScale: number;
   /**
+   * How every cover is drawn when a game has not chosen for itself.
+   *
+   * The single largest thing about how a library looks. A portrait poster in a
+   * wide tile is a strip of a face; a wide banner in a tall tile loses the
+   * wordmark. `smart` guesses from the picture's shape, which is right often
+   * enough that nobody has to think about it, and the other two are the answer
+   * when the guess is wrong for a whole library - a wall of Steam banners, or a
+   * wall of painted posters.
+   */
+  coverFit?: 'smart' | 'cover' | 'contain';
+  /**
    * Where the tint behind a hovered cover comes from.
    *
    * On by default: the picture's own colours, so the tile reads as one thing.

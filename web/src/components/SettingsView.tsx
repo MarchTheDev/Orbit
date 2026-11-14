@@ -322,7 +322,7 @@ const SECTIONS = [
   { id: 'orbit-captures', label: 'Captures' },
   { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
-  { id: 'orbit-details', label: 'Artwork' },
+  { id: 'orbit-details', label: 'Metadata' },
   { id: 'orbit-achievements', label: 'Achievements' },
   { id: 'orbit-integrations', label: 'Integrations' },
   { id: 'orbit-tabs', label: 'Tabs' },
@@ -396,7 +396,8 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Launch Orbit at sign-in', section: 'orbit-appearance', keywords: 'start when pc starts boot login startup autostart' },
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
   { label: 'Open in Orbit', section: 'orbit-appearance', keywords: 'explorer windows linux context menu right click executable import nautilus dolphin' },
-  { label: 'Artwork and game details', section: 'orbit-details', keywords: 'metadata description cover genres rating release year steamgriddb portrait key' },
+  { label: 'Metadata and artwork sources', section: 'orbit-details', keywords: 'metadata description cover genres rating release year steamgriddb portrait key' },
+  { label: 'Default cover fit', section: 'orbit-details', keywords: 'cover fit fill crop banner portrait letterbox artwork' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Reorder top tabs', section: 'orbit-tabs', keywords: 'navigation order pages tabs' },
   { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
@@ -1737,60 +1738,131 @@ export function SettingsView({
         id="orbit-details"
         active={activeSection === 'orbit-details'}
         icon={Sparkles}
-        title="Artwork and details"
+        title="Metadata"
         note="Need work"
-        lead="Orbit can use Steam's public catalogue for artwork and details, SteamGridDB when a key is added, and a plain web image search when neither has a portrait. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
+        lead="What Orbit knows about a game, where it comes from, and how the artwork is drawn. Nothing here changes how a game starts."
       >
-        <div className="rounded-2xl border border-line bg-panel/40 p-3">
-          <label className="block text-sm font-semibold text-fg" htmlFor="sgdb-key">
-            SteamGridDB API key
-          </label>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            Optional. Steam's own artwork needs nothing and is used when this is empty. A key asks
-            SteamGridDB for portrait covers only, a page at a time. Get a free key from{' '}
-            <button
-              type="button"
-              className="underline decoration-line underline-offset-2 transition hover:text-accent"
-              onClick={() => void openExternal('https://www.steamgriddb.com/profile/preferences')}
-            >
-              your SteamGridDB profile
-            </button>
-            . It stays on this machine, in your settings file.
-          </p>
-          <div className="mt-2.5 flex gap-2">
-            <input
-              id="sgdb-key"
-              type="password"
-              value={settings.sgdbApiKey ?? ''}
-              onChange={(e) => setSettings({ sgdbApiKey: e.target.value })}
-              placeholder="Leave empty to use Steam's artwork only"
-              className={`${inputCls} min-w-0 flex-1 font-mono`}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {settings.sgdbApiKey && (
-              <button
-                type="button"
-                onClick={() => setSettings({ sgdbApiKey: '' })}
-                className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-muted transition hover:border-accent hover:text-fg"
-              >
-                Clear
-              </button>
-            )}
+        <Group title="Where details come from">
+          <div className="orbit-setrow">
+            <div className="orbit-setrow-copy">
+              <p className="orbit-setrow-label">Steam catalogue</p>
+              <p className="orbit-setrow-hint">
+                Free and keyless. The summary, genres, developer, release year and header artwork come
+                from here, for any game whose store page can be found.
+              </p>
+            </div>
+            <span className="orbit-settag is-on">On</span>
           </div>
-        </div>
-        <Checkbox
-          checked={settings.fetchMetadata}
-          onChange={(v) => setSettings({ fetchMetadata: v })}
-          label="Look games up when they are added"
-          hint="Fetch a summary, genres, cover art and playtime estimates as you add a game."
-        />
-        <Checkbox
-          checked={settings.autoFetchMetadata}
-          onChange={(v) => setSettings({ autoFetchMetadata: v })}
-          label="Fill in the gaps in the background"
-          hint="Fill in missing details for older games in the background, a few at a time."
-        />
+
+          <div className="orbit-setrow">
+            <div className="orbit-setrow-copy">
+              <label className="orbit-setrow-label" htmlFor="sgdb-key">
+                SteamGridDB
+              </label>
+              <p className="orbit-setrow-hint">
+                Portrait covers, heroes and logos, when a key is added. Optional: Steam&apos;s own
+                artwork needs nothing and is used when this is empty. A key stays on this machine,
+                in your settings file.{' '}
+                <button
+                  type="button"
+                  className="underline decoration-line underline-offset-2 transition hover:text-accent"
+                  onClick={() => void openExternal('https://www.steamgriddb.com/profile/preferences')}
+                >
+                  Get a free key
+                </button>
+                .
+              </p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  id="sgdb-key"
+                  type="password"
+                  value={settings.sgdbApiKey ?? ''}
+                  onChange={(e) => setSettings({ sgdbApiKey: e.target.value })}
+                  placeholder="Leave empty to use Steam's artwork only"
+                  className={`${inputCls} min-w-0 flex-1 font-mono`}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                {settings.sgdbApiKey && (
+                  <button
+                    type="button"
+                    onClick={() => setSettings({ sgdbApiKey: '' })}
+                    className="orbit-btnquiet shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            <span className={cn('orbit-settag', settings.sgdbApiKey ? 'is-on' : 'is-off')}>
+              {settings.sgdbApiKey ? 'Key saved' : 'No key'}
+            </span>
+          </div>
+
+          <div className="orbit-setrow">
+            <div className="orbit-setrow-copy">
+              <p className="orbit-setrow-label">HowLongToBeat</p>
+              <p className="orbit-setrow-hint">
+                Main story, main + extras and completionist times, and an estimate from the genre when
+                nothing is listed. Used every time a game is opened; no key, no account.
+              </p>
+            </div>
+            <span className="orbit-settag is-on">On</span>
+          </div>
+        </Group>
+
+        <Group title="When a cover is missing">
+          <div className="orbit-setrow-copy">
+            <p className="orbit-setrow-hint">
+              A game with no portrait falls back through its wide header, then its backdrop, then the
+              game&apos;s initials on a plate of its own colour. Nothing is left as an empty tile. A cover
+              can be pinned per game from its Edit page, where the store&apos;s own choices are browsable.
+            </p>
+          </div>
+        </Group>
+
+        <Group title="How a cover is drawn">
+          <div className="orbit-setrow">
+            <div className="orbit-setrow-copy">
+              <p className="orbit-setrow-label">Default fit</p>
+              <p className="orbit-setrow-hint">
+                Applied to every game that has not chosen for itself. A banner in a tall tile loses its
+                wordmark; a poster in a wide tile becomes a strip.
+              </p>
+            </div>
+            <div className="orbit-seg" role="group" aria-label="Default cover fit">
+              {([
+                ['smart', 'Smart'],
+                ['cover', 'Fill'],
+                ['contain', 'Fit whole'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={(settings.coverFit ?? 'smart') === id}
+                  onClick={() => setSettings({ coverFit: id })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Group>
+
+        <Group title="Looking things up">
+          <Checkbox
+            checked={settings.fetchMetadata}
+            onChange={(v) => setSettings({ fetchMetadata: v })}
+            label="Look games up when they are added"
+            hint="Fetch a summary, genres, cover art and playtime estimates as you add a game."
+          />
+          <Checkbox
+            checked={settings.autoFetchMetadata}
+            onChange={(v) => setSettings({ autoFetchMetadata: v })}
+            label="Fill in the gaps in the background"
+            hint="Fill in missing details for older games in the background, a few at a time."
+          />
+        </Group>
       </Section>
 
       <Section id="orbit-tabs" active={activeSection === 'orbit-tabs'} icon={GripVertical} title="Statistics pages" lead="Choose the order of the tabs inside Statistics. The library and the bar itself stay where they are, so a page can never be lost.">

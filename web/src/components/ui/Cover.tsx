@@ -4,6 +4,21 @@ import type { Game } from '../../types';
 import { fileSrc } from '../../services/desktop';
 import { cn } from '../../utils/cn';
 
+/**
+ * The library-wide answer to "how is this cover drawn", read from the same
+ * storage the Settings page writes. It is a preference rather than app state so
+ * that a tile does not have to be told about it at every call site; a game's own
+ * `coverFit` still wins over it, and an arrangement's `fit` wins over both.
+ */
+function libraryFit(): 'cover' | 'contain' | undefined {
+  try {
+    const value = localStorage.getItem('orbit.covers.fit');
+    return value === 'cover' || value === 'contain' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Keep a few nearby TV images decoded across selection changes. Detached Image
 // objects preserve the decoded resource while the visible components reuse it.
 const warmImages = new Map<string, HTMLImageElement>();
@@ -74,7 +89,10 @@ export function Cover({
     setFailures((old) => ({ ...(old.identity === identity ? old : current), [which]: true }));
   };
 
-  const fit = fitOverride ?? game.meta?.coverFit;
+  // The order is: the arrangement's own mind (the TV's backdrop, a shelf's
+  // choice), then the game's own answer, then the library-wide default in
+  // Settings, and only then the guess made from the picture's shape.
+  const fit = fitOverride ?? game.meta?.coverFit ?? libraryFit();
 
   if (game.coverPath && !current.local) {
     return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('local')} />;
