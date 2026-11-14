@@ -2520,6 +2520,7 @@ html.orbit-linux .orbit-topbar {
 .orbit-shelf {
   position: sticky;
   top: 62px;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 62px);
@@ -2548,6 +2549,10 @@ html.orbit-linux .orbit-topbar {
   overflow-y: auto;
   /* Room for the selected cover's ring: the scroller would cut it otherwise. */
   padding: 4px 6px 4px 4px;
+  /* Reaching the end of the shelf ends the scroll. Without this the wheel keeps
+     going into the page behind it, and the shelf - which fills the window -
+     drifts out of view for no reason the hand can see. */
+  overscroll-behavior: contain;
 }
 .orbit-shelf-grid {
   display: grid;
