@@ -64,6 +64,98 @@ body {
   backdrop-filter: blur(14px) saturate(1.04);
 }
 
+/* ----------------------------------------------------------------- the editor
+
+   The game editor is one long form, and a form of forty fields is read section
+   by section: a heading, a line saying what the section is for, then the
+   fields. The old version was four tinted cards of equal weight, which made an
+   artwork picker look as important as the game's status. */
+.orbit-edit { display: flex; flex-direction: column; gap: 22px; }
+.orbit-edit-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 13px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 22%, transparent);
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--c-accent) 7%, transparent), transparent 62%),
+    color-mix(in srgb, var(--c-panel2) 70%, transparent);
+}
+.orbit-edit-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-accent) 82%, var(--c-text));
+}
+.orbit-edit-headmeta {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--c-muted);
+}
+.orbit-edit-headfoot {
+  padding-top: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  font-size: 11px;
+  color: var(--c-muted);
+}
+.orbit-edit-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 640px) {
+  .orbit-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.orbit-editsection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-editsection-head { display: flex; flex-direction: column; gap: 4px; }
+.orbit-editsection-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 680;
+  letter-spacing: -.005em;
+  color: var(--c-text);
+}
+.orbit-editsection-title svg { color: color-mix(in srgb, var(--c-accent) 78%, var(--c-text)); }
+.orbit-editsection-note {
+  max-width: 74ch;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--c-muted);
+  text-wrap: pretty;
+}
+.orbit-editrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-text) 2.5%, transparent);
+  cursor: pointer;
+}
+.orbit-editrow:hover { border-color: color-mix(in srgb, var(--c-text) 18%, transparent); }
+.orbit-editrow-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--c-muted);
+  text-wrap: pretty;
+}
+
 /* -------------------------------------------------------------------- dialogs
 
    A dialog is a sheet of the app's own surface lifted off the page, not a card

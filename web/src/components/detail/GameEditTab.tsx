@@ -160,17 +160,17 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
   }, []);
 
   return (
-    <section className="space-y-4">
-      <div className="space-y-3 rounded-xl border border-accent/25 bg-panel2/50 p-4">
-        <div className="flex items-start gap-3">
+    <section className="orbit-edit">
+      <div className="orbit-edit-head">
+        <div className="flex items-start gap-4">
           <PortraitFrame
             src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
             className="border border-line shadow-lg"
           />
           <div className="min-w-0 flex-1 space-y-1">
-            <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
-              <Pencil className="size-3.5" />
-              Review details
+            <span className="orbit-edit-kicker">
+              <Pencil className="size-3" />
+              Editing this game
             </span>
             <label className="block">
               <span className="sr-only">Title</span>
@@ -182,19 +182,17 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
                 aria-label="Game title"
               />
             </label>
-            <p className="text-xs leading-relaxed text-muted">
+            <p className="orbit-edit-headmeta">
               {developer || releaseYear || genres
                 ? [developer, releaseYear, genres].filter(Boolean).join(' · ')
                 : 'Anything the store got wrong, or Orbit guessed from a file name, can be fixed below.'}
             </p>
           </div>
         </div>
-        <p className="border-t border-line/70 pt-3 text-[11px] text-muted">
-          Changes stay here until you save.
-        </p>
+        <p className="orbit-edit-headfoot">Changes are kept as you make them. There is no save button.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="orbit-edit-grid">
 
         <label className="block">
           <span className={labelCls}>Author / developer</span>
@@ -250,11 +248,17 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </label>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
-        <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">
-          <Image className="size-3.5" />
-          Artwork
-        </h4>
+      <section className="orbit-editsection">
+        <header className="orbit-editsection-head">
+          <h4 className="orbit-editsection-title">
+            <Image className="size-3.5" />
+            Artwork
+          </h4>
+          <p className="orbit-editsection-note">
+            A cover is a portrait poster; a backdrop is the wide picture behind the title. Either can be a
+            file on this PC or a link.
+          </p>
+        </header>
 
         <div className="flex gap-3">
           <PortraitFrame
@@ -348,9 +352,9 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
             say('Cover chosen. Closing this keeps it.');
           }}
         />
-      </div>
+      </section>
 
-      <label className="flex items-start gap-3 rounded-xl border border-line bg-panel2/40 p-3">
+      <label className="orbit-editrow">
         <input
           type="checkbox"
           checked={planned}
@@ -358,16 +362,21 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
           className="mt-0.5 size-4 accent-[var(--c-accent)]"
         />
         <span>
-          <span className="block text-sm font-medium">Not owned yet</span>
-          <span className="block text-xs text-muted">
-            Tick this for a game you mean to play but do not have here. It stays on the Backlog page instead of the
-            library, with no Play button, until a program is pointed at it.
+          <span className="block text-[13px] font-semibold">Not owned yet</span>
+          <span className="orbit-editrow-hint">
+            Tick this for a game you mean to play but do not have here. It stays on the Backlog page instead
+            of the library, with no Play button, until a program is pointed at it.
           </span>
         </span>
       </label>
 
-      <section className="space-y-3 rounded-xl border border-line bg-panel2/40 p-3">
-        <h4 className="text-xs font-semibold uppercase tracking-widest text-muted">Library details</h4>
+      <section className="orbit-editsection">
+        <header className="orbit-editsection-head">
+          <h4 className="orbit-editsection-title">In the library</h4>
+          <p className="orbit-editsection-note">
+            Where the game sits on the shelf, and whether it is one you want to see first.
+          </p>
+        </header>
         <label className="block max-w-sm">
           <span className={labelCls}>Status</span>
           <Select
@@ -398,14 +407,17 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         <LaunchEditor game={game} saveOnClose onSave={(launch, companions) => onUpdate({ launch, companions })} />
       )}
 
-      <div className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
-        <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">
-          <Sparkles className="size-3.5" />
-          HowLongToBeat, in hours
-        </h4>
-        <p className="text-[11px] text-muted">
-          These come from a lookup, and anything typed here is kept instead. Empty means no time known.
-        </p>
+      <section className="orbit-editsection">
+        <header className="orbit-editsection-head">
+          <h4 className="orbit-editsection-title">
+            <Sparkles className="size-3.5" />
+            How long it takes
+          </h4>
+          <p className="orbit-editsection-note">
+            From a HowLongToBeat lookup, in hours. Anything typed here is kept instead; empty means no time
+            is known.
+          </p>
+        </header>
         <div className="grid grid-cols-3 gap-2">
           <label className="block">
             <span className={labelCls}>Main story</span>
@@ -433,7 +445,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
           <RotateCcw className="size-3.5" />
           Look these up again
         </button>
-      </div>
+      </section>
 
       <div className="block">
         <span className={labelCls}>
