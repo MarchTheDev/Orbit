@@ -2685,42 +2685,6 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
   color: var(--c-text);
 }
 
-.orbit-stats-hero {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  min-height: 268px;
-  margin-top: 16px;
-  padding: 26px;
-  border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
-}
-.orbit-stats-hero-art {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background-size: cover;
-  background-position: center 24%;
-  opacity: .6;
-}
-.orbit-stats-hero-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--c-bg) 78%, transparent) 0%, color-mix(in srgb, var(--c-bg) 26%, transparent) 62%, transparent 100%),
-    linear-gradient(0deg, color-mix(in srgb, var(--c-bg) 88%, transparent) 0%, transparent 62%);
-}
-.orbit-stats-hero-top {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  display: flex;
-  gap: 6px;
-}
 .orbit-period {
   display: flex;
   gap: 2px;
@@ -2746,48 +2710,167 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   background: color-mix(in srgb, var(--c-text) 88%, transparent);
   color: var(--c-bg);
 }
-.orbit-stats-caption {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--c-text) 62%, transparent);
-}
-.orbit-stats-number {
-  margin-top: 8px;
-  font-size: clamp(48px, 6.4vw, 84px);
-  font-weight: 800;
-  line-height: .88;
-  letter-spacing: -.045em;
-  font-variant-numeric: tabular-nums;
-}
-.orbit-stats-number small {
-  font-size: .42em;
-  font-weight: 700;
-  letter-spacing: -.02em;
-  color: color-mix(in srgb, var(--c-text) 70%, transparent);
-}
-.orbit-stats-badges {
+
+
+
+
+
+
+
+/* The page's own bar: how far back the whole page counts, and one line saying
+   what that currently amounts to. */
+.orbit-statsbar {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 12px;
+  margin-top: 16px;
+}
+.orbit-statsbar .orbit-period {
+  border-color: color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  backdrop-filter: none;
+}
+.orbit-period button[aria-pressed='true'] {
+  background: var(--c-accent);
+  color: var(--c-onaccent);
+}
+.orbit-statsbar-lede { font-size: 11.5px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+
+/* Four figures across the top, each with its number in the largest type on the
+   page and one line under it saying what the number is worth. No poster behind
+   them: a number is easier to read on a flat surface. */
+.orbit-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   margin-top: 14px;
 }
-.orbit-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 27px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
-  background: color-mix(in srgb, var(--c-bg) 52%, transparent);
-  font-size: 11.5px;
-  color: color-mix(in srgb, var(--c-text) 72%, transparent);
-  backdrop-filter: blur(8px);
+@media (min-width: 900px) {
+  .orbit-figures { grid-template-columns: 1.35fr 1fr 1fr 1.15fr; }
 }
-html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: none; }
-.orbit-badge b { color: var(--c-text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.orbit-figure {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 15px 13px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 62%, transparent);
+}
+.orbit-figure.is-lead {
+  border-color: color-mix(in srgb, var(--c-accent) 26%, transparent);
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--c-accent) 9%, transparent), transparent 62%),
+    color-mix(in srgb, var(--c-panel) 62%, transparent);
+}
+.orbit-figure-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.orbit-figure-value {
+  margin-top: 7px;
+  font-size: clamp(30px, 3.4vw, 46px);
+  font-weight: 780;
+  line-height: .92;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text);
+}
+.orbit-figure-value small {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--c-muted);
+}
+.orbit-figure-value.is-quiet { color: var(--c-muted); }
+.orbit-figure.is-lead .orbit-figure-value { color: color-mix(in srgb, var(--c-accent) 88%, var(--c-text)); }
+.orbit-figure-foot {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 11px;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-figure-game { display: flex; align-items: center; gap: 9px; margin-top: 8px; min-width: 0; }
+.orbit-figure-gameart {
+  flex: none;
+  width: 26px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+}
+.orbit-figure-game b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+.orbit-figure-game em {
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two panels side by side where both are short: the backlog suggestion and the
+   shape of the library. */
+.orbit-stats-split {
+  display: grid;
+  gap: 0;
+}
+@media (min-width: 1080px) {
+  .orbit-stats-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; }
+}
+.orbit-playnext { display: grid; gap: 2px; margin-top: 12px; }
+.orbit-playnext button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap);
+}
+.orbit-playnext button:hover { background: color-mix(in srgb, var(--c-text) 6%, transparent); }
+.orbit-playnext-art {
+  flex: none;
+  width: 30px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 11%, transparent);
+}
+.orbit-playnext b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+.orbit-playnext em { display: block; font-size: 10.5px; font-style: normal; color: var(--c-muted); }
+.orbit-panel-empty {
+  margin-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--c-muted);
+  max-width: 52ch;
+  text-wrap: pretty;
+}
 
 .orbit-stats-panel {
   margin-top: 18px;

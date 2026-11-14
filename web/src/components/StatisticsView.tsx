@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  BarChart3, BookOpen, CalendarDays, Clock, Flame, FolderOpen, Gamepad2, Images, ListOrdered,
+  BarChart3, BookOpen, CalendarDays, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
   NotebookPen, Play, Trash2, Trophy,
 } from 'lucide-react';
 import type { Game, GameStatus, Session, Settings } from '../types';
@@ -8,9 +8,8 @@ import {
   listSessions, overlayDelete, overlayGallery, overlayOpen, revealInExplorer, type GalleryItem,
 } from '../services/native';
 import { fileSrc } from '../services/desktop';
-import { fmtDate, fmtMinutes } from '../utils/format';
+import { fmtMinutes } from '../utils/format';
 import { cn } from '../utils/cn';
-import { wideArt } from '../utils/art';
 import { Cover } from './ui/Cover';
 import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, captureFolderName, isCaptureKind, type CaptureKind } from './Captures';
 import { SessionsView } from './SessionsView';
@@ -169,6 +168,27 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
  * that made it. Sessions, Journal and Backlog are the same rooms as ever,
  * folded in here rather than repeated in the menu.
  */
+/** A panel of the page: a title, a line about it, and whatever it holds. */
+function SectionPanel({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="orbit-stats-panel">
+      <div className="orbit-stats-panel-head">
+        <h2>{title}</h2>
+        {note && <span>{note}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export function StatisticsView({
   games,
   journalGames,
@@ -353,7 +373,6 @@ export function StatisticsView({
     .map(([id, secs]) => ({ game: byGame.get(id), secs }))
     .filter((row): row is { game: Game; secs: number } => Boolean(row.game))
     .sort((a, b) => b.secs - a.secs);
-  const topGame = ranked[0]?.game ?? games.filter((game) => game.playSecs > 0).sort((a, b) => b.playSecs - a.playSecs)[0];
 
   // Every day with a session, for the streak. A streak that ended yesterday
   // still counts until today is over.
@@ -421,62 +440,84 @@ export function StatisticsView({
 
       {tab === 'overview' ? (
         <>
-          <section className="orbit-stats-hero">
-            <div
-              className="orbit-stats-hero-art"
-              aria-hidden
-              style={
-                topGame && wideArt(topGame)
-                  ? { backgroundImage: `url("${wideArt(topGame)}")` }
-                  : {
-                      backgroundImage: `radial-gradient(110% 90% at 78% 14%, hsl(${topGame?.hue ?? 220} 46% 34% / .7), transparent 64%), radial-gradient(80% 70% at 8% 92%, hsl(${topGame?.hue ?? 260} 42% 26% / .5), transparent 60%)`,
-                      backgroundSize: 'auto, auto',
-                    }
-              }
-            />
-            <div className="orbit-stats-hero-scrim" aria-hidden />
-            <div className="orbit-stats-hero-top">
-              <div className="orbit-period" role="group" aria-label="How far back to count">
-                {(
-                  [
-                    ['month', 'Month'],
-                    ['year', 'Year'],
-                    ['all', 'All time'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button key={id} aria-pressed={period === id} onClick={() => setPeriod(id)}>
-                    {label}
-                  </button>
-                ))}
-              </div>
+          {/* The period is a property of the whole page, not of one chart, so it
+              sits in the header where every panel below can see it. */}
+          <div className="orbit-statsbar">
+            <div className="orbit-period" role="group" aria-label="How far back to count">
+              {([
+                ['month', '30 days'],
+                ['year', 'Year'],
+                ['all', 'All time'],
+              ] as const).map(([id, label]) => (
+                <button key={id} aria-pressed={period === id} onClick={() => setPeriod(id)}>
+                  {label}
+                </button>
+              ))}
             </div>
-            <p className="orbit-stats-caption">Played {PERIOD_LABEL[period]}</p>
-            <p className="orbit-stats-number">
-              {hours >= 1 ? Math.floor(hours) : Math.max(0, Math.floor(totalSecs / 60))}
-              <small>{hours >= 1 ? 'h' : 'm'}</small>
-              {hours >= 1 && Math.round((totalSecs % 3600) / 60) >= 10 && (
-                <small> {Math.round((totalSecs % 3600) / 60)}m</small>
+            <span className="orbit-statsbar-lede">
+              {loaded
+                ? `${PERIOD_LABEL[period]} · ${inPeriod.length} ${inPeriod.length === 1 ? 'session' : 'sessions'} across ${days.size} ${days.size === 1 ? 'day' : 'days'}`
+                : 'Reading sessions…'}
+            </span>
+          </div>
+
+          {/* Four numbers, said plainly. The hero picture is behind the page
+              rather than under the numbers: a blurred cover the size of a panel
+              was decoration that made the one number on it harder to read. */}
+          <section className="orbit-figures">
+            <div className="orbit-figure is-lead">
+              <p className="orbit-figure-label">Played {PERIOD_LABEL[period]}</p>
+              <p className="orbit-figure-value">
+                {hours >= 1 ? Math.floor(hours).toLocaleString() : Math.max(0, Math.floor(totalSecs / 60)).toLocaleString()}
+                <small>{hours >= 1 ? 'hours' : 'minutes'}</small>
+              </p>
+              <p className="orbit-figure-foot">
+                {hours >= 1 && Math.round((totalSecs % 3600) / 60) >= 1
+                  ? `and ${Math.round((totalSecs % 3600) / 60)} minutes more`
+                  : inPeriod.length > 0 ? 'Nothing over the hour yet' : 'Nothing tracked yet'}
+              </p>
+            </div>
+            <div className="orbit-figure">
+              <p className="orbit-figure-label">Sessions</p>
+              <p className="orbit-figure-value">{inPeriod.length.toLocaleString()}</p>
+              <p className="orbit-figure-foot">
+                {sessions.length > 0
+                  ? `${fmtMinutes(Math.round(sessions.reduce((sum, row) => sum + row.durationSecs, 0) / sessions.length / 60))} on average`
+                  : 'No sessions yet'}
+              </p>
+            </div>
+            <div className="orbit-figure">
+              <p className="orbit-figure-label">Day streak</p>
+              <p className="orbit-figure-value">{streak}<small>{streak === 1 ? 'day' : 'days'}</small></p>
+              <p className="orbit-figure-foot">{streak > 0 ? (allDays.has(startOfDay(now)) ? 'Counting today' : 'Ended yesterday') : 'Play today to start one'}</p>
+            </div>
+            <div className="orbit-figure">
+              <p className="orbit-figure-label">Most played</p>
+              {ranked[0] ? (
+                <>
+                  <p className="orbit-figure-game">
+                    <span className="orbit-figure-gameart"><Cover game={ranked[0].game} className="size-full" fit="cover" /></span>
+                    <span className="min-w-0">
+                      <b className="truncate">{ranked[0].game.title}</b>
+                      <em>{fmtMinutes(ranked[0].secs / 60)}</em>
+                    </span>
+                  </p>
+                  <p className="orbit-figure-foot">{inPeriod.length > 0 ? `${Math.round((ranked[0].secs / Math.max(1, totalSecs)) * 100)}% of the period` : ''}</p>
+                </>
+              ) : (
+                <p className="orbit-figure-value is-quiet">—</p>
               )}
-            </p>
-            <div className="orbit-stats-badges">
-              <span className="orbit-badge"><b>{inPeriod.length}</b> sessions</span>
-              <span className="orbit-badge"><b>{days.size}</b> days played</span>
-              {streak > 0 && <span className="orbit-badge"><Flame className="size-3" /> <b>{streak}</b> day streak</span>}
-              {ranked[0] && <span className="orbit-badge">Most played <b>{ranked[0].game.title}</b></span>}
             </div>
           </section>
 
-          <section className="orbit-stats-panel">
-            <div className="orbit-stats-panel-head">
-              <h2>
-                {period === 'month' ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
-              </h2>
-              <span>
-                {busiest && busiest.total > 0
-                  ? `Busiest: ${busiest.label} · ${fmtMinutes(busiest.total / 60)}`
-                  : loaded ? 'Nothing tracked yet' : 'Reading sessions…'}
-              </span>
-            </div>
+          <SectionPanel
+            title={period === 'month' ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
+            note={
+              busiest && busiest.total > 0
+                ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)}`
+                : loaded ? 'Nothing tracked yet' : 'Reading sessions…'
+            }
+          >
             <div className={`orbit-chart${hasData ? '' : ' orbit-chart-quiet'}`} role="img" aria-label={`Playtime ${PERIOD_LABEL[period]}, ${fmtMinutes(totalSecs / 60)}`}>
               {!hasData ? (
                 <p>{loaded ? 'Nothing tracked in this period. Play something, or widen the period.' : 'Reading sessions…'}</p>
@@ -517,14 +558,72 @@ export function StatisticsView({
                 )}
               </div>
             )}
-          </section>
+          </SectionPanel>
+
+          <div className="orbit-stats-split">
+            <SectionPanel title="Something to play next" note="Chosen from the backlog">
+              {allGames.some((game) => game.planned) ? (
+                <ul className="orbit-playnext">
+                  {allGames
+                    .filter((game) => game.planned)
+                    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title))
+                    .slice(0, 4)
+                    .map((game) => (
+                      <li key={game.id}>
+                        <button type="button" onClick={() => onOpenGame(game.id)}>
+                          <span className="orbit-playnext-art"><Cover game={game} className="size-full" fit="cover" /></span>
+                          <span className="min-w-0">
+                            <b className="truncate">{game.title}</b>
+                            <em>
+                              {[game.meta?.genres?.[0], game.meta?.releaseYear]
+                                .filter(Boolean)
+                                .join(' · ') || 'In the backlog'}
+                            </em>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="orbit-panel-empty">
+                  Nothing planned. Games you add to the Backlog show up here, so there is always
+                  something on the shelf rather than a wall of covers.
+                </p>
+              )}
+            </SectionPanel>
+
+            <SectionPanel title="The shape of the library" note={`${games.length} games`}>
+              <div className="orbit-statusbar" aria-hidden>
+                {(Object.keys(statusCounts) as GameStatus[]).map((status) => (
+                  <i
+                    key={status}
+                    style={{ width: `${(statusCounts[status] / librarySize) * 100}%`, background: STATUS_COLOUR[status] }}
+                  />
+                ))}
+              </div>
+              <div className="orbit-statuslegend">
+                {(Object.keys(statusCounts) as GameStatus[]).map((status) => (
+                  <span key={status}>
+                    <i style={{ background: STATUS_COLOUR[status] }} />
+                    {status === 'backlog' ? 'In the backlog' : status === 'playing' ? 'Playing' : status === 'completed' ? 'Completed' : 'Dropped'}
+                    <b>{statusCounts[status]}</b>
+                  </span>
+                ))}
+                <span>
+                  <Trophy className="size-3" />
+                  {games.filter((game) => game.favorite).length} favorites
+                </span>
+              </div>
+              <div className="orbit-stats-facts">
+                <p><Clock className="size-3.5" /> Longest session <b>{longest > 0 ? fmtMinutes(longest / 60) : '—'}</b></p>
+                <p><CalendarDays className="size-3.5" /> Tracked for <b>{activeDays > 0 ? `${activeDays} days` : 'no time yet'}</b></p>
+                <p><Gamepad2 className="size-3.5" /> Games played <b>{games.filter((game) => game.sessionCount > 0).length}</b></p>
+              </div>
+            </SectionPanel>
+          </div>
 
           {topGames.length > 0 && (
-            <section className="orbit-stats-panel">
-              <div className="orbit-stats-panel-head">
-                <h2>Most played</h2>
-                <span>Click a cover to open the game</span>
-              </div>
+            <SectionPanel title="Most played" note="Click a cover to open the game">
               <div className="orbit-topgames">
                 {topGames.map((game) => (
                   <button key={game.id} className="orbit-topgame" onClick={() => onOpenGame(game.id)} title={`Open ${game.title}`}>
@@ -534,41 +633,8 @@ export function StatisticsView({
                   </button>
                 ))}
               </div>
-            </section>
+            </SectionPanel>
           )}
-
-          <section className="orbit-stats-panel">
-            <div className="orbit-stats-panel-head">
-              <h2>The collection</h2>
-              <span>{games.length} games · {fmtDate(new Date().toISOString())}</span>
-            </div>
-            <div className="orbit-statusbar" aria-hidden>
-              {(Object.keys(statusCounts) as GameStatus[]).map((status) => (
-                <i
-                  key={status}
-                  style={{ width: `${(statusCounts[status] / librarySize) * 100}%`, background: STATUS_COLOUR[status] }}
-                />
-              ))}
-            </div>
-            <div className="orbit-statuslegend">
-              {(Object.keys(statusCounts) as GameStatus[]).map((status) => (
-                <span key={status}>
-                  <i style={{ background: STATUS_COLOUR[status] }} />
-                  {status === 'backlog' ? 'In the backlog' : status === 'playing' ? 'Playing' : status === 'completed' ? 'Completed' : 'Dropped'}
-                  <b>{statusCounts[status]}</b>
-                </span>
-              ))}
-              <span>
-                <Trophy className="size-3" />
-                {games.filter((game) => game.favorite).length} favorites
-              </span>
-            </div>
-            <div className="orbit-stats-facts">
-              <p><Clock className="size-3.5" /> Longest session <b>{longest > 0 ? fmtMinutes(longest / 60) : '—'}</b></p>
-              <p><CalendarDays className="size-3.5" /> Tracked for <b>{activeDays > 0 ? `${activeDays} days` : 'no time yet'}</b></p>
-              <p><Gamepad2 className="size-3.5" /> Average session <b>{sessions.length > 0 ? fmtMinutes(Math.round(sessions.reduce((sum, row) => sum + row.durationSecs, 0) / sessions.length / 60)) : '—'}</b></p>
-            </div>
-          </section>
         </>
       ) : tab === 'sessions' ? (
         <SessionsView games={games} onChanged={onChanged} onOpenGame={onOpenGame} embedded />
