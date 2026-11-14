@@ -90,7 +90,7 @@ export function Modal({
       data-overlay-hit="1"
       className={cn(
         'modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center p-4',
-        bare ? 'bg-bg/85' : 'bg-black/60 backdrop-blur-sm',
+        bare ? 'bg-bg/85' : 'bg-black/70',
       )}
       onClick={(event) => {
         // Ignore clicks that bubble out of a dialog and only close the top
@@ -103,7 +103,7 @@ export function Modal({
       <div
         className={cn(
           'modal-panel-enter flex w-full flex-col overflow-hidden border border-line bg-panel shadow-2xl',
-          bare ? 'max-h-[92vh] max-w-6xl rounded-3xl' : `max-h-[88vh] ${SIZES[size]} rounded-2xl`,
+          bare ? 'max-h-[92vh] max-w-6xl rounded-2xl' : `max-h-[88vh] ${SIZES[size]} rounded-2xl`,
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -112,7 +112,7 @@ export function Modal({
             frame with room to breathe: px-6 py-5. */}
         <div className="flex items-start justify-between gap-4 border-b border-line px-6 pb-4 pt-5">
           <div>
-            <h2 className="text-lg font-semibold">{title}</h2>
+            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
             {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
           </div>
           <button
@@ -131,9 +131,9 @@ export function Modal({
   );
 }
 
-export const inputCls = 'w-full rounded-lg border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent';
-export const labelCls = 'mb-1 block text-xs uppercase tracking-widest text-muted';
+export const inputCls = 'w-full rounded-lg border border-line bg-panel2 px-3 py-2 text-sm outline-none transition hover:border-muted/60 focus:border-accent';
+export const labelCls = 'orbit-kicker mb-1.5 block';
 export const btnPrimary = 'btn-accent rounded-lg px-4 py-2 text-sm';
-export const btnGhost = 'rounded-lg border border-line bg-panel2 px-4 py-2 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-40';
+export const btnGhost = 'btn-quiet rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed';
 /** A Browse button: looks like part of the field it fills. */
 export const btnBrowse = 'shrink-0 rounded-lg border border-line bg-panel px-3 py-2 text-sm text-muted hover:border-accent hover:text-accent';

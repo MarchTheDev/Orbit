@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'nebula',
   customThemes: [],
   fontFamily: 'system',
-  libraryFilterOrder: ['all', 'playing', 'completed', 'dropped', 'favorites', 'unplayed', 'hidden'],
+  libraryFilterOrder: ['all', 'favorites', 'hidden'],
   hiddenLibraryFilters: [],
   libraryFolders: [],
   steamOnLaunch: false,

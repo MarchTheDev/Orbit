@@ -166,13 +166,13 @@ export function MoveDriveModal({ game, folders, onClose, job, onStartMove, onMin
               {progress === null ? (
                 // A folder too large to measure still moves; Orbit just cannot
                 // say how far along it is, and a bar stuck on 0% would be a lie.
-                <div className="h-2 overflow-hidden rounded-full bg-bg">
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-accent to-accent2" />
+                <div className="orbit-rail">
+                  <span className="w-1/3 animate-pulse" />
                 </div>
               ) : (
-                <div className="h-2 overflow-hidden rounded-full bg-bg">
-                  <div
-                    className="h-full bg-gradient-to-r from-accent to-accent2 transition-all"
+                <div className="orbit-rail">
+                  <span
+                    className="transition-all"
                     style={{ width: `${Math.round(progress * 100)}%` }}
                   />
                 </div>

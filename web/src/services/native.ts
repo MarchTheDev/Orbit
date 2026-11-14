@@ -781,6 +781,17 @@ export function dataDir(): Promise<string | null> {
   return t ? t.core.invoke<string>('data_dir') : Promise.resolve(null);
 }
 
+/** The folder Orbit's own logs are written to. */
+export function logsDir(): Promise<string | null> {
+  const t = tauri();
+  return t ? t.core.invoke<string>('logs_dir').catch(() => null) : Promise.resolve(null);
+}
+
+/** The last lines of the newest log, oldest first. */
+export function logsTail(lines = 160): Promise<string[]> {
+  return call<string[]>('logs_tail', { lines }, () => []);
+}
+
 /**
  * How far this machine's clock is from UTC, in minutes.
  *
@@ -904,6 +915,18 @@ export function dataPortable(): Promise<boolean> {
 /** How much space Orbit's own files take. */
 export function dataDirSize(): Promise<number> {
   return call('data_dir_size', {}, async () => 0);
+}
+
+/** How much the replay workspace is holding in temporary clips. */
+export function cacheSize(): Promise<number> {
+  return call('cache_size', {}, async () => 0);
+}
+
+/** Empty the replay workspace. Answers with the bytes freed. */
+export function cacheClear(): Promise<number> {
+  return call('cache_clear', {}, async () => {
+    throw new Error('Clearing the cache needs the desktop app.');
+  });
 }
 
 // ------------------------------------------------------------------- the pad

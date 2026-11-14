@@ -105,13 +105,16 @@ export function Cover({
     <div
       className={cn('relative flex items-center justify-center overflow-hidden', className)}
       style={{
-        background: `radial-gradient(circle at 30% 20%, hsl(${game.hue} 80% 55%), hsl(${(game.hue + 60) % 360} 70% 22%) 70%)`,
+        // A dark observatory plate with the game's own hue as a low wash, so a
+        // library without artwork still reads as one set rather than a wall of
+        // saturated colour blocks.
+        background: `radial-gradient(circle at 32% 16%, hsl(${game.hue} 38% 38% / .42), transparent 64%), linear-gradient(165deg, var(--c-panel2), var(--c-panel))`,
         ...style,
       }}
     >
-      <div className="absolute size-[140%] rounded-full border border-white/15" />
-      <div className="absolute size-[90%] rounded-full border border-white/10" />
-      <span className="relative text-3xl font-black tracking-tight text-white/90 drop-shadow">{initials}</span>
+      <div className="absolute size-[140%] rounded-full border border-white/[0.07]" />
+      <div className="absolute size-[86%] rounded-full border border-white/[0.05]" />
+      <span className="relative text-2xl font-bold tracking-[0.06em] text-fg/85">{initials}</span>
     </div>
   );
 }

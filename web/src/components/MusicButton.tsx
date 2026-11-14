@@ -99,7 +99,7 @@ export function MusicButton({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-2 w-64 space-y-3 rounded-2xl border border-line bg-panel/95 p-4 text-sm shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-0 top-full z-40 mt-2 w-64 space-y-3 rounded-xl border border-line bg-panel p-4 text-sm shadow-2xl">
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-2 font-medium">
               <Volume2 className="size-4 text-accent" />

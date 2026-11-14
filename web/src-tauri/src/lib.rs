@@ -38,6 +38,7 @@ mod storage;
 mod store;
 mod transfer;
 mod update;
+mod webart;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1481,6 +1482,16 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
         }
     }
 
+    if picks.is_empty() && page == 0 {
+        // The same last step Heronite takes: when no store has a cover, the
+        // web is asked for one by name, and whatever comes back is offered as
+        // a choice rather than applied.
+        match webart::covers(title, 12).await {
+            Ok(found) => picks.extend(found),
+            Err(e) => log::warn!("Web image search offered nothing: {e}"),
+        }
+    }
+
     if picks.is_empty() {
         if let Some(reason) = cover_error {
             return Err(reason);
@@ -1752,6 +1763,53 @@ fn remember_wine(_settings: Option<&Settings>) {
 #[tauri::command]
 fn data_dir(orbit: State<'_, Orbit>) -> String {
     orbit.store.root().to_string_lossy().to_string()
+}
+
+/// Where Orbit's own log files live, for the Logs page.
+#[tauri::command]
+fn logs_dir(app: tauri::AppHandle) -> Result<String, String> {
+    app.path()
+        .app_log_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|error| error.to_string())
+}
+
+/// The last lines of the newest log.
+///
+/// Read rather than streamed: a log is small, and the page wants to show the
+/// end of the story rather than watch it being written.
+#[tauri::command]
+fn logs_tail(app: tauri::AppHandle, lines: Option<usize>) -> Result<Vec<String>, String> {
+    let dir = app.path().app_log_dir().map_err(|error| error.to_string())?;
+    let mut newest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(Vec::new()),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        let newer = match &newest {
+            Some((at, _)) => modified > *at,
+            None => true,
+        };
+        if newer {
+            newest = Some((modified, path));
+        }
+    }
+    let Some((_, path)) = newest else {
+        return Ok(Vec::new());
+    };
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let all: Vec<&str> = text.lines().collect();
+    let take = lines.unwrap_or(160).clamp(10, 2000);
+    let start = all.len().saturating_sub(take);
+    Ok(all[start..].iter().map(|line| line.to_string()).collect())
 }
 
 /// Whether this copy carries its own files, beside the program.
@@ -2216,6 +2274,44 @@ async fn data_dir_size(orbit: State<'_, Orbit>) -> Result<u64, String> {
         .map_err(|e| format!("Could not measure the data folder: {e}"))
 }
 
+/// The rolling replay buffer's workspace: the only thing in Orbit's data folder
+/// that is a cache rather than a record. A crash can leave a partial clip here,
+/// so it is worth both showing and clearing.
+fn replay_workspace(orbit: &Orbit) -> std::path::PathBuf {
+    orbit.store.root().join("replay")
+}
+
+/// How much the replay workspace is holding right now.
+#[tauri::command]
+async fn cache_size(orbit: State<'_, Orbit>) -> Result<u64, String> {
+    let dir = replay_workspace(orbit.inner());
+    tokio::task::spawn_blocking(move || storage::dir_size(&dir))
+        .await
+        .map_err(|e| format!("Could not measure the replay workspace: {e}"))
+}
+
+/// Empty the replay workspace, and say how much it freed.
+///
+/// While a game is being watched the rolling buffer is live, and deleting it
+/// would break the clip a player is about to save; the buffer is kept for the
+/// session and cleaned when the game stops.
+#[tauri::command]
+async fn cache_clear(orbit: State<'_, Orbit>) -> Result<u64, String> {
+    if overlay::status().playing {
+        return Err("A game is running. The replay buffer is cleared when the session ends.".into());
+    }
+    let dir = replay_workspace(orbit.inner());
+    tokio::task::spawn_blocking(move || {
+        let freed = storage::dir_size(&dir);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(|e| format!("Could not clear the cache: {e}"))?;
+        }
+        Ok(freed)
+    })
+    .await
+    .map_err(|e| format!("Could not clear the cache: {e}"))?
+}
+
 /// Open a folder with one file in it selected, so a path in the UI is one click
 /// from the files.
 ///
@@ -2489,6 +2585,17 @@ pub fn run() {
 
             app.manage(Orbit { db, runner, store, sizes, policy: Arc::clone(&policy) });
 
+            // On Windows Orbit carries its own title bar. The bar was already
+            // there, and the frame's copy stacked above it was the one strip of
+            // the window that did not belong to the app. The resize border and
+            // shadow stay, and the frame's buttons are drawn in the top bar
+            // (web/src/services/windowChrome.ts).
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_shadow(true);
+                let _ = window.set_decorations(false);
+            }
+
             if let Ok(current) = policy.lock() {
                 remember_minimize_policy(&current);
             }
@@ -2649,6 +2756,8 @@ pub fn run() {
             save_settings,
             cloud_quit,
             data_dir,
+            logs_dir,
+            logs_tail,
             data_portable,
             clock_offset,
             overlay_refused_shortcuts,
@@ -2657,6 +2766,8 @@ pub fn run() {
             proton_install,
             proton_remove,
             data_dir_size,
+            cache_size,
+            cache_clear,
             ambient_set,
             ambient_stop,
             ambient_file,

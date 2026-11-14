@@ -11,14 +11,11 @@ import { btnGhost } from './ui/Modal';
 import { Cover } from './ui/Cover';
 
 function Bar({ used, total }: { used: number; total: number | null }) {
-  if (!total || total <= 0) return <div className="h-2 rounded-full bg-panel2" />;
+  if (!total || total <= 0) return <div className="orbit-rail" />;
   const pct = Math.max(0, Math.min(100, (used / total) * 100));
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-panel2">
-      <div
-        className={pct > 90 ? 'h-full rounded-full bg-rose-500' : 'h-full rounded-full bg-gradient-to-r from-accent to-accent2'}
-        style={{ width: `${pct}%` }}
-      />
+    <div className="orbit-rail" title={`${Math.round(pct)}% used`}>
+      <span style={{ width: `${pct}%`, background: pct > 90 ? '#f43f5e' : undefined }} />
     </div>
   );
 }
@@ -139,16 +136,17 @@ export function StorageView({
     <div className="mx-auto max-w-[1400px] space-y-4 p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <HardDrive className="size-6 text-accent" />
-            Storage
-          </h1>
+          <p className="orbit-kicker flex items-center gap-1.5">
+            <HardDrive className="size-3 text-accent" />
+            Payload
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Storage</h1>
           <p className="mt-1 text-sm text-muted">
             Where the games in your library live, and how to move them somewhere with more room.
           </p>
         </div>
         <div className="text-right">
-          <p className="font-mono text-lg font-semibold">{fmtBytes(totalSize)}</p>
+          <p className="orbit-num font-mono text-lg font-semibold">{fmtBytes(totalSize)}</p>
           <p className="text-[11px] text-muted">
             {games.length} {games.length === 1 ? 'game' : 'games'}
             {movable < games.length && ` · ${games.length - movable} with no folder recorded`}
@@ -159,11 +157,11 @@ export function StorageView({
       {drives.length > 0 && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {drives.map((d) => (
-            <div key={d.drive} className="glass rounded-2xl px-4 py-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted">
+            <div key={d.drive} className="orbit-panel px-4 py-3">
+              <p className="orbit-kicker">
                 {driveLabel(d.drive)} {d.label && d.label !== '' ? d.label : ''}
               </p>
-              <p className="mt-0.5 text-xl font-bold">{fmtBytes(d.free)}</p>
+              <p className="orbit-num mt-1 text-xl font-bold">{fmtBytes(d.free)}</p>
               <p className="mb-2 text-[11px] text-muted">free of {fmtBytes(d.total)}</p>
               <Bar used={d.total - d.free} total={d.total} />
             </div>
@@ -171,7 +169,7 @@ export function StorageView({
         </div>
       )}
 
-      <section className="glass rounded-2xl p-4">
+      <section className="orbit-panel p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-muted">
             <HardDrive className="size-4" />
@@ -252,7 +250,7 @@ export function StorageView({
         )}
       </section>
 
-      <section className="glass rounded-2xl p-4">
+      <section className="orbit-panel p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Library folders</h2>
           <div className="flex-1" />

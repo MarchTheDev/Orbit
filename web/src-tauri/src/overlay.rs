@@ -1748,7 +1748,7 @@ pub fn gallery() -> Vec<GalleryItem> {
     collect_kind(&recordings, "recording", &mut found);
     collect_kind(&replays, "replay", &mut found);
     found.sort_by(|left, right| right.0.cmp(&left.0));
-    found.into_iter().take(36).map(|(_, item)| item).collect()
+    found.into_iter().map(|(_, item)| item).collect()
 }
 
 #[derive(Clone, Serialize)]

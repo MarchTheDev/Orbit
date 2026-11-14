@@ -196,7 +196,7 @@ check('up from the buttons reaches the top bar, where the way out is',
   document.activeElement?.closest('[data-tv-topbar]') !== null);
 check('and there is a button there that leaves TV mode',
   [...document.querySelectorAll('[data-tv-topbar] button')].some(
-    (button) => button.getAttribute('aria-label') === 'Leave TV mode',
+    (button) => button.getAttribute('aria-label') === 'Leave Stardeck',
   ));
 await key('ArrowRight');
 check('right in the bar stays in the bar instead of walking the rail',
@@ -257,9 +257,9 @@ check('escape on a game\'s page goes back to the rail rather than out of TV mode
 check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
 
 await key('Escape');
-check('escape leaves TV mode immediately without a closing animation',
-  left === 1 && !document.querySelector('.tv-shutdown'),
-  `left ${left} / shutdown ${!!document.querySelector('.tv-shutdown')}`);
+check('escape on the rail does not drop the player onto the desktop',
+  left === 0 && !!document.querySelector('[data-tv-cover]'),
+  `left ${left}`);
 
 console.log('a controller drives the same hub');
 
@@ -279,7 +279,7 @@ check('Start on the controller plays the game the hub is about',
 
 pad('orbit-pad-back');
 await act(async () => wait(320));
-check('Back on the controller leaves TV mode from the rail', left === 2, String(left));
+check('Back on the controller from the rail stays in TV mode', left === 0, String(left));
 
 // From a game's page the same press steps back to the rail, not out of the mode.
 await render(library);
@@ -288,7 +288,7 @@ await act(async () => {
 });
 pad('orbit-pad-back');
 await act(async () => wait(20));
-check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 2);
+check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 0);
 
 console.log('TV mode opens without entrance choreography');
 
@@ -405,7 +405,7 @@ await key('ArrowRight');
 check('right moves along the bar rather than into the rail',
   inBar() && document.activeElement !== sound && selected() === '0');
 check('and the way out is one of the stops on it',
-  document.activeElement?.getAttribute('aria-label') === 'Leave TV mode',
+  document.activeElement?.getAttribute('aria-label') === 'Leave Stardeck',
   String(document.activeElement?.getAttribute('aria-label')));
 
 played.length = 0;
@@ -570,17 +570,17 @@ padHost.remove();
 delete dom.window.__TAURI__;
 dom.window.document.hasFocus = hadFocus;
 
-console.log('the button is in the top bar, beside the sound');
+console.log('the bar keeps its rooms behind the menu, and Stardeck is one of them');
 
 const nav = await import('../src/components/TopNav.tsx');
 const source = await import('node:fs').then((fs) =>
   fs.readFileSync(new URL('../src/components/TopNav.tsx', import.meta.url), 'utf8'),
 );
-check('the bar has a TV control that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
-check('it sits beside the music control rather than at the far corner',
-  source.indexOf('onClick={onTv}') < source.indexOf('<MusicButton'));
-check('the TV button is a plain television, drawn like the icons beside it',
-  /aria-label="TV mode"/.test(source) &&
+check('the bar has a Stardeck entry that calls back out', typeof nav.TopNav === 'function' && source.includes('onTv'));
+check('Stardeck lives in the burger menu rather than on the bar itself',
+  source.indexOf('aria-label="Stardeck"') > source.indexOf('className="orbit-menu"'));
+check('the Stardeck row is a plain gamepad, drawn like the rows beside it',
+  /aria-label="Stardeck"/.test(source) &&
     !/orbit-tv-button|box-shadow|gradient/.test(source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400)),
   source.slice(source.indexOf('onClick={onTv}'), source.indexOf('onClick={onTv}') + 400));
 

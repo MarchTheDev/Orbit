@@ -299,17 +299,27 @@ export function GameDetail({
       {/* The slide is the shell. The scroller inside it never gets a transform,
           which is what made scrolling and moving the controller ring repaint
           the whole drawer after it had opened. */}
-      <aside className={`${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[460px] max-w-[calc(100vw-24px)]`}>
-      <div className="orbit-detail glass flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-3xl">
-        <div className="relative h-44 shrink-0 bg-panel">
+      <aside className={`${leaving ? 'drawer-out pointer-events-none' : slideIn ? 'drawer-in' : 'drawer-off'} fixed inset-y-3 right-3 z-50 flex w-[480px] max-w-[calc(100vw-24px)]`}>
+      <div className="orbit-detail flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-2xl border border-line">
+        <div className="relative h-48 shrink-0 overflow-hidden bg-panel">
+          {(game.meta?.backgroundUrl || game.meta?.headerUrl) && (
+            <img
+              src={game.meta.backgroundUrl ?? game.meta.headerUrl ?? ''}
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="absolute inset-0 size-full object-cover opacity-40"
+            />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-panel via-panel/75 to-panel/10" />
           <button
             onClick={beginClose}
             aria-label="Close"
-            className="absolute right-3 top-3 grid size-7 place-items-center rounded-lg text-muted hover:bg-panel2 hover:text-fg"
+            className="absolute right-3 top-3 z-10 grid size-8 place-items-center rounded-lg border border-line bg-bg/60 text-muted transition hover:text-fg"
           >
             <X className="size-4" />
           </button>
-          <div className="absolute bottom-0 left-0 flex items-end gap-4 p-5">
+          <div className="absolute bottom-0 left-0 z-10 flex items-end gap-4 p-5">
             <Cover game={game} className="h-28 w-20 rounded-lg [&_span]:text-lg" />
             <div className="pb-1">
               <input
@@ -323,9 +333,9 @@ export function GameDetail({
                 spellCheck={false}
                 aria-label="Game title"
                 title="Rename this game"
-                className="w-full max-w-[15rem] rounded-lg border border-transparent bg-transparent text-xl font-bold leading-tight outline-none hover:border-line focus:border-accent focus:bg-black/20"
+                className="orbit-display w-full max-w-[15rem] rounded-md border border-transparent bg-transparent text-2xl outline-none hover:border-line focus:border-accent focus:bg-bg/30"
               />
-              <p className="text-xs text-muted">
+              <p className="mt-1 text-xs text-muted">
                 {game.meta?.developer ?? 'Unknown developer'}
                 {game.meta?.releaseYear ? ` · ${game.meta.releaseYear}` : ''}
               </p>
@@ -333,7 +343,7 @@ export function GameDetail({
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel px-5 py-2 pr-4">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-panel px-5">
           {(
             [
               ['overview', 'Overview', Info],
@@ -349,18 +359,19 @@ export function GameDetail({
               type="button"
               data-orbit-detail-tab={id}
               onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
-                tab === id ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg'
+              className={`relative flex items-center gap-1.5 whitespace-nowrap px-3 py-3 text-xs font-medium transition-colors ${
+                tab === id ? 'text-fg' : 'text-muted hover:text-fg'
               }`}
             >
-              <Icon className="size-3.5" />
+              <Icon className={tab === id ? 'size-3.5 text-accent' : 'size-3.5'} />
               {label}
               {id === 'achievements' && !!game.achievements?.length && (
-                <span className="text-[10px] text-muted">
+                <span className="orbit-num text-[10px] text-muted">
                   {game.achievements.filter((a) => a.unlocked).length}/{game.achievements.length}
                 </span>
               )}
-              {id === 'log' && logCount > 0 && <span className="text-[10px] text-muted">{logCount}</span>}
+              {id === 'log' && logCount > 0 && <span className="orbit-num text-[10px] text-muted">{logCount}</span>}
+              {tab === id && <span aria-hidden className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-accent" />}
             </button>
           ))}
         </div>
@@ -528,7 +539,7 @@ export function GameDetail({
           )}
           <HltbCard game={game} onFetch={getHltb} loading={loadingHltb} error={hltbError} />
 
-          <section className="rounded-xl border border-line bg-panel2 p-4">
+          <section className="rounded-xl border border-line bg-panel2/60 p-4">
             <div className="mb-2 flex items-center justify-between gap-2">
               <h3 className="flex items-center gap-2 text-sm font-semibold">
                 <Info className="size-4 text-accent" />
@@ -574,7 +585,7 @@ export function GameDetail({
             {!!game.meta?.genres.length && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {game.meta.genres.map((g) => (
-                  <span key={g} className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent">
+                  <span key={g} className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted">
                     {g}
                   </span>
                 ))}
@@ -582,7 +593,7 @@ export function GameDetail({
             )}
           </section>
 
-          <section className="rounded-xl border border-line bg-panel2 p-4">
+          <section className="rounded-xl border border-line bg-panel2/60 p-4">
             {/* Where the files are is a Storage question, and the paths that used
                 to be printed here were two lines of C:\\Program Files nobody
                 read. What the drawer is asked is how much room the game takes. */}

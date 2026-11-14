@@ -3,20 +3,37 @@ import {
   Check,
   CircleAlert,
   CircleCheck,
+  Download,
   Eye,
   EyeOff,
   FolderOpen,
+  Images,
   Info,
+  LayoutGrid,
+  List,
   LoaderCircle,
   MoveRight,
+  Palette,
   Pencil,
   Play,
+  ScrollText,
   Square,
   Star,
   Trash2,
   X,
 } from 'lucide-react';
-import type { Game, LauncherGame, OtherLauncher, Page, Settings, SortKey, ViewMode } from './types';
+import type {
+  CoverShape,
+  Game,
+  GameSection,
+  GridLabel,
+  LauncherGame,
+  OtherLauncher,
+  Page,
+  Settings,
+  ShelfSize,
+  SortKey,
+} from './types';
 import { useLibrary } from './hooks/useLibrary';
 import { useSession } from './hooks/useSession';
 import { useGamepad } from './hooks/useGamepad';
@@ -47,6 +64,9 @@ import {
   overlayShowPins,
   setClockOffset,
   addGameLog,
+  dataDir,
+  logsDir,
+  overlayOpenKind,
 } from './services/native';
 import { onFileDrop } from './services/desktop';
 import { ambient } from './services/ambient';
@@ -56,15 +76,14 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import { Hero } from './components/Hero';
-import { Toolbar, type Filter } from './components/Toolbar';
 import { Logo } from './components/ui/Logo';
-import { GameGrid } from './components/GameGrid';
-import { GameList } from './components/GameList';
+import { LibraryView, type LibraryMode, type ShelfLayout } from './components/LibraryView';
+import { StatisticsView, type StatsTab } from './components/StatisticsView';
 import { GameDetail } from './components/detail/GameDetail';
 import { SavesView } from './components/SavesView';
 import { GameEditDialog } from './components/detail/GameEditDialog';
@@ -86,6 +105,7 @@ import { Startup } from './components/Startup';
 import { fmtClock } from './utils/format';
 import { moveInOrder } from './utils/reorder';
 import { inLibraryShelf, libraryCount, onDisk, onJournalPage } from './utils/library';
+import { LIBRARY_FILTERS, type Filter } from './data/libraryFilters';
 import { gameFromLauncher, newLauncherGames } from './utils/launcherGame';
 import { announce, onToast, say, type ToastMessage } from './utils/toast';
 import { APP_VERSION } from './version';
@@ -103,7 +123,7 @@ function FilledStar({ className }: { className?: string }) {
 }
 
 const SORT_KEYS: SortKey[] = ['title', 'lastPlayed', 'playtime', 'added', 'size', 'manual'];
-const LIBRARY_FILTER_KEYS: Filter[] = ['all', 'favorites', 'playing', 'completed', 'dropped', 'unplayed', 'hidden'];
+const LIBRARY_FILTER_KEYS: Filter[] = LIBRARY_FILTERS.map((filter) => filter.id);
 
 function savedSort(): SortKey {
   const value = localStorage.getItem('orbit.sort');
@@ -113,6 +133,71 @@ function savedSort(): SortKey {
 function savedFilter(): Filter {
   const value = localStorage.getItem('orbit.filter');
   return LIBRARY_FILTER_KEYS.includes(value as Filter) ? value as Filter : 'all';
+}
+
+/** Details puts the game's page beside the shelf; Grid is the cover wall. */
+function savedMode(): LibraryMode {
+  return localStorage.getItem('orbit.library.mode') === 'grid' ? 'grid' : 'details';
+}
+
+function savedRail(): ShelfLayout {
+  return localStorage.getItem('orbit.library.rail') === 'list' ? 'list' : 'covers';
+}
+
+function savedShelfSize(): ShelfSize {
+  const value = localStorage.getItem('orbit.library.shelf');
+  return value === 'small' || value === 'large' ? value : 'medium';
+}
+
+function savedShape(): CoverShape {
+  const value = localStorage.getItem('orbit.library.shape');
+  return value === '2:3' || value === '1:1' || value === '16:9' ? value : '3:4';
+}
+
+function savedGridLabel(): GridLabel {
+  const value = localStorage.getItem('orbit.library.label');
+  return value === 'nothing' || value === 'title' || value === 'info' ? value : 'title-info';
+}
+
+const ALL_SECTIONS: GameSection[] = ['overview', 'gallery', 'journal', 'achievements'];
+
+/**
+ * A place the window has been, for Back and Forward.
+ *
+ * `focusId` is the game the library's shelf had selected: it is kept beside the
+ * page rather than in it because the shelf's selection lives inside the
+ * library, and the history is the window's business. Without it, Back from a
+ * game's page landed on whichever game the shelf happened to be showing.
+ */
+interface Step {
+  page: Page;
+  selectedId: string | null;
+  mode: LibraryMode;
+  rail: ShelfLayout;
+  focusId?: string | null;
+}
+
+/**
+ * The grid's cover width, from a setting that used to be a percentage.
+ *
+ * Older copies stored 70-170 (percent of a 150px tile) under the same key, and
+ * a percentage is never a sensible pixel width below 110, so anything smaller
+ * is read the old way. The result is what Heronite offers: 110 to 240 pixels.
+ */
+function coverWidthFromSetting(value?: number): number {
+  if (!value) return 150;
+  const pixels = value < 110 ? Math.round(150 * (value / 100)) : Math.round(value);
+  return Math.min(240, Math.max(110, pixels));
+}
+
+function savedSections(): GameSection[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem('orbit.library.sections') ?? 'null');
+    if (Array.isArray(value)) return ALL_SECTIONS.filter((section) => value.includes(section));
+  } catch {
+    // A damaged value is no reason to hide the page's sections.
+  }
+  return ALL_SECTIONS;
 }
 
 export default function App() {
@@ -137,6 +222,15 @@ export default function App() {
   // Keep the rest of Orbit available and leave the overlay settings untouched.
   const overlayAvailable = !isNative() || desktopOs() !== 'linux';
   const [page, setPage] = useState<Page>('library');
+  /** A genre the palette asked the library to show. */
+  const [libraryGenre, setLibraryGenre] = useState<string | null>(null);
+  /** A game the history wants the shelf to select again. */
+  const [historyFocus, setHistoryFocus] = useState<{ id: string; page: Page; token: number } | null>(null);
+  const historyFocusToken = useRef(0);
+  /** Whether each way through the history would actually go somewhere. */
+  const [historyDepth, setHistoryDepth] = useState({ back: false, ahead: false });
+  /** Which room of Statistics is open, so the palette can land on the Album. */
+  const [statsTab, setStatsTab] = useState<StatsTab>('overview');
   /** TV mode: the library fullscreen, read from a couch. */
   const [tv, setTv] = useState(false);
 
@@ -159,7 +253,18 @@ export default function App() {
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('orbit.view') as ViewMode) || 'grid');
+  /** How the library is read: the shelf plus game page, or the cover wall. */
+  const [mode, setMode] = useState<LibraryMode>(savedMode);
+  /** How the Details shelf is drawn: artwork, or a compact list. */
+  const [rail, setRail] = useState<ShelfLayout>(savedRail);
+  /** How wide the shelf's covers are drawn. */
+  const [shelfSize, setShelfSize] = useState<ShelfSize>(savedShelfSize);
+  /** The shape both views draw covers in. */
+  const [shape, setShape] = useState<CoverShape>(savedShape);
+  /** What sits under a grid cover. */
+  const [gridLabel, setGridLabel] = useState<GridLabel>(savedGridLabel);
+  /** The game page sections shown in Details. */
+  const [sections, setSections] = useState<GameSection[]>(savedSections);
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
@@ -173,8 +278,10 @@ export default function App() {
   const [showThemeManager, setShowThemeManager] = useState(false);
   /** True while a launcher/drive picker was opened from the Add Game form. */
   const addTabImport = useRef(false);
-  /** Whether the opening has finished and taken itself off the screen. */
+  /** The opening has finished and taken itself off the screen. */
   const [booted, setBooted] = useState(false);
+  /** Ctrl K: one field over every page, game and action. */
+  const [palette, setPalette] = useState(false);
   /** A settings section to reveal after navigation, with a token for repeated jumps. */
   const [settingsJump, setSettingsJump] = useState<{ id: string; token: number } | null>(null);
   const settingsJumpToken = useRef(0);
@@ -214,14 +321,19 @@ export default function App() {
    * someone made is still there tomorrow and survives a cleared browser profile.
    */
   const order = settings?.sortOrder ?? [];
-  const scale = settings?.coverScale ?? 100;
+  const coverWidth = coverWidthFromSetting(settings?.coverScale);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudClose, setCloudClose] = useState<'backup' | 'restore' | null>(null);
   const [cloudJob, setCloudJob] = useState<CloudPulse | null>(null);
   /** The newer release, if one has been found. Settings shows and installs it. */
   const [update, setUpdate] = useState<ReleaseInfo | null>(null);
 
-  useEffect(() => localStorage.setItem('orbit.view', view), [view]);
+  useEffect(() => localStorage.setItem('orbit.library.mode', mode), [mode]);
+  useEffect(() => localStorage.setItem('orbit.library.rail', rail), [rail]);
+  useEffect(() => localStorage.setItem('orbit.library.shelf', shelfSize), [shelfSize]);
+  useEffect(() => localStorage.setItem('orbit.library.shape', shape), [shape]);
+  useEffect(() => localStorage.setItem('orbit.library.label', gridLabel), [gridLabel]);
+  useEffect(() => localStorage.setItem('orbit.library.sections', JSON.stringify(sections)), [sections]);
   useEffect(() => localStorage.setItem('orbit.sort', sort), [sort]);
   useEffect(() => localStorage.setItem('orbit.filter', filter), [filter]);
 
@@ -817,8 +929,6 @@ export default function App() {
       if (q && !g.title.toLowerCase().includes(q)) return false;
       if (activeFilter === 'hidden') return !!g.hidden;
       if (activeFilter === 'favorites') return g.favorite;
-      if (activeFilter === 'unplayed') return g.sessionCount === 0;
-      if (activeFilter !== 'all') return g.status === activeFilter;
       return true;
     });
     const by: Record<SortKey, (a: Game, b: Game) => number> = {
@@ -1070,6 +1180,9 @@ export default function App() {
   // than these, and nothing is counted twice.
   const runningGame = played.find((g) => g.id === session?.gameId) ?? null;
 
+  // The library's own size, which the shelf header and the All chip read.
+  const libraryTotal = libraryCount(games);
+
   const startGame = async (g: Game) => {
     if (session?.gameId === g.id) return;
     setSelectedId(g.id);
@@ -1248,6 +1361,165 @@ export default function App() {
     setPage('settings');
   }, []);
 
+  /** Show one of Orbit's own folders in Explorer, from the palette. */
+  const revealFolder = useCallback(async (which: 'data' | 'logs') => {
+    const dir = which === 'data' ? await dataDir() : await logsDir();
+    if (dir) await revealInExplorer(dir);
+  }, []);
+
+  /** Every way into a page goes through here, so Statistics opens on its front. */
+  const goPage = useCallback((next: Page) => {
+    setShowThemeManager(false);
+    if (next === 'statistics') setStatsTab('overview');
+    setPage(next);
+  }, []);
+
+  /**
+   * Where the window has been, for the mouse's Back and Forward buttons.
+   *
+   * Orbit has no URLs to hand to a webview history, so the steps are kept
+   * here: opening a game or changing page is one. A replayed step is not
+   * recorded again, or Back would bounce straight back to where it came from.
+   */
+  const backSteps = useRef<Step[]>([]);
+  const aheadSteps = useRef<Step[]>([]);
+  const replaying = useRef(false);
+  const shownStep = useRef<Step>({ page, selectedId, mode, rail });
+  /** The library focus the last step was on, see `Step.focusId` below. */
+  const focusStep = useRef<string | null>(null);
+
+  /**
+   * Record where the window is.
+   *
+   * A step is more than a page: which game was open, and which of the library's
+   * two views was showing, are part of "where I was" too. Without the view,
+   * stepping back from Grid landed in Observatory rather than in the Grid you
+   * had just left, which made Back feel like it had lost your place. The
+   * library's shelf selection is recorded through `onFocus` below, because it
+   * belongs to the library rather than to the window's own state.
+   */
+  useEffect(() => {
+    const step: Step = { page, selectedId, mode, rail, focusId: focusStep.current };
+    const previous = shownStep.current;
+    const changed =
+      previous.page !== step.page ||
+      previous.selectedId !== step.selectedId ||
+      previous.mode !== step.mode ||
+      previous.rail !== step.rail;
+    if (replaying.current) {
+      replaying.current = false;
+    } else if (changed) {
+      backSteps.current.push(previous);
+      if (backSteps.current.length > 60) backSteps.current.shift();
+      aheadSteps.current = [];
+    }
+    shownStep.current = step;
+    setHistoryDepth({ back: backSteps.current.length > 0, ahead: aheadSteps.current.length > 0 });
+  }, [page, selectedId, mode, rail]);
+
+  const goHistory = useCallback(
+    (direction: -1 | 1) => {
+      const from = direction === -1 ? backSteps : aheadSteps;
+      const to = direction === -1 ? aheadSteps : backSteps;
+      const here: Step = { page, selectedId, mode, rail, focusId: focusStep.current };
+      const same = (a: Step) =>
+        a.page === here.page && a.selectedId === here.selectedId && a.mode === here.mode && a.rail === here.rail &&
+        (a.focusId ?? null) === (here.focusId ?? null);
+      let step = from.current.pop();
+      // Two entries can describe the same place when a page and its drawer
+      // change together; skipping them is what makes one press one step.
+      while (step && same(step)) step = from.current.pop();
+      if (!step) return;
+      to.current.push(here);
+      replaying.current = true;
+      setPalette(false);
+      setPage(step.page);
+      setSelectedId(step.selectedId);
+      setMode(step.mode);
+      setRail(step.rail);
+      // The library puts its focus back from this, so stepping out of a game
+      // and back in lands on the same game rather than on the first one.
+      setHistoryFocus(step.focusId ? { id: step.focusId, page: step.page, token: ++historyFocusToken.current } : null);
+      setHistoryDepth({ back: backSteps.current.length > 0, ahead: aheadSteps.current.length > 0 });
+    },
+    [page, selectedId, mode, rail],
+  );
+
+  /**
+   * Note which game the shelf moved to.
+   *
+   * Picking a game is a place the window goes, so it is recorded as one: Back
+   * from a game's page then returns to the game that was open before it, and a
+   * run of shelf clicks can be walked back the way it was walked in. It is
+   * folded into the current step rather than pushed as a new one, so Back does
+   * not first land on a game page that was never left.
+   */
+  const rememberFocus = useCallback((id: string) => {
+    focusStep.current = id;
+    const previous = shownStep.current;
+    if (previous.page !== 'library' || previous.focusId === id) return;
+    if (!replaying.current) {
+      backSteps.current.push({ ...previous, focusId: previous.focusId ?? null });
+      if (backSteps.current.length > 60) backSteps.current.shift();
+      aheadSteps.current = [];
+    }
+    replaying.current = false;
+    shownStep.current = { ...previous, focusId: id };
+    setHistoryDepth({ back: backSteps.current.length > 0, ahead: aheadSteps.current.length > 0 });
+  }, []);
+
+  // The side buttons on a mouse, and the keyboard's own pair. The default is
+  // suppressed: a webview that keeps its own history would leave Orbit for a
+  // page it never had.
+  useEffect(() => {
+    const move = (direction: -1 | 1) => {
+      if (!tv) goHistory(direction);
+    };
+    const onMouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      move(event.button === 3 ? -1 : 1);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === 'ArrowLeft' || event.key === 'BrowserBack') {
+        event.preventDefault();
+        move(-1);
+      } else if (event.key === 'ArrowRight' || event.key === 'BrowserForward') {
+        event.preventDefault();
+        move(1);
+      }
+    };
+    window.addEventListener('mousedown', onMouse);
+    window.addEventListener('auxclick', onMouse);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onMouse);
+      window.removeEventListener('auxclick', onMouse);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [goHistory, tv]);
+
+  // A new page starts at its top. Without this, opening a long page from a
+  // scrolled library lands halfway down it and the change reads as a glitch.
+  useEffect(() => {
+    const scroller = document.querySelector('.orbit-scroll');
+    if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 });
+  }, [page]);
+
+  // Ctrl K, from anywhere. The modifier makes it safe even while typing, and
+  // the palette itself takes Escape and Enter once it is open.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      setPalette((open) => !open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     if (!isNative() || !overlayAvailable) return;
     let stop = () => {};
@@ -1286,15 +1558,13 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', report);
   }, []);
 
-  const showHome = page === 'library' && !query;
-
   // A native startup command rejecting used to leave only the dark empty
   // background on screen. Keep its real error visible and give the player a
   // retry instead of making a broken launch indistinguishable from a blank app.
   if (startupError) {
     return (
       <main className="grid h-full place-items-center overflow-auto bg-bg p-6 text-fg">
-        <section role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-panel p-7 shadow-2xl">
+        <section role="alert" className="w-full max-w-xl rounded-2xl border border-line bg-panel p-7 shadow-2xl">
           <div className="mb-5 flex items-center gap-3">
             <Logo className="size-9 shrink-0" animated={false} />
             <h1 className="text-2xl font-semibold">Orbit couldn’t finish starting</h1>
@@ -1302,11 +1572,11 @@ export default function App() {
           <p className="text-sm leading-relaxed text-muted">
             The library or settings request failed. The details below can help identify why this installation opened without its interface.
           </p>
-          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-red-200">{startupError}</pre>
+          <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-line bg-panel2 p-3 text-xs text-rose-300">{startupError}</pre>
           <button
             type="button"
             onClick={retryStartup}
-            className="mt-5 rounded-xl bg-accent px-5 py-2.5 font-semibold text-white hover:brightness-110"
+            className="btn-accent mt-5 rounded-xl px-5 py-2.5 font-semibold"
           >
             Retry startup
           </button>
@@ -1373,24 +1643,33 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
+      <div className="orbit-app">
       <TopNav
         page={page}
-        setPage={(next) => {
-          setShowThemeManager(false);
-          setPage(next);
+        onNavigate={(next) => {
+          goPage(next);
         }}
-        onOpenSettings={openSettings}
-        order={settings?.tabOrder}
+        onOpenPalette={() => setPalette(true)}
+        onBack={() => goHistory(-1)}
+        onForward={() => goHistory(1)}
+        canGoBack={historyDepth.back}
+        canGoForward={historyDepth.ahead}
+        onOpenSettings={() => openSettings()}
         sound={settings.sound}
         setSound={(sound) => setSettings({ sound })}
         showMusic={settings.topbarMusic !== false}
         showBars={settings.musicBars !== false}
+        onAdd={() => setShowAdd(true)}
+        onAddFolder={() => {
+          setImportFolder(settings.scanPath?.trim() || null);
+          setShowImport(true);
+        }}
         onTv={enterTv}
       />
 
       {dragOver && !showAdd && (
-        <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-base/80 backdrop-blur-sm">
-          <div className="rounded-3xl border-2 border-dashed border-accent px-12 py-10 text-center">
+        <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-bg/80 backdrop-blur-sm">
+          <div className="rounded-2xl border border-dashed border-accent/70 px-12 py-10 text-center">
             <Logo className="mx-auto size-16 text-accent" animated />
             <p className="mt-3 text-lg font-semibold">Drop to add</p>
             <p className="mt-1 text-sm text-muted">A game program, or a folder full of them</p>
@@ -1398,7 +1677,8 @@ export default function App() {
         </div>
       )}
 
-      <main key={page} className="orbit-tab-enter pb-24">
+      <main key={page} className="orbit-main orbit-tab-enter">
+        <div className="orbit-main-inner">
         {!settings ? null : showThemeManager ? (
           <ThemeManagerPage
             settings={settings}
@@ -1406,7 +1686,7 @@ export default function App() {
             onBack={() => setShowThemeManager(false)}
           />
         ) : page === 'settings' ? (
-          <div className="glass mx-6 mt-5 rounded-3xl">
+          <div>
             <SettingsView
               settings={settings}
               setSettings={setSettings}
@@ -1427,6 +1707,8 @@ export default function App() {
               onLibraryChanged={() => void reload()}
               update={update}
               onFoundUpdate={setUpdate}
+              onOpenAlbum={() => setPage('statistics')}
+              section={settingsJump?.id}
             />
           </div>
         ) : page === 'backlog' ? (
@@ -1480,75 +1762,77 @@ export default function App() {
           />
         ) : page === 'saves' ? (
           <SavesView games={games} settings={settings} setSettings={setSettings} />
+        ) : page === 'statistics' ? (
+          <StatisticsView
+            games={played}
+            journalGames={games.filter((game) => onJournalPage(game, settings.syncJournal !== false, settings.journalOn ?? [], settings.journalOff ?? []))}
+            allGames={games}
+            settings={settings}
+            setSettings={setSettings}
+            onChanged={() => void reload()}
+            onOpenGame={openDetail}
+            onEditGame={openGameEditor}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onAddPlanned={(game) => addGames([game])}
+            onRemove={(id) => removeGame(id)}
+            onBacklogStatus={(id, status) => updateGame(id, { status })}
+            onBacklogMembership={setBacklogMembership}
+            onJournalMembership={setJournalMembership}
+            fetchMetadata={settings.fetchMetadata !== false}
+            tab={statsTab}
+            onTab={setStatsTab}
+          />
         ) : (
-          <>
-            {showHome && settings.showHero !== false && heroGame && (
-              <Hero
-                game={heroGame}
-                running={runningGame?.id === heroGame.id}
-                onPlay={() => void startGame(heroGame)}
-                onDetails={() => setSelectedId(heroGame.id)}
-              />
-            )}
-            <Toolbar
-              count={visible.length}
-              total={libraryCount(games)}
-              filter={activeFilter}
-              setFilter={setFilter}
-              query={query}
-              setQuery={setQuery}
-              view={view}
-              setView={setView}
-              sort={sort}
-              setSort={setSort}
-              onAdd={() => setShowAdd(true)}
-              showHero={settings.showHero !== false}
-              onToggleHero={() => setSettings({ showHero: settings.showHero === false })}
-              scale={scale}
-              setScale={(n) => setSettings({ coverScale: n })}
-              filterOrder={settings.libraryFilterOrder}
-              hiddenFilters={settings.hiddenLibraryFilters}
-            />
-            <div>
-              {!ready ? null : visible.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted">
-                  <Logo className="size-16 opacity-50" />
-                  <p>{games.length === 0 ? 'Nothing in this orbit yet.' : 'Nothing matches that.'}</p>
-                  {games.length === 0 && (
-                    <p className="text-xs">Drop a game program on the window, or use Add game.</p>
-                  )}
-                </div>
-              ) : view === 'grid' ? (
-                <GameGrid
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                  coverTint={settings.coverTint !== false}
-                />
-              ) : (
-                <GameList
-                  games={visible}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onEdit={openGameEditor}
-                  onToggleFavorite={toggleFavorite}
-                  onPlay={(g) => void startGame(g)}
-                  scale={scale}
-                  onReorder={sort === 'manual' ? reorder : undefined}
-                />
-              )}
-            </div>
-          </>
+          <LibraryView
+            games={visible}
+            total={libraryTotal}
+            filter={activeFilter}
+            setFilter={setFilter}
+            filterOrder={settings.libraryFilterOrder}
+            hiddenFilters={hiddenLibraryFilters}
+            query={query}
+            setQuery={setQuery}
+            sort={sort}
+            setSort={setSort}
+            coverWidth={coverWidth}
+            setCoverWidth={(next) => setSettings({ coverScale: next })}
+            coverTint={settings.coverTint !== false}
+            setCoverTint={(next) => setSettings({ coverTint: next })}
+            mode={mode}
+            setMode={setMode}
+            rail={rail}
+            setRail={setRail}
+            shelfSize={shelfSize}
+            setShelfSize={setShelfSize}
+            shape={shape}
+            setShape={setShape}
+            gridLabel={gridLabel}
+            setGridLabel={setGridLabel}
+            sections={sections}
+            setSections={setSections}
+            runningId={runningGame?.id ?? null}
+            session={session}
+            onPlay={(game) => void startGame(game)}
+            onStop={() => void stop()}
+            onEdit={(id) => openGameEditor(id)}
+            onOpenDetails={openDetail}
+            onToggleFavorite={toggleFavorite}
+            onUpdate={(id, patch) => updateGame(id, patch)}
+            onDiscoverSteam={() => setShowSteam(true)}
+            onAdd={() => setShowAdd(true)}
+            onReorder={sort === 'manual' ? reorder : undefined}
+            historyFocus={historyFocus}
+            onFocus={rememberFocus}
+            genreRequest={libraryGenre}
+            onGenreRequest={() => setLibraryGenre(null)}
+          />
         )}
+        </div>
       </main>
+      </div>
 
       {session && runningGame && (
-        <div className="glass fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-5 pr-2 text-sm shadow-2xl">
+        <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full border border-line bg-panel py-2 pl-5 pr-2 text-sm shadow-2xl">
           <span className="orbit-pulse size-2 rounded-full bg-emerald-400" />
           <span>
             Playing <b>{runningGame.title}</b>
@@ -1852,8 +2136,119 @@ export default function App() {
         <CloudTransferOrb job={cloudJob} lift={!!move.job && moveId !== move.job.gameId} />
       )}
 
+      {settings && (
+        <CommandPalette
+          open={palette}
+          games={games}
+          onClose={() => setPalette(false)}
+          onPage={goPage}
+          onGame={openDetail}
+          onSettings={() => openSettings()}
+          onAdd={() => setShowAdd(true)}
+          onAddFolder={() => {
+            setImportFolder(settings.scanPath?.trim() || null);
+            setShowImport(true);
+          }}
+          onTv={enterTv}
+          runningId={session?.gameId ?? null}
+          onStop={() => void stop()}
+          onPlay={(id) => {
+            const game = games.find((item) => item.id === id);
+            if (game) void startGame(game);
+          }}
+          onGenre={(genre) => {
+            goPage('library');
+            setMode('details');
+            setLibraryGenre(genre);
+          }}
+          extra={[
+            {
+              id: 'page-album',
+              label: 'Album',
+              hint: 'Screenshots, recordings, replays',
+              Icon: Images,
+              group: 'Pages',
+              run: () => {
+                goPage('statistics');
+                setStatsTab('album');
+              },
+            },
+            {
+              id: 'view-details',
+              label: 'Details view',
+              hint: 'The shelf and the game page',
+              Icon: List,
+              group: 'Actions',
+              run: () => {
+                goPage('library');
+                setMode('details');
+              },
+            },
+            {
+              id: 'view-grid',
+              label: 'Grid view',
+              hint: 'Every cover on one wall',
+              Icon: LayoutGrid,
+              group: 'Actions',
+              run: () => {
+                goPage('library');
+                setMode('grid');
+              },
+            },
+            {
+              id: 'import-steam',
+              label: 'Import from Steam',
+              hint: 'Your installed Steam games',
+              Icon: Download,
+              group: 'Actions',
+              run: () => setShowSteam(true),
+            },
+            {
+              id: 'themes',
+              label: 'Themes',
+              hint: 'Colours, type and wallpapers',
+              Icon: Palette,
+              group: 'Actions',
+              run: () => setShowThemeManager(true),
+            },
+            {
+              id: 'settings-logs',
+              label: 'Watch the app log',
+              hint: 'What Orbit has been doing',
+              Icon: ScrollText,
+              group: 'Actions',
+              run: () => openSettings('orbit-logs'),
+            },
+            {
+              id: 'folder-captures',
+              label: 'Open the captures folder',
+              hint: 'Screenshots, recordings and replays',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void overlayOpenKind('screenshots'),
+            },
+            {
+              id: 'folder-data',
+              label: "Open Orbit's data folder",
+              hint: 'Where the library and saves live',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void revealFolder('data'),
+            },
+            {
+              id: 'folder-logs',
+              label: 'Open the logs folder',
+              hint: 'The files the app writes',
+              Icon: FolderOpen,
+              group: 'Files',
+              run: () => void revealFolder('logs'),
+            },
+          ]}
+        />
+      )}
+
       {!isNative() && (
-        <p className="pointer-events-none fixed bottom-2 left-2 rounded-full bg-panel/80 px-3 py-1 text-[10px] text-muted">
+        <p className="pointer-events-none fixed bottom-2 right-2 z-20 rounded-full bg-panel/80 px-3 py-1 text-[10px] text-muted">
           Browser preview · run <span className="font-mono">npm run tauri dev</span> for files, launching and sessions
         </p>
       )}

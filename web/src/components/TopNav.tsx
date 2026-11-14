@@ -1,15 +1,30 @@
-import { HardDrive, Library, ListOrdered, NotebookPen, Save, ScrollText, Settings as SettingsIcon, Tv } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChartNoAxesColumn,
+  FolderOpen,
+  Gamepad2,
+  HardDrive,
+  Library,
+  ListOrdered,
+  NotebookPen,
+  Plus,
+  Save,
+  ScrollText,
+  Search,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import type { Page, Settings } from '../types';
 import { Logo } from './ui/Logo';
 import { MusicButton } from './MusicButton';
+import { customTitleBar } from '../services/windowChrome';
+import { WindowControls } from './WindowControls';
 
 // Sessions follows the library, with Journal before Backlog in the default
-// order. The theme button is gone: themes live in Settings.
-//
-// The order can be rearranged in Settings, so this list is the default and the
-// place every tab is defined; `orderedTabs` turns it into whatever order the
-// player arranged.
+// order. The order can be rearranged in Settings, so this list is the default
+// and the place every page is defined; `orderedTabs` turns it into whatever
+// order the player arranged.
 export type Tab = { id: Page; label: string; Icon: typeof Library };
 
 export const TABS: Tab[] = [
@@ -54,138 +69,202 @@ export function orderedTabs(order: Page[] | undefined): Tab[] {
   return out;
 }
 
+/**
+ * One bar across the top of the window.
+ *
+ * The app's rooms live behind the burger rather than along an edge, so the
+ * library gets the whole width. The search in the middle opens the palette
+ * instead of owning a field: one field over every page and game is faster than
+ * a field per page. Sound stays out here because a switch for something you can
+ * hear belongs where the sound is.
+ */
 export function TopNav({
   page,
-  setPage,
-  order,
+  onNavigate,
+  onOpenPalette,
+  onBack,
+  onForward,
+  canGoBack,
+  canGoForward,
   sound,
   setSound,
   showMusic,
   showBars,
   onOpenSettings,
+  onAdd,
+  onAddFolder,
   onTv,
 }: {
   page: Page;
-  setPage: (p: Page) => void;
-  /**
-   * Opens Settings, optionally at one of its cards.
-   *
-   * Settings is a long page, and somebody pressing a button about the music
-   * wants to arrive at the music rather than at the top of everything.
-   */
-  onOpenSettings: (at?: string) => void;
-  /** The player's own tab order from Settings; the default when absent. */
-  order?: Page[];
+  onNavigate: (next: Page) => void;
+  onOpenPalette: () => void;
+  /** Step back and forward through the places the window has been. */
+  onBack: () => void;
+  onForward: () => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
   /** The background music, so the bar can play it, hush it and set its level. */
   sound: Settings['sound'];
   setSound: (next: Settings['sound']) => void;
-  /** Whether the controls are drawn at all. Settings decides. */
+  /** Whether the sound controls are drawn at all. Settings decides. */
   showMusic: boolean;
   /** Whether the controls dance while the music plays. */
   showBars: boolean;
-  /** Fills the screen with TV mode, the library as a couch sees it. */
+  onOpenSettings: () => void;
+  onAdd: () => void;
+  onAddFolder: () => void;
+  /** Fills the screen with Stardeck, the library as a couch sees it. */
   onTv: () => void;
 }) {
-  const tabs = orderedTabs(order);
-  const tabKey = tabs.map((tab) => tab.id).join('|');
-  const navRef = useRef<HTMLElement>(null);
-  const [indicator, setIndicator] = useState({ x: 0, y: 0, width: 0, height: 0, visible: false });
-  const activeTab = tabs.some((tab) => tab.id === page) ? page : null;
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const burger = useRef<HTMLButtonElement>(null);
 
-  useLayoutEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const update = () => {
-      const button = activeTab ? nav.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`) : null;
-      if (!button) {
-        setIndicator((current) => ({ ...current, visible: false }));
-        return;
-      }
-      const bounds = button.getBoundingClientRect();
-      const navBounds = nav.getBoundingClientRect();
-      setIndicator({
-        x: bounds.left - navBounds.left,
-        y: bounds.top - navBounds.top,
-        width: bounds.width,
-        height: bounds.height,
-        visible: true,
-      });
+  // The menu belongs to the page it was opened on; navigating is how it closes.
+  useEffect(() => setOpen(false), [page]);
+
+  useEffect(() => {
+    if (!open) return;
+    const first = window.requestAnimationFrame(() => {
+      menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menu.current?.contains(target) || burger.current?.contains(target)) return;
+      setOpen(false);
     };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [activeTab, tabKey]);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      burger.current?.focus();
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.cancelAnimationFrame(first);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const go = (next: Page) => {
+    onNavigate(next);
+    setOpen(false);
+  };
+  const act = (run: () => void) => {
+    setOpen(false);
+    run();
+  };
 
   return (
-    <header className="orbit-topbar sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-xl">
-      {/* The bar is the one thing that spans the whole window rather than sitting
-          in a column: on a wide screen the logo belongs at the left edge and the
-          settings button at the right, not both of them a hand's width in. */}
-      <div className="flex w-full items-center gap-5 px-6 py-3">
-        <button
-          onClick={() => setPage('library')}
-          className="orbit-logo flex items-center gap-2.5 rounded-full px-2 py-1"
-          title="Orbit"
-          aria-label="Orbit"
-        >
-          <Logo className="size-7 drop-shadow-[0_2px_8px_var(--c-accent)]" animated />
-          <span className="text-lg font-bold tracking-tight">Orbit</span>
-        </button>
-
-        <nav ref={navRef} className="relative flex items-center gap-1">
-          <span
-            aria-hidden
-            className="topnav-indicator pointer-events-none absolute left-0 top-0 rounded-full border border-accent/35 bg-panel2 shadow-sm"
-            style={{
-              width: indicator.width,
-              height: indicator.height,
-              opacity: indicator.visible ? 1 : 0,
-              transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0)`,
-            }}
-          />
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              data-tab-id={t.id}
-              aria-current={page === t.id ? 'page' : undefined}
-              onClick={() => setPage(t.id)}
-              className={`relative z-10 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                page === t.id ? 'text-fg' : 'text-muted hover:bg-panel/70 hover:text-fg'
-              }`}
-            >
-              <t.Icon className="size-4" strokeWidth={1.8} />
-              {t.label}
+    <>
+      <header
+        className={customTitleBar ? 'orbit-topbar orbit-topbar-native' : 'orbit-topbar'}
+        data-tauri-drag-region={customTitleBar || undefined}
+      >
+        <div className="orbit-topbar-left" data-tauri-drag-region={customTitleBar || undefined}>
+          <button className="orbit-brand" onClick={() => go('library')} title="Orbit" aria-label="Orbit">
+            <Logo className="size-7 shrink-0 text-accent" animated />
+            <span>ORBIT</span>
+          </button>
+          <button
+            ref={burger}
+            className="orbit-burger"
+            onClick={() => setOpen((current) => !current)}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            title={open ? 'Close menu' : 'Menu'}
+          >
+            <i /><i /><i />
+          </button>
+          {/* Back and Forward, beside the menu. Every window on the desktop has
+              this pair; a launcher that is walked one game at a time needs it
+              more than most, and the mouse's own buttons are not a thing you can
+              see. They sit on the bar so the way back is never a guess. */}
+          <div className="orbit-history" role="group" aria-label="History">
+            <button type="button" onClick={onBack} disabled={!canGoBack} title="Back (Alt Left)" aria-label="Back">
+              <ArrowLeft className="size-4" strokeWidth={2} />
             </button>
-          ))}
-        </nav>
+            <button type="button" onClick={onForward} disabled={!canGoForward} title="Forward (Alt Right)" aria-label="Forward">
+              <ArrowRight className="size-4" strokeWidth={2} />
+            </button>
+          </div>
+        </div>
 
-        <div className="flex-1" />
-        {/* Beside the sound, because both are about the room rather than the
-            library: one is what you hear and the other is what you sit back
-            for. A plain television, drawn like the icons around it: the full
-            screen it opens is the loud thing, not the button. */}
-        <button
-          onClick={onTv}
-          aria-label="TV mode"
-          title="TV mode"
-          className="rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg"
-        >
-          <Tv className="size-5" strokeWidth={1.8} />
+        <button className="orbit-search" onClick={onOpenPalette} aria-label="Search games, pages and actions">
+          <Search className="size-4 shrink-0" strokeWidth={1.8} />
+          <span>Search games, pages and actions</span>
+          <kbd>Ctrl K</kbd>
         </button>
-        {showMusic && (
-          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={() => onOpenSettings('orbit-sound')} />
-        )}
-        <button
-          onClick={() => setPage('settings')}
-          aria-label="Settings"
-          title="Settings"
-          className={`rounded-full p-2 text-muted transition hover:bg-panel/70 hover:text-fg ${
-            page === 'settings' ? 'text-fg ring-1 ring-accent/40' : ''
-          }`}
-        >
-          <SettingsIcon className="size-5" strokeWidth={1.8} />
-        </button>
-      </div>
-    </header>
+
+        <div className="orbit-topbar-right" data-tauri-drag-region={customTitleBar || undefined}>
+          {showMusic && (
+            <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={onOpenSettings} />
+          )}
+          <WindowControls />
+        </div>
+      </header>
+
+      {open && (
+        <div ref={menu} className="orbit-menu" role="menu" aria-label="Orbit">
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'library' ? 'page' : undefined} onClick={() => go('library')}>
+            <Library className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Library
+          </button>
+          <button
+            role="menuitem"
+            className="orbit-menu-item"
+            aria-current={page === 'statistics' ? 'page' : undefined}
+            onClick={() => go('statistics')}
+          >
+            <ChartNoAxesColumn className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Statistics
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onAdd)}>
+            <Plus className="size-[17px] shrink-0" strokeWidth={1.9} />
+            Add game
+          </button>
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onAddFolder)}>
+            <FolderOpen className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Add from folder
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button
+            role="menuitem"
+            className="orbit-menu-item"
+            onClick={onTv}
+            aria-label="Stardeck"
+            title="Stardeck"
+          >
+            <Gamepad2 className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Stardeck
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'saves' ? 'page' : undefined} onClick={() => go('saves')}>
+            <Save className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Saves
+          </button>
+          <button role="menuitem" className="orbit-menu-item" aria-current={page === 'storage' ? 'page' : undefined} onClick={() => go('storage')}>
+            <HardDrive className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Storage
+          </button>
+
+          <div className="orbit-menu-sep" role="separator" />
+
+          <button role="menuitem" className="orbit-menu-item" onClick={() => act(onOpenSettings)}>
+            <SettingsIcon className="size-[17px] shrink-0" strokeWidth={1.8} />
+            Settings
+          </button>
+        </div>
+      )}
+    </>
   );
 }
