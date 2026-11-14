@@ -19,6 +19,7 @@ import {
   MonitorPlay,
   Palette,
   Piano,
+  Plug,
   RefreshCw,
   ScrollText,
   ArrowLeftRight,
@@ -27,6 +28,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Trophy,
   Volume2,
   Wand2,
   X,
@@ -138,6 +140,7 @@ function Section({
   icon: Icon,
   title,
   lead,
+  note,
   active = true,
   children,
 }: {
@@ -145,6 +148,8 @@ function Section({
   icon: typeof Palette;
   title: string;
   lead?: string;
+  /** `Need work` on a card whose feature is still being built. */
+  note?: string;
   /** One card is on screen at a time: the rail is the page, not a short cut. */
   active?: boolean;
   children: ReactNode;
@@ -156,7 +161,10 @@ function Section({
           <Icon className="size-[18px]" strokeWidth={1.9} />
         </span>
         <div className="min-w-0 pt-0.5">
-          <h2 className="text-base font-semibold leading-6 text-fg">{title}</h2>
+          <h2 className="flex flex-wrap items-center gap-2.5 text-base font-semibold leading-6 text-fg">
+            {title}
+            <NeedsWork on={note === 'Need work'} />
+          </h2>
           {lead && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">{lead}</p>}
         </div>
       </div>
@@ -300,6 +308,8 @@ const SECTIONS = [
   { id: 'orbit-backups', label: 'Backups' },
   { id: 'orbit-libraries', label: 'Libraries' },
   { id: 'orbit-details', label: 'Artwork' },
+  { id: 'orbit-achievements', label: 'Achievements' },
+  { id: 'orbit-integrations', label: 'Integrations' },
   { id: 'orbit-tabs', label: 'Tabs' },
   { id: 'orbit-sound', label: 'Sound' },
   { id: 'orbit-copy', label: 'Export' },
@@ -311,11 +321,28 @@ const SECTIONS = [
 ];
 
 /** Every card grouped into the rooms the page is read in. */
+/**
+ * The cards whose feature is not finished yet.
+ *
+ * These are the parts of Heronite that Orbit still has to catch up on: reading
+ * launchers properly, filling in metadata, achievements, captures and the cloud.
+ * They are marked rather than hidden, because seeing the shape of the whole
+ * settings page is how somebody knows what Orbit is going to be; the note tells
+ * them the switch they are looking at is not the final one.
+ */
+const NEEDS_WORK = new Set(['orbit-captures', 'orbit-backups', 'orbit-libraries', 'orbit-details', 'orbit-achievements', 'orbit-integrations']);
+
+/** The small marker a card and its row in the rail both carry. */
+function NeedsWork({ on = false }: { on?: boolean }) {
+  if (!on) return null;
+  return <span className="orbit-needswork" title="This part of Orbit is still being built">Need work</span>;
+}
+
 const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
   { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
-  { label: 'Games', ids: ['orbit-details', 'orbit-captures', 'orbit-overlay'] },
+  { label: 'Games', ids: ['orbit-details', 'orbit-achievements', 'orbit-captures', 'orbit-overlay'] },
   { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-tabs', 'orbit-backups'] },
-  { label: 'System', ids: ['orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
+  { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
 ];
 
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
@@ -361,6 +388,8 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
+  { label: 'Integrations', section: 'orbit-integrations', keywords: 'integrations discord steamgriddb webhook services connect account' },
+  { label: 'Achievements', section: 'orbit-achievements', keywords: 'achievements trophies completion steam unlocks' },
   { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
@@ -1101,7 +1130,7 @@ export function SettingsView({
                   aria-current={chosen ? 'page' : undefined}
                   className={compact
                     ? cn(
-                        'shrink-0 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition',
+                        'inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition',
                         chosen
                           ? 'border-accent/50 bg-accent/10 text-fg'
                           : 'border-line/70 text-muted hover:text-fg',
@@ -1109,7 +1138,8 @@ export function SettingsView({
                     : 'orbit-setnav-row'}
                 >
                   <span className="orbit-setnav-tick" aria-hidden />
-                  {section.label}
+                  {compact ? section.label : <span className="min-w-0 flex-1 truncate">{section.label}</span>}
+                  {NEEDS_WORK.has(id) && <span className="orbit-setnav-needs" title="Need work" />}
                 </button>
               );
             })}
@@ -1483,6 +1513,7 @@ export function SettingsView({
       <Section
         id="orbit-captures"
         active={activeSection === 'orbit-captures'}
+        note="Need work"
         icon={Images}
         title="Captures"
         lead="Everything the overlay saved: screenshots, recordings and replays. They live in three folders on this PC, and the album in Statistics shows all of them grouped by game."
@@ -1564,6 +1595,7 @@ export function SettingsView({
       <Section
         id="orbit-backups"
         active={activeSection === 'orbit-backups'}
+        note="Need work"
         icon={Save}
         title="Backups"
         lead="Add a cloud here. Disconnect one here too."
@@ -1582,6 +1614,7 @@ export function SettingsView({
       <Section
         id="orbit-libraries"
         active={activeSection === 'orbit-libraries'}
+        note="Need work"
         icon={LibraryIcon}
         title="Libraries"
         lead="Scan launchers or a drive and review the games Orbit finds before adding anything."
@@ -1654,10 +1687,48 @@ export function SettingsView({
       </Section>
 
       <Section
+        id="orbit-integrations"
+        active={activeSection === 'orbit-integrations'}
+        icon={Plug}
+        title="Integrations"
+        note="Need work"
+        lead="The services Orbit could talk to: a store catalogue, a screenshot host, a Discord presence, a controller companion. Nothing here is wired up yet."
+      >
+        <div className="orbit-soon">
+          <p>
+            <b>Planned:</b> Steam, SteamGridDB, HowLongToBeat, Discord Rich Presence and a webhook for
+            captures. Each one will be a row here with its own sign-in, and each one off until it is
+            turned on.
+          </p>
+          <p className="orbit-soon-note">
+            Until then nothing leaves this machine unless the Artwork card asks for it, and no account
+            is needed to use Orbit.
+          </p>
+        </div>
+      </Section>
+
+      <Section
+        id="orbit-achievements"
+        active={activeSection === 'orbit-achievements'}
+        icon={Trophy}
+        title="Achievements"
+        note="Need work"
+        lead="Reading a game's achievements, tracking which ones are done, and showing them beside the game. The tab reads from Steam today; the rest is still to come."
+      >
+        <div className="orbit-soon">
+          <p>
+            <b>Planned:</b> a choice of source (Steam, the game's own files, or ticks by hand), a
+            completion figure per game in the library, and a shelf in Statistics for the rarest ones.
+          </p>
+        </div>
+      </Section>
+
+      <Section
         id="orbit-details"
         active={activeSection === 'orbit-details'}
         icon={Sparkles}
         title="Artwork and details"
+        note="Need work"
         lead="Orbit can use Steam's public catalogue for artwork and details, SteamGridDB when a key is added, and a plain web image search when neither has a portrait. That does not make a game a Steam launch: only games imported from your Steam library start through Steam."
       >
         <div className="rounded-2xl border border-line bg-panel/40 p-3">

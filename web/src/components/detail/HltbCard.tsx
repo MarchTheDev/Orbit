@@ -61,26 +61,22 @@ export function HltbCard({
     : [];
 
   return (
-    <section className="rounded-xl border border-line bg-panel2 p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Timer className="size-4 text-accent" />
+    <div className="orbit-hltb">
+      <div className="orbit-panelblock-head">
+        <h2>
+          <Timer className="size-3.5" strokeWidth={1.9} />
           HowLongToBeat
-        </h3>
-        <button
-          onClick={onFetch}
-          disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-        >
+        </h2>
+        <button className="orbit-btnquiet" onClick={onFetch} disabled={loading}>
           <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
           {loading ? 'Fetching…' : h ? 'Refresh' : 'Fetch'}
         </button>
       </div>
 
       {!h ? (
-        <p className="text-xs text-muted">No times yet. Orbit fetches these by itself when a game is added.</p>
+        <p className="mt-3 text-xs leading-relaxed text-muted">No times yet. Orbit fetches these by itself when a game is added.</p>
       ) : (
-        <div className="space-y-3">
+        <div className="mt-3 space-y-3">
           <div className="flex items-baseline justify-between gap-3">
             <span className="text-xs text-muted">Played</span>
             <span className="font-mono text-sm font-semibold">{fmtHours(game.playSecs)}</span>
@@ -116,7 +112,7 @@ export function HltbCard({
             );
           })}
 
-          <HltbExtraEstimate hours={h.mainExtra} className="border-t border-line pt-2" />
+          <HltbExtraEstimate hours={h.mainExtra} className="border-t border-line/70 pt-2.5" />
 
           {/* A game played past every estimate is worth saying plainly: the
               numbers are other people's averages, not a rule. */}
@@ -132,6 +128,6 @@ export function HltbCard({
         <p className="mt-2 text-[10px] text-muted">Estimated: the real lookup needs the desktop app.</p>
       )}
       {error && <p className="mt-2 text-[11px] text-rose-400">{error}</p>}
-    </section>
+    </div>
   );
 }

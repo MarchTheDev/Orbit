@@ -1363,6 +1363,179 @@ html.orbit-linux .orbit-topbar {
   background: color-mix(in srgb, var(--c-text) 8%, transparent);
 }
 
+/* ------------------------------------------------- the shared page shape */
+
+/* A page's heading: display type, one line about the page beside it, and the
+   readings that belong to the whole page. Everything below it starts on a
+   hairline, so a page never begins with a card. */
+.orbit-pagehead-lead {
+  margin-top: 8px;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--c-muted);
+}
+
+/* Readings on one rule, as the game page draws its telemetry. */
+.orbit-telemetry {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+}
+.orbit-telemetry-cell {
+  min-width: 0;
+  padding: 12px 18px;
+  border-right: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+}
+.orbit-telemetry-cell:last-child { border-right: 0; }
+.orbit-telemetry-cell > p {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.orbit-telemetry-cell > b {
+  display: block;
+  margin-top: 5px;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.orbit-telemetry-cell > span {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--c-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A named section of a page: a held label on a hairline, then its contents.
+   This is what replaced the floating cards on Sessions, Journal, Backlog and
+   Storage, which each had their own radius, padding and border colour. */
+.orbit-panelblock { min-width: 0; }
+.orbit-panelblock-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+}
+.orbit-panelblock-head > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .17em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-text) 88%, transparent);
+}
+.orbit-panelblock-head > h2 svg { color: var(--c-muted); }
+.orbit-panelblock-head > :not(h2):first-child { margin-left: auto; }
+.orbit-panelblock-body { padding-top: 12px; }
+
+/* A row inside a page: one thing, on its own line, with its readings on the
+   right. The rule is the row's own bottom edge, so a list of them reads as a
+   table rather than as a stack of cards. */
+.orbit-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 12px 10px 10px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  transition: background-color .12s var(--ease-snap);
+}
+.orbit-row:last-child { border-bottom-color: transparent; }
+.orbit-row:hover { background: color-mix(in srgb, var(--c-text) 4.5%, transparent); }
+.orbit-row:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+
+/* An empty page or section: a rule, a quiet word, and a way to fix it. */
+.orbit-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 48px 24px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 12%, transparent);
+  border-radius: 14px;
+  text-align: center;
+  color: var(--c-muted);
+}
+.orbit-empty > svg { opacity: .55; }
+.orbit-empty > p:first-of-type {
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--c-text) 85%, transparent);
+}
+.orbit-empty > p + p { font-size: 12px; }
+
+/* The column a page's contents sit in, once its heading is above them. */
+.orbit-page { display: flex; flex-direction: column; gap: 22px; }
+.orbit-page > .orbit-pagehead { padding-bottom: 0; }
+.orbit-pageactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.orbit-pagetools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+/* The Backlog's times, on one quiet rule: four readings, not a card. */
+.orbit-backlogtimes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 24px;
+  padding: 11px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  font-size: 12px;
+  color: var(--c-muted);
+}
+.orbit-backlogtimes b { color: var(--c-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.orbit-panelhint { margin-bottom: 6px; font-size: 11.5px; line-height: 1.5; color: var(--c-muted); }
+.orbit-panelcount { font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+
+/* A quiet action, for the second button in a row of them. */
+.orbit-btnquiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-btnquiet:hover {
+  border-color: color-mix(in srgb, var(--c-text) 24%, transparent);
+  color: var(--c-text);
+}
+.orbit-btnquiet:disabled { opacity: .4; cursor: default; }
+
 /* Settings: the rail, where a category's name and the cards in it are two
    different things to look at. The name is a label; the cards are rows that
    light up, carry a marker on the chosen one, and are indented under it. */
@@ -1430,6 +1603,46 @@ html.orbit-linux .orbit-topbar {
   transition: background-color .12s var(--ease-snap);
 }
 .orbit-setnav-row[aria-current='page'] .orbit-setnav-tick { background: var(--c-accent); }
+.orbit-setnav-needs {
+  width: 4px;
+  height: 4px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 70%, transparent);
+  background: transparent;
+}
+
+/* The marker itself: a small outlined word, so a half-built part of Orbit is
+   visible at a glance without wearing the same weight as the card's title. */
+.orbit-needswork {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 92%, var(--c-text));
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A card whose feature is planned rather than finished: a note, not a switch. */
+.orbit-soon {
+  border: 1px dashed color-mix(in srgb, var(--c-accent) 28%, transparent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--c-accent) 4%, transparent);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--c-text) 80%, transparent);
+}
+.orbit-soon b { color: var(--c-text); font-weight: 650; }
+.orbit-soon-note { margin-top: 8px; font-size: 11.5px; color: var(--c-muted); }
+
 
 /* The room. Pages own their own headers; this only places them. */
 .orbit-main {
@@ -2565,6 +2778,446 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
   .orbit-topgame .orbit-cover,
   .orbit-gallery img { transition: none !important; }
 }
+/* ------------------------------------------------------------- the Stardeck */
+
+/* The Stardeck is Orbit's couch mode, and it is laid out like a deck of games
+   rather than a carousel: a stage that carries the chosen game, and a single
+   ordered index of everything that can be started. The stage never moves; the
+   row of banners slides under the light.
+
+   Nothing here leans on the selected game's colours for its chrome. The accent
+   is the theme's, the rules are hairlines, and the artwork is the only thing
+   that changes colour as the index moves - which is what keeps a dark game and
+   a bright one on the same screen as the same app. */
+.orbit-deck {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  padding: 0 20px 14px;
+}
+@media (min-width: 640px) {
+  .orbit-deck { padding: 0 34px 18px; }
+}
+.orbit-deck.is-side {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 22px;
+}
+
+/* The stage. */
+.orbit-deck-stage {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, #07080f 88%, transparent);
+}
+.orbit-deck.is-side .orbit-deck-stage { flex: 1 1 auto; }
+.orbit-deck.is-side .orbit-deck-index {
+  flex: 0 0 min(46%, 40rem);
+  flex-direction: column;
+  align-items: stretch;
+}
+.orbit-deck-stagewash {
+  position: absolute;
+  inset: 0;
+  opacity: .8;
+}
+.orbit-deck-stageinner {
+  position: relative;
+  display: flex;
+  height: 100%;
+  align-items: flex-end;
+  gap: clamp(18px, 3vw, 40px);
+  padding: clamp(18px, 3vw, 34px);
+}
+.orbit-deck-art {
+  position: relative;
+  flex: none;
+  align-self: flex-end;
+}
+.orbit-deck-artglow {
+  position: absolute;
+  inset: -18px;
+  border-radius: 26px;
+  filter: blur(26px);
+  opacity: .55;
+  z-index: -1;
+}
+.orbit-deck-cover {
+  display: block;
+  width: clamp(6rem, 15vw, 11.5rem);
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, #fff 16%, transparent);
+  box-shadow: 0 26px 60px -18px rgba(0, 0, 0, .8);
+}
+.orbit-deck-cover.is-banner {
+  width: clamp(11rem, 27vw, 21rem);
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+}
+.orbit-deck-copy {
+  min-width: 0;
+  max-width: 46rem;
+  padding-bottom: 2px;
+}
+.orbit-deck-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-accent) 92%, white);
+}
+.orbit-deck-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, .18);
+}
+.orbit-deck-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 14px;
+}
+.orbit-deck-summary {
+  margin-top: 12px;
+  max-width: 58ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--c-text) 62%, transparent);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* Below a metre of window the summary is the first thing to go: the numbers and
+   the buttons are why the page is open. */
+@media (max-height: 700px) {
+  .orbit-deck-summary { display: none; }
+}
+.orbit-deck-progress {
+  margin-top: 14px;
+  max-width: 20rem;
+}
+.orbit-deck-progresshead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-text) 45%, transparent);
+}
+.orbit-deck-progresshead b {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--c-text) 75%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-deck-rail {
+  height: 3px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 14%, transparent);
+  overflow: hidden;
+}
+.orbit-deck-rail > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--c-accent);
+  transition: width .4s var(--ease-out);
+}
+.orbit-deck-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+.orbit-deck-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 30px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 18px 44px -20px color-mix(in srgb, var(--c-accent) 90%, transparent);
+  transition: filter .14s var(--ease-snap), transform .14s var(--ease-snap);
+}
+.orbit-deck-play:hover { filter: brightness(1.07); }
+.orbit-deck-play:active { transform: translateY(1px); }
+.orbit-deck-play.is-stop {
+  background: #f43f5e;
+  color: #fff;
+  box-shadow: 0 18px 44px -20px rgba(244, 63, 94, .7);
+}
+.orbit-deck-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 18%, transparent);
+  background: color-mix(in srgb, #07080f 45%, transparent);
+  color: color-mix(in srgb, var(--c-text) 90%, transparent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .14s var(--ease-snap), background-color .14s var(--ease-snap);
+}
+.orbit-deck-secondary:hover {
+  border-color: color-mix(in srgb, var(--c-text) 34%, transparent);
+  background: color-mix(in srgb, #07080f 62%, transparent);
+}
+.orbit-deck-play:focus-visible,
+.orbit-deck-secondary:focus-visible,
+.orbit-deck-customise:focus-visible,
+.orbit-deck-order button:focus-visible,
+.orbit-deck-steps button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* The index: a header of readings, then one row of banners. */
+.orbit-deck-index {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.orbit-deck.is-side .orbit-deck-index { justify-content: flex-start; padding-top: 6px; }
+.orbit-deck-indexhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
+.orbit-deck-indexhead h2 {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-text) 50%, transparent);
+}
+.orbit-deck-indexhead > .orbit-num {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--c-text) 34%, transparent);
+}
+.orbit-deck-indexhead > .orbit-deck-order { margin-left: auto; }
+.orbit-deck-order {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, #07080f 40%, transparent);
+}
+.orbit-deck-order button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: color-mix(in srgb, var(--c-text) 48%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-deck-order button:hover { color: var(--c-text); }
+.orbit-deck-order button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--c-accent) 22%, transparent);
+  color: var(--c-text);
+}
+.orbit-deck-steps { display: flex; gap: 4px; }
+.orbit-deck-steps button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: color-mix(in srgb, #07080f 40%, transparent);
+  color: color-mix(in srgb, var(--c-text) 55%, transparent);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-deck-steps button:hover {
+  border-color: color-mix(in srgb, var(--c-text) 32%, transparent);
+  color: var(--c-text);
+}
+.orbit-deck-customise {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: color-mix(in srgb, #07080f 40%, transparent);
+  color: color-mix(in srgb, var(--c-text) 58%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-deck-customise:hover,
+.orbit-deck-customise[data-open] {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  color: var(--c-text);
+}
+
+.orbit-deck-cards {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 6px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 1.5rem, #000 calc(100% - 1.5rem), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 1.5rem, #000 calc(100% - 1.5rem), transparent 100%);
+}
+/* Beside the stage the index becomes a column of banners that scrolls down, so
+   the stage keeps the height and the list keeps the width. */
+.orbit-deck.is-side .orbit-deck-cards {
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 100%;
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%);
+}
+.orbit-deck-cards::-webkit-scrollbar { display: none; }
+.orbit-deck-cards > li { flex: none; scroll-snap-align: center; }
+.orbit-deck.is-side .orbit-deck-cards > li { width: 100%; }
+
+.orbit-deck-card {
+  display: block;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.orbit-deck.is-side .orbit-deck-card { width: 100%; }
+.orbit-deck-frame {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  transition: border-color .16s var(--ease-snap), transform .16s var(--ease-snap), box-shadow .16s var(--ease-snap);
+}
+.orbit-deck-frame.is-poster { aspect-ratio: 2 / 3; }
+.orbit-deck-frame.is-banner { aspect-ratio: 16 / 9; }
+.orbit-deck-card:hover .orbit-deck-frame {
+  border-color: color-mix(in srgb, var(--c-text) 30%, transparent);
+  transform: translateY(-2px);
+}
+/* The chosen card is lit, not outlined three ways: one accent edge, a warm
+   shadow, and its name at full strength. */
+.orbit-deck-card[aria-current='true'] .orbit-deck-frame {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 1px var(--c-accent), 0 20px 46px -22px color-mix(in srgb, var(--c-accent) 70%, transparent);
+  transform: translateY(-2px);
+}
+.orbit-deck-card:focus-visible .orbit-deck-frame {
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+.orbit-deck-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 6px;
+  min-height: 2.1rem;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.15;
+  text-align: center;
+  color: color-mix(in srgb, var(--c-text) 45%, transparent);
+  transition: color .12s var(--ease-snap);
+}
+.orbit-deck-card[aria-current='true'] .orbit-deck-name { color: var(--c-text); }
+.orbit-deck-card:hover .orbit-deck-name { color: var(--c-accent); }
+/* Beside the stage, a banner carries its name to the right of the picture. */
+.orbit-deck.is-side .orbit-deck-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding-bottom: 10px;
+}
+.orbit-deck.is-side .orbit-deck-name {
+  margin-top: 7px;
+  min-height: 0;
+  text-align: left;
+  -webkit-line-clamp: 1;
+  font-size: 12px;
+}
+.orbit-deck-on {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, .92);
+  color: #04120c;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.orbit-deck-on > i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: orbit-pulse 1.8s ease-in-out infinite;
+}
+
+/* The mode is a cut, in and out, on a slow renderer and a fast one alike. */
+.orbit-deck,
+.orbit-deck * { transition-duration: .16s; }
+@media (prefers-reduced-motion: reduce) {
+  .orbit-deck *,
+  .orbit-deck { transition: none !important; animation: none !important; }
+}
+
 /* ------------------------------------------------------------------ TV mode */
 
 /* The hub is the window, so the page has nothing behind it to show through.

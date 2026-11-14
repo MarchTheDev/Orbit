@@ -88,14 +88,20 @@ export function AchievementsTab({
   const pct = rows.length > 0 ? Math.round((unlocked / rows.length) * 100) : 0;
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-start gap-4 rounded-xl border border-line bg-panel2 p-4">
+    <section className="orbit-achievements">
+      <div className="orbit-panelblock-head">
+        <h2>
+          <Trophy className="size-3.5" strokeWidth={1.9} />
+          Achievements
+        </h2>
+        <button className="orbit-btnquiet" onClick={() => void read()} disabled={loading}>
+          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+          {loading ? 'Reading…' : 'Refresh'}
+        </button>
+      </div>
+      <div className="mt-3 flex items-start gap-4">
         <Cover game={game} className="size-14 shrink-0 rounded-lg [&_span]:text-sm" />
         <div className="min-w-0 flex-1">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Trophy className="size-4 text-accent" />
-            Achievements
-          </h3>
           {/* The count and the share, plus whether Steam had a hand in it. */}
           <p className="text-xs text-muted">
             {rows.length === 0
@@ -110,22 +116,14 @@ export function AchievementsTab({
             </div>
           )}
         </div>
-        <button
-          onClick={() => void read()}
-          disabled={loading}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-        >
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-          {loading ? 'Reading…' : 'Refresh'}
-        </button>
       </div>
 
-      {error && <p className="rounded-lg border border-line bg-panel2/50 px-3 py-2 text-xs text-muted">{error}</p>}
+      {error && <p className="mt-3 rounded-lg border border-line/70 px-3 py-2 text-xs text-muted">{error}</p>}
 
       {rows.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <SearchField value={query} onChange={setQuery} placeholder="Find an achievement" inputClassName="w-56" />
-          <div className="flex rounded-lg border border-line p-0.5">
+          <div className="orbit-seg !w-auto">
             {(
               [
                 ['all', `All ${rows.length}`],
@@ -136,10 +134,7 @@ export function AchievementsTab({
               <button
                 key={id}
                 onClick={() => setShow(id)}
-                className={cn(
-                  'rounded-md px-2.5 py-1 text-[11px] transition',
-                  show === id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg',
-                )}
+                className="!px-2.5"
               >
                 {label}
               </button>
@@ -149,16 +144,13 @@ export function AchievementsTab({
       )}
 
       {rows.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className="mt-2">
           {visible.map((a) => (
             <li key={a.id}>
               <button
                 onClick={() => toggle(a.id)}
                 title={a.unlocked ? 'Click to lock this again' : 'Click to mark this as unlocked'}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition',
-                  a.unlocked ? 'border-accent/50 bg-accent/10' : 'border-line bg-panel2/30 hover:border-accent/50',
-                )}
+                className={cn('orbit-row !rounded-none', a.unlocked && 'bg-[color-mix(in_srgb,var(--c-accent)_7%,transparent)]')}
               >
                 {a.icon ? (
                   <img

@@ -9,6 +9,7 @@ import { driveLabel } from '../utils/drive';
 import { say } from '../utils/toast';
 import { btnGhost } from './ui/Modal';
 import { Cover } from './ui/Cover';
+import { HeadStat, PageHead, Panel, Telemetry, TelemetryCell } from './ui/Page';
 
 function Bar({ used, total }: { used: number; total: number | null }) {
   if (!total || total <= 0) return <div className="orbit-rail" />;
@@ -133,57 +134,50 @@ export function StorageView({
   const movable = games.filter((g) => g.installDir).length;
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-4 p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="orbit-kicker flex items-center gap-1.5">
-            <HardDrive className="size-3 text-accent" />
-            Payload
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Storage</h1>
-          <p className="mt-1 text-sm text-muted">
-            Where the games in your library live, and how to move them somewhere with more room.
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="orbit-num font-mono text-lg font-semibold">{fmtBytes(totalSize)}</p>
-          <p className="text-[11px] text-muted">
-            {games.length} {games.length === 1 ? 'game' : 'games'}
-            {movable < games.length && ` · ${games.length - movable} with no folder recorded`}
-          </p>
-        </div>
-      </header>
+    <div className="orbit-page">
+      <PageHead
+        kicker="Payload"
+        title="Storage"
+        lead="Where the games in your library live, and how to move them somewhere with more room."
+        meta={
+          <>
+            <HeadStat value={fmtBytes(totalSize)} label="in the library" />
+            <HeadStat value={games.length} label={games.length === 1 ? 'game' : 'games'} />
+            {movable < games.length && <span>{games.length - movable} with no folder recorded</span>}
+          </>
+        }
+      />
 
       {drives.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Telemetry>
           {drives.map((d) => (
-            <div key={d.drive} className="orbit-panel px-4 py-3">
-              <p className="orbit-kicker">
-                {driveLabel(d.drive)} {d.label && d.label !== '' ? d.label : ''}
-              </p>
-              <p className="orbit-num mt-1 text-xl font-bold">{fmtBytes(d.free)}</p>
-              <p className="mb-2 text-[11px] text-muted">free of {fmtBytes(d.total)}</p>
-              <Bar used={d.total - d.free} total={d.total} />
-            </div>
+            <TelemetryCell
+              key={d.drive}
+              label={`${driveLabel(d.drive)} ${d.label && d.label !== '' ? d.label : ''}`.trim()}
+              value={fmtBytes(d.free)}
+              hint={`free of ${fmtBytes(d.total)}`}
+            >
+              <div className="mt-2 mb-0.5">
+                <Bar used={d.total - d.free} total={d.total} />
+              </div>
+            </TelemetryCell>
           ))}
-        </div>
+        </Telemetry>
       )}
 
-      <section className="orbit-panel p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-muted">
-            <HardDrive className="size-4" />
-            Your games
-          </h2>
-          <div className="flex-1" />
-          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void measure()} disabled={measuring}>
-            <RefreshCw className={`size-4 ${measuring ? 'animate-spin' : ''}`} />
+      <Panel
+        title="Your games"
+        icon={HardDrive}
+        aside={
+          <button className="orbit-btnquiet" onClick={() => void measure()} disabled={measuring}>
+            <RefreshCw className={`size-3.5 ${measuring ? 'animate-spin' : ''}`} />
             {measuring ? 'Measuring…' : 'Measure again'}
           </button>
-        </div>
+        }
+      >
 
         {games.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted">Nothing in the library yet.</p>
+          <p className="orbit-empty">Nothing in the library yet.</p>
         ) : (
           <div className="space-y-4">
             {byDrive.map(([drive, list]) => {
@@ -248,25 +242,25 @@ export function StorageView({
             })}
           </div>
         )}
-      </section>
+      </Panel>
 
-      <section className="orbit-panel p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Library folders</h2>
-          <div className="flex-1" />
-          <button className={`${btnGhost} flex items-center gap-2`} onClick={() => void addFolder()}>
-            <FolderPlus className="size-4" />
+      <Panel
+        title="Library folders"
+        icon={FolderOpen}
+        aside={
+          <button className="orbit-btnquiet" onClick={() => void addFolder()}>
+            <FolderPlus className="size-3.5" />
             Add folder
           </button>
-        </div>
-
+        }
+      >
         {folders.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted">
+          <p className="orbit-empty">
             No library folders yet. Add one and Orbit will only ever move games between folders you list here.
           </p>
         ) : (
           <div className="space-y-3">
-            <p className="text-xs text-muted">
+            <p className="text-xs leading-relaxed text-muted">
               {fmtBytes(grand)} across {folders.length} {folders.length === 1 ? 'folder' : 'folders'}, measured once when
               Orbit starts. Games are only ever moved between these.
             </p>
@@ -274,7 +268,7 @@ export function StorageView({
               const list = games.filter((g) => ownerOf(g) === path);
               const free = spaceBy[path];
               return (
-                <div key={path} className="rounded-xl border border-line bg-panel2/50 p-3">
+                <div key={path} className="rounded-xl border border-line/70 bg-panel2/40 p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       className="min-w-0 flex-1 truncate text-left font-mono text-sm hover:text-accent hover:underline"
@@ -318,7 +312,7 @@ export function StorageView({
             })}
           </div>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }

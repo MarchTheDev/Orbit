@@ -6,6 +6,7 @@ import { rememberPlaythrough } from '../services/playthroughs';
 import { Cover } from './ui/Cover';
 import { GameLogView } from './detail/GameLogView';
 import { SearchField } from './ui/SearchField';
+import { HeadStat, PageHead } from './ui/Page';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { moveInOrder } from '../utils/reorder';
 import { inLibraryShelf } from '../utils/library';
@@ -267,36 +268,30 @@ export function LogsView({
   const selectedRun = selected ? runOf(selected.id) : null;
 
   return (
-    <div className={embedded ? '' : 'mx-auto max-w-[1400px] p-6'}>
+    <div className={embedded ? '' : 'orbit-page'}>
       {embedded ? (
         <p className="mb-3 text-right text-[11px] text-muted">
           {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
           {gamesWithLogs === 1 ? 'game' : 'games'}
         </p>
       ) : (
-        <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="orbit-kicker flex items-center gap-1.5">
-              <NotebookPen className="size-3 text-accent" />
-              Field notes
-            </p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight">Journal</h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted">
-              Everything you have written down, game by game. Orbit also writes the first entry itself: the moment a game
-              is played for the first time, a line saying so appears here.
-            </p>
-          </div>
-          {/* Counts, not clocks: the Journal is read for what was written, and the
-              hours and minutes beside every date were a second set of numbers to
-              skip past. */}
-          <div className="flex items-center gap-3">
-            <p className="text-right text-[11px] text-muted">
-              {visibleLogCount} {visibleLogCount === 1 ? 'log' : 'logs'} in {gamesWithLogs}{' '}
-              {gamesWithLogs === 1 ? 'game' : 'games'}
-              {games.length === allGames.length && total > logs.length && ` · the latest ${logs.length} of ${total}`}
-            </p>
-          </div>
-        </header>
+        <PageHead
+          kicker="Field notes"
+          title="Journal"
+          lead="Everything you have written down, game by game. Orbit writes the first entry itself: the moment a game is played for the first time, a line saying so appears here."
+          // Counts, not clocks: the Journal is read for what was written, and
+          // the hours and minutes beside every date were a second set of
+          // numbers to skip past.
+          meta={
+            <>
+              <HeadStat value={visibleLogCount} label={visibleLogCount === 1 ? 'log' : 'logs'} />
+              <HeadStat value={gamesWithLogs} label={gamesWithLogs === 1 ? 'game written about' : 'games written about'} />
+              {games.length === allGames.length && total > logs.length && (
+                <span>latest {logs.length} of {total}</span>
+              )}
+            </>
+          }
+        />
       )}
 
       <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
@@ -343,8 +338,8 @@ export function LogsView({
                     }}
                     data-orbit-journal-game={g.id}
                     {...bind(g.id)}
-                    className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
-                      active ? 'border-accent/45 bg-panel2' : 'border-line hover:border-accent/50'
+                    className={`flex w-full items-center gap-3 rounded-[9px] px-2.5 py-2 text-left transition ${
+                      active ? 'bg-[color-mix(in_srgb,var(--c-accent)_12%,transparent)]' : 'hover:bg-[color-mix(in_srgb,var(--c-text)_5%,transparent)]'
                     } ${dragging === g.id ? 'opacity-50' : ''} ${
                       over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
                     }`}
@@ -367,7 +362,7 @@ export function LogsView({
         <section className="min-w-0">
           {selected ? (
             <>
-              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-line/70 bg-panel/50 p-3">
+              <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-line/60 pb-3">
                 <Cover game={selected} className="size-12 shrink-0 rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-sm font-semibold">{selected.title}</h2>
@@ -412,9 +407,10 @@ export function LogsView({
               />
             </>
           ) : (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line py-24 text-muted">
-              <NotebookPen className="size-8 opacity-60" />
-              <p className="text-sm">Use + beside the game search to add games to the Journal.</p>
+            <div className="orbit-empty">
+              <NotebookPen className="size-7" />
+              <p>Nothing open</p>
+              <p>Use + beside the game search to add games to the Journal.</p>
             </div>
           )}
         </section>

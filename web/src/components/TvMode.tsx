@@ -31,6 +31,9 @@ const lite = tvLite;
 /** How the one list on the page is ordered. */
 export type TvOrder = 'recent' | 'az';
 
+/** How a cover is drawn in the deck: the game's poster, or the wide banner. */
+export type DeckArt = 'poster' | 'banner';
+
 /** How wide the covers on the rail are drawn. */
 export type StardeckCover = 'compact' | 'standard' | 'large';
 
@@ -49,6 +52,10 @@ export interface StardeckPrefs {
   order: TvOrder;
   cover: StardeckCover;
   dim: StardeckDim;
+  /** The stage: the game across the top of the screen, or down its right side. */
+  stage: 'top' | 'side';
+  /** Posters, which are what a library looks like, or the wide banners a store uses. */
+  art: DeckArt;
   /** The game's own description under its facts. */
   summary: boolean;
   /** The time in the corner, the way a console has one. */
@@ -65,6 +72,8 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   order: 'recent',
   cover: 'standard',
   dim: 'balanced',
+  stage: 'top',
+  art: 'poster',
   summary: true,
   clock: true,
   logo: true,
@@ -87,6 +96,8 @@ function savedStardeck(): StardeckPrefs {
         order: value.order === 'az' ? 'az' : 'recent',
         cover: value.cover === 'compact' || value.cover === 'large' ? value.cover : 'standard',
         dim: value.dim === 'soft' || value.dim === 'deep' ? value.dim : 'balanced',
+        stage: value.stage === 'side' ? 'side' : 'top',
+        art: value.art === 'banner' ? 'banner' : 'poster',
         summary: value.summary !== false,
         clock: value.clock !== false,
         logo: value.logo !== false,
@@ -111,6 +122,19 @@ const COVER_WIDTH: Record<StardeckCover, string> = {
   compact: 'w-[clamp(4.6rem,11.5vh,6.8rem)]',
   standard: 'w-[clamp(5.8rem,15vh,9.4rem)]',
   large: 'w-[clamp(7rem,18.5vh,11.4rem)]',
+};
+
+/**
+ * The wide banners, when the deck is drawn from them.
+ *
+ * A banner is 16:9, so its width has to be roughly twice a poster's to read at
+ * the same distance from the screen; these are the poster widths above with
+ * that ratio applied, and they share the same three named sizes.
+ */
+const BANNER_WIDTH: Record<StardeckCover, string> = {
+  compact: 'w-[clamp(8rem,20vh,11.8rem)]',
+  standard: 'w-[clamp(10rem,26vh,16.4rem)]',
+  large: 'w-[clamp(12.4rem,32vh,19.8rem)]',
 };
 
 /**
@@ -525,6 +549,24 @@ function StardeckPanel({
             { id: 'deep', label: 'Deep' },
           ]}
           onChange={(next) => set('dim', next as StardeckDim)}
+        />
+        <PanelChoice
+          label="Stage"
+          value={prefs.stage}
+          options={[
+            { id: 'top', label: 'Above' },
+            { id: 'side', label: 'Beside' },
+          ]}
+          onChange={(next) => set('stage', next as StardeckPrefs['stage'])}
+        />
+        <PanelChoice
+          label="Artwork"
+          value={prefs.art}
+          options={[
+            { id: 'poster', label: 'Posters' },
+            { id: 'banner', label: 'Banners' },
+          ]}
+          onChange={(next) => set('art', next as DeckArt)}
         />
       </div>
 
@@ -1033,29 +1075,32 @@ export function TvMode({
             </button>
           </div>
         ) : (
-          <>
-            {/* The game owns the screen: its poster on the left, its name and
-                numbers taking the light, and one row of presses under them. */}
-            <div className="flex min-h-0 flex-1 items-end px-5 sm:px-9">
-              <div className="flex w-full items-end gap-8 pb-3 lg:gap-10">
-                <div className="relative hidden shrink-0 md:block">
-                  <div
-                    aria-hidden
-                    className="absolute -inset-5 rounded-[2rem] opacity-70 blur-2xl"
-                    style={{ background: `hsl(${active.hue} 65% 42% / 0.32)` }}
-                  />
+          <div className={cn('orbit-deck', prefs.stage === 'side' && 'is-side')}>
+            {/* The stage: the chosen game, named and measured, on its own
+                artwork. On a television this is the far end of the room, so it
+                is the biggest thing on screen and nothing else competes. */}
+            <section className="orbit-deck-stage" data-deck-stage>
+              <div
+                aria-hidden
+                className="orbit-deck-stagewash"
+                style={{ background: `radial-gradient(120% 140% at 18% 0%, hsl(${active.hue} 55% 40% / .45), transparent 68%)` }}
+              />
+              <div className="orbit-deck-stageinner">
+                <div className="orbit-deck-art">
                   <Cover
                     game={active}
-                    className="orbit-hero-enter relative h-[clamp(8.5rem,29vh,16rem)] w-[clamp(6rem,19vh,11.4rem)] rounded-2xl border border-white/15 shadow-[0_28px_70px_rgba(0,0,0,.7)] [&_span]:text-3xl"
+                    className={cn('orbit-deck-cover', prefs.art === 'banner' && 'is-banner')}
                     fit="cover"
                     loading="eager"
                   />
+                  <div className="orbit-deck-artglow" style={{ background: `hsl(${active.hue} 65% 46% / .35)` }} aria-hidden />
                 </div>
-                <div className="min-w-0 max-w-3xl pb-1">
-                  <p className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.32em] text-accent">
+
+                <div className="orbit-deck-copy">
+                  <p className="orbit-deck-kicker">
                     {running ? (
                       <>
-                        <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                        <span className="orbit-deck-live" aria-hidden />
                         Playing now
                       </>
                     ) : active.status === 'playing' ? (
@@ -1069,7 +1114,7 @@ export function TvMode({
 
                   <GameTitle game={active} logo={prefs.logo} />
 
-                  <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <div className="orbit-deck-stats">
                     <Stat label="played">{fmtMinutes(active.playSecs / 60)}</Stat>
                     {active.lastPlayed && (
                       <>
@@ -1080,9 +1125,7 @@ export function TvMode({
                     {left !== null && (
                       <>
                         <Dot />
-                        <Stat label="of the story left">
-                          {left > 0 ? `${left}h` : 'almost done'}
-                        </Stat>
+                        <Stat label="of the story left">{left > 0 ? `${left}h` : 'almost done'}</Stat>
                       </>
                     )}
                     {active.sizeBytes > 0 && (
@@ -1094,39 +1137,29 @@ export function TvMode({
                   </div>
 
                   {prefs.summary && active.meta?.summary && (
-                    <p className="mt-3.5 hidden max-w-xl text-sm leading-relaxed text-white/55 [@media(min-height:760px)]:line-clamp-2 [@media(min-height:760px)]:sm:block">
-                      {active.meta.summary}
-                    </p>
+                    <p className="orbit-deck-summary">{active.meta.summary}</p>
                   )}
 
                   {progress !== null && (
-                    <div className="mt-4 max-w-xs">
-                      <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">
+                    <div className="orbit-deck-progress">
+                      <div className="orbit-deck-progresshead">
                         <span>Main story</span>
-                        <span className="font-mono text-white/55">{progress}%</span>
+                        <b>{progress}%</b>
                       </div>
-                      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-accent" style={{ width: `${progress}%` }} />
+                      <div className="orbit-deck-rail" aria-hidden>
+                        <i style={{ width: `${progress}%` }} />
                       </div>
                     </div>
                   )}
 
-                  <div data-tv-actions className="mt-6 flex flex-wrap items-center gap-3">
+                  <div data-tv-actions className="orbit-deck-actions">
                     {running ? (
-                      <button
-                        data-tv-action="stop"
-                        onClick={onStop}
-                        className="flex items-center gap-2.5 rounded-full bg-rose-500 px-8 py-3.5 text-[15px] font-bold text-white shadow-[0_10px_40px_rgba(244,63,94,.35)] transition hover:brightness-110 focus-visible:ring-4 focus-visible:ring-rose-400/40"
-                      >
+                      <button data-tv-action="stop" onClick={onStop} className="orbit-deck-play is-stop">
                         <Square className="size-4" fill="currentColor" strokeWidth={0} />
                         Stop session
                       </button>
                     ) : (
-                      <button
-                        data-tv-action="play"
-                        onClick={start}
-                        className="flex items-center gap-2.5 rounded-full bg-accent px-9 py-3.5 text-[15px] font-bold text-[var(--c-on-accent)] shadow-[0_16px_50px_-12px_var(--c-accent)] transition hover:brightness-110 focus-visible:ring-4 focus-visible:ring-accent/40"
-                      >
+                      <button data-tv-action="play" onClick={start} className="orbit-deck-play">
                         <Play className="size-4" fill="currentColor" strokeWidth={0} />
                         Play
                       </button>
@@ -1137,10 +1170,7 @@ export function TvMode({
                         setDetailId(active.id);
                         onDetails(active);
                       }}
-                      className={cn(
-                        'flex items-center gap-2.5 rounded-full border border-white/15 px-6 py-3.5 text-[15px] font-semibold text-white/90 transition hover:border-white/35 focus-visible:ring-4 focus-visible:ring-accent/40',
-                        lite ? 'bg-white/[0.12] hover:bg-white/[0.18]' : 'bg-white/[0.07] backdrop-blur-md hover:bg-white/[0.12]',
-                      )}
+                      className="orbit-deck-secondary"
                     >
                       <Info className="size-4" />
                       Details
@@ -1148,28 +1178,19 @@ export function TvMode({
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
 
-            {/* The shelf, with its own controls where the shelf is read: how
-                it is ordered, which game is on the stage, and the handful of
-                choices about the room itself. */}
-            <section className="relative mt-2 shrink-0">
-              <div className="mb-2 flex items-center gap-3 px-5 sm:px-9">
-                {!prefs.cinema && (
-                  <h2 className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/40">
-                    Your library
-                  </h2>
-                )}
-                <span className="font-mono text-[11px] text-white/25">
+            {/* The index: every game that can be started, in one ordered list.
+                This is what makes the mode a deck rather than a carousel - the
+                stage never moves, the row of banners moves under the light. */}
+            <section className="orbit-deck-index">
+              <div className="orbit-deck-indexhead">
+                <h2>Deck</h2>
+                <span className="orbit-num">
                   {at + 1} / {list.length}
                 </span>
 
-                <span className="flex-1" />
-
-                <div className={cn(
-                  'flex items-center gap-0.5 rounded-full border border-white/10 p-0.5',
-                  lite ? 'bg-white/[0.12]' : 'bg-white/[0.06] backdrop-blur-sm',
-                )}>
+                <div className="orbit-deck-order" role="group" aria-label="How the deck is ordered">
                   {(
                     [
                       ['recent', 'Recent', Clock],
@@ -1181,10 +1202,6 @@ export function TvMode({
                       onClick={() => setPrefs((current) => ({ ...current, order: id }))}
                       aria-pressed={prefs.order === id}
                       title={id === 'recent' ? 'Ordered by what you played last' : 'Ordered by name'}
-                      className={cn(
-                        'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus-visible:ring-2 focus-visible:ring-accent',
-                        prefs.order === id ? 'bg-accent/25 text-white' : 'text-white/45 hover:text-accent',
-                      )}
                     >
                       <Icon className="size-3" />
                       {label}
@@ -1192,21 +1209,11 @@ export function TvMode({
                   ))}
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => select(at - 1)}
-                    aria-label="Previous game"
-                    title="Previous game"
-                    className="grid size-7 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/50 transition hover:border-white/30 hover:text-white"
-                  >
+                <div className="orbit-deck-steps">
+                  <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game">
                     <ChevronLeft className="size-4" />
                   </button>
-                  <button
-                    onClick={() => select(at + 1)}
-                    aria-label="Next game"
-                    title="Next game"
-                    className="grid size-7 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/50 transition hover:border-white/30 hover:text-white"
-                  >
+                  <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game">
                     <ChevronRight className="size-4" />
                   </button>
                 </div>
@@ -1216,12 +1223,8 @@ export function TvMode({
                     onClick={() => setCustomizing((open) => !open)}
                     aria-expanded={customizing}
                     title="Stardeck settings (C)"
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition',
-                      customizing
-                        ? 'border-accent/60 bg-accent/15 text-white'
-                        : 'border-white/10 bg-white/[0.06] text-white/55 hover:border-white/30 hover:text-white',
-                    )}
+                    className="orbit-deck-customise"
+                    data-open={customizing || undefined}
                   >
                     <SlidersHorizontal className="size-3.5" />
                     Customize
@@ -1237,80 +1240,68 @@ export function TvMode({
                 </div>
               </div>
 
-              {!prefs.cinema && (
-                <ul
-                  ref={rail}
-                  // A wheel over the rail is meant for the rail: nothing behind
-                  // the hub can scroll, so a vertical flick would otherwise do
-                  // nothing at all in the one place the pointer already is.
-                  onWheel={(event) => {
-                    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-                    if (rail.current) rail.current.scrollLeft += event.deltaY;
-                  }}
-                  className="tv-rail orbit-scroll flex items-start gap-3.5 overflow-x-auto px-5 pb-5 pt-2 sm:px-9"
-                >
-                  {list.map((game, n) => {
-                    const chosen = n === at;
-                    return (
-                      <li key={game.id} className="shrink-0">
-                        <button
-                          data-tv-cover={n}
-                          draggable={false}
-                          onDragStart={(event) => event.preventDefault()}
-                          onFocus={() => setSelectedId(game.id)}
-                          onClick={() => {
-                            // The same button is the mouse's "look at this" and
-                            // the pad's "play this", so the press that produced
-                            // the click is what tells them apart.
-                            if (padJustActivated(400)) {
-                              if (game.id === runningId) onStop();
-                              else onPlay(game);
-                              return;
-                            }
-                            setSelectedId(game.id);
-                          }}
-                          onDoubleClick={() => {
-                            if (game.id !== runningId) onPlay(game);
-                          }}
-                          aria-current={chosen ? 'true' : undefined}
-                          // The name is on the cover, in the page and in the
-                          // aria-label. A `title` would add the browser's own
-                          // little badge after a second of stillness, which is
-                          // what the pointer does while an arrow key is moving
-                          // the rail underneath it.
-                          aria-label={game.title}
-                          className={cn('tv-cover group block rounded-xl outline-none', COVER_WIDTH[prefs.cover])}
-                        >
-                          {/* The ring around the artwork, and only the artwork:
-                              `index.css` draws it against the theme's accent for
-                              hover, selection and the pad alike. */}
-                          <span className="relative block aspect-[2/3] w-full overflow-hidden rounded-xl">
-                            <Cover game={game} className="size-full [&_span]:text-xl" fit="cover" />
-                            {game.id === runningId && (
-                              <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">
-                                <span className="size-1 animate-pulse rounded-full bg-black/70" />
-                                On
-                              </span>
-                            )}
-                          </span>
-                          {/* Two lines, never cut to an ellipsis on the first: a
-                              long name is the one thing a rail cannot guess at. */}
-                          <span
-                            className={cn(
-                              'mt-1.5 line-clamp-2 min-h-[2.1rem] text-center text-[11px] font-medium leading-[1.15] transition',
-                              chosen ? 'text-white' : 'text-white/45 group-hover:text-accent',
-                            )}
-                          >
-                            {game.title}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <ul
+                ref={rail}
+                // A wheel over the index is meant for the index: nothing behind
+                // the deck can scroll, so a vertical flick would otherwise do
+                // nothing at all in the one place the pointer already is.
+                onWheel={(event) => {
+                  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+                  if (rail.current) rail.current.scrollLeft += event.deltaY;
+                }}
+                className="orbit-deck-cards orbit-scroll"
+              >
+                {list.map((game, n) => {
+                  const chosen = n === at;
+                  return (
+                    <li key={game.id}>
+                      <button
+                        data-tv-cover={n}
+                        draggable={false}
+                        onDragStart={(event) => event.preventDefault()}
+                        onFocus={() => setSelectedId(game.id)}
+                        onClick={() => {
+                          // The same button is the mouse's "look at this" and
+                          // the pad's "play this", so the press that produced
+                          // the click is what tells them apart.
+                          if (padJustActivated(400)) {
+                            if (game.id === runningId) onStop();
+                            else onPlay(game);
+                            return;
+                          }
+                          setSelectedId(game.id);
+                        }}
+                        onDoubleClick={() => {
+                          if (game.id !== runningId) onPlay(game);
+                        }}
+                        aria-current={chosen ? 'true' : undefined}
+                        aria-label={game.title}
+                        className={cn(
+                          'orbit-deck-card',
+                          prefs.art === 'banner' ? BANNER_WIDTH[prefs.cover] : COVER_WIDTH[prefs.cover],
+                        )}
+                      >
+                        <span className={cn('orbit-deck-frame', prefs.art === 'banner' ? 'is-banner' : 'is-poster')}>
+                          <Cover
+                            game={game}
+                            className="size-full [&_span]:text-xl"
+                            fit="cover"
+                          />
+                          {game.id === runningId && (
+                            <span className="orbit-deck-on">
+                              <i aria-hidden />
+                              On
+                            </span>
+                          )}
+                        </span>
+                        <span className="orbit-deck-name line-clamp-2">{game.title}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
-          </>
+          </div>
         )}
       </main>
 

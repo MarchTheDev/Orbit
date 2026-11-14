@@ -27,6 +27,7 @@ import { HltbExtraEstimate } from './detail/HltbExtraEstimate';
 import type { PlanPick } from './detail/PlanDialog';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
+import { HeadStat, PageHead } from './ui/Page';
 import { cn } from '../utils/cn';
 import { Modal } from './ui/Modal';
 import { ConfirmDialog } from './ui/ConfirmDialog';
@@ -283,30 +284,31 @@ export function BacklogView({
   const unknown = backlog.filter((g) => !g.hltb?.main).length;
 
   return (
-    <div className={embedded ? 'space-y-6' : 'space-y-8 px-6 pb-10 pt-6'}>
+    <div className={embedded ? 'space-y-6' : 'orbit-page'}>
       {!embedded && (
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="orbit-kicker">On the horizon</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight">Backlog</h1>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
-              <span>{backlog.length} on the Backlog</span>
+        <PageHead
+          kicker="On the horizon"
+          title="Backlog"
+          lead="What is waiting, what is part-way through, and what has been set aside, ordered by how long it takes to beat."
+          meta={
+            <>
+              <HeadStat value={backlog.length} label="on the Backlog" />
               {backlogHours > 0 && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1.5">
                   <Hourglass className="size-3.5" />
-                  about {Math.round(backlogHours)}h of main story
+                  about <b>{Math.round(backlogHours)}h</b> of main story
                 </span>
               )}
-              {unknown > 0 && <span title="HowLongToBeat has no time for these yet">· {unknown} unknown</span>}
-              {planned.length > 0 && <span>· {planned.length} not owned yet</span>}
-            </p>
-          </div>
-        </header>
+              {unknown > 0 && <span title="HowLongToBeat has no time for these yet">{unknown} unknown</span>}
+              {planned.length > 0 && <span>{planned.length} not owned yet</span>}
+            </>
+          }
+        />
       )}
 
       {/* The shelf's own toolbar: the search takes the room it needs, while the
           reading controls and the action for planning a new game sit together. */}
-      <div className="mt-5 flex flex-wrap items-center gap-2">
+      <div className="orbit-pagetools">
         <SearchField
           value={query}
           onChange={setQuery}
@@ -392,7 +394,7 @@ export function BacklogView({
           weekend" without opening anything: the shortest, the longest, and how
           much is left of all of it together. */}
       {showTimes && backlog.length > 0 && (
-        <section className="orbit-panel flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
+        <div className="orbit-backlogtimes">
           {(() => {
             const measured = backlog.filter((g) => (g.hltb?.main ?? 0) > 0);
             const hours = measured.map((g) => g.hltb!.main);
@@ -414,7 +416,7 @@ export function BacklogView({
               </>
             );
           })()}
-        </section>
+        </div>
       )}
 
       {/* One place, in the middle of the window, for the whole decision: the

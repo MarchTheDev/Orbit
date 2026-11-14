@@ -27,17 +27,13 @@ import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Select } from './ui/Select';
 import { DateTimePicker } from './ui/DateTimePicker';
+import { PageHead, Panel, Telemetry, TelemetryCell } from './ui/Page';
 
 const PAGE = 25;
 
+/** One reading on the page's telemetry rule. */
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="orbit-panel px-4 py-3">
-      <p className="orbit-kicker">{label}</p>
-      <p className="orbit-num mt-1 text-xl font-bold">{value}</p>
-      {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
-    </div>
-  );
+  return <TelemetryCell label={label} value={value} hint={hint} />;
 }
 
 export function SessionsView({
@@ -198,58 +194,56 @@ export function SessionsView({
   );
 
   return (
-    <div className={embedded ? 'space-y-4' : 'mx-auto max-w-[1500px] space-y-5 px-6 py-6'}>
+    <div className={embedded ? 'space-y-5' : 'orbit-page'}>
       {embedded ? (
         <div className="flex justify-end">{logButton}</div>
       ) : (
-        <header className="flex flex-wrap items-center gap-3">
-          <div className="min-w-0">
-            <p className="orbit-kicker">Playtime</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight">Sessions</h1>
-            <p className="mt-1 text-sm text-muted">Tracked playtime and hand-logged sessions.</p>
-          </div>
-          {logButton}
-        </header>
+        <PageHead
+          kicker="Playtime"
+          title="Sessions"
+          lead="Tracked playtime and hand-logged sessions, newest first."
+        >
+          <div className="orbit-pageactions">{logButton}</div>
+        </PageHead>
       )}
 
       {stats && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <Telemetry>
           <Stat label="Games tracked" value={String(stats.trackedGames)} hint={`of ${stats.totalGames} in the library`} />
           <Stat label="Sessions" value={String(stats.sessionCount)} />
           <Stat label="Longest session" value={stats.longestSecs > 0 ? fmtClock(stats.longestSecs) : '-'} />
           <Stat label="Average session" value={stats.sessionCount > 0 ? fmtClock(Math.round(stats.sessionSecs / stats.sessionCount)) : '-'} />
           <Stat label="First played" value={stats.firstPlay ? fmtDate(new Date(stats.firstPlay * 1000).toISOString()) : '-'} />
-        </div>
+        </Telemetry>
       )}
 
-      <section className="orbit-panel p-5">
-        <div className="mb-4 flex flex-wrap items-end gap-3">
-          <div className="mr-auto">
-            <h2 className="text-lg font-semibold">Session history</h2>
-            <p className="mt-0.5 text-xs text-muted">Right-click a session to edit, open its game, or remove it.</p>
-          </div>
+      <Panel
+        title="Session history"
+        aside={
           <Select
             value={gameFilter}
             onChange={(value) => {
               setGameFilter(value);
               setPage(0);
             }}
-            className="w-56"
-            menuClassName="w-56"
+            className="!w-52 !rounded-[9px] !px-2.5 !py-1.5 text-[11.5px]"
+            menuClassName="w-52"
             ariaLabel="Which game's sessions to show"
             options={[{ value: '', label: 'Every game' }, ...selectableGames.map((game) => ({ value: game.id, label: game.title }))]}
           />
-        </div>
+        }
+      >
+        <p className="orbit-panelhint">Right-click a session to edit it, open its game, or remove it.</p>
 
         {actionError && <p role="alert" className="mb-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{actionError}</p>}
         {sessions.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-line px-4 py-14 text-center">
-            <Clock className="mx-auto size-8 text-muted/70" />
-            <p className="mt-2 text-sm font-medium">{total === 0 ? 'No sessions yet' : 'Nothing on this page'}</p>
-            <p className="mt-1 text-xs text-muted">{total === 0 ? 'Press Play on a game or log time by hand to start your history.' : 'Try another page or clear the game filter.'}</p>
+          <div className="orbit-empty">
+            <Clock className="size-7" />
+            <p>{total === 0 ? 'No sessions yet' : 'Nothing on this page'}</p>
+            <p>{total === 0 ? 'Press Play on a game or log time by hand to start your history.' : 'Try another page or clear the game filter.'}</p>
           </div>
         ) : (
-          <ul className="space-y-2">
+          <ul className="mt-1">
             {sessions.map((row) => {
               const game = games.find((candidate) => candidate.id === row.gameId);
               return (
@@ -262,7 +256,7 @@ export function SessionsView({
                     setActionError(null);
                     setContext({ kind: 'session', x: event.clientX, y: event.clientY, row });
                   }}
-                  className="group grid gap-3 rounded-2xl border border-line/70 bg-panel/35 p-3 transition hover:border-accent/40 hover:bg-panel/60 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  className="group grid gap-2 rounded-xl border-b border-line/50 px-2 py-2.5 transition last:border-b-0 hover:bg-[color-mix(in_srgb,var(--c-text)_4%,transparent)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                 >
                   <button
                     type="button"
@@ -313,22 +307,16 @@ export function SessionsView({
         {pages > 1 && (
           <div className="mt-4 flex items-center justify-center gap-3 text-sm">
             <button className={btnGhost} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
-            <span className="text-muted">Page {page + 1} of {pages}</span>
+            <span className="text-muted tabular-nums">Page {page + 1} of {pages}</span>
             <button className={btnGhost} disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
           </div>
         )}
-      </section>
+      </Panel>
 
       {played.length > 0 && (
-        <section className="orbit-panel p-5">
-          <div className="mb-4 flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Most played</h2>
-              <p className="mt-0.5 text-xs text-muted">Right-click a game to adjust its total playtime or open its details.</p>
-            </div>
-            <span className="text-xs text-muted">Top {played.length}</span>
-          </div>
-          <div className="space-y-2">
+        <Panel title="Most played" aside={<span className="orbit-panelcount">Top {played.length}</span>}>
+          <p className="orbit-panelhint">Right-click a game to adjust its total playtime or open its details.</p>
+          <div className="mt-1">
             {played.map((game, index) => {
               const top = Math.max(1, played[0].playSecs);
               const fraction = Math.min(100, (game.playSecs / top) * 100);
@@ -350,7 +338,7 @@ export function SessionsView({
                   }}
                   role="button"
                   tabIndex={0}
-                  className="group flex cursor-pointer items-center gap-3 rounded-2xl border border-line/60 bg-panel/30 p-2.5 text-left transition hover:border-accent/40 hover:bg-panel/55"
+                  className="orbit-row cursor-pointer"
                 >
                   <span className="w-5 shrink-0 text-center font-mono text-xs text-muted">{String(index + 1).padStart(2, '0')}</span>
                   <Cover game={game} className="size-12 shrink-0 rounded-xl" />
@@ -368,7 +356,7 @@ export function SessionsView({
               );
             })}
           </div>
-        </section>
+        </Panel>
       )}
 
       {editing && <EditSession row={editing} onClose={() => setEditing(null)} onSaved={() => { onChanged(); void load(); }} />}
