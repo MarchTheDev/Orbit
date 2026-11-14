@@ -689,7 +689,14 @@ export function LibraryView({
           <SearchField value={query} onChange={setQuery} placeholder="Find a game" />
           {/* Filters owns the sort as well as the facets: one button that
               decides what the shelf holds and how it is read, instead of a
-              dropdown standing next to it saying half the same thing. */}
+              dropdown standing next to it saying half the same thing.
+
+              It is drawn here, inside the Library's own tools row, and nowhere
+              else. Every page with a search box was getting it for a while,
+              because it had been placed in the header the pages share; a
+              control that changes what the shelf holds means nothing on the
+              Journal or the Backlog, and the people who asked for it there
+              were asking about the shelf. */}
           <div className="orbit-filter" ref={filterBox}>
             <button
               type="button"
