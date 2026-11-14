@@ -3,8 +3,8 @@ import { ORBIT_BRAND } from './brand';
 export type { Theme } from '../types';
 
 // Orbit themes - named after celestial bodies. `nebula` is the default and
-// keeps its id so a saved choice survives upgrades; only its palette moved to
-// the graphite room and solar signal the rest of the interface is drawn in.
+// keeps its id so a saved choice survives upgrades; only its palette moved, to
+// the graphite room and the lime signal the rest of the interface is drawn in.
 export const THEMES: Theme[] = [
   {
     id: ORBIT_BRAND.themeId,
@@ -19,7 +19,7 @@ export const THEMES: Theme[] = [
     accent2: ORBIT_BRAND.accent2,
     onAccent: ORBIT_BRAND.onAccent,
   },
-  { id: 'eclipse', name: 'Eclipse', bg: '#09090b', panel: '#131316', panel2: '#1c1c21', border: '#2a2a31', text: '#f4f4f5', muted: '#a1a1aa', accent: '#f59e0b', accent2: '#ef4444' },
+  { id: 'eclipse', name: 'Eclipse', bg: '#09090b', panel: '#131316', panel2: '#1c1c21', border: '#2a2a31', text: '#f4f4f5', muted: '#a1a1aa', accent: '#f59e0b', accent2: '#ef4444', onAccent: '#1c1206' },
   // Rubellite follows Eclipse's dark, restrained surfaces with a ruby-pink accent.
   { id: 'rubellite', name: 'Rubellite', bg: '#100a11', panel: '#191019', panel2: '#241722', border: '#3c2938', text: '#f8edf5', muted: '#ad93a7', accent: '#d85b83', accent2: '#9f5baf' },
   { id: 'mars', name: 'Mars', bg: '#140a08', panel: '#22110d', panel2: '#2f1913', border: '#4a2a20', text: '#fff1ec', muted: '#c9a092', accent: '#f97316', accent2: '#e11d48' },

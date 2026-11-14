@@ -23,12 +23,12 @@ HERE = Path(__file__).resolve().parent
 FONTS = Path('/usr/share/fonts/truetype/dejavu')
 
 # src/data/brand.ts, so the installer and the window agree.
-BG_TOP = (16, 20, 32)
-BG_BOTTOM = (7, 9, 15)
-ACCENT = (233, 162, 59)
-INK = (255, 250, 240)
-INK_WARM = (242, 192, 120)
-MUTED = (139, 152, 171)
+BG_TOP = (27, 29, 34)
+BG_BOTTOM = (8, 9, 11)
+ACCENT = (211, 243, 107)
+INK = (250, 255, 238)
+INK_WARM = (205, 237, 99)
+MUTED = (141, 144, 151)
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -46,13 +46,13 @@ def plate(width: int, height: int) -> Image.Image:
             [(0, y), (width, y)],
             fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)),
         )
-    # A single gold wash behind wherever the mark sits, so the plate is not flat.
+    # A single lime wash behind wherever the mark sits, so the plate is not flat.
     glow = Image.new('RGB', (width, height), (0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
     cx = width * 0.5
     cy = height * 0.42
     radius = min(width, height) * 0.55
-    gdraw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(46, 32, 12))
+    gdraw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(40, 46, 16))
     glow = glow.filter(ImageFilter.GaussianBlur(min(width, height) * 0.16))
     return Image.blend(image, Image.blend(image, glow, 0.55), 0.9)
 
@@ -92,7 +92,7 @@ def sidebar() -> Image.Image:
     draw = ImageDraw.Draw(image)
     centre(draw, 'Orbit', font(25, True), width // 2, 176, INK)
     centre(draw, 'Game library', font(11), width // 2, 210, MUTED)
-    draw.line([(58, 240), (width - 58, 240)], fill=(233, 162, 59, 90), width=1)
+    draw.line([(58, 240), (width - 58, 240)], fill=(211, 243, 107, 90), width=1)
     return image
 
 

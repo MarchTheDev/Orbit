@@ -600,7 +600,7 @@ export function LibraryView({
               className="chip shrink-0"
             >
               {item.label}
-              {item.id === 'all' && <span className="orbit-num ml-1.5 rounded-md bg-black/15 px-1.5 py-px text-[9.5px]">{total}</span>}
+              {item.id === 'all' && <span className="orbit-num ml-1.5 rounded-md bg-onaccent/15 px-1.5 py-px text-[9.5px]">{total}</span>}
             </button>
           ))}
           {genre && (
@@ -627,7 +627,7 @@ export function LibraryView({
               <SlidersHorizontal className="mr-1.5 size-3.5" />
               Filters
               {facetCount > 0 && (
-                <span className="orbit-num ml-1.5 rounded-md bg-accent/20 px-1.5 py-px text-[9.5px] text-fg">
+                <span className="orbit-num ml-1.5 rounded-md bg-onaccent/15 px-1.5 py-px text-[9.5px] text-onaccent">
                   {facetCount}
                 </span>
               )}
