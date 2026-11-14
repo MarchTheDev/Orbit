@@ -1401,9 +1401,23 @@ export default function App() {
   useEffect(() => {
     const step: Step = { page, selectedId, mode, rail, focusId: focusStep.current };
     const previous = shownStep.current;
+    /**
+     * Which game is being looked at is not a step; being inside a game is.
+     *
+     * Opening a game's page - from the Grid, from a search result, from the
+     * palette - is one step, and stepping back out is one. Walking from there to
+     * the next game, and the next, is not: those used to fill the history with
+     * every cover somebody pressed, so Back went through them one at a time and
+     * the page underneath crawled instead of leaving.
+     *
+     * The step still carries the game that was open, so going back into a page
+     * lands on the game that was there; it just does not start a step of its own.
+     */
+    const wasInside = previous.selectedId !== null;
+    const inside = step.selectedId !== null;
     const changed =
       previous.page !== step.page ||
-      previous.selectedId !== step.selectedId ||
+      wasInside !== inside ||
       previous.mode !== step.mode ||
       previous.rail !== step.rail;
     if (replaying.current) {
@@ -1422,9 +1436,12 @@ export default function App() {
       const from = direction === -1 ? backSteps : aheadSteps;
       const to = direction === -1 ? aheadSteps : backSteps;
       const here: Step = { page, selectedId, mode, rail, focusId: focusStep.current };
+      // The view and whether a game is open count; which game, and the shelf's
+      // focus, do not. Two steps that differ only in the game being looked at
+      // are the same place, and skipping them is what makes one press one step.
       const same = (a: Step) =>
-        a.page === here.page && a.selectedId === here.selectedId && a.mode === here.mode && a.rail === here.rail &&
-        (a.focusId ?? null) === (here.focusId ?? null);
+        a.page === here.page && (a.selectedId !== null) === (here.selectedId !== null) &&
+        a.mode === here.mode && a.rail === here.rail;
       let step = from.current.pop();
       // Two entries can describe the same place when a page and its drawer
       // change together; skipping them is what makes one press one step.
