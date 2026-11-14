@@ -37,7 +37,7 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def plate(width: int, height: int) -> Image.Image:
-    """The background: one indigo-to-near-black wash, brighter at the top left."""
+    """The background: one graphite wash, dark at the bottom, lit at the top."""
     image = Image.new('RGB', (width, height), BG_BOTTOM)
     draw = ImageDraw.Draw(image)
     for y in range(height):
@@ -51,10 +51,12 @@ def plate(width: int, height: int) -> Image.Image:
     gdraw = ImageDraw.Draw(glow)
     cx = width * 0.5
     cy = height * 0.42
-    radius = min(width, height) * 0.55
-    gdraw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(40, 46, 16))
-    glow = glow.filter(ImageFilter.GaussianBlur(min(width, height) * 0.16))
-    return Image.blend(image, Image.blend(image, glow, 0.55), 0.9)
+    radius = min(width, height) * 0.46
+    gdraw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(36, 42, 14))
+    glow = glow.filter(ImageFilter.GaussianBlur(min(width, height) * 0.2))
+    # A wash, not a spotlight: enough that the plate is not a flat rectangle,
+    # little enough that the mark still sits on graphite rather than on olive.
+    return Image.blend(image, glow, 0.42)
 
 
 def mark(size: int) -> Image.Image:
@@ -65,18 +67,13 @@ def mark(size: int) -> Image.Image:
     which is how they ended up still purple: two drawings of the same thing,
     only one of them updated. The PNG beside them is the real thing, generated
     from `icons/icon.svg` by `npx tauri icon`, so it is the source here too.
+
+    The mark has always been a rounded plate, so it is drawn as it is: cutting a
+    second, larger corner radius out of it left a hairline of transparency along
+    every edge once the two radii disagreed by a pixel.
     """
     source = Image.open(HERE.parent / 'icons' / 'icon.png').convert('RGBA')
-    glyph = source.resize((size, size), Image.LANCZOS)
-    # The plate's own corner radius, kept when the picture is cut down.
-    mask = Image.new('L', (size * 4, size * 4), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, size * 4 - 1, size * 4 - 1],
-        radius=round(size * 4 * (112 / 512)),
-        fill=255,
-    )
-    glyph.putalpha(mask.resize((size, size), Image.LANCZOS))
-    return glyph
+    return source.resize((size, size), Image.LANCZOS)
 
 
 def centre(draw: ImageDraw.ImageDraw, text: str, fnt, cx: int, y: int, fill):
@@ -92,7 +89,7 @@ def sidebar() -> Image.Image:
     draw = ImageDraw.Draw(image)
     centre(draw, 'Orbit', font(25, True), width // 2, 176, INK)
     centre(draw, 'Game library', font(11), width // 2, 210, MUTED)
-    draw.line([(58, 240), (width - 58, 240)], fill=(211, 243, 107, 90), width=1)
+    draw.line([(58, 240), (width - 58, 240)], fill=ACCENT, width=1)
     return image
 
 
