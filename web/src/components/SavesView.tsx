@@ -37,6 +37,7 @@ import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { inputCls, Modal } from './ui/Modal';
 import { CloudPanel } from './saves/CloudPanel';
+import { HeadStat, PageHead } from './ui/Page';
 
 /**
  * Copies of the files a game writes while it is played.
@@ -419,17 +420,22 @@ export function SavesView({
     : [];
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-6">
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="orbit-kicker">Safe copies</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Saves</h1>
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            A copy of each game's save files, made here. Turn auto on and Orbit takes one when a
-            session ends. Nothing else has to be installed.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="orbit-page mx-auto max-w-4xl px-6 py-6">
+      <PageHead
+        kicker="Safe copies"
+        title="Saves"
+        lead="A copy of each game's save files, made here. Turn auto on and Orbit takes one when a session ends. Nothing else has to be installed."
+        meta={
+          rows.length > 0 ? (
+            <>
+              <HeadStat value={listed.length} label={listed.length === 1 ? 'game' : 'games'} />
+              <HeadStat value={auto.length} label="on auto" />
+              {clouds.length > 0 && <HeadStat value={clouds.length} label={clouds.length === 1 ? 'cloud' : 'clouds'} />}
+            </>
+          ) : undefined
+        }
+      >
+        <div className="orbit-pageactions">
           {isNative() && listed.length > 0 && (
             <button
               type="button"
@@ -447,9 +453,9 @@ export function SavesView({
               disabled={sendingCloud || restoringCloud}
               onClick={() => void backupToCloud('chosen')}
               title="Backup every game on this page that has a save folder, then send those copies to the ticked clouds."
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg disabled:opacity-50"
+              className="orbit-btnquiet"
             >
-              <CloudUpload className="size-4" />
+              <CloudUpload className="size-3.5" />
               {sendingCloud ? 'Backing up…' : 'Backup to the cloud'}
             </button>
           )}
@@ -475,9 +481,9 @@ export function SavesView({
                 setBrowseQuery('');
                 setBrowsing(true);
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
+              className="orbit-btnquiet"
             >
-              <List className="size-4" />
+              <List className="size-3.5" />
               All games
             </button>
           )}
@@ -485,20 +491,19 @@ export function SavesView({
             <button
               type="button"
               onClick={() => setShowHidden((on) => !on)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-muted hover:border-accent hover:text-fg"
+              className="orbit-btnquiet"
             >
-              {showHidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              {showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
               {showHidden ? 'Hide them again' : `Show ${hiddenIds.length} hidden`}
             </button>
           )}
         </div>
-      </div>
-
+      </PageHead>
 
       {status?.root && (
-        <p className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted">
+        <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
           <span>
-            Copies are kept in <span className="text-fg">{status.root}</span>.
+            Copies are kept in <span className="font-mono text-[11px] text-fg">{status.root}</span>.
           </span>
           <button
             type="button"
@@ -538,12 +543,12 @@ export function SavesView({
       )}
 
       {rows.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line px-4 py-8 text-center text-sm text-muted">
+        <p className="orbit-empty">
           Add a game first. A backup needs something to belong to.
         </p>
       ) : listed.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line px-4 py-8 text-center">
-          <p className="text-sm text-muted">Every game is hidden from Saves. They are still in the library.</p>
+        <div className="orbit-empty">
+          <p>Every game is hidden from Saves. They are still in the library.</p>
           <button
             type="button"
             onClick={() => setShowHidden(true)}
@@ -561,16 +566,16 @@ export function SavesView({
         {listed.length === 1 && (
           <p className="mb-3 text-xs text-muted">Right-click a game, or use All games, to hide it from this list.</p>
         )}
-        <ul ref={list} className="space-y-2">
+        <ul ref={list} className="mt-1">
           {listed.map((game) => (
             <li
               key={game.id}
               data-orbit-save={game.id}
               onContextMenu={(event) => openMenu(game, event)}
               className={cn(
-                'rounded-xl border border-line bg-panel/60',
+                'orbit-row',
                 dragging === game.id && 'opacity-60',
-                over === game.id && dragging && dragging !== game.id && 'ring-2 ring-accent',
+                over === game.id && dragging && dragging !== game.id && 'orbit-row-drop',
                 hidden.has(game.id) && 'opacity-70',
               )}
             >
@@ -578,11 +583,11 @@ export function SavesView({
               <button
                 onClick={() => setOpenId((current) => (current === game.id ? null : game.id))}
                 {...bind(game.id)}
-                className="flex min-w-0 flex-1 cursor-grab items-center justify-between gap-3 px-4 py-2.5 text-left active:cursor-grabbing"
+                className="flex min-w-0 flex-1 cursor-grab items-center justify-between gap-3 py-3 pr-4 text-left active:cursor-grabbing"
               >
                 <span className="flex min-w-0 items-center gap-3">
-                  <GripVertical className="size-4 shrink-0 text-muted" aria-hidden />
-                  <Cover game={game} className="h-20 w-14 shrink-0 overflow-hidden rounded-lg [&_span]:text-[11px]" />
+                  <GripVertical className="ml-1 size-4 shrink-0 text-muted" aria-hidden />
+                  <Cover game={game} className="h-16 w-11 shrink-0 overflow-hidden rounded-md [&_span]:text-[11px]" />
                   <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold">{game.title}</span>
                   <span className="block text-xs text-muted">
@@ -595,13 +600,13 @@ export function SavesView({
                   )}
                   </span>
                 </span>
-                <span className="text-xs text-muted">{openId === game.id ? 'Close' : 'Manage'}</span>
+                <span className="orbit-btnquiet shrink-0">{openId === game.id ? 'Close' : 'Manage'}</span>
               </button>
               {hidden.has(game.id) && (
                 <button
                   type="button"
                   onClick={() => setHidden(game.id, false)}
-                  className="mr-3 shrink-0 self-center rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"
+                  className="orbit-btnquiet mr-3 shrink-0 self-center"
                 >
                   Show
                 </button>

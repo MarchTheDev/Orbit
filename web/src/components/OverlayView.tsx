@@ -1238,7 +1238,15 @@ export function OverlayView() {
   const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
   const fps = status?.fps === 60 ? 60 : 30;
   const runningFolder = status?.playing ? status.game : '';
-  const scopedItems = runningFolder ? items.filter((item) => item.game === runningFolder) : items;
+  /**
+   * The gallery, while a game is running, is that game's gallery.
+   *
+   * The captures are filed under the game they came from, so this is the same
+   * filter the modal gallery below uses. With nothing running there is no game
+   * to be playing, and the panel says so rather than showing the whole library's
+   * screenshots under a heading that claims to be about one game.
+   */
+  const scopedItems = runningFolder ? items.filter((item) => item.game === runningFolder) : [];
   const shownItems = scopedItems.filter((item) => item.kind === tab);
   const tabCounts = captureCounts(scopedItems);
   const pages = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
@@ -1326,7 +1334,7 @@ export function OverlayView() {
         <Box
           id="gallery"
           padSelected={padOn('gallery')}
-          title={runningFolder ? `Gallery · ${runningFolder}` : 'Gallery'}
+          title={runningFolder ? `Captures · ${runningFolder}` : 'Captures'}
           place={places.gallery}
           front={front === 'gallery'}
           onDrag={drag}
@@ -1339,13 +1347,13 @@ export function OverlayView() {
               data-overlay
               aria-label="Close"
               onClick={() => void overlayHide('the close button')}
-              className="grid size-7 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+              className="orbit-ovicon grid size-7 place-items-center"
             >
               <X className="size-4" />
             </button>
           )}
         >
-          <div className="mb-2 flex gap-1">
+          <div className="orbit-ovseg mb-2" role="group" aria-label="What to show">
             {CAPTURE_KINDS.map((kind) => (
               <button
                 key={kind}
@@ -1353,22 +1361,18 @@ export function OverlayView() {
                 data-overlay
                 aria-pressed={tab === kind}
                 onClick={() => { setTab(kind); setPage(0); }}
-                className={cn(
-                  'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-                  tab === kind
-                    ? 'border-accent bg-accent/15 text-white'
-                    : 'border-white/15 bg-black/30 text-white/70 hover:border-white/35 hover:text-white',
-                )}
               >
                 {CAPTURE_LABELS[kind].many}
-                {tabCounts[kind] > 0 && <span className="ml-1 tabular-nums text-white/45">{tabCounts[kind]}</span>}
+                {tabCounts[kind] > 0 && <span className="orbit-ovcount ml-1">{tabCounts[kind]}</span>}
               </button>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-2">
             {shownItems.length === 0 && (
-              <p className="col-span-2 px-1 py-6 text-center text-[11px] leading-relaxed text-white/45">
-                {runningFolder ? `No ${CAPTURE_LABELS[tab].many.toLowerCase()} of this game yet.` : 'Nothing captured yet.'}
+              <p className="orbit-ovempty col-span-2 px-1 py-6 text-center">
+                {runningFolder
+                  ? `No ${CAPTURE_LABELS[tab].many.toLowerCase()} of ${runningFolder} yet.`
+                  : 'Start a game and its captures appear here.'}
               </p>
             )}
             {pageItems.map((item) => (
@@ -1387,10 +1391,10 @@ export function OverlayView() {
                   setFront('gallery');
                 }}
                 onClick={() => void run(async () => { await overlayOpen(item.path); })}
-                className="overflow-hidden rounded-2xl bg-black/30 text-left hover:bg-white/10"
+                className="orbit-ovtile overflow-hidden text-left"
               >
                 <Preview item={item} />
-                <span className="block truncate px-2 py-1.5 text-[11px] text-white">{item.name}</span>
+                <span className="orbit-ovtile-name block truncate">{item.name}</span>
               </button>
             ))}
           </div>
@@ -1405,7 +1409,7 @@ export function OverlayView() {
               >
                 Previous
               </button>
-              <span className="text-[11px] tabular-nums text-white/50">{safePage + 1} / {pages}</span>
+              <span className="orbit-ovcount text-[11px] tabular-nums">{safePage + 1} / {pages}</span>
               <button
                 type="button"
                 data-overlay
@@ -1424,7 +1428,7 @@ export function OverlayView() {
             onClick={() => void run(async () => {
               await overlayOpenKind(tab === 'screenshot' ? 'screenshots' : tab === 'replay' ? 'replays' : 'recordings');
             })}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-[11px] text-white/75 hover:border-white/40"
+            className="orbit-ovlink mt-2 flex w-full items-center justify-center gap-2"
           >
             <FolderOpen className="size-3.5" />
             Open folder
@@ -1448,7 +1452,7 @@ export function OverlayView() {
               data-overlay
               aria-label="Close"
               onClick={() => void overlayHide('the close button')}
-              className="grid size-7 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+              className="orbit-ovicon grid size-7 place-items-center"
             >
               <X className="size-4" />
             </button>
@@ -1537,16 +1541,15 @@ export function OverlayView() {
           <button
             type="button"
             data-overlay
-            data-overlay-hit="1"
+            data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 orbit-ovpill flex items-center gap-1.5 px-3 py-1.5 text-[11px]"
             aria-expanded={boxesOpen}
             onClick={() => setBoxesOpen((open) => !open)}
-            className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/15 bg-[#141416]/92 px-3 py-1.5 text-[11px] text-white/80 backdrop-blur-md"
           >
             <Settings2 className="size-3.5" />
             Boxes
           </button>
           {boxesOpen && (
-            <div data-overlay-hit="1" className="pointer-events-auto absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-2xl border border-white/10 bg-[#141416]/95 p-3 shadow-2xl backdrop-blur-md">
+            <div data-overlay-hit="1" className="pointer-events-auto orbit-ovsheet absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 p-3">
               <div className="flex flex-wrap gap-1.5">
                 {OVERLAY_BOXES.filter((box) => !linux || box.id !== 'fps').map((box) => {
                   const shown = !hidden.includes(box.id);
@@ -1652,17 +1655,14 @@ function Box({
       data-overlay-box={id}
       data-overlay-hit="1"
       data-pin={p.pinned ? '1' : '0'}
-      className={cn(
-        'pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141416]/92 text-fg shadow-2xl backdrop-blur-md',
-        padSelected && 'orbit-box-focus',
-      )}
+      className={cn('orbit-ovbox pointer-events-auto absolute flex flex-col overflow-hidden text-fg', padSelected && 'orbit-box-focus')}
       style={{ left: p.x, top: p.y, width: p.w ?? BOX[id].w, height: p.h ?? BOX[id].h, zIndex: front ? 30 : 20 }}
     >
       <div
-        className="flex cursor-grab items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"
+        className="orbit-ovbox-head flex cursor-grab items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"
         onPointerDown={(event) => onDrag(id, event)}
       >
-        <p className="min-w-0 truncate text-[11px] uppercase tracking-widest text-white/50">{title}</p>
+        <p className="orbit-ovbox-title min-w-0 truncate">{title}</p>
         <span className="flex items-center gap-1">
           {extra}
           <button
@@ -1671,10 +1671,7 @@ function Box({
             aria-label={place.pinned ? `Unpin ${title}` : `Pin ${title}`}
             aria-pressed={place.pinned}
             onClick={() => onPin(id)}
-            className={cn(
-              'grid size-7 place-items-center rounded-full',
-              place.pinned ? 'bg-white text-black' : 'text-white/70 hover:bg-white/10 hover:text-white',
-            )}
+            className={cn('orbit-ovicon grid size-7 place-items-center', place.pinned && 'is-on')}
           >
             <Pin className="size-3.5" />
           </button>
