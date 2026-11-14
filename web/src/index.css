@@ -4236,9 +4236,9 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
 }
 .orbit-ovlink:hover { border-color: color-mix(in srgb, var(--c-accent) 60%, transparent); color: #fff; }
 
-/* A card: a name, a sentence, then the settings. No border, no nested panel -
-   the page has one column and the card's own rule is what separates it from the
-   next one. */
+/* A card: a name, a sentence, then the settings. The card is the page's own
+   sheet with a rule over it, so the settings inside it are the only objects in
+   frames. */
 .orbit-setsec {
   min-width: 0;
   border-top: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
@@ -4282,6 +4282,48 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   text-wrap: pretty;
 }
 .orbit-setsec-body { display: flex; flex-direction: column; gap: 18px; }
+
+/* The typefaces, each writing in itself. */
+.orbit-fontlist { display: flex; flex-direction: column; }
+.orbit-fontrow {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  padding: 9px 2px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+  background: none;
+  text-align: left;
+  color: var(--c-text);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap);
+}
+.orbit-fontrow:first-child { border-top: 0; }
+.orbit-fontrow:hover { color: color-mix(in srgb, var(--c-accent) 40%, var(--c-text)); }
+.orbit-fontrow-name {
+  flex: none;
+  width: 9rem;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+.orbit-fontrow-sample {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--c-muted);
+}
+.orbit-fontrow[data-chosen] .orbit-fontrow-sample { color: color-mix(in srgb, var(--c-text) 82%, transparent); }
+.orbit-fontrow-tick {
+  flex: none;
+  width: 1rem;
+  text-align: right;
+  font-size: 11px;
+  color: var(--c-accent);
+}
 
 /* The theme cards. A small picture of the theme - its room, its panel and its
    two signals - under its name. The chosen one is not a heavier border: it is
@@ -4381,6 +4423,11 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
+  padding: 2px 0;
+}
+.orbit-setrow + .orbit-setrow {
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
 }
 .orbit-setrow-copy { min-width: 0; flex: 1; }
 .orbit-setrow-label {
@@ -4417,16 +4464,33 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
 }
 .orbit-settag.is-off { opacity: .6; }
 
-/* A block of settings that belong together: a name, a rule, then rows. */
+/* A block of settings that belong together.
+   It used to be a bordered box inside the card, which made a page of settings a
+   stack of boxes in a column of boxes: three frames deep before a single switch.
+   The block is a ruled run with its name in the margin now, and only what reads
+   as a control - a switch, a slider, a field - carries a line of its own. */
 .orbit-setgroup {
+  counter-increment: setgroup;
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 11px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  background: color-mix(in srgb, var(--c-text) 2.4%, transparent);
+  gap: 14px;
+  padding: 20px 0 4px 22px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
 }
+.orbit-setgroup:first-child { border-top: 0; padding-top: 2px; }
+.orbit-setgroup::before {
+  content: counter(setgroup, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 21px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: color-mix(in srgb, var(--c-accent) 58%, var(--c-muted));
+}
+.orbit-setgroup:first-child::before { top: 3px; }
+.orbit-setsec-body { counter-reset: setgroup; }
 .orbit-setgroup-head { display: flex; flex-direction: column; gap: 4px; }
 .orbit-setgroup-note {
   max-width: 66ch;
@@ -4449,11 +4513,10 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   font-variant-numeric: tabular-nums;
 }
 .orbit-setgroup-title {
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--c-muted) 88%, transparent);
+  font-size: 12.5px;
+  font-weight: 680;
+  letter-spacing: -.005em;
+  color: var(--c-text);
 }
 .orbit-setsubhead {
   display: flex;

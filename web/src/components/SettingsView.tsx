@@ -1298,28 +1298,30 @@ export function SettingsView({
           )}
         </div>
         <SubHead>Typeface</SubHead>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {FONTS.map((font) => (
-            <button
-              key={font.id}
-              type="button"
-              onClick={() => setSettings({ fontFamily: font.id as FontChoice })}
-              aria-pressed={(settings.fontFamily ?? 'system') === font.id}
-              className={cn(
-                'rounded-xl border px-3 py-3 text-left transition',
-                (settings.fontFamily ?? 'system') === font.id
-                  ? 'border-accent bg-accent/10 shadow-[0_0_0_1px_var(--c-accent)]'
-                  : 'border-line bg-panel2/40 hover:border-accent/50',
-              )}
-              style={{ fontFamily: font.stack }}
-            >
-              <span className="flex items-baseline justify-between gap-3">
-                <span className="text-sm font-semibold">{font.name}</span>
-                <span className="text-lg font-bold">Aa</span>
-              </span>
-              <span className="mt-1 block text-xs text-muted">{font.sample}</span>
-            </button>
-          ))}
+        {/* Each face is shown by writing in it, at the size the app writes at,
+            rather than by a swatch card with two letters on it. */}
+        <div className="orbit-fontlist" role="radiogroup" aria-label="Typeface">
+          {FONTS.map((font) => {
+            const chosen = (settings.fontFamily ?? 'system') === font.id;
+            return (
+              <button
+                key={font.id}
+                type="button"
+                role="radio"
+                aria-checked={chosen}
+                onClick={() => setSettings({ fontFamily: font.id as FontChoice })}
+                className="orbit-fontrow"
+                data-chosen={chosen || undefined}
+                style={{ fontFamily: font.stack }}
+              >
+                <span className="orbit-fontrow-name">{font.name}</span>
+                <span className="orbit-fontrow-sample">{font.sample}</span>
+                <span className="orbit-fontrow-tick" aria-hidden>
+                  {chosen ? '✓' : ''}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <SubHead>Surface</SubHead>
