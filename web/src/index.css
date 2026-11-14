@@ -465,6 +465,59 @@ html.orbit-linux.orbit-glass .orbit-ovsheet {
   border-radius: 18px;
 }
 
+/* A switch: the control for something that is on or off and takes effect the
+   moment it is pressed. It is drawn here rather than borrowed from the OS,
+   because an operating system's switch inside an Orbit panel is the one grey
+   rectangle nobody can restyle.
+
+   The mark inside travels rather than the whole control moving, so the travel
+   is a transform on one element and nothing repaints around it. */
+.orbit-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  width: 38px;
+  height: 21px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--c-text) 16%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 6%, transparent);
+  cursor: pointer;
+  transition: background-color .14s var(--ease-snap), border-color .14s var(--ease-snap);
+}
+.orbit-switch > i {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  display: block;
+  width: 15px;
+  height: 15px;
+  margin-top: -7.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 62%, transparent);
+  transition: transform .16s var(--ease-snap), background-color .14s var(--ease-snap);
+}
+.orbit-switch:hover { border-color: color-mix(in srgb, var(--c-text) 30%, transparent); }
+.orbit-switch[data-on],
+.orbit-switch[aria-checked='true'] {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.orbit-switch[data-on] > i,
+.orbit-switch[aria-checked='true'] > i {
+  transform: translateX(17px);
+  background: var(--c-onaccent);
+}
+.orbit-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.orbit-switch:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 /* A label above a value, quiet enough to sit beside a headline. */
 .orbit-kicker {
   font-size: 10px;
