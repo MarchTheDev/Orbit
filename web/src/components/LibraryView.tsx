@@ -6,6 +6,7 @@ import {
   Images,
   Info,
   LayoutGrid,
+  ChevronDown,
   List,
   NotebookPen,
   Pencil,
@@ -120,13 +121,13 @@ const DEFAULT_SHELF_ROWS: ShelfRows = 3;
  * was a column of identical slivers with no way to make one game look like the
  * subject of the page.
  */
-const LIST_SIZES = [44, 56, 72, 92, 120] as const;
-type ListSize = (typeof LIST_SIZES)[number];
-const DEFAULT_LIST_SIZE: ListSize = 56;
+const LIST_MIN = 44;
+const LIST_MAX = 148;
+const DEFAULT_LIST_SIZE = 56;
 
-function savedListSize(): ListSize {
+function savedListSize(): number {
   const value = Number(localStorage.getItem('orbit.observatory.listsize'));
-  return (LIST_SIZES as readonly number[]).includes(value) ? (value as ListSize) : DEFAULT_LIST_SIZE;
+  return Number.isFinite(value) && value >= LIST_MIN && value <= LIST_MAX ? value : DEFAULT_LIST_SIZE;
 }
 
 function savedShelfWidth(): number {
@@ -366,7 +367,7 @@ export function LibraryView({
   // A list row's height, in pixels. Covers are a grid of columns; a list is one
   // column of rows, so its size is how tall each row is - the cover grows with
   // it and so does the type beside it.
-  const [listSize, setListSize] = useState<ListSize>(savedListSize);
+  const [listSize, setListSize] = useState<number>(savedListSize);
   /**
    * Whether a click in the Grid opens the game instead of only opening it in the
    * Observatory.
@@ -376,7 +377,7 @@ export function LibraryView({
    * game saves the second step. Off by default - a wall of covers where every
    * click leaves the wall is surprising if you have only ever used a mouse.
    */
-  const [gridOpensOnSelect, setGridOpensOnSelect] = useState<boolean>(
+  const [gridOpensOnSelect] = useState<boolean>(
     () => localStorage.getItem('orbit.library.openOnSelect') === '1',
   );
   /** Grid wall sizing, kept apart from the shelf's. */
@@ -653,6 +654,7 @@ export function LibraryView({
         </div>
 
         <div className="orbit-libtools-right">
+          <SearchField value={query} onChange={setQuery} placeholder="Find a game" />
           {/* Filters owns the sort as well as the facets: one button that
               decides what the shelf holds and how it is read, instead of a
               dropdown standing next to it saying half the same thing. */}
@@ -760,7 +762,6 @@ export function LibraryView({
               </div>
             )}
           </div>
-          <SearchField value={query} onChange={setQuery} placeholder="Find a game" />
           <div className="orbit-viewswitch" ref={viewSwitch}>
             <button
               className="orbit-viewbtn"
@@ -771,6 +772,11 @@ export function LibraryView({
             >
               <List className="size-3.5" strokeWidth={2} />
               Observatory
+              <ChevronDown
+                className="orbit-viewbtn-caret"
+                aria-hidden
+                strokeWidth={2.4}
+              />
             </button>
             <button
               className="orbit-viewbtn"
@@ -781,6 +787,11 @@ export function LibraryView({
             >
               <LayoutGrid className="size-3.5" strokeWidth={2} />
               Grid
+              <ChevronDown
+                className="orbit-viewbtn-caret"
+                aria-hidden
+                strokeWidth={2.4}
+              />
             </button>
 
             {viewMenu === 'details' && (
@@ -860,10 +871,15 @@ export function LibraryView({
                   </div>
                 </div>
 
-                <span className="orbit-viewmenu-label">Appearance</span>
+                <span className="orbit-viewmenu-label">Shape</span>
                 <CornersRow value={corners} onChange={setCorners} />
+
+                <span className="orbit-viewmenu-label">Behaviour</span>
                 <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
+                </div>
+                <div className="orbit-viewmenu-row">
+                  <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
                 </div>
                 <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
                   Reset to defaults
@@ -871,23 +887,20 @@ export function LibraryView({
 
                 {rail === 'list' && (
                   <div className="orbit-viewmenu-block">
-                    <span className="orbit-viewmenu-sublabel">Row size</span>
-                    <div className="orbit-seg" role="group" aria-label="Row size">
-                      {LIST_SIZES.map((size, index) => (
-                        <button
-                          key={size}
-                          type="button"
-                          aria-pressed={listSize === size}
-                          onClick={() => setListSize(size)}
-                          title={`${size} pixels tall`}
-                        >
-                          {index + 1}
-                        </button>
-                      ))}
+                    <div className="orbit-viewmenu-row">
+                      <span>Row size</span>
+                      <span className="orbit-viewmenu-value">{listSize} px</span>
                     </div>
-                    <p className="orbit-viewmenu-note">
-                      A taller row draws a bigger cover and names the game in full.
-                    </p>
+                    <input
+                      type="range"
+                      min={LIST_MIN}
+                      max={LIST_MAX}
+                      step={2}
+                      value={listSize}
+                      onChange={(event) => setListSize(Number(event.target.value))}
+                      className="orbit-range w-full cursor-pointer"
+                      aria-label="Row size"
+                    />
                   </div>
                 )}
 
@@ -937,24 +950,6 @@ export function LibraryView({
                   <ShapeRow value={gridShape} onChange={setGridShape} />
                 </div>
 
-                <div className="orbit-viewmenu-row orbit-viewmenu-rowsplit">
-                  <span>
-                    Open details on select
-                    <span className="orbit-viewmenu-hint">One press on a cover shows the game</span>
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={gridOpensOnSelect}
-                    aria-label="Open details on select"
-                    onClick={() => setGridOpensOnSelect((on) => !on)}
-                    className="orbit-switch"
-                    data-on={gridOpensOnSelect || undefined}
-                  >
-                    <i />
-                  </button>
-                </div>
-
                 <div className="orbit-viewmenu-block">
                   <span className="orbit-viewmenu-sublabel">Cover fit</span>
                   <div className="orbit-seg" role="group" aria-label="How artwork fills its frame">
@@ -964,17 +959,17 @@ export function LibraryView({
                   </div>
                 </div>
 
-                <span className="orbit-viewmenu-label">Appearance</span>
+                <span className="orbit-viewmenu-label">Shape</span>
                 <CornersRow value={corners} onChange={setCorners} />
 
+                <span className="orbit-viewmenu-label">Behaviour</span>
                 <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
                 </div>
                 <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
                 </div>
-
-                <div className="orbit-viewmenu-block">
+                <div className="orbit-viewmenu-row">
                   <CheckboxInline checked={gridOpen} onChange={setGridOpen} label="Open details on select" />
                 </div>
                 {sort === 'manual' && (

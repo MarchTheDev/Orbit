@@ -2215,6 +2215,20 @@ html.orbit-linux .orbit-topbar {
   align-items: center;
   gap: 6px;
 }
+/* The arrow that says this button opens something, rather than doing what it
+   says. It turns over while the panel under it is open. */
+.orbit-viewbtn-caret {
+  width: 13px;
+  height: 13px;
+  margin-right: -4px;
+  opacity: .55;
+  transition: transform .14s var(--ease-snap), opacity .12s var(--ease-snap);
+}
+.orbit-viewbtn[aria-expanded='true'] .orbit-viewbtn-caret {
+  transform: rotate(180deg);
+  opacity: .9;
+}
+.orbit-viewbtn:hover .orbit-viewbtn-caret { opacity: .85; }
 .orbit-viewbtn {
   display: flex;
   align-items: center;
@@ -2418,6 +2432,9 @@ html.orbit-linux .orbit-topbar {
   scrollbar-width: none;
 }
 .orbit-libtools-chips::-webkit-scrollbar { display: none; }
+/* Every control on the tools row is one height and one radius, so the row reads
+   as a set of buttons rather than as a search box that happens to sit beside
+   two of them. */
 .orbit-libtools-right {
   display: flex;
   flex-wrap: wrap;
@@ -2425,6 +2442,16 @@ html.orbit-linux .orbit-topbar {
   gap: 8px;
   margin-left: auto;
 }
+.orbit-libtools-right > .orbit-filter > .chip,
+.orbit-libtools-right > .orbit-viewswitch .orbit-viewbtn,
+.orbit-libtools-right > .orbit-libsearch input {
+  height: 34px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.orbit-libtools-right > .orbit-filter > .chip { padding: 0 12px; }
+.orbit-libtools-right > .orbit-libsearch input { padding-left: 13px; padding-right: 34px; }
 .orbit-viewmenu-note {
   margin: 8px 4px 2px;
   font-size: 11px;
