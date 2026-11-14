@@ -442,7 +442,7 @@ struct BonkerData {
 /// `detail=media` only returns the wide header. The portrait lives on `full`,
 /// under `images.library_capsule`, which is the picture newer titles do not
 /// publish at the old `library_600x900.jpg` name.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 struct BonkerImages {
     library_capsule: Option<String>,
     library_capsule_2x: Option<String>,
@@ -502,10 +502,6 @@ fn push_portrait(picks: &mut Vec<ArtworkPick>, url: Option<&str>, label: &str) {
 
 // ------------------------------------------------------------ wide artwork
 
-/// The open SteamGridDB catalogue: the community's grids and heroes, answered
-/// without a key. The keyed API is a different host, in `sgdb.rs`.
-const OPEN_SGDB: &str = "https://www.steamgriddb.com";
-
 /// One wide picture of a game, with where it came from.
 struct Wide {
     url: String,
@@ -513,105 +509,72 @@ struct Wide {
     label: String,
 }
 
-/// Wide art for a game, from the open catalogues in order of quality.
+/// Wide art for a game, with no key and no account.
 ///
-/// The store's own artwork is first: it is the picture the game ships with, it
-/// needs no key and no account, and on Steam it is already what the store page
-/// and the library tile draw. What it does not have is a *choice*, which is what
-/// the two community catalogues below exist for - one wide picture per game is a
-/// coin toss on a television, and the artist who spent a day on a title's banner
-/// usually did better than the marketing department.
+/// Only an app id is needed: every route here is the store's own, so there is
+/// nothing to search for by title and nothing to guess at.
 ///
-/// Both of the community catalogues are open: no key, no account, no sign-in.
-/// SteamGridDB's API needs a key, and its key is somebody's personal one, so it
-/// is offered separately and with a key rather than pretended to be open.
+/// The two routes below both end at a picture the game ships with: the store's
+/// page, and the hero at its own file name for a title the store's cache has not
+/// indexed yet. Neither asks anybody for anything, which is the whole point -
+/// the Stardeck used to need a SteamGridDB key before it could put a picture on
+/// the screen at all.
 ///
-/// Every step is allowed to fail. A game nobody has drawn for comes back with
-/// the store's header and nothing else, which is precisely the picture the
-/// television had before this existed.
-pub async fn wide_art(app_id: Option<u64>, title: &str) -> Vec<ArtworkPick> {
+/// The community's own heroes are a keyed catalogue, so they are asked for in
+/// `tv_backdrop` afterwards, and only when this machine has a key. A game nobody
+/// has drawn for comes back with the store's own picture, which is exactly what
+/// the television showed before any of this existed.
+///
+/// Every step is allowed to fail without failing the others.
+pub async fn wide_art(app_id: Option<u64>) -> Vec<ArtworkPick> {
     let Ok(client) = client() else {
         return Vec::new();
     };
-    // The three catalogues are asked at once: they are independent, and the
-    // television wants a backdrop now rather than after three timeouts.
-    let store_client = client.clone();
     let steam_client = client.clone();
-    let grid_client = client.clone();
-    let name = title.to_string();
-    let (store, steam, grid) = tokio::join!(
-        async move {
-            match app_id {
-                Some(id) => steam_wide(&store_client, id).await,
-                None => None,
-            }
-        },
-        async move { hero_file(&steam_client, app_id).await },
-        async move { sgdb_open_hero(&grid_client, &name).await },
-    );
+    // Spawned rather than awaited one after another, the same way the full
+    // sheet asks its questions: these are two independent routes to the same
+    // picture, and the television wants it now rather than after the sum of two
+    // timeouts. `tokio::join!` would read better, but it wants the macros
+    // feature this crate deliberately leaves out.
+    let store_task = tokio::spawn(async move { steam_wide(&client, app_id).await });
+    let steam_task = tokio::spawn(async move { hero_file(&steam_client, app_id).await });
+    let store = store_task.await.ok().flatten();
+    let steam = steam_task.await.ok().flatten();
 
     let mut picks: Vec<ArtworkPick> = Vec::new();
-    let mut push = |wide: Option<Wide>, kind: &str| {
+    let mut push = |wide: Option<Wide>| {
         let Some(wide) = wide else { return };
         if picks.iter().any(|have| have.url == wide.url) {
             return;
         }
-        picks.push(ArtworkPick { url: wide.url, kind: kind.into(), label: wide.label });
+        picks.push(ArtworkPick { url: wide.url, kind: "hero".into(), label: wide.label });
     };
-    push(store, "hero");
-    push(steam, "hero");
-    push(grid, "hero");
+    push(store);
+    push(steam);
     picks
 }
 
-/// The store's own wide picture: the hashed asset path first, then the older
-/// fixed name every Steam header has had for fifteen years.
-async fn steam_wide(client: &reqwest::Client, app_id: u64) -> Option<Wide> {
+/// The store's own wide picture, from the entry the cache already keeps.
+async fn steam_wide(client: &reqwest::Client, app_id: Option<u64>) -> Option<Wide> {
+    let app_id = app_id?;
     let Ok(page) = bonker_full(client, app_id).await else { return None };
-    let images = page.images.clone().unwrap_or_default();
-    let url = [images.library_hero.clone(), images.hero.clone(), images.header.clone()]
-        .into_iter()
-        .flatten()
-        .map(|url| url.trim().to_string())
-        .find(|url| !url.is_empty())?;
+    let url = wide_of(&page.images.unwrap_or_default())?;
     Some(Wide { url, label: "Steam, the store's own".into() })
 }
 
-/// SteamGridDB's grid art, without a key.
+/// Which of a store page's pictures is the wide one.
 ///
-/// A different service from the SteamGridDB API below: this one is the open
-/// mirror the SteamGridDB community runs for tools that cannot ask a person for
-/// a key. It answers with heroes in the order the community voted for them.
-async fn sgdb_open_hero(client: &reqwest::Client, title: &str) -> Option<Wide> {
-    let id = open_sgdb_id(client, title).await?;
-    let url = format!("{OPEN_SGDB}/api/public/heroes/{id}");
-    let reply = client
-        .get(url)
-        .timeout(std::time::Duration::from_secs(4))
-        .send()
-        .await
-        .ok()?
-        .json::<OpenGridHeroes>()
-        .await
-        .ok()?;
-    reply
-        .data
+/// The hero the page itself draws first, then the hero under Bonker's older
+/// name, then the header every Steam page has had for fifteen years. A cover is
+/// never used here: a portrait stretched across a television is a crop nobody
+/// chose.
+fn wide_of(images: &BonkerImages) -> Option<String> {
+    [images.library_hero.as_deref(), images.hero.as_deref(), images.header.as_deref()]
         .into_iter()
-        .map(|hero| hero.url)
+        .flatten()
+        .map(str::trim)
         .find(|url| !url.is_empty())
-        .map(|url| Wide { url, label: "SteamGridDB, community".into() })
-}
-
-/// The open SteamGridDB mirror's id for a title, which is its search answer.
-async fn open_sgdb_id(client: &reqwest::Client, title: &str) -> Option<u64> {
-    let url = format!("{OPEN_SGDB}/api/public/search/autocomplete/{}", path_term(title));
-    let reply = client.get(url).send().await.ok()?.json::<OpenGridSearch>().await.ok()?;
-    let wanted = title.trim().to_lowercase();
-    reply
-        .data
-        .into_iter()
-        .max_by_key(|item| if item.name.trim().to_lowercase() == wanted { 2 } else { 1 })
-        .map(|item| item.id)
+        .map(str::to_string)
 }
 
 /// The library hero at its own file name, which newer titles publish before
@@ -627,32 +590,6 @@ async fn hero_file(client: &reqwest::Client, app_id: Option<u64>) -> Option<Wide
         .ok()
         .filter(|response| response.status().is_success())
         .map(|_| Wide { url, label: "Steam, library hero".into() })
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct OpenGridSearch {
-    #[serde(default)]
-    data: Vec<OpenGridSearchItem>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct OpenGridSearchItem {
-    #[serde(default)]
-    id: u64,
-    #[serde(default)]
-    name: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct OpenGridHeroes {
-    #[serde(default)]
-    data: Vec<OpenGridHero>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct OpenGridHero {
-    #[serde(default)]
-    url: String,
 }
 
 // ------------------------------------------------------------ the full sheet
@@ -1281,6 +1218,45 @@ mod tests {
         assert_eq!(picks.len(), 1);
         assert_eq!(picks[0].label, "Store header");
         assert!(!picks[0].url.starts_with(' '));
+    }
+
+    #[test]
+    fn a_wide_picture_is_the_hero_before_the_header() {
+        let images = BonkerImages {
+            library_hero: Some("https://cdn.example/hero.jpg".into()),
+            header: Some("https://cdn.example/header.jpg".into()),
+            ..BonkerImages::default()
+        };
+        assert_eq!(wide_of(&images).as_deref(), Some("https://cdn.example/hero.jpg"));
+    }
+
+    #[test]
+    fn the_hero_under_its_older_name_is_still_the_hero() {
+        let images = BonkerImages {
+            hero: Some("https://cdn.example/old-name-hero.jpg".into()),
+            header: Some("https://cdn.example/header.jpg".into()),
+            ..BonkerImages::default()
+        };
+        assert_eq!(wide_of(&images).as_deref(), Some("https://cdn.example/old-name-hero.jpg"));
+    }
+
+    #[test]
+    fn a_page_with_only_a_header_still_has_a_wide_picture() {
+        let images = BonkerImages {
+            header: Some(" https://cdn.example/header.jpg ".into()),
+            ..BonkerImages::default()
+        };
+        assert_eq!(wide_of(&images).as_deref(), Some("https://cdn.example/header.jpg"));
+    }
+
+    #[test]
+    fn a_page_with_no_wide_picture_offers_nothing_rather_than_a_cover() {
+        let images = BonkerImages {
+            library_capsule: Some("https://cdn.example/cover.jpg".into()),
+            library_600x900: Some("https://cdn.example/cover-tall.jpg".into()),
+            ..BonkerImages::default()
+        };
+        assert_eq!(wide_of(&images), None);
     }
 
     #[test]

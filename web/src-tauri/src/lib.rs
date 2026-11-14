@@ -1398,11 +1398,11 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String, page: Opti
 
 /// Wide art for the TV's backdrop, best-effort.
 ///
-/// The open catalogues come first - the store's own hero, then the community's,
-/// none of which asks for a key - and SteamGridDB, when there is a key, is
-/// asked last for the pictures the open catalogues do not carry. A game nobody
-/// has drawn for returns nothing at all, which is normal: the deck falls back to
-/// the game's header and then to a wash of its colour.
+/// The store's own hero is asked for first and needs nothing from anybody, so a
+/// fresh install has a picture on the television. SteamGridDB, when this machine
+/// has a key, is asked afterwards for the community's wider choice. A game with
+/// neither returns nothing at all, which is normal: the deck falls back to the
+/// game's header and then to a wash of its colour.
 #[tauri::command]
 async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<String>, String> {
     let game = match orbit.db.game(&game_id) {
@@ -1414,7 +1414,7 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
         }
     };
     let app_id = steam_app_id(&game);
-    for pick in metadata::wide_art(app_id, &game.title).await {
+    for pick in metadata::wide_art(app_id).await {
         log::debug!("TV backdrop from {}", pick.label);
         return Ok(Some(pick.url));
     }

@@ -1838,12 +1838,10 @@ export function SettingsView({
 
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
-              <p className="orbit-setrow-label">Community artwork</p>
+              <p className="orbit-setrow-label">Store artwork</p>
               <p className="orbit-setrow-hint">
-                The open catalogues - Steam&apos;s own library heroes and the SteamGridDB
-                community&apos;s - are asked for wide art for the Stardeck and for alternative covers.
-                No key, no account, nothing to sign in to. A game nobody has drawn for keeps the
-                store&apos;s own header.
+                Steam&apos;s own covers, heroes and headers fill the shelf and the Stardeck with no key
+                and no account. A game nobody has drawn for keeps its store header.
               </p>
             </div>
             <span className="orbit-settag is-on">On</span>
@@ -1855,9 +1853,9 @@ export function SettingsView({
                 SteamGridDB key
               </label>
               <p className="orbit-setrow-hint">
-                Optional, and only for the pictures the open catalogues do not carry: portrait
-                covers, logos, and the wider choice of heroes. Everything above works without it.
-                A key stays on this machine, in your settings file.{' '}
+                Optional, and only for what the store does not have: the SteamGridDB community&apos;s
+                alternative covers, logos and wider choice of heroes. Everything above works
+                without it. A key stays on this machine, in your settings file.{' '}
                 <button
                   type="button"
                   className="underline decoration-line underline-offset-2 transition hover:text-accent"
