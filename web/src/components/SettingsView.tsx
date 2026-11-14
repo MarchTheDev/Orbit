@@ -30,6 +30,7 @@ import {
   Trophy,
   Volume2,
   Wand2,
+  Plus,
   X,
 } from 'lucide-react';
 import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, type Page, type Settings } from '../types';
@@ -158,6 +159,91 @@ function SwitchRow({ checked, onChange, label, hint, disabled }: { checked: bool
  * top saying what the group is for, so nothing has to be read from the top to
  * find the one thing somebody came here for.
  */
+
+function MetadataSources({ settings, setSettings }: { settings: Settings; setSettings: (patch: Partial<Settings>) => void }) {
+  const sources = settings.metadataSources ?? [];
+  const setSources = (next: typeof sources) => setSettings({ metadataSources: next });
+  const [addOpen, setAddOpen] = useState(false);
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftUrl, setDraftUrl] = useState("");
+  const toggle = (id: string, enabled: boolean) => setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
+  const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
+  const move = (fromId: string, toId: string, after: boolean) => {
+    const ids = moveInOrder(sources.map((s) => s.id), fromId, toId, after);
+    const ordered = ids.map((id) => sources.find((src2) => src2.id === id)!).filter(Boolean) as typeof sources;
+    setSources(ordered);
+  };
+  const { bind, dragging, over } = useDragReorder((a, b, after) => move(a, b, after));
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1">
+        {sources.map((src) => (
+          <div
+            key={src.id}
+            {...bind(src.id)}
+            data-orbit-drop={src.id}
+            className={`group flex items-center gap-2 rounded-xl border bg-panel px-2.5 py-2 transition ${over === src.id ? "border-accent ring-1 ring-accent/40" : "border-line"} ${dragging === src.id ? "opacity-60 rotate-[0.4deg] scale-[1.01] shadow-lg" : ""}`}
+          >
+            <span data-orbit-drag-handle="" className="grid size-7 shrink-0 cursor-grab place-items-center rounded-lg border border-line bg-panel2 text-muted hover:border-accent hover:text-fg active:cursor-grabbing" title="Drag to reorder">
+              <GripVertical className="size-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-fg">{src.label}</span>
+              {src.note && <span className="block truncate text-[11px] text-muted">{src.note}</span>}
+              {src.url && <span className="block truncate font-mono text-[10px] text-muted">{src.url}</span>}
+            </span>
+            {src.kind === "custom" ? (
+              <button type="button" onClick={() => remove(src.id)} className="grid size-7 shrink-0 place-items-center rounded-lg border border-transparent text-muted hover:border-rose-400 hover:text-rose-400" title="Remove source"><Trash2 className="size-3.5" /></button>
+            ) : (
+              <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] text-muted">{src.kind === "builtin" ? "built-in" : "custom"}</span>
+            )}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={src.enabled}
+              aria-label={`${src.label} enabled`}
+              onClick={() => toggle(src.id, !src.enabled)}
+              className="orbit-switch shrink-0"
+              data-on={src.enabled || undefined}
+            >
+              <i />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={() => setAddOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"><Plus className="size-3.5" /> Add source</button>
+        <span className="text-[11px] text-muted">{sources.filter((s) => s.enabled).length} of {sources.length} on</span>
+      </div>
+      {addOpen && (
+        <div className="rounded-xl border border-line bg-panel2 p-3 space-y-2">
+          <p className="text-xs font-semibold text-fg">Add a metadata source</p>
+          <p className="text-[11px] text-muted">Community extensions (e.g., VNDB, IGDB) — URL is optional for now.</p>
+          <input value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} placeholder="Name — e.g., VNDB" className={inputCls} />
+          <input value={draftUrl} onChange={(e) => setDraftUrl(e.target.value)} placeholder="https://api.example.com (optional)" className={`${inputCls} font-mono`} />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setAddOpen(false)} className="orbit-btnquiet">Cancel</button>
+            <button
+              type="button"
+              disabled={!draftLabel.trim()}
+              onClick={() => {
+                const id = draftLabel.trim().toLowerCase().replace(/\s+/g, "-") + "-" + Date.now().toString(36).slice(-4);
+                setSources([...sources, { id, label: draftLabel.trim(), enabled: true, kind: "custom", url: draftUrl.trim() || undefined, note: "Custom" }]);
+                setDraftLabel("");
+                setDraftUrl("");
+                setAddOpen(false);
+              }}
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-onaccent disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Section({
   id,
   icon: Icon,
@@ -1812,93 +1898,36 @@ export function SettingsView({
         active={activeSection === 'orbit-details'}
         icon={Sparkles}
         title="Metadata"
-        note="Need work"
-        lead="Where game info comes from."
+        lead="Where game info comes from. Toggle, reorder, or add a source."
       >
-        <Group title="Where details come from">
+        <Group title="Sources">
+          <MetadataSources settings={settings} setSettings={setSettings} />
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
-              <p className="orbit-setrow-label">Steam catalogue</p>
-              <p className="orbit-setrow-hint">
-                Free and keyless. The summary, genres, developer, release year and header artwork come
-                from here, for any game whose store page can be found.
-              </p>
-            </div>
-            </div>
-
-          <div className="orbit-setrow">
-            <div className="orbit-setrow-copy">
-              <p className="orbit-setrow-label">Store artwork</p>
-              <p className="orbit-setrow-hint">Steam&apos;s own covers, heroes and headers — no key needed.</p>
-            </div>
-          </div>
-
-          <div className="orbit-setrow">
-            <div className="orbit-setrow-copy">
-              <label className="orbit-setrow-label" htmlFor="sgdb-key">
-                SteamGridDB key
-              </label>
-              <p className="orbit-setrow-hint">
-                Optional, and only for what the store does not have: the SteamGridDB community&apos;s
-                alternative covers, logos and wider choice of heroes. Everything above works
-                without it. A key stays on this machine, in your settings file.{' '}
-                <button
-                  type="button"
-                  className="underline decoration-line underline-offset-2 transition hover:text-accent"
-                  onClick={() => void openExternal('https://www.steamgriddb.com/profile/preferences')}
-                >
-                  Get a free key
-                </button>
-                .
-              </p>
+              <label className="orbit-setrow-label" htmlFor="sgdb-key">SteamGridDB key</label>
+              <p className="orbit-setrow-hint">For alt covers. Optional — stays on this machine.</p>
               <div className="mt-2 flex gap-2">
                 <input
                   id="sgdb-key"
                   type="password"
                   value={settings.sgdbApiKey ?? ''}
                   onChange={(e) => setSettings({ sgdbApiKey: e.target.value })}
-                  placeholder="Leave empty to use Steam's artwork only"
+                  placeholder="Leave empty for Steam only"
                   className={`${inputCls} min-w-0 flex-1 font-mono`}
                   spellCheck={false}
                   autoComplete="off"
                 />
                 {settings.sgdbApiKey && (
-                  <button
-                    type="button"
-                    onClick={() => setSettings({ sgdbApiKey: '' })}
-                    className="orbit-btnquiet shrink-0"
-                  >
-                    Clear
-                  </button>
+                  <button type="button" onClick={() => setSettings({ sgdbApiKey: '' })} className="orbit-btnquiet shrink-0">Clear</button>
                 )}
               </div>
             </div>
-            <span className={cn('orbit-settag', settings.sgdbApiKey ? 'is-on' : 'is-off')}>
-              {settings.sgdbApiKey ? 'Key saved' : 'No key'}
-            </span>
-          </div>
-
-          <div className="orbit-setrow">
-            <div className="orbit-setrow-copy">
-              <p className="orbit-setrow-label">HowLongToBeat</p>
-              <p className="orbit-setrow-hint">Playtime estimates — no key needed.</p>
-            </div>
+            <span className={cn('orbit-settag', settings.sgdbApiKey ? 'is-on' : 'is-off')}>{settings.sgdbApiKey ? 'Key saved' : 'No key'}</span>
           </div>
         </Group>
-
         <Group title="Looking things up">
-          <SwitchRow
-            checked={settings.fetchMetadata ?? true}
-            onChange={(v) => setSettings({ fetchMetadata: v })}
-            label="Lookup on add"
-            hint="Fetch info when adding a game."
-          />
-          <SwitchRow
-            checked={settings.autoFetchMetadata ?? true}
-            onChange={(v) => setSettings({ autoFetchMetadata: v })}
-            label="Background fill"
-            hint="Fill missing info quietly."
-          />
+          <SwitchRow checked={settings.fetchMetadata ?? true} onChange={(v) => setSettings({ fetchMetadata: v })} label="Lookup on add" hint="Fetch on add." />
+          <SwitchRow checked={settings.autoFetchMetadata ?? true} onChange={(v) => setSettings({ autoFetchMetadata: v })} label="Background fill" hint="Fill missing quietly." />
         </Group>
       </Section>
 

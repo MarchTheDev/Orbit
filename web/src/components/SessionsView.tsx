@@ -264,7 +264,7 @@ export function SessionsView({
                     className="flex min-w-0 items-center gap-3 rounded-xl text-left"
                     title={`Open ${row.gameTitle}`}
                   >
-                    {game ? <Cover game={game} className="size-14 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}
+                    {game ? <Cover game={game} className="size-20 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-20 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-semibold">{row.gameTitle}</span>
                       <span className="mt-1 block text-xs text-muted">
@@ -341,7 +341,7 @@ export function SessionsView({
                   className="orbit-row cursor-pointer"
                 >
                   <span className="w-5 shrink-0 text-center font-mono text-xs text-muted">{String(index + 1).padStart(2, '0')}</span>
-                  <Cover game={game} className="size-12 shrink-0 rounded-xl" />
+                  <Cover game={game} className="size-14 shrink-0 rounded-xl" />
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5">
                       <span className="truncate text-sm font-medium">{game.title}</span>

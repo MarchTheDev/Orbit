@@ -2156,8 +2156,25 @@ html.orbit-linux .orbit-topbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 2px;
+  gap: 10px 12px;
+  padding-bottom: 4px;
+}
+.orbit-dragging {
+  opacity: .58;
+  transform: rotate(.6deg) scale(1.02);
+  box-shadow: 0 8px 24px rgba(0,0,0,.24);
+  z-index: 10;
+}
+.orbit-drop-target {
+  outline: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+  outline-offset: 1px;
+  border-radius: 12px;
+}
+.orbit-pagetools .orbit-searchfield,
+.orbit-pagetools [data-orbit-search] {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 360px;
 }
 /* The Backlog's times, on one quiet rule: four readings, not a card. */
 .orbit-backlogtimes {
@@ -3406,8 +3423,8 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
   position: relative;
   overflow: hidden;
   aspect-ratio: 16 / 9;
-  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  border-radius: 10px;
   background: var(--c-panel2);
   padding: 0;
   cursor: zoom-in;
@@ -3458,6 +3475,7 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
 /* The menu of what is written under a picture, anchored to its own button and
    above the shelf rather than inside the scroll. */
 .orbit-album-under { position: relative; flex: none; }
+.orbit-stats-panel:has(.orbit-album-undermenu) { overflow: visible; }
 .orbit-album-undercount {
   min-width: 15px;
   padding: 0 4px;
@@ -3472,12 +3490,17 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
   top: calc(100% + 8px);
   right: 0;
   z-index: 40;
-  width: 264px;
+  width: 280px;
   padding: 6px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
   background: var(--c-panel);
-  box-shadow: 0 26px 60px -30px rgba(0, 0, 0, .9);
+  box-shadow: 0 20px 48px -20px rgba(0, 0, 0, .75);
+}
+html.orbit-glass .orbit-album-undermenu {
+  background: color-mix(in srgb, var(--c-panel) 84%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
 }
 .orbit-album-underrow {
   display: flex;
@@ -3727,9 +3750,10 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   border: 0;
   border-radius: 7px;
   background: none;
-  color: color-mix(in srgb, var(--c-text) 70%, transparent);
-  font-size: 11px;
+  color: color-mix(in srgb, var(--c-text) 66%, transparent);
+  font-size: 11.5px;
   font-weight: 600;
+  transition: color .12s var(--ease-snap), background-color .12s var(--ease-snap);
   cursor: pointer;
 }
 .orbit-period button[aria-pressed='true'] {
@@ -3753,19 +3777,27 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   margin-top: 16px;
 }
 .orbit-statsbar .orbit-period {
-  border-color: color-mix(in srgb, var(--c-text) 10%, transparent);
-  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  border-color: color-mix(in srgb, var(--c-text) 16%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 72%, transparent);
+  box-shadow: 0 1px 6px rgba(0,0,0,.14);
   backdrop-filter: none;
+}
+.orbit-statsbar .orbit-period button {
+  color: color-mix(in srgb, var(--c-text) 62%, transparent);
+}
+.orbit-statsbar .orbit-period button:hover {
+  color: color-mix(in srgb, var(--c-text) 88%, transparent);
+  background: color-mix(in srgb, var(--c-text) 7%, transparent);
 }
 .orbit-period button[aria-pressed='true'] {
   background: var(--c-accent);
   color: var(--c-onaccent);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0,0,0,.16);
 }
 .orbit-statsbar-lede { font-size: 11.5px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
 
-/* Four figures across the top, each with its number in the largest type on the
-   page and one line under it saying what the number is worth. No poster behind
-   them: a number is easier to read on a flat surface. */
+/* Three figures across the top (Played, Sessions, Most played) — Day streak removed. */
 .orbit-figures {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3773,7 +3805,7 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   margin-top: 14px;
 }
 @media (min-width: 900px) {
-  .orbit-figures { grid-template-columns: 1.35fr 1fr 1fr 1.15fr; }
+  .orbit-figures { grid-template-columns: 1.45fr 1fr 1.25fr; }
 }
 .orbit-figure {
   display: flex;
@@ -3781,8 +3813,8 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   min-width: 0;
   padding: 14px 15px 13px;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  background: color-mix(in srgb, var(--c-panel) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 74%, transparent);
 }
 .orbit-figure.is-lead {
   border-color: color-mix(in srgb, var(--c-accent) 26%, transparent);
@@ -3819,7 +3851,8 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   margin-top: auto;
   padding-top: 8px;
   font-size: 11px;
-  color: var(--c-muted);
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--c-text) 58%, transparent);
   font-variant-numeric: tabular-nums;
 }
 .orbit-figure-game { display: flex; align-items: center; gap: 9px; margin-top: 8px; min-width: 0; }
@@ -3902,8 +3935,9 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   margin-top: 18px;
   padding: 20px 22px 18px;
   border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
-  background: color-mix(in srgb, var(--c-panel) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 78%, transparent);
+  box-shadow: 0 2px 16px rgba(0,0,0,.08);
 }
 .orbit-stats-panel-head {
   display: flex;
@@ -3912,12 +3946,14 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   gap: 14px;
 }
 .orbit-stats-panel-head h2 {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
+  letter-spacing: -.01em;
 }
 .orbit-stats-panel-head span {
   font-size: 11.5px;
-  color: var(--c-muted);
+  font-weight: 500;
+  color: color-mix(in srgb, var(--c-text) 60%, transparent);
 }
 .orbit-chart {
   display: flex;
@@ -3925,7 +3961,12 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   gap: 3px;
   height: 190px;
   margin-top: 18px;
-  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  padding-bottom: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 13%, transparent);
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--c-text) 7%, transparent) 1px, transparent 1px) 0 0 / 100% 25% no-repeat,
+    linear-gradient(to bottom, color-mix(in srgb, var(--c-text) 7%, transparent) 1px, transparent 1px) 0 0 / 100% 50% no-repeat,
+    linear-gradient(to bottom, color-mix(in srgb, var(--c-text) 7%, transparent) 1px, transparent 1px) 0 0 / 100% 75% no-repeat;
 }
 .orbit-chart-col {
   position: relative;
@@ -3934,29 +3975,33 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  border-radius: 2px;
 }
 .orbit-chart-col i {
   display: block;
-  min-height: 1px;
-  border-radius: 2px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  border-top: 1px solid rgba(255,255,255,.08);
 }
-.orbit-chart-col:hover i { filter: brightness(1.18); }
+.orbit-chart-col:hover i { filter: brightness(1.16) saturate(1.08); }
 .orbit-chart-quiet {
   height: 130px;
   align-items: center;
   justify-content: center;
   border-bottom: 0;
   color: var(--c-muted);
-  font-size: 12px;
+  font-size: 12.5px;
+  background: none;
 }
 .orbit-chart-axis {
   display: flex;
   justify-content: space-between;
-  margin-top: 7px;
-  font-size: 9.5px;
-  letter-spacing: .04em;
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
   text-transform: uppercase;
-  color: var(--c-muted);
+  color: color-mix(in srgb, var(--c-text) 56%, transparent);
   font-variant-numeric: tabular-nums;
 }
 .orbit-legend {
@@ -3964,8 +4009,9 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   flex-wrap: wrap;
   gap: 6px 14px;
   margin-top: 14px;
-  font-size: 11px;
-  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--c-text) 68%, transparent);
 }
 .orbit-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .orbit-legend i { width: 8px; height: 8px; border-radius: 2px; }

@@ -8,7 +8,8 @@ export { DEFAULT_SETTINGS };
  * is no longer where a game lives, only how the app is set up.
  */
 export function normalizeSettings(stored: Partial<Settings>): Settings {
-  const normalized = dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  let normalized = dropRetired({ ...DEFAULT_SETTINGS, ...stored });
+  normalized = ensureMetadataSources(normalized);
   if (!['system', 'rounded', 'serif', 'mono', 'humanist', 'book'].includes(String(normalized.fontFamily ?? 'system'))) {
     normalized.fontFamily = 'system';
   }
@@ -30,6 +31,13 @@ export async function loadSettings(): Promise<Settings> {
 }
 
 /** Retired providers and launch-time scans are removed so later saves cannot revive them. */
+function ensureMetadataSources(settings: Settings): Settings {
+  const fallback = (DEFAULT_SETTINGS as Settings).metadataSources ?? [];
+  if (!Array.isArray(settings.metadataSources) || settings.metadataSources.length === 0) {
+    settings.metadataSources = [...fallback];
+  }
+  return settings;
+}
 function dropRetired(settings: Settings): Settings {
   const next = { ...settings } as Settings & {
     igdbClientId?: string;

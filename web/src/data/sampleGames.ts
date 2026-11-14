@@ -94,6 +94,15 @@ export const DEFAULT_SETTINGS: Settings = {
     onAppClose: 'quit',
     onMinimize: 'taskbar',
   },
+  metadataSources: [
+    { id: 'steam', label: 'Steam catalogue', enabled: true, kind: 'builtin', note: 'Summary, genres, year, header' },
+    { id: 'steamgriddb', label: 'SteamGridDB', enabled: true, kind: 'builtin', note: 'Alt covers & heroes — needs key above' },
+    { id: 'hltb', label: 'HowLongToBeat', enabled: true, kind: 'builtin', note: 'Playtime estimates' },
+    { id: 'lutris', label: 'Lutris', enabled: false, kind: 'builtin', note: 'Linux install scripts & icons' },
+    { id: 'libretro', label: 'Libretro Thumbnails', enabled: false, kind: 'builtin', note: 'Emulated box art (LaunchBox via Libretro)' },
+    { id: 'protondb', label: 'ProtonDB', enabled: true, kind: 'builtin', note: 'Compatibility & anti-cheat' },
+    { id: 'web', label: 'Web search', enabled: false, kind: 'builtin', note: 'Fallback web metadata' },
+  ],
   fetchMetadata: true,
   autoFetchMetadata: true,
 };

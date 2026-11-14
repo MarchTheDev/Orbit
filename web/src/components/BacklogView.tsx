@@ -607,9 +607,9 @@ function Section({
                 data-orbit-game={g.id}
                 data-orbit-no-move={readOnlyMoves ? '' : undefined}
                 {...bind(g.id)}
-                className={`group flex items-center gap-3 rounded-xl border border-line bg-panel p-3 transition hover:border-muted/50 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
-                  over === g.id ? 'ring-2 ring-accent' : ''
-                } ${dragging === g.id ? 'opacity-60' : ''}`}
+                className={`group flex items-center gap-3 rounded-xl border bg-panel p-3 transition duration-150 hover:border-muted/50 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
+                  over === g.id ? 'border-accent ring-2 ring-accent/50 shadow-md' : 'border-line'
+                } ${dragging === g.id ? 'opacity-55 rotate-[0.5deg] scale-[1.015] shadow-xl z-10' : ''}`}
               >
                 {movable ? (
                   <button
@@ -627,7 +627,7 @@ function Section({
                   </span>
                 )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} fit="cover" className="size-16 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="size-20 rounded-xl transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button

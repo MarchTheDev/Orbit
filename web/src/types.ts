@@ -600,6 +600,8 @@ export interface Settings {
    * ships one nor invents one.
    */
   sgdbApiKey?: string;
+  /** Where metadata can be fetched from, Heronite-style: each source can be toggled, reordered, or added. */
+  metadataSources?: { id: string; label: string; enabled: boolean; kind: 'builtin' | 'custom'; url?: string; note?: string }[];
   /** Fetch details and cover art when a game is added. */
   fetchMetadata: boolean;
   /** Also fill in details for games that are already in the library. */

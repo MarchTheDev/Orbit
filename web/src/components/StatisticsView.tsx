@@ -238,6 +238,7 @@ export function StatisticsView({
   onTab: (tab: StatsTab) => void;
 }) {
   const [period, setPeriod] = useState<Period>('month');
+  const [playNextSeed, setPlayNextSeed] = useState(0);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
@@ -251,6 +252,10 @@ export function StatisticsView({
   const [under, setUnder] = useState({ name: true, date: true, size: true, game: false });
   const [underOpen, setUnderOpen] = useState(false);
   const underBox = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (tab === 'overview') setPlayNextSeed((seed) => seed + 1);
+  }, [tab]);
 
   // A menu that was opened and then left behind is a menu over the next page.
   useEffect(() => {
@@ -423,9 +428,10 @@ export function StatisticsView({
   const maxTotal = Math.max(1, ...bins.map((bin) => bin.total));
   const hasData = bins.some((bin) => bin.total > 0);
   const topGames = [...games].filter((game) => game.playSecs > 0).sort((a, b) => b.playSecs - a.playSecs).slice(0, 8);
+  const shapeGames = games.filter((game) => !game.planned);
   const statusCounts: Record<GameStatus, number> = { playing: 0, completed: 0, dropped: 0, backlog: 0 };
-  for (const game of games) statusCounts[game.status] += 1;
-  const librarySize = Math.max(1, games.length);
+  for (const game of shapeGames) statusCounts[game.status] += 1;
+  const librarySize = Math.max(1, shapeGames.length);
   const axis = bins.length > 0 ? [0, Math.floor((bins.length - 1) / 2), bins.length - 1] : [];
   const hours = totalSecs / 3600;
 
@@ -434,7 +440,7 @@ export function StatisticsView({
     sessions: sessions.length,
     album: captures?.length ?? 0,
     journal: journalGames.length,
-    backlog: allGames.filter((game) => game.planPlatform || game.planned).length,
+    backlog: allGames.filter((game) => game.planned).length,
   };
 
   return (
@@ -517,11 +523,6 @@ export function StatisticsView({
               </p>
             </div>
             <div className="orbit-figure">
-              <p className="orbit-figure-label">Day streak</p>
-              <p className="orbit-figure-value">{streak}<small>{streak === 1 ? 'day' : 'days'}</small></p>
-              <p className="orbit-figure-foot">{streak > 0 ? (allDays.has(startOfDay(now)) ? 'Counting today' : 'Ended yesterday') : 'Play today to start one'}</p>
-            </div>
-            <div className="orbit-figure">
               <p className="orbit-figure-label">Most played</p>
               {ranked[0] ? (
                 <>
@@ -591,35 +592,44 @@ export function StatisticsView({
           </SectionPanel>
 
           <div className="orbit-stats-split">
-            <SectionPanel title="Something to play next" note="Chosen from the backlog">
-              {allGames.some((game) => game.planned) ? (
-                <ul className="orbit-playnext">
-                  {allGames
-                    .filter((game) => game.planned)
-                    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title))
-                    .slice(0, 4)
-                    .map((game) => (
+            <SectionPanel title="Something to play next" note="From your backlog — shuffled each time you open this page">
+              {(() => {
+                const pool = allGames.filter((game) => game.status === 'backlog');
+                if (pool.length === 0) {
+                  return (
+                    <p className="orbit-panel-empty">
+                      Nothing in the backlog. Add a game to the Backlog and it will appear here for a quick pick.
+                    </p>
+                  );
+                }
+                // Shuffle reproducibly per open; Fisher-Yates with Math.random seeded by playNextSeed+pool
+                const shuffled = [...pool];
+                for (let index = shuffled.length - 1; index > 0; index -= 1) {
+                  const other = Math.floor(Math.random() * (index + 1));
+                  const tmp = shuffled[index];
+                  shuffled[index] = shuffled[other];
+                  shuffled[other] = tmp;
+                }
+                // Keep stable across renders until tab reopens via playNextSeed dependency
+                void playNextSeed;
+                return (
+                  <ul className="orbit-playnext">
+                    {shuffled.slice(0, 4).map((game) => (
                       <li key={game.id}>
                         <button type="button" onClick={() => onOpenGame(game.id)}>
                           <span className="orbit-playnext-art"><Cover game={game} className="size-full" fit="cover" /></span>
                           <span className="min-w-0">
                             <b className="truncate">{game.title}</b>
                             <em>
-                              {[game.meta?.genres?.[0], game.meta?.releaseYear]
-                                .filter(Boolean)
-                                .join(' · ') || 'In the backlog'}
+                              {[game.meta?.genres?.[0], game.meta?.releaseYear].filter(Boolean).join(' · ') || 'In the backlog'}
                             </em>
                           </span>
                         </button>
                       </li>
                     ))}
-                </ul>
-              ) : (
-                <p className="orbit-panel-empty">
-                  Nothing planned. Games you add to the Backlog show up here, so there is always
-                  something on the shelf rather than a wall of covers.
-                </p>
-              )}
+                  </ul>
+                );
+              })()}
             </SectionPanel>
 
             <SectionPanel title="The shape of the library" note={`${games.length} games`}>
@@ -641,7 +651,7 @@ export function StatisticsView({
                 ))}
                 <span>
                   <Trophy className="size-3" />
-                  {games.filter((game) => game.favorite).length} favorites
+                  {shapeGames.filter((game) => game.favorite).length} favorites
                 </span>
               </div>
               <div className="orbit-stats-facts">
@@ -745,40 +755,58 @@ export function StatisticsView({
               {/* The games, as their own covers rather than a dropdown: the
                   Album is pictures, so the filter for it is pictures too. */}
               {albumGames.length > 1 && (
-                <div className="orbit-album-games" role="group" aria-label="Only one game">
-                  <button
-                    type="button"
-                    className={cn('orbit-album-gamechip', albumGame === 'all' && 'is-on')}
-                    aria-pressed={albumGame === 'all'}
-                    onClick={() => setAlbumGame('all')}
-                  >
-                    <span className="orbit-album-gamechip-art is-all">
-                      <Images className="size-4" />
-                    </span>
-                    <span className="orbit-album-gamechip-name">All games</span>
-                  </button>
-                  {albumGames.map((entry) => (
+                <div className="space-y-3">
+                  <div className="orbit-album-games" role="group" aria-label="Only one game">
                     <button
-                      key={entry.folder}
                       type="button"
-                      className={cn('orbit-album-gamechip', albumGame === entry.folder && 'is-on')}
-                      aria-pressed={albumGame === entry.folder}
-                      onClick={() => setAlbumGame(albumGame === entry.folder ? 'all' : entry.folder)}
-                      title={`${entry.title} · ${entry.count}`}
+                      className={cn('orbit-album-gamechip', albumGame === 'all' && 'is-on')}
+                      aria-pressed={albumGame === 'all'}
+                      onClick={() => setAlbumGame('all')}
                     >
-                      <span className="orbit-album-gamechip-art">
-                        {entry.game ? (
-                          <Cover game={entry.game} className="size-full" fit="cover" />
-                        ) : (
-                          <span className="grid size-full place-items-center text-fluid text-[10px] font-bold text-muted">
-                            {entry.title.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
+                      <span className="orbit-album-gamechip-art is-all">
+                        <Images className="size-4" />
                       </span>
-                      <span className="orbit-album-gamechip-name">{entry.title}</span>
-                      <span className="orbit-album-gamechip-count">{entry.count}</span>
+                      <span className="orbit-album-gamechip-name">All games</span>
                     </button>
-                  ))}
+                    {albumGames.map((entry) => (
+                      <button
+                        key={entry.folder}
+                        type="button"
+                        className={cn('orbit-album-gamechip', albumGame === entry.folder && 'is-on')}
+                        aria-pressed={albumGame === entry.folder}
+                        onClick={() => setAlbumGame(albumGame === entry.folder ? 'all' : entry.folder)}
+                        title={`${entry.title} · ${entry.count}`}
+                      >
+                        <span className="orbit-album-gamechip-art">
+                          {entry.game ? (
+                            <Cover game={entry.game} className="size-full" fit="cover" />
+                          ) : (
+                            <span className="grid size-full place-items-center text-fluid text-[10px] font-bold text-muted">
+                              {entry.title.slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                        </span>
+                        <span className="orbit-album-gamechip-name">{entry.title}</span>
+                        <span className="orbit-album-gamechip-count">{entry.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {albumGame !== 'all' && (
+                    <div className="animate-in fade-in slide-in-from-top-1 rounded-xl border border-line bg-panel/60 p-2">
+                      <div className="mb-2 flex items-center justify-between px-1">
+                        <span className="text-xs font-medium text-fg">Captures for {byFolder.get(albumGame)?.title ?? albumGame}</span>
+                        <button type="button" onClick={() => setAlbumGame('all')} className="rounded-md px-2 py-1 text-[11px] text-muted hover:bg-panel2 hover:text-fg">Show all</button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {(captures ?? []).filter((item) => item.game === albumGame && (albumKind === 'all' || item.kind === albumKind)).slice(0, 8).map((item) => (
+                          <button key={item.path} onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path))} className="group overflow-hidden rounded-lg border border-line bg-panel2">
+                            <span className="block aspect-video overflow-hidden"><CaptureThumb item={item} /></span>
+                            <span className="block truncate px-1.5 py-1 text-[10px] text-muted group-hover:text-fg">{item.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
