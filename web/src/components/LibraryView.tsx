@@ -383,15 +383,32 @@ export function LibraryView({
   /** The genre rail's pick, which narrows everything else. */
   const [genre, setGenre] = useState<string | null>(() => localStorage.getItem('orbit.library.genre'));
 
-  // The chips, the genre and the facets all narrow the same shelf: the chips are
-  // whose shelf it is, the genre is what kind of game, the facets which corner
-  // of it is being looked at.
+  /**
+   * Whether one game belongs to the shelf being read.
+   *
+   * The chips are whose shelf it is, the genre is what kind of game, and the
+   * facets are which corner of it is being looked at. Declared here, above the
+   * memo below it: a `const` arrow is not hoisted the way a function
+   * declaration is, so this pair was once split - the memo above, the narrower
+   * below - and the first render threw and blanked the window instead of
+   * leaving an empty shelf.
+   */
+  const applyChips = (game: Game) => {
+    if (filter === 'favorites' && !game.favorite) return false;
+    if (filter === 'hidden' && !game.hidden) return false;
+    if (filter !== 'favorites' && filter !== 'hidden' && game.hidden) return false;
+    if (genre && !(game.meta?.genres ?? []).some((name) => name.trim().toLowerCase() === genre.toLowerCase())) return false;
+    return matchesFacets(game, facets);
+  };
+
+  // The chips, the genre and the facets all narrow the same shelf.
   const shown = useMemo(
     () => games.filter(applyChips),
     // `applyChips` closes over the filter, the genre and the facets.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [games, filter, genre, facets],
   );
+
   const facetCount = facets.only.length + (facets.start === 'any' ? 0 : 1) + (genre ? 1 : 0);
   useEffect(() => localStorage.setItem('orbit.library.genre', genre ?? ''), [genre]);
 
@@ -562,15 +579,6 @@ export function LibraryView({
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count }));
   }, [games]);
-
-  /** A chip's genre, a genre rail's pick, and the facets all have to agree. */
-  const applyChips = (game: Game) => {
-    if (filter === 'favorites' && !game.favorite) return false;
-    if (filter === 'hidden' && !game.hidden) return false;
-    if (filter !== 'favorites' && filter !== 'hidden' && game.hidden) return false;
-    if (genre && !(game.meta?.genres ?? []).some((name) => name.trim().toLowerCase() === genre.toLowerCase())) return false;
-    return matchesFacets(game, facets);
-  };
 
   return (
     <div className="orbit-library" data-corners={corners} data-lift={lift ? 'on' : 'off'}>

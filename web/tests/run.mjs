@@ -61,6 +61,7 @@ const checks = [
   'tests/hltb-extra.test.mjs',
   'tests/requirements.test.mjs',
   'tests/tv-mode.test.mjs',
+  'tests/shell-render.test.mjs',
   'tests/capture-paths.test.mjs',
   'tests/shortcuts.test.mjs',
   'tests/shortcut-editor.test.mjs',
@@ -78,7 +79,9 @@ try {
       platform: 'node',
       outfile: out,
       // Left to Node, so the bundle finds the copies installed here.
-      external: ['jsdom', 'react', 'react-dom', 'react-dom/server', 'lucide-react'],
+      // `esbuild` too: one check builds the app again to render it, and a
+      // bundled esbuild cannot require `fs` at run time.
+      external: ['jsdom', 'react', 'react-dom', 'react-dom/server', 'lucide-react', 'esbuild'],
       jsx: 'automatic',
       logLevel: 'silent',
     });

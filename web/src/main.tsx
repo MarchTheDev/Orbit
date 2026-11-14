@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./index.css";
 import App from "./App";
 import { OverlayView } from "./components/OverlayView";
+import { CrashScreen } from "./components/ui/CrashScreen";
 import { isNative } from "./services/native";
 
 function overlayWindow(): boolean {
@@ -20,6 +21,8 @@ const Root = overlayWindow() ? OverlayView : App;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Root />
+    <CrashScreen>
+      <Root />
+    </CrashScreen>
   </StrictMode>
 );
