@@ -357,7 +357,7 @@ export function AddGameModal({
         {/* What Orbit made of the drop, before anything is saved. The title is
             editable right here, and a wrong guess is one click to replace. */}
         {looked && (
-          <section className="space-y-3 rounded-xl border border-accent/25 bg-panel2/50 p-4">
+          <section className="orbit-addfound">
             <div className="flex items-start gap-3">
               <PortraitFrame src={d.coverPath ? fileSrc(d.coverPath) : storeCover} className="border border-line shadow-lg">
                 <span
@@ -519,7 +519,7 @@ export function AddGameModal({
         />
 
         {!d.exePath.trim() && (
-          <p className="rounded-lg border border-line bg-panel2/40 px-3 py-2 text-xs text-muted">
+          <p className="orbit-addnote">
             With no program, this game is only timed: Orbit runs the clock and you start it yourself. You can point it
             at a program later from the game's own page.
           </p>
@@ -528,7 +528,7 @@ export function AddGameModal({
         {/* Only the program is asked for. The folder around it, the drive it
             sits on and its size all come from that one path, so asking for them
             as well was three questions with only one right answer each. */}
-        <section className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
+        <section className="orbit-addgroup">
           <span className={labelCls}>Where the game lives</span>
           <div className="flex gap-2">
             <label className="block flex-1">
@@ -665,22 +665,23 @@ export function AddGameModal({
         <button type="submit" className="hidden" />
 
         {/* Every local game library, including a reviewable drive scan, lives in one picker. */}
-        <section className="space-y-3 border-t border-line pt-4">
-          <div>
-            <p className="text-sm font-semibold text-fg">Game libraries</p>
-            <p className="mt-0.5 text-xs text-muted">Choose a library to review its games before adding them.</p>
-          </div>
+        <section className="orbit-addgroup">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Game libraries</h4>
+            <p className="orbit-editsection-note">
+              Point Orbit at an installed library and review what it finds before anything is added.
+            </p>
+          </header>
           <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={onScanFolder}
-              className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-accent/35 bg-panel text-accent">
+            <button type="button" onClick={onScanFolder} className="orbit-sourcecard">
+              <span className="orbit-sourcecard-icon is-accent">
                 <HardDrive className="size-5" />
               </span>
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold">Drive or folder</span>
-              <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+              <span className="orbit-sourcecard-copy">
+                <b>Drive or folder</b>
+                <em>Scan any folder of games</em>
+              </span>
+              <Download className="orbit-sourcecard-go" />
             </button>
             {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => (
               <button
@@ -689,19 +690,22 @@ export function AddGameModal({
                 onClick={() => onImportLauncher(launcher.id)}
                 disabled={!canScan(launcher)}
                 title={canScan(launcher) ? undefined : NOT_SCANNABLE_NOTE}
-                className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel/75 px-3 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-line disabled:hover:bg-panel/75"
+                className="orbit-sourcecard"
               >
                 <span
-                  className="grid size-9 shrink-0 place-items-center rounded-xl border bg-panel"
+                  className="orbit-sourcecard-icon"
                   style={{ color: launcher.color, borderColor: `${launcher.color}55` }}
                 >
-                  <LauncherIcon launcher={launcher.id} className="size-5" />
+                  <LauncherIcon launcher={launcher.id} className="size-[18px]" />
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{launcher.id}</span>
+                <span className="orbit-sourcecard-copy">
+                  <b>{launcher.id}</b>
+                  <em>{canScan(launcher) ? 'Installed games' : 'Streaming, nothing to scan'}</em>
+                </span>
                 {canScan(launcher) ? (
-                  <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
+                  <Download className="orbit-sourcecard-go" />
                 ) : (
-                  <span className="shrink-0 text-[10px] text-muted">streaming</span>
+                  <span className="orbit-sourcecard-tag">streaming</span>
                 )}
               </button>
             ))}
