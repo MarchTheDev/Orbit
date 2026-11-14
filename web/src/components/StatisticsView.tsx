@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BarChart3, BookOpen, CalendarDays, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
   NotebookPen, Play, Trash2, Trophy,
@@ -36,6 +36,15 @@ const DAY = 86_400;
  * ten minutes ago is noise; anything older gets its day, and a year only when it
  * is not this one.
  */
+/** A capture's file size, from what the gallery reported. */
+function sizeOf(item: GalleryItem): string {
+  const bytes = item.bytes ?? 0;
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function whenOf(item: GalleryItem): string {
   if (!item.at) return '';
   const then = new Date(item.at * 1000);
@@ -238,6 +247,27 @@ export function StatisticsView({
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [captureMenu, setCaptureMenu] = useState<{ x: number; y: number; item: GalleryItem } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
+  /** Which facts are written under each picture. All of them, to begin with. */
+  const [under, setUnder] = useState({ name: true, date: true, size: true, game: false });
+  const [underOpen, setUnderOpen] = useState(false);
+  const underBox = useRef<HTMLDivElement>(null);
+
+  // A menu that was opened and then left behind is a menu over the next page.
+  useEffect(() => {
+    if (!underOpen) return;
+    const away = (event: MouseEvent) => {
+      if (!underBox.current?.contains(event.target as Node)) setUnderOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setUnderOpen(false);
+    };
+    window.addEventListener('mousedown', away);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', key);
+    };
+  }, [underOpen]);
   /** Bumped after a capture is removed, so the Album reads the disk again. */
   const [captureTick, setCaptureTick] = useState(0);
   const refreshCaptures = () => setCaptureTick((tick) => tick + 1);
@@ -651,6 +681,7 @@ export function StatisticsView({
             </div>
 
             <div className="orbit-album-tools">
+              <div className="orbit-album-filterrow">
               <div className="orbit-minichips">
                 <button aria-pressed={albumKind === 'all'} onClick={() => setAlbumKind('all')}>
                   Everything <span className="opacity-60">{captures?.length ?? 0}</span>
@@ -660,6 +691,55 @@ export function StatisticsView({
                     {CAPTURE_LABELS[kind].many} <span className="opacity-60">{albumCounts[kind]}</span>
                   </button>
                 ))}
+              </div>
+
+              {/* What is written under each picture. A menu rather than four
+                  switches in the open: the answer is usually "leave it alone",
+                  and a row of controls over a wall of photographs is the thing
+                  it was asked not to be. */}
+              <div className="orbit-album-under" ref={underBox}>
+                <button
+                  type="button"
+                  className="orbit-btnquiet"
+                  aria-expanded={underOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => setUnderOpen((open) => !open)}
+                >
+                  <ListOrdered className="size-3.5" />
+                  Shown under
+                  <span className="orbit-album-undercount">
+                    {Object.values(under).filter(Boolean).length}
+                  </span>
+                </button>
+                {underOpen && (
+                  <div className="orbit-album-undermenu" role="dialog" aria-label="Shown under each capture">
+                    {([
+                      ['name', 'File name', 'Screenshot 2026-11-13 21-04-11.png'],
+                      ['date', 'When it was taken', 'Today, 21:04'],
+                      ['size', 'File size', '2.4 MB'],
+                      ['game', 'Which game', 'Elden Ring'],
+                    ] as const).map(([key, label, sample]) => (
+                      <label key={key} className="orbit-album-underrow">
+                        <span className="min-w-0">
+                          <b>{label}</b>
+                          <em>{sample}</em>
+                        </span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={under[key]}
+                          aria-label={label}
+                          onClick={() => setUnder((current) => ({ ...current, [key]: !current[key] }))}
+                          className="orbit-switch"
+                          data-on={under[key] || undefined}
+                        >
+                          <i />
+                        </button>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
               </div>
 
               {/* The games, as their own covers rather than a dropdown: the
@@ -734,15 +814,6 @@ export function StatisticsView({
                           {group.game ? ` · ${fmtMinutes(group.game.playSecs / 60)} played` : ''}
                         </p>
                       </div>
-                      {albumGame === 'all' && albumGames.length > 1 && (
-                        <button
-                          type="button"
-                          className="orbit-btnquiet ml-auto shrink-0"
-                          onClick={() => setAlbumGame(group.items[0]?.game ?? 'all')}
-                        >
-                          Only this game
-                        </button>
-                      )}
                     </div>
                     <div className="orbit-gallery">
                       {group.items.map((item) => (
@@ -766,8 +837,12 @@ export function StatisticsView({
                             )}
                           </span>
                           <span className="orbit-album-tilefoot">
-                            <span className="orbit-album-tilename">{item.name}</span>
-                            <span className="orbit-album-tiledate">{whenOf(item)}</span>
+                            {under.name && <span className="orbit-album-tilename">{item.name}</span>}
+                            <span className="orbit-album-tilefacts">
+                              {under.date && whenOf(item) && <span>{whenOf(item)}</span>}
+                              {under.size && sizeOf(item) && <span>{sizeOf(item)}</span>}
+                              {under.game && <span>{group.title}</span>}
+                            </span>
                           </span>
                         </button>
                       ))}

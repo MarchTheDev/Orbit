@@ -1763,6 +1763,8 @@ pub struct GalleryItem {
     /// Sorted by this already; carrying it out of here is what lets the Album
     /// say "13 Nov 2026" under a picture instead of only listing them.
     pub at: i64,
+    /// The file's size on disk, in bytes.
+    pub bytes: u64,
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
@@ -3616,6 +3618,7 @@ fn collect_kind(dir: &Path, kind: &str, found: &mut Vec<(SystemTime, GalleryItem
                         .duration_since(UNIX_EPOCH)
                         .map(|since| since.as_secs() as i64)
                         .unwrap_or(0),
+                    bytes: file.metadata().map(|meta| meta.len()).unwrap_or(0),
                 },
             ));
         }

@@ -1678,6 +1678,8 @@ export interface GalleryItem {
   path: string;
   /** When the file was written, in seconds since the epoch. 0 when unknown. */
   at?: number;
+  /** The file's size on disk. */
+  bytes?: number;
 }
 
 export function overlayGallery(): Promise<GalleryItem[]> {
