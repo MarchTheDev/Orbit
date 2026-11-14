@@ -139,6 +139,58 @@ body {
   color: var(--c-muted);
 }
 
+/* A list of things that can be brought in, checked one at a time. Rows are
+   separated by a hairline rather than boxed, so a hundred Steam games read as
+   one list and not a hundred cards. */
+.orbit-importlist {
+  display: flex;
+  flex-direction: column;
+  max-height: 26rem;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c-bg) 30%, transparent);
+}
+.orbit-importrow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 11px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+.orbit-importrow:first-child { border-top: 0; }
+.orbit-importrow:hover { background: color-mix(in srgb, var(--c-text) 4%, transparent); }
+.orbit-importrow[data-known] { opacity: .55; }
+.orbit-importrow[data-known]:hover { background: none; }
+.orbit-importrow-copy { min-width: 0; flex: 1; }
+.orbit-importrow-copy b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.orbit-importrow-copy em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--c-muted);
+}
+.orbit-importrow-meta { flex: none; text-align: right; }
+.orbit-importrow-meta b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--c-text) 82%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-importrow-meta em { display: block; font-size: 10px; font-style: normal; color: var(--c-muted); }
+
 /* ----------------------------------------------------------------- the editor
 
    The game editor is one long form, and a form of forty fields is read section

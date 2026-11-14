@@ -299,19 +299,15 @@ export function SteamImportModal({
           </button>
         </div>
 
-        {error && <p className="rounded-lg border border-line bg-panel2/50 px-3 py-2 text-xs text-muted">{error}</p>}
+        {error && <p className="orbit-addnote">{error}</p>}
 
         {(rows?.length ?? 0) > 0 && (
-          <ul className="max-h-[26rem] space-y-1 overflow-y-auto pr-1">
+          <ul className="orbit-importlist">
             {visible.map((r) => {
               const known = isKnown(r);
               return (
                 <li key={r.appId}>
-                  <div
-                    className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
-                      known ? 'border-line bg-panel2/20' : 'border-line bg-panel2/40 hover:border-accent/60'
-                    }`}
-                  >
+                  <div className="orbit-importrow" data-known={known || undefined}>
                     <CheckboxBox
                       checked={r.include}
                       onChange={() => toggle(r.appId)}
@@ -319,17 +315,17 @@ export function SteamImportModal({
                       title={known ? 'Already in the library' : r.name}
                     />
                     <ArtworkThumb title={r.name} appId={r.appId} lookup />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{r.name}</p>
-                      <p className="truncate font-mono text-[11px] text-muted">
+                    <div className="orbit-importrow-copy">
+                      <b>{r.name}</b>
+                      <em className="font-mono">
                         {known ? 'already in the library' : r.installDir || r.library || `app ${r.appId}`}
-                      </p>
+                      </em>
                     </div>
-                    <div className="shrink-0 text-right text-xs text-muted">
-                      <p>{fmtBytes(r.sizeBytes)}</p>
-                      <p className="text-[10px]">
+                    <div className="orbit-importrow-meta">
+                      <b>{fmtBytes(r.sizeBytes)}</b>
+                      <em>
                         {r.lastPlayed ? `played ${fmtDate(new Date(r.lastPlayed * 1000).toISOString())}` : 'never played'}
-                      </p>
+                      </em>
                     </div>
                   </div>
                 </li>
@@ -339,11 +335,14 @@ export function SteamImportModal({
           </ul>
         )}
 
-        <section className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3">
-          <h3 className="text-sm font-semibold">Add one by hand</h3>
-          <p className="text-xs text-muted">
-            Paste a Steam store link or an app id for a game that is in your Steam account but not installed here.
-          </p>
+        <section className="orbit-editsection">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Add one by hand</h4>
+            <p className="orbit-editsection-note">
+              Paste a Steam store link or an app id for a game that is in your Steam account but not installed
+              here.
+            </p>
+          </header>
           <div className="flex flex-wrap gap-2">
             <input
               className={`${inputCls} min-w-[12rem] flex-1`}
