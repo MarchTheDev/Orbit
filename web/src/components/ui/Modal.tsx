@@ -90,7 +90,7 @@ export function Modal({
       data-overlay-hit="1"
       className={cn(
         'modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center p-4',
-        bare ? 'bg-bg/85' : 'bg-black/70',
+        bare ? 'orbit-modal-scrim is-bare' : 'orbit-modal-scrim',
       )}
       onClick={(event) => {
         // Ignore clicks that bubble out of a dialog and only close the top
@@ -102,29 +102,25 @@ export function Modal({
     >
       <div
         className={cn(
-          'modal-panel-enter flex w-full flex-col overflow-hidden border border-line bg-panel shadow-2xl',
-          bare ? 'max-h-[92vh] max-w-6xl rounded-2xl' : `max-h-[88vh] ${SIZES[size]} rounded-2xl`,
+          'modal-panel-enter orbit-modal flex w-full flex-col overflow-hidden',
+          bare ? 'max-h-[92vh] max-w-6xl' : `max-h-[88vh] ${SIZES[size]}`,
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* The header and footer stay put and the middle scrolls, so a long form
             never pushes its own buttons out of view. Everything sits inside the
             frame with room to breathe: px-6 py-5. */}
-        <div className="flex items-start justify-between gap-4 border-b border-line px-6 pb-4 pt-5">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-            {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
+        <div className="orbit-modal-head">
+          <div className="min-w-0">
+            <h2 className="orbit-modal-title">{title}</h2>
+            {subtitle && <p className="orbit-modal-sub">{subtitle}</p>}
           </div>
-          <button
-            onClick={closeIfTopmost}
-            aria-label="Close"
-            className="rounded-lg p-1 text-muted hover:bg-panel2 hover:text-fg"
-          >
+          <button onClick={closeIfTopmost} aria-label="Close" className="orbit-modal-x">
             <X className="size-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
-        {footer && <div className="border-t border-line bg-panel2/40 px-6 py-4">{footer}</div>}
+        <div className="orbit-modal-body">{children}</div>
+        {footer && <div className="orbit-modal-foot">{footer}</div>}
       </div>
     </div>,
     document.body,

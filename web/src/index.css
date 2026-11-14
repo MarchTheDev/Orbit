@@ -64,6 +64,96 @@ body {
   backdrop-filter: blur(14px) saturate(1.04);
 }
 
+/* -------------------------------------------------------------------- dialogs
+
+   A dialog is a sheet of the app's own surface lifted off the page, not a card
+   dropped on a black screen: the scrim is the room colour at four-fifths, the
+   frame is a panel with one lit edge, and the heading is a kicker over a title
+   with a hairline under it. The middle scrolls and the head and foot do not, so
+   a long form never pushes its own buttons out of view. */
+.orbit-modal-scrim {
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--c-bg) 72%, transparent), transparent 70%),
+    color-mix(in srgb, var(--c-bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.orbit-modal-scrim.is-bare {
+  background: color-mix(in srgb, var(--c-bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+html.orbit-linux .orbit-modal-scrim,
+html.orbit-linux .orbit-modal-scrim.is-bare {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--c-bg) 88%, transparent);
+}
+.orbit-modal {
+  border: 1px solid color-mix(in srgb, var(--c-text) 11%, transparent);
+  border-radius: 16px;
+  background: var(--c-panel);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent),
+    0 40px 90px -40px rgba(0, 0, 0, .9);
+}
+.orbit-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-modal-title {
+  font-size: 16px;
+  font-weight: 680;
+  letter-spacing: -.012em;
+  line-height: 1.25;
+  color: var(--c-text);
+}
+.orbit-modal-sub {
+  margin-top: 3px;
+  max-width: 74ch;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--c-muted);
+  text-wrap: pretty;
+}
+.orbit-modal-x {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-muted);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), background-color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-modal-x:hover {
+  color: var(--c-text);
+  background: color-mix(in srgb, var(--c-text) 7%, transparent);
+  border-color: color-mix(in srgb, var(--c-text) 12%, transparent);
+}
+.orbit-modal-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 20px;
+}
+.orbit-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 40%, transparent);
+}
+
 /* ---------------------------------------------------------------- liquid glass
 
    The optional look: surfaces become frosted panes, the window behind them is a
