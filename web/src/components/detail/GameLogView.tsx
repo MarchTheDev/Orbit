@@ -367,7 +367,7 @@ export function GameLogView({
   };
 
   return (
-    <section className="rounded-xl border border-line bg-panel2 p-4">
+    <section className="orbit-logview">
       <PlaythroughBar
         runs={runs}
         currentId={current?.id ?? null}
@@ -377,13 +377,13 @@ export function GameLogView({
         onRename={(id, name) => void renameRun(id, name)}
         onDelete={(run) => void removeRun(run)}
       />
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <NotebookPen className="size-4 text-accent" />
+      <div className="orbit-loghead">
+        <div className="min-w-0">
+          <h3 className="orbit-loghead-title">
+            <NotebookPen className="size-4" />
             Log
           </h3>
-          <p className="text-xs text-muted">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
+          <p className="orbit-loghead-sub">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
         </div>
         {/* The total time is the drawer's business, where the log sits beside
             the session clock. In the Journal the page is the writing, and the
@@ -404,10 +404,10 @@ export function GameLogView({
         data-orbit-pad-game={withClock ? gameId : undefined}
       >
       {draft ? (
-        <div className="mb-4 space-y-2 rounded-xl border border-accent/40 bg-accent/5 p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
+        <div className="orbit-logdraft">
+          <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">Day (required) · time optional</span>
+              <span className="orbit-logfield">Day (required) · time optional</span>
               <DateTimePicker
                 value={draft.at}
                 onChange={(at) => setDraft({ ...draft, at })}
@@ -418,7 +418,7 @@ export function GameLogView({
               />
             </label>
             <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-muted">Play duration (optional)</span>
+              <span className="orbit-logfield">Play duration (optional)</span>
               <input
                 className={inputCls}
                 value={draft.secs}
@@ -429,7 +429,7 @@ export function GameLogView({
             </label>
           </div>
           <label className="block">
-            <span className="text-[11px] uppercase tracking-widest text-muted">What happened</span>
+            <span className="orbit-logfield">What happened</span>
             <input
               className={inputCls}
               value={draft.note}
@@ -441,7 +441,7 @@ export function GameLogView({
             />
           </label>
           <label className="block">
-            <span className="text-[11px] uppercase tracking-widest text-muted">More about this entry (optional)</span>
+            <span className="orbit-logfield">More about this entry (optional)</span>
             <textarea
               className={`${inputCls} mt-1 min-h-20 resize-y text-sm leading-relaxed`}
               rows={3}
@@ -455,7 +455,7 @@ export function GameLogView({
               <button
                 key={q}
                 onClick={() => setDraft({ ...draft, note: q })}
-                className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted hover:border-accent hover:text-fg"
+                className="orbit-logquick"
               >
                 {q}
               </button>
@@ -485,7 +485,7 @@ export function GameLogView({
             setError(null);
             setDraft(blank());
           }}
-          className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:border-accent hover:text-fg"
+          className="orbit-logadd"
         >
           <Plus className="size-4" />
           Add an entry
@@ -514,7 +514,7 @@ export function GameLogView({
           Nothing written yet. Finished the story, beat the DLC, went back to an older save: those go here.
         </p>
       ) : (
-        <ul className="space-y-1.5">
+        <ol className="orbit-loglist">
           {shown.map((r) => {
             const expanded = expandedId === r.id;
             const savedDetails = r.details ?? '';
@@ -523,13 +523,17 @@ export function GameLogView({
               <li
                 key={r.id}
                 {...bindLogRow(r.id, order === 'mine', drag.bind)}
-                className={`overflow-hidden rounded-xl border border-line/60 bg-bg/55 text-sm transition ${
-                  order === 'mine' ? 'cursor-grab active:cursor-grabbing' : ''
-                } ${order === 'mine' && drag.over === String(r.id) ? 'ring-2 ring-accent' : ''} ${
-                  order === 'mine' && drag.dragging === String(r.id) ? 'opacity-60' : ''
-                }`}
+                className={`orbit-logrow ${order === 'mine' ? 'is-draggable' : ''} ${
+                  order === 'mine' && drag.over === String(r.id) ? 'is-over' : ''
+                } ${order === 'mine' && drag.dragging === String(r.id) ? 'is-dragging' : ''}`}
               >
-                <div className="group flex items-center gap-2 px-2 py-2">
+                {/* The timeline's own mark: a dot on the rule, with the day
+                    beside it, so a list of entries reads as a sequence rather
+                    than as a table of timestamps. */}
+                <span className="orbit-logrow-mark" aria-hidden>
+                  <i />
+                </span>
+                <div className="orbit-logrow-body">
                   {order === 'mine' && (
                     <span
                       title="Press here and move to place this entry"
@@ -544,23 +548,19 @@ export function GameLogView({
                     onClick={() => toggleDetails(r)}
                     disabled={draft?.id === r.id}
                     data-orbit-pad={withClock ? 'journal-entry' : undefined}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left disabled:cursor-default"
+                    className="orbit-logrow-main"
                     aria-expanded={expanded}
                     title={draft?.id === r.id ? 'This entry is being edited above' : expanded ? 'Close this entry' : 'Open this entry'}
                   >
                     {/* The length sits beside the date in the drawer, where
                         the row is a record of a session. In the Journal it is
                         a note, and the clocks were noise beside the date. */}
+                    <span className="orbit-logrow-when">{displayLogDate(r.at, withClock)}</span>
                     {!withClock && (
-                      <span className="w-14 shrink-0 font-mono text-xs font-semibold text-accent">
-                        {fmtShort(r.secs) || '-'}
-                      </span>
+                      <span className="orbit-logrow-length">{fmtShort(r.secs) || ''}</span>
                     )}
-                    <span className={`shrink-0 font-mono text-xs text-muted ${withClock ? 'w-32' : 'w-20'}`}>
-                      {displayLogDate(r.at, withClock)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {r.note || <span className="text-muted">no note</span>}
+                    <span className="orbit-logrow-note">
+                      {r.note || <span className="opacity-60">no note</span>}
                     </span>
                     {expanded ? (
                       <ChevronUp className="size-3.5 shrink-0 text-muted" />
@@ -568,16 +568,15 @@ export function GameLogView({
                       <ChevronDown className="size-3.5 shrink-0 text-muted" />
                     )}
                   </button>
-                  <span className="flex shrink-0 items-center gap-2">
+                  <span className="orbit-logrow-tools">
                     <button
                       type="button"
                       onClick={() => editEntry(r)}
-                      className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs text-muted transition hover:bg-panel2 hover:text-accent"
+                      className="orbit-logtool"
                       title="Edit this entry"
                       aria-label="Edit this entry"
                     >
                       <Pencil className="size-3.5" />
-                      <span>Edit</span>
                     </button>
                     <button
                       type="button"
@@ -586,7 +585,7 @@ export function GameLogView({
                           void deleteGameLog(r.id).then(refresh);
                         }
                       }}
-                      className="rounded-lg p-1 text-muted transition hover:bg-panel2 hover:text-rose-400"
+                      className="orbit-logtool is-danger"
                       title="Remove this entry"
                       aria-label="Remove this entry"
                     >
@@ -595,7 +594,7 @@ export function GameLogView({
                   </span>
                 </div>
                 {expanded && (
-                  <div className="space-y-2 border-t border-line/60 px-3 py-3 sm:pl-12">
+                  <div className="orbit-logrow-more">
                     <label className="block">
                       <span className="text-[11px] font-semibold uppercase tracking-widest text-muted">
                         More about this entry
@@ -636,7 +635,7 @@ export function GameLogView({
               </li>
             );
           })}
-        </ul>
+        </ol>
       )}
 
       </div>

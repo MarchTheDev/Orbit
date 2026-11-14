@@ -2010,6 +2010,213 @@ html.orbit-linux .orbit-topbar {
   color: #fca5a5;
 }
 
+/* -------------------------------------------------------------- a game's log
+
+   The log is a list of things that happened, so it is drawn as one: a hairline
+   down the left with a mark on it per entry, the day beside the mark, and what
+   was written where the reading happens. It used to be a table of monospace
+   timestamps with a grip and two buttons on every row, which is a database view
+   of somebody's diary. */
+.orbit-logview { display: flex; flex-direction: column; min-width: 0; }
+.orbit-loghead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-loghead-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--c-text);
+}
+.orbit-loghead-title svg { color: color-mix(in srgb, var(--c-accent) 78%, var(--c-text)); }
+.orbit-loghead-sub { margin-top: 2px; font-size: 11.5px; color: var(--c-muted); }
+.orbit-logfield {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.orbit-loglist {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 6px;
+  padding-left: 0;
+  list-style: none;
+}
+/* The rule the entries hang from. */
+.orbit-loglist::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: color-mix(in srgb, var(--c-text) 10%, transparent);
+}
+.orbit-logrow {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 10px 0 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+.orbit-logrow:first-child { border-top: 0; }
+.orbit-logrow.is-draggable { cursor: grab; }
+.orbit-logrow.is-draggable:active { cursor: grabbing; }
+.orbit-logrow.is-over { box-shadow: inset 0 2px 0 var(--c-accent); }
+.orbit-logrow.is-dragging { opacity: .55; }
+.orbit-logrow-mark {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 11px;
+  padding-top: 5px;
+}
+.orbit-logrow-mark > i {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--c-text) 26%, transparent);
+  background: var(--c-bg);
+  transition: border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-logrow:hover .orbit-logrow-mark > i {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+}
+.orbit-logrow-body { min-width: 0; flex: 1; }
+.orbit-logrow-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.orbit-logrow-main:disabled { cursor: default; }
+.orbit-logrow-when {
+  flex: none;
+  min-width: 6.5rem;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-muted);
+}
+.orbit-logrow-length {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 88%, var(--c-text));
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.orbit-logrow-note {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--c-text);
+}
+.orbit-logrow-tools { display: flex; flex: none; align-items: center; gap: 2px; opacity: 0; transition: opacity .12s var(--ease-snap); }
+.orbit-logrow:hover .orbit-logrow-tools,
+.orbit-logrow:focus-within .orbit-logrow-tools { opacity: 1; }
+.orbit-logtool {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--c-muted);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-logtool:hover {
+  border-color: color-mix(in srgb, var(--c-text) 16%, transparent);
+  background: color-mix(in srgb, var(--c-text) 6%, transparent);
+  color: var(--c-text);
+}
+.orbit-logtool.is-danger:hover { color: #fca5a5; border-color: color-mix(in srgb, #f87171 45%, transparent); }
+.orbit-logrow-more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px 12px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 40%, transparent);
+}
+.orbit-logdraft {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 34%, transparent);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--c-accent) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--c-panel2) 70%, transparent);
+}
+.orbit-logquick {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+  color: var(--c-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-logquick:hover {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+}
+.orbit-logadd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin: 12px 0;
+  padding: 11px;
+  border-radius: 11px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 16%, transparent);
+  background: color-mix(in srgb, var(--c-text) 2%, transparent);
+  color: var(--c-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-logadd:hover {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 7%, transparent);
+}
+
 /* ------------------------------------------------------------------- Journal
 
    A journal is a rail of games and a page of writing beside it. The rail is a
@@ -2103,6 +2310,36 @@ html.orbit-linux .orbit-topbar {
 .orbit-journal-title { font-size: 15px; font-weight: 680; letter-spacing: -.01em; line-height: 1.2; }
 .orbit-journal-sub { margin-top: 2px; font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
 .orbit-journal-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.orbit-journal-railhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.orbit-journal-railhead svg { color: color-mix(in srgb, var(--c-accent) 70%, var(--c-muted)); }
+.orbit-journal-picker { display: flex; flex-direction: column; gap: 2px; max-height: 55vh; overflow-y: auto; }
+.orbit-journal-pickerrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  transition: background-color .12s var(--ease-snap);
+}
+.orbit-journal-pickerrow:hover { background: color-mix(in srgb, var(--c-text) 5%, transparent); }
+.orbit-journal-pickerart {
+  flex: none;
+  width: 28px;
+  height: 39px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+}
 
 /* ------------------------------------------------------------------ Settings */
 

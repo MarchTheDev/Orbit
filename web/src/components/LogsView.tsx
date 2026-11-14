@@ -296,6 +296,10 @@ export function LogsView({
 
       <div className="orbit-journal">
         <aside className="orbit-journal-rail">
+          <p className="orbit-journal-railhead">
+            <NotebookPen className="size-3.5" />
+            {games.length} {games.length === 1 ? 'game' : 'games'}
+          </p>
           <SearchField
             value={query}
             onChange={setQuery}
@@ -415,12 +419,12 @@ export function LogsView({
         <Modal title="Add games to the Journal" subtitle="Choose records to show in the Journal. This does not create or remove any entries." onClose={() => setShowAddGames(false)} size="md">
           <div className="space-y-3">
             <SearchField value={addQuery} onChange={setAddQuery} placeholder="Find a game" className="w-full" inputClassName="w-full" />
-            <ul className="max-h-[55vh] space-y-1 overflow-y-auto pr-1">
+            <ul className="orbit-journal-picker">
               {addCandidates.map((game) => (
-                <li key={game.id} className="flex items-center gap-3 rounded-xl border border-line bg-panel2/40 p-2">
-                  <Cover game={game} className="size-10 shrink-0 rounded-lg" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{game.title}</span>
-                  <button type="button" className={`${btnGhost} shrink-0`} onClick={() => onJournalMembership(game.id, true)}>
+                <li key={game.id} className="orbit-journal-pickerrow">
+                  <Cover game={game} className="orbit-journal-pickerart" />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{game.title}</span>
+                  <button type="button" className={btnGhost} onClick={() => onJournalMembership(game.id, true)}>
                     Add
                   </button>
                 </li>
