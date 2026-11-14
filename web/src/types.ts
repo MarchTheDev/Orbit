@@ -837,6 +837,23 @@ export interface Settings {
     shortcuts?: OverlayShortcuts;
     /** Let capture shortcuts run while the panel is closed; off by default. */
     captureShortcutsOutsideOverlay?: boolean;
+    /**
+     * How the overlay's own boxes are painted.
+     *
+     * The overlay sits on top of a game, and how much of the game shows through
+     * it is a matter of taste and of what the game looks like behind it: a
+     * picture full of text wants a solid box, a dark quiet one can take glass.
+     * Three numbers rather than a switch, because "transparent" is a range and
+     * not a mode.
+     */
+    look?: {
+      /** 0 to 100. How much of the box's panel is painted. Missing means 88. */
+      opacity?: number;
+      /** 0 to 40 pixels of blur behind a box. Missing means 0. */
+      blur?: number;
+      /** 0 to 100. How far the box's corners are rounded. Missing means 55. */
+      corners?: number;
+    };
   };
   /**
    * Which games back themselves up, and a folder to copy when Orbit cannot

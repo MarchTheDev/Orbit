@@ -387,6 +387,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Data folder and portable copy', section: 'orbit-advanced', keywords: 'advanced folders cache data directory portable beside program' },
   { label: 'Log files', section: 'orbit-logs', keywords: 'logs diagnostics errors support folder tail report' },
   { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes resize' },
+  { label: 'How the overlay boxes are drawn', section: 'orbit-overlay', keywords: 'overlay opacity transparency blur frosted glass corners radius solid see through' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
   { label: 'Add a cloud', section: 'orbit-backups', keywords: 'add cloud google drive mega proton dropbox sign in ftp sftp webdav shared folder server' },
   { label: 'Connected clouds', section: 'orbit-backups', keywords: 'cloud google drive mega proton dropbox disconnect sign out' },
@@ -661,6 +662,52 @@ function OverlaySettings({
             : 'The FPS box reads the picture the desktop presents. Turn this off if the overlay closes by itself over a game.'
         }
       />
+      <div className="orbit-setgroup">
+        <div className="orbit-setgroup-head">
+          <h3 className="orbit-setgroup-title">How the boxes are drawn</h3>
+          <p className="orbit-setgroup-note">
+            The overlay sits on top of a game, so how much of the game shows through is a matter of
+            what is behind it. A picture full of text wants a solid box; a dark quiet one can take
+            glass.
+          </p>
+        </div>
+        {([
+          ['opacity', 'Solidity', 30, 100, 5, '%', 'How much of the box is painted at all. Below about half the game shows through the text.'],
+          ['blur', 'Blur behind', 0, 40, 1, ' px', 'Frosting the game behind a box. Costs a compositing pass per box, so keep it low on a laptop.'],
+          ['corners', 'Corners', 0, 100, 5, '', 'How far a box’s corners are rounded.'],
+        ] as const).map(([key, label, min, max, step, unit, hint]) => {
+          const current = overlay?.look?.[key] ?? (key === 'opacity' ? 88 : key === 'blur' ? 0 : 55);
+          return (
+            <div key={key} className="orbit-setrow">
+              <div className="orbit-setrow-copy">
+                <div className="orbit-setrow-line">
+                  <p className="orbit-setrow-label">{label}</p>
+                  <span className="orbit-setrow-value">
+                    {current}
+                    {unit}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={current}
+                  onChange={(event) => setOverlay({ look: { ...overlay?.look, [key]: Number(event.target.value) } })}
+                  className="orbit-range mt-2 w-full cursor-pointer"
+                  aria-label={label}
+                />
+                <p className="orbit-setrow-hint">{hint}</p>
+              </div>
+            </div>
+          );
+        })}
+        <p className="orbit-setrow-hint">
+          The panel in the game draws with these the next time it opens, including one that is already
+          open.
+        </p>
+      </div>
+
       <ShortcutEditor
         value={overlay?.shortcuts}
         onChange={(shortcuts, resetOpenShortcut) =>

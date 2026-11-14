@@ -78,6 +78,12 @@ const BOX: Record<BoxId, { w: number; h: number; minW: number; minH: number }> =
   capture: { w: 560, h: 220, minW: 320, minH: 160 },
 };
 
+/** A setting read back from disk, kept inside the range the slider offers. */
+function clampNumber(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
 function stamp(): string {
   const now = new Date();
   const part = (value: number) => String(value).padStart(2, '0');
@@ -286,8 +292,27 @@ export function OverlayView() {
    * away. Turning them off leaves a panel that opens, draws and stays.
    */
   const [liveStats, setLiveStats] = useState(true);
+  /**
+   * How the boxes are painted: how solid, how blurred behind, how rounded.
+   *
+   * Kept as three numbers and applied as three custom properties on the panel,
+   * so every box - including ones drawn by other components - picks them up
+   * without being told about them. The defaults are the look the boxes had
+   * before this existed, so nothing changes for anybody who never opens it.
+   */
+  const [look, setLook] = useState({ opacity: 88, blur: 0, corners: 55 });
   /** The FPS reading waits a few seconds, so the panel is up before it starts. */
   const [fpsArmed, setFpsArmed] = useState(false);
+  /**
+   * Why the boxes are empty, when they are.
+   *
+   * Three different things can leave a box reading "—": the switch is off, the
+   * numbers have not arrived yet, or the reading failed. They used to look
+   * identical, which is how a box that was working came to be reported as a box
+   * that was not.
+   */
+  const [statsError, setStatsError] = useState('');
+  const [statsSeen, setStatsSeen] = useState(false);
   const [front, setFront] = useState<BoxId>('capture');
   const [page, setPage] = useState(0);
   const [boxesOpen, setBoxesOpen] = useState(false);
@@ -589,6 +614,11 @@ export function OverlayView() {
       setShutterOn(settings.overlay?.shutter !== false);
       setShutterVolume(settings.overlay?.shutterVolume ?? 40);
       setLiveStats(settings.overlay?.liveStats !== false);
+      setLook({
+        opacity: clampNumber(settings.overlay?.look?.opacity, 30, 100, 88),
+        blur: clampNumber(settings.overlay?.look?.blur, 0, 40, 0),
+        corners: clampNumber(settings.overlay?.look?.corners, 0, 100, 55),
+      });
       // `overlay-shown` is the panel's own word, and it can arrive before this
       // read comes back. A page that has already been told it is up must not
       // be told again by a slower answer that it is not: on a slow machine
@@ -642,6 +672,11 @@ export function OverlayView() {
         setShutterOn(settings.overlay?.shutter !== false);
         setShutterVolume(settings.overlay?.shutterVolume ?? 40);
         setLiveStats(settings.overlay?.liveStats !== false);
+      setLook({
+        opacity: clampNumber(settings.overlay?.look?.opacity, 30, 100, 88),
+        blur: clampNumber(settings.overlay?.look?.blur, 0, 40, 0),
+        corners: clampNumber(settings.overlay?.look?.corners, 0, 100, 55),
+      });
       }).catch(() => undefined);
     }).then((unlisten) => {
       stopShown = unlisten;
@@ -1178,6 +1213,14 @@ export function OverlayView() {
   const wantFps = !linux && liveStats && awake && !hidden.includes('fps') && (!resting || !!places.fps.pinned);
   const wantPerformance = liveStats && awake && !hidden.includes('performance') && (!resting || !!places.performance.pinned);
   const wantStats = wantFps || wantPerformance;
+  /**
+   * The numbers come back as a whole picture, and a picture is filled in by the
+   * sampler thread a moment after the first ask. An answer whose every field is
+   * missing is not a reading: it is the sampler saying it has not managed one
+   * yet. Saying so is what separates a slow start from a broken box.
+   */
+  const statsHasNumbers = (next: MachineStats | null) =>
+    !!next && [next.cpu, next.ram, next.gpu, next.vram, next.fps].some((value) => value != null);
   // Opening the panel is the moment the game is most likely to be redrawing
   // everything. The readings wait until the panel has been on screen for a
   // moment, so a reading that goes wrong cannot be mistaken for the panel
@@ -1193,7 +1236,20 @@ export function OverlayView() {
   useEffect(() => {
     if (!wantStats) return;
     const askFps = wantFps && fpsArmed;
-    const pull = () => void machineStats(askFps).then(setStats).catch(() => undefined);
+    const pull = () => {
+      void machineStats(askFps)
+        .then((next) => {
+          setStats(next);
+          if (statsHasNumbers(next)) {
+            setStatsSeen(true);
+            setStatsError('');
+          }
+        })
+        .catch((reason) => {
+          setStats(null);
+          setStatsError(reason instanceof Error ? reason.message : 'The numbers could not be read.');
+        });
+    };
     pull();
     const timer = window.setInterval(pull, 1000);
     return () => window.clearInterval(timer);
@@ -1234,6 +1290,20 @@ export function OverlayView() {
     void run(() => overlayReplay(seconds, stamp()), true, 'Replay saved');
   };
   captureRef.current = { shot: captureShot, record: captureRecord, replay: captureReplay };
+  /**
+   * The one line under the numbers, and what it has to say.
+   *
+   * Nothing at all once a reading has landed, because a box with numbers in it
+   * does not need to be told it is working. Before then the sentence names the
+   * reason: the switch, a failure, or a sampler that has not answered yet.
+   */
+  const statsNote = !liveStats
+    ? 'Reading is off in Settings'
+    : statsError
+      ? 'Could not read the numbers'
+      : statsSeen
+        ? ''
+        : 'Reading…';
   const lengths = overlayLengths(status?.lengths);
   const quality = status?.quality === '4k' ? '4K' : status?.quality || '1080p';
   const fps = status?.fps === 60 ? 60 : 30;
@@ -1282,7 +1352,14 @@ export function OverlayView() {
   })[toast.kind] : null;
 
   return (
-    <div className="relative h-full text-white">
+    <div
+      className="orbit-ov relative h-full text-white"
+      style={{
+        ['--ov-opacity' as string]: look.opacity / 100,
+        ['--ov-blur' as string]: `${look.blur}px`,
+        ['--ov-radius' as string]: `${Math.round(look.corners * 0.24)}px`,
+      }}
+    >
       {/* When open, the native window receives clicks across the screen so the
           boxes remain interactive. Empty glass does not dismiss the panel;
           Escape, the pad's B, the close buttons, and the hotkey are deliberate
@@ -1498,7 +1575,7 @@ export function OverlayView() {
       {visible('fps') && (
         <Box id="fps" padSelected={padOn('fps')} title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
           <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
-          {!liveStats && <p className="mt-1 text-center text-[10px] leading-tight text-white/45">Reading is off</p>}
+          <p className="mt-1 text-center text-[10px] leading-tight text-white/45">{statsNote}</p>
         </Box>
       )}
       {visible('performance') && (
@@ -1507,7 +1584,7 @@ export function OverlayView() {
           <Meter label="CPU" value={stats?.cpu} />
           <Meter label="RAM" value={stats?.ram} detail={stats ? `${gigabytes(stats.ramUsed)} / ${gigabytes(stats.ramTotal)} GB` : ''} />
           <Meter label="VRAM" value={stats?.vram} detail={stats ? `${gigabytes(stats.vramUsed)} / ${gigabytes(stats.vramTotal, true)} GB` : ''} />
-          {!liveStats && <p className="mt-1 text-center text-[10px] leading-tight text-white/45">Reading is off</p>}
+          <p className="mt-1 text-center text-[10px] leading-tight text-white/45">{statsNote}</p>
         </Box>
       )}
       {visible('clock') && (

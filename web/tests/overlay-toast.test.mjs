@@ -426,7 +426,11 @@ check(
     overlay.includes('const timer = window.setTimeout(() => setFpsArmed(true), FPS_ARM_MS);') &&
     overlay.includes('const askFps = wantFps && fpsArmed;') &&
     overlay.includes('machineStats(askFps)') &&
-    overlay.split('Reading is off').length - 1 >= 2,
+    // Both boxes still say why they are empty when reading is off, and now also
+    // while the sampler has not answered yet.
+    overlay.includes("const statsNote = !liveStats") &&
+    overlay.includes("'Reading is off in Settings'") &&
+    overlay.includes(": 'Reading…'"),
 );
 check(
   'the panel is told it is open even when its page loads after the first event',
