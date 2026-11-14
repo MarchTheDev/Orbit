@@ -2993,14 +2993,19 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
 }
 .orbit-deck-cover {
   display: block;
-  width: clamp(6rem, 15vw, 11.5rem);
+  /* Sized by the height of the screen, not its width: the stage is a band
+     across the bottom of a television, and the artwork has to fit under the
+     same 720 lines whatever the aspect ratio of the screen is. */
+  height: clamp(7.5rem, 34vh, 16rem);
+  width: auto;
   aspect-ratio: 2 / 3;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, #fff 16%, transparent);
   box-shadow: 0 26px 60px -18px rgba(0, 0, 0, .8);
 }
 .orbit-deck-cover.is-banner {
-  width: clamp(11rem, 27vw, 21rem);
+  height: clamp(6rem, 24vh, 11.3rem);
+  width: auto;
   aspect-ratio: 16 / 9;
   border-radius: 12px;
 }
@@ -3252,11 +3257,12 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
 /* Beside the stage the index becomes a column of banners that scrolls down, so
    the stage keeps the height and the list keeps the width. */
 .orbit-deck.is-side .orbit-deck-cards {
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  max-height: 100%;
   mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%);
 }
@@ -3315,19 +3321,27 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
 }
 .orbit-deck-card[aria-current='true'] .orbit-deck-name { color: var(--c-text); }
 .orbit-deck-card:hover .orbit-deck-name { color: var(--c-accent); }
-/* Beside the stage, a banner carries its name to the right of the picture. */
+/* Beside the stage the index is a column, so each game is a small picture with
+   its name beside it rather than a wide picture with its name under it. The
+   frames keep their own size here: a full-width banner in a column big enough to
+   hold the stage would be a screenful of picture and one name. */
 .orbit-deck.is-side .orbit-deck-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  padding-bottom: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 4px 2px;
 }
+.orbit-deck.is-side .orbit-deck-frame { aspect-ratio: auto; }
+.orbit-deck.is-side .orbit-deck-frame.is-poster { width: 3.2rem; height: 4.53rem; }
+.orbit-deck.is-side .orbit-deck-frame.is-banner { width: 6.6rem; height: 3.71rem; }
 .orbit-deck.is-side .orbit-deck-name {
-  margin-top: 7px;
+  margin: 0;
   min-height: 0;
   text-align: left;
-  -webkit-line-clamp: 1;
-  font-size: 12px;
+  -webkit-line-clamp: 2;
+  font-size: 12.5px;
 }
 .orbit-deck-on {
   position: absolute;
@@ -3351,6 +3365,20 @@ html.orbit-linux .orbit-badge { background: var(--c-panel); backdrop-filter: non
   border-radius: 999px;
   background: currentColor;
   animation: orbit-pulse 1.8s ease-in-out infinite;
+}
+
+/* A short screen - a laptop on a television, or a handheld - cannot hold a
+   stage and an index at the sizes above. The artwork shrinks first, then the
+   summary goes, so the index keeps its names and the buttons keep their height. */
+@media (max-height: 640px) {
+  .orbit-deck { gap: 12px; }
+  .orbit-deck-cover { height: clamp(6rem, 30vh, 9rem); }
+  .orbit-deck-cover.is-banner { height: clamp(5rem, 22vh, 7.5rem); }
+  .orbit-deck-actions { margin-top: 14px; }
+  .orbit-deck-play,
+  .orbit-deck-secondary { height: 40px; }
+  .orbit-deck-play { padding: 0 22px; }
+  .orbit-deck-progress { display: none; }
 }
 
 /* The mode is a cut, in and out, on a slow renderer and a fast one alike. */
