@@ -1824,6 +1824,105 @@ html.orbit-linux .orbit-topbar {
   color: var(--c-text);
 }
 .orbit-btnquiet:disabled { opacity: .4; cursor: default; }
+/* The same button when what it does takes something away. */
+.orbit-btnquiet-danger:hover {
+  border-color: color-mix(in srgb, #f87171 55%, transparent);
+  color: #fca5a5;
+}
+
+/* ------------------------------------------------------------------- Journal
+
+   A journal is a rail of games and a page of writing beside it. The rail is a
+   list of covers with a name and a count, and the page begins with the game's
+   own cover rather than a row of grey controls: what is being read is the game,
+   and what can be done to it belongs under that. */
+.orbit-journal {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1024px) {
+  .orbit-journal { grid-template-columns: 17rem minmax(0, 1fr); }
+}
+.orbit-journal-rail { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.orbit-journal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 55%, transparent);
+}
+@media (min-width: 1024px) {
+  .orbit-journal-list { max-height: calc(100vh - 17rem); overflow-y: auto; }
+}
+.orbit-journal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+}
+.orbit-journal-row:hover { background: color-mix(in srgb, var(--c-text) 5%, transparent); }
+.orbit-journal-row[data-active] {
+  background: color-mix(in srgb, var(--c-accent) 11%, transparent);
+  border-color: color-mix(in srgb, var(--c-accent) 30%, transparent);
+}
+.orbit-journal-row.is-dragging { opacity: .45; }
+.orbit-journal-row.is-over { border-color: var(--c-accent); }
+.orbit-journal-rowart {
+  flex: none;
+  width: 30px;
+  height: 42px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+}
+.orbit-journal-rowcopy { min-width: 0; flex: 1; }
+.orbit-journal-rowcopy b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.orbit-journal-rowcopy em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--c-muted);
+}
+.orbit-journal-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 14px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-journal-headart {
+  flex: none;
+  width: 44px;
+  height: 62px;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+}
+.orbit-journal-title { font-size: 15px; font-weight: 680; letter-spacing: -.01em; line-height: 1.2; }
+.orbit-journal-sub { margin-top: 2px; font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+.orbit-journal-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 
 /* ------------------------------------------------------------------ Settings */
 

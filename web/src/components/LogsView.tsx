@@ -294,8 +294,8 @@ export function LogsView({
         />
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
-        <aside className="space-y-3">
+      <div className="orbit-journal">
+        <aside className="orbit-journal-rail">
           <SearchField
             value={query}
             onChange={setQuery}
@@ -318,10 +318,7 @@ export function LogsView({
             <p className="px-1 text-[11px] text-muted">Press a game and move it to put the ones you write about most first.</p>
           )}
 
-          <ul
-            ref={list}
-            className="space-y-1 p-1.5 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto"
-          >
+          <ul ref={list} className="orbit-journal-list">
             {ordered.map((g) => {
               const counts = perGame.get(g.id);
               const active = selected?.id === g.id;
@@ -338,18 +335,15 @@ export function LogsView({
                     }}
                     data-orbit-journal-game={g.id}
                     {...bind(g.id)}
-                    className={`flex w-full items-center gap-3 rounded-[9px] px-2.5 py-2 text-left transition ${
-                      active ? 'bg-[color-mix(in_srgb,var(--c-accent)_12%,transparent)]' : 'hover:bg-[color-mix(in_srgb,var(--c-text)_5%,transparent)]'
-                    } ${dragging === g.id ? 'opacity-50' : ''} ${
-                      over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
+                    data-active={active || undefined}
+                    className={`orbit-journal-row ${dragging === g.id ? 'is-dragging' : ''} ${
+                      over === g.id && dragging && dragging !== g.id ? 'is-over' : ''
                     }`}
                   >
-                    <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{g.title}</span>
-                      <span className="block truncate text-[11px] text-muted">
-                        {logCountLabel(counts)}
-                      </span>
+                    <Cover game={g} className="orbit-journal-rowart" />
+                    <span className="orbit-journal-rowcopy">
+                      <b>{g.title}</b>
+                      <em>{logCountLabel(counts)}</em>
                     </span>
                   </button>
                 </li>
@@ -362,30 +356,31 @@ export function LogsView({
         <section className="min-w-0">
           {selected ? (
             <>
-              <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-line/60 pb-3">
-                <Cover game={selected} className="size-12 shrink-0 rounded-xl" />
+              <div className="orbit-journal-head">
+                <Cover game={selected} className="orbit-journal-headart" />
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-sm font-semibold">{selected.title}</h2>
-                  <p className="text-[11px] text-muted">
-                    {selectedRun ? `Clears only ${selectedRun.name}. Other playthroughs stay.` : 'Clears only the playthrough you are reading.'}
+                  <h2 className="orbit-journal-title">{selected.title}</h2>
+                  <p className="orbit-journal-sub">
+                    {logCountLabel(perGame.get(selected.id))}
+                    {selectedRun ? ` · ${selectedRun.name}` : ''}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="orbit-journal-actions">
                   <button
                     type="button"
                     disabled={!selectedRun}
                     onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'logs', run: selectedRun })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-40"
+                    className="orbit-btnquiet orbit-btnquiet-danger"
                     title={selectedRun ? `Remove the Journal entries for ${selectedRun.name} only` : 'The playthrough is still loading'}
                   >
                     <Trash2 className="size-3.5" />
-                    Clear log entries
+                    Clear entries
                   </button>
                   <button
                     type="button"
                     disabled={!selectedRun}
                     onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'notes', run: selectedRun })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-rose-400/60 hover:text-rose-300 disabled:opacity-40"
+                    className="orbit-btnquiet orbit-btnquiet-danger"
                     title={selectedRun ? `Clear notes for ${selectedRun.name} only` : 'The playthrough is still loading'}
                   >
                     <RotateCcw className="size-3.5" />
