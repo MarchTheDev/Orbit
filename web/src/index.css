@@ -223,6 +223,29 @@ body {
 .orbit-detail .blur-xl {
   display: none !important;
 }
+/*
+ * The panel's corners, and the cards inside it.
+ *
+ * The drawer grew its radius at three sizes: 2xl on the shell, xl on a card, lg
+ * on a row inside the card. Three sizes of the same corner on one screen is a
+ * large part of why the details panel reads as an older program than the page
+ * it opens over. It is one radius now, and a card inside a card is a heading
+ * with content under it rather than a second border.
+ */
+.orbit-detail {
+  border-radius: 14px;
+}
+.orbit-detail section,
+.orbit-detail [data-detail-card] {
+  border-radius: 10px;
+}
+.orbit-detail .orbit-panelblock,
+.orbit-detail section section {
+  border-radius: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+}
 @keyframes drawer {
   from { transform: translate3d(100%, 0, 0); }
   to { transform: none; }
