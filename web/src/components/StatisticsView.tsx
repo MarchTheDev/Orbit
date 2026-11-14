@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, BookOpen, CalendarDays, Clock, Flame, Gamepad2, Images, ListOrdered, NotebookPen, Trophy } from 'lucide-react';
+import {
+  BarChart3, BookOpen, CalendarDays, Clock, Flame, FolderOpen, Gamepad2, Images, ListOrdered,
+  NotebookPen, Play, Trash2, Trophy,
+} from 'lucide-react';
 import type { Game, GameStatus, Session, Settings } from '../types';
-import { listSessions, overlayGallery, overlayOpen, type GalleryItem } from '../services/native';
+import {
+  listSessions, overlayDelete, overlayGallery, overlayOpen, revealInExplorer, type GalleryItem,
+} from '../services/native';
 import { fileSrc } from '../services/desktop';
 import { fmtDate, fmtMinutes } from '../utils/format';
+import { cn } from '../utils/cn';
 import { wideArt } from '../utils/art';
 import { Cover } from './ui/Cover';
 import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, captureFolderName, isCaptureKind, type CaptureKind } from './Captures';
 import { SessionsView } from './SessionsView';
 import { BacklogView } from './BacklogView';
 import { LogsView } from './LogsView';
+import { ContextMenu, type MenuItem } from './ui/ContextMenu';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 type Period = 'month' | 'year' | 'all';
 export type StatsTab = 'overview' | 'sessions' | 'album' | 'journal' | 'backlog';
@@ -21,6 +29,28 @@ const PERIOD_LABEL: Record<Period, string> = {
 };
 
 const DAY = 86_400;
+
+/**
+ * When a capture was taken, in the shortest form that is still exact enough.
+ *
+ * Today and yesterday are said as words, because a date under a picture taken
+ * ten minutes ago is noise; anything older gets its day, and a year only when it
+ * is not this one.
+ */
+function whenOf(item: GalleryItem): string {
+  if (!item.at) return '';
+  const then = new Date(item.at * 1000);
+  const now = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const time = then.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay(then, now)) return `Today, ${time}`;
+  if (sameDay(then, yesterday)) return `Yesterday, ${time}`;
+  const sameYear = then.getFullYear() === now.getFullYear();
+  return `${then.toLocaleDateString([], { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })}, ${time}`;
+}
 const STATUS_COLOUR: Record<GameStatus, string> = {
   playing: '#5fc99a',
   completed: 'var(--c-accent)',
@@ -183,7 +213,14 @@ export function StatisticsView({
   const [loaded, setLoaded] = useState(false);
   const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
   const [albumKind, setAlbumKind] = useState<CaptureKind | 'all'>('all');
+  /** One game's captures, by capture folder, or every game's. */
+  const [albumGame, setAlbumGame] = useState<string | 'all'>('all');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [captureMenu, setCaptureMenu] = useState<{ x: number; y: number; item: GalleryItem } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
+  /** Bumped after a capture is removed, so the Album reads the disk again. */
+  const [captureTick, setCaptureTick] = useState(0);
+  const refreshCaptures = () => setCaptureTick((tick) => tick + 1);
 
   // The library is passed live, so playtime ticks every second while a game
   // runs. The session list only changes when a session ends, which the count
@@ -225,7 +262,7 @@ export function StatisticsView({
       alive = false;
       window.removeEventListener('focus', load);
     };
-  }, []);
+  }, [captureTick]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -249,6 +286,7 @@ export function StatisticsView({
     const map = new Map<string, { title: string; game?: Game; items: GalleryItem[] }>();
     for (const item of captures ?? []) {
       if (albumKind !== 'all' && item.kind !== albumKind) continue;
+      if (albumGame !== 'all' && item.game !== albumGame) continue;
       const known = map.get(item.game) ?? {
         title: byFolder.get(item.game)?.title ?? item.game,
         game: byFolder.get(item.game),
@@ -258,7 +296,48 @@ export function StatisticsView({
       map.set(item.game, known);
     }
     return [...map.values()];
-  }, [captures, albumKind, byFolder]);
+  }, [captures, albumKind, albumGame, byFolder]);
+
+  /**
+   * The games that actually have captures, for the filter row.
+   *
+   * Built from the captures rather than from the library: a game with nothing
+   * in the Album is not a way to filter the Album, and a capture whose game is
+   * no longer in the library still needs a name to be found under.
+   */
+  const albumGames = useMemo(() => {
+    const counts = new Map<string, { folder: string; title: string; game?: Game; count: number }>();
+    for (const item of captures ?? []) {
+      const known = counts.get(item.game) ?? {
+        folder: item.game,
+        title: byFolder.get(item.game)?.title ?? item.game,
+        game: byFolder.get(item.game),
+        count: 0,
+      };
+      known.count += 1;
+      counts.set(item.game, known);
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+  }, [captures, byFolder]);
+
+  /**
+   * What a right click on a capture offers.
+   *
+   * The same verbs the overlay's own gallery has, because it is the same file:
+   * look at it, show it in its folder, or delete it. Deleting asks first - the
+   * picture is the only copy.
+   */
+  const captureItems = (item: GalleryItem): MenuItem[] => [
+    {
+      label: item.kind === 'screenshot' ? 'Open the picture' : 'Play this clip',
+      icon: item.kind === 'screenshot' ? Images : Play,
+      onSelect: () =>
+        item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path),
+    },
+    { label: 'Show in its folder', icon: FolderOpen, onSelect: () => void revealInExplorer(item.path) },
+    { kind: 'sep' },
+    { label: 'Delete capture', icon: Trash2, danger: true, onSelect: () => setDeleteTarget(item) },
+  ];
 
   const now = Date.now() / 1000;
   const byGame = useMemo(() => new Map(games.map((game) => [game.id, game])), [games]);
@@ -501,19 +580,63 @@ export function StatisticsView({
               <span>
                 {captures === null
                   ? 'Reading captures…'
-                  : `${captures.length} ${captures.length === 1 ? 'item' : 'items'} across ${albumGroups.length} ${albumGroups.length === 1 ? 'game' : 'games'}`}
+                  : `${(albumGame === 'all' ? captures.filter((item) => albumKind === 'all' || item.kind === albumKind) : captures.filter((item) => item.game === albumGame && (albumKind === 'all' || item.kind === albumKind))).length} ${albumKind === 'all' ? 'items' : CAPTURE_LABELS[albumKind].many.toLowerCase()} across ${albumGroups.length} ${albumGroups.length === 1 ? 'game' : 'games'}`}
               </span>
             </div>
-            <div className="orbit-minichips mt-3">
-              <button aria-pressed={albumKind === 'all'} onClick={() => setAlbumKind('all')}>
-                Everything <span className="opacity-60">{captures?.length ?? 0}</span>
-              </button>
-              {CAPTURE_KINDS.map((kind) => (
-                <button key={kind} aria-pressed={albumKind === kind} onClick={() => setAlbumKind(kind)}>
-                  {CAPTURE_LABELS[kind].many} <span className="opacity-60">{albumCounts[kind]}</span>
+
+            <div className="orbit-album-tools">
+              <div className="orbit-minichips">
+                <button aria-pressed={albumKind === 'all'} onClick={() => setAlbumKind('all')}>
+                  Everything <span className="opacity-60">{captures?.length ?? 0}</span>
                 </button>
-              ))}
+                {CAPTURE_KINDS.map((kind) => (
+                  <button key={kind} aria-pressed={albumKind === kind} onClick={() => setAlbumKind(kind)}>
+                    {CAPTURE_LABELS[kind].many} <span className="opacity-60">{albumCounts[kind]}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* The games, as their own covers rather than a dropdown: the
+                  Album is pictures, so the filter for it is pictures too. */}
+              {albumGames.length > 1 && (
+                <div className="orbit-album-games" role="group" aria-label="Only one game">
+                  <button
+                    type="button"
+                    className={cn('orbit-album-gamechip', albumGame === 'all' && 'is-on')}
+                    aria-pressed={albumGame === 'all'}
+                    onClick={() => setAlbumGame('all')}
+                  >
+                    <span className="orbit-album-gamechip-art is-all">
+                      <Images className="size-4" />
+                    </span>
+                    <span className="orbit-album-gamechip-name">All games</span>
+                  </button>
+                  {albumGames.map((entry) => (
+                    <button
+                      key={entry.folder}
+                      type="button"
+                      className={cn('orbit-album-gamechip', albumGame === entry.folder && 'is-on')}
+                      aria-pressed={albumGame === entry.folder}
+                      onClick={() => setAlbumGame(albumGame === entry.folder ? 'all' : entry.folder)}
+                      title={`${entry.title} · ${entry.count}`}
+                    >
+                      <span className="orbit-album-gamechip-art">
+                        {entry.game ? (
+                          <Cover game={entry.game} className="size-full" fit="cover" />
+                        ) : (
+                          <span className="grid size-full place-items-center text-fluid text-[10px] font-bold text-muted">
+                            {entry.title.slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
+                      </span>
+                      <span className="orbit-album-gamechip-name">{entry.title}</span>
+                      <span className="orbit-album-gamechip-count">{entry.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
             {captures === null ? null : captures.length === 0 ? (
               <div className="orbit-gallery-empty mt-4">
                 No captures yet. Screenshots, recordings and replays taken with the overlay are kept here,
@@ -525,13 +648,19 @@ export function StatisticsView({
               <div className="orbit-album">
                 {albumGroups.map((group) => (
                   <div key={group.title} className="orbit-album-group">
-                    {/* The group header names the game and nothing else. A
-                        button in every header was a row of the same word down
-                        the page; the covers themselves open the game, which is
-                        what a click on a picture already means everywhere else
-                        in Orbit. */}
+                    {/* The group header is the game's own cover and name, so a
+                        wall of captures is read down the pictures rather than
+                        down a column of coloured squares. */}
                     <div className="orbit-album-head">
-                      <i style={{ background: group.game ? `hsl(${group.game.hue} 58% 56%)` : 'var(--c-muted)' }} aria-hidden />
+                      <span className="orbit-album-headart">
+                        {group.game ? (
+                          <Cover game={group.game} className="size-full" fit="cover" />
+                        ) : (
+                          <span className="grid size-full place-items-center bg-panel2 text-[11px] font-bold text-muted">
+                            {group.title.slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
+                      </span>
                       <div className="min-w-0">
                         <h3 className="truncate">{group.title}</h3>
                         <p>
@@ -539,15 +668,41 @@ export function StatisticsView({
                           {group.game ? ` · ${fmtMinutes(group.game.playSecs / 60)} played` : ''}
                         </p>
                       </div>
+                      {albumGame === 'all' && albumGames.length > 1 && (
+                        <button
+                          type="button"
+                          className="orbit-btnquiet ml-auto shrink-0"
+                          onClick={() => setAlbumGame(group.items[0]?.game ?? 'all')}
+                        >
+                          Only this game
+                        </button>
+                      )}
                     </div>
                     <div className="orbit-gallery">
                       {group.items.map((item) => (
                         <button
                           key={item.path}
                           onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path))}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setCaptureMenu({ x: event.clientX, y: event.clientY, item });
+                          }}
                           title={item.name}
+                          className="orbit-album-tile"
                         >
-                          <CaptureThumb item={item} />
+                          <span className="orbit-album-tileart">
+                            <CaptureThumb item={item} />
+                            {item.kind !== 'screenshot' && (
+                              <span className="orbit-album-tilebadge">
+                                {item.kind === 'recording' ? 'REC' : 'REPLAY'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="orbit-album-tilefoot">
+                            <span className="orbit-album-tilename">{item.name}</span>
+                            <span className="orbit-album-tiledate">{whenOf(item)}</span>
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -556,6 +711,30 @@ export function StatisticsView({
               </div>
             )}
           </section>
+          {captureMenu && (
+            <ContextMenu
+              x={captureMenu.x}
+              y={captureMenu.y}
+              items={captureItems(captureMenu.item)}
+              onClose={() => setCaptureMenu(null)}
+            />
+          )}
+          {deleteTarget && (
+            <ConfirmDialog
+              title="Delete this capture?"
+              description={`${deleteTarget.name} is removed from the disk. This cannot be undone.`}
+              confirmLabel="Delete"
+              confirmIcon={Trash2}
+              onCancel={() => setDeleteTarget(null)}
+              onConfirm={() => {
+                const target = deleteTarget;
+                setDeleteTarget(null);
+                void overlayDelete(target.path)
+                  .then(refreshCaptures)
+                  .catch(() => undefined);
+              }}
+            />
+          )}
           {lightbox && (
             <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
               <img src={lightbox} alt="" />

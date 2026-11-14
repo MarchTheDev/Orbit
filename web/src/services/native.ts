@@ -1676,6 +1676,8 @@ export interface GalleryItem {
   name: string;
   game: string;
   path: string;
+  /** When the file was written, in seconds since the epoch. 0 when unknown. */
+  at?: number;
 }
 
 export function overlayGallery(): Promise<GalleryItem[]> {

@@ -2467,39 +2467,133 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .42; }
   text-align: center;
 }
 
-/* Album: one block per game, the game captured most recently first. */
-.orbit-album { display: grid; gap: 12px; margin-top: 14px; }
-.orbit-album-group {
-  padding: 12px 13px 13px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--c-text) 2%, transparent);
+/* Album: one block per game, the game captured most recently first.
+
+   The game is identified by its cover rather than by a coloured square - the
+   Album is pictures, so the thing that says which game a row belongs to should
+   be a picture too. Each capture carries its own name and when it was taken,
+   because a wall of thumbnails with no dates is a folder listing. */
+.orbit-album-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
 }
-.orbit-album-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.orbit-album-head > i { flex: none; width: 9px; height: 9px; border-radius: 3px; }
-.orbit-album-head h3 { font-size: 13px; font-weight: 700; line-height: 1.2; }
-.orbit-album-head p { margin-top: 2px; font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
-.orbit-album-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.orbit-album-games {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.orbit-album-games::-webkit-scrollbar { display: none; }
+.orbit-album-gamechip {
+  display: flex;
+  width: 92px;
   flex: none;
-  margin-left: auto;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  flex-direction: column;
+  gap: 5px;
+  border: 0;
   background: none;
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 600;
+  padding: 0;
+  text-align: left;
   cursor: pointer;
-  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap);
+  color: var(--c-muted);
 }
-.orbit-album-open:hover {
-  color: var(--c-text);
-  border-color: color-mix(in srgb, var(--c-accent) 45%, transparent);
+.orbit-album-gamechip-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  transition: border-color .12s var(--ease-snap), transform .12s var(--ease-snap);
 }
-.orbit-album .orbit-gallery { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.orbit-album-gamechip-art.is-all {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 2 / 3;
+  color: var(--c-muted);
+}
+.orbit-album-gamechip:hover .orbit-album-gamechip-art {
+  border-color: color-mix(in srgb, var(--c-text) 28%, transparent);
+  transform: translateY(-1px);
+}
+.orbit-album-gamechip.is-on { color: var(--c-text); }
+.orbit-album-gamechip.is-on .orbit-album-gamechip-art {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 1px var(--c-accent);
+}
+.orbit-album-gamechip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 550;
+}
+.orbit-album-gamechip-count { font-size: 9.5px; opacity: .65; font-variant-numeric: tabular-nums; }
+
+.orbit-album { display: grid; gap: 18px; margin-top: 16px; }
+.orbit-album-group { min-width: 0; }
+.orbit-album-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+}
+.orbit-album-headart {
+  display: block;
+  width: 30px;
+  height: 42px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+}
+.orbit-album-head h3 { font-size: 13.5px; font-weight: 680; line-height: 1.2; }
+.orbit-album-head p { margin-top: 2px; font-size: 11px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+
+.orbit-album .orbit-gallery { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.orbit-album-tile { display: block; text-align: left; border-radius: 9px; }
+.orbit-album-tileart {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+}
+.orbit-album-tile:hover .orbit-album-tileart { border-color: color-mix(in srgb, var(--c-accent) 55%, transparent); }
+.orbit-album-tilebadge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .68);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.orbit-album-tilefoot { display: block; margin-top: 5px; padding: 0 1px; }
+.orbit-album-tilename {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--c-text) 78%, transparent);
+}
+.orbit-album-tiledate {
+  display: block;
+  font-size: 10px;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 .orbit-lightbox {
   position: fixed;

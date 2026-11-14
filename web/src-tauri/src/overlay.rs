@@ -1758,6 +1758,11 @@ pub struct GalleryItem {
     pub name: String,
     pub game: String,
     pub path: String,
+    /// When the file was last written, in seconds since the epoch.
+    ///
+    /// Sorted by this already; carrying it out of here is what lets the Album
+    /// say "13 Nov 2026" under a picture instead of only listing them.
+    pub at: i64,
 }
 
 pub fn shot(app: &AppHandle, stamp: &str) -> Result<String, String> {
@@ -3607,6 +3612,10 @@ fn collect_kind(dir: &Path, kind: &str, found: &mut Vec<(SystemTime, GalleryItem
                     name: path.file_name().map(|item| item.to_string_lossy().to_string()).unwrap_or_default(),
                     game: game_name.clone(),
                     path: path.to_string_lossy().to_string(),
+                    at: modified
+                        .duration_since(UNIX_EPOCH)
+                        .map(|since| since.as_secs() as i64)
+                        .unwrap_or(0),
                 },
             ));
         }
