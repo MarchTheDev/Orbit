@@ -71,11 +71,14 @@ const GRID_LABELS: { value: GridLabel; label: string; title: string }[] = [
   { value: 'title-info', label: 'Both', title: 'Title, then playtime and drive' },
 ];
 
+// Reading order, and the default: what you did, what you have achieved, and
+// then the pictures of it. The gallery was second, which put a wall of
+// thumbnails between the page's summary and the entries written about the game.
 const SECTIONS: { value: GameSection; label: string }[] = [
   { value: 'overview', label: 'Overview' },
-  { value: 'gallery', label: 'Gallery' },
   { value: 'journal', label: 'Journal' },
   { value: 'achievements', label: 'Achievements' },
+  { value: 'gallery', label: 'Gallery' },
 ];
 
 const DEFAULT_SHAPE: CoverShape = '3:4';
@@ -108,6 +111,23 @@ const MAX_SHELF_WIDTH = 260;
 const SHELF_ROWS = [2, 3, 4, 5, 6] as const;
 type ShelfRows = (typeof SHELF_ROWS)[number];
 const DEFAULT_SHELF_ROWS: ShelfRows = 3;
+
+/**
+ * How tall a row of the Observatory's list is, in pixels.
+ *
+ * The covers shelf is a grid, so its size is a width; the list is one column of
+ * rows, and its size is a height. A list of forty games at the old fixed height
+ * was a column of identical slivers with no way to make one game look like the
+ * subject of the page.
+ */
+const LIST_SIZES = [44, 56, 72, 92, 120] as const;
+type ListSize = (typeof LIST_SIZES)[number];
+const DEFAULT_LIST_SIZE: ListSize = 56;
+
+function savedListSize(): ListSize {
+  const value = Number(localStorage.getItem('orbit.observatory.listsize'));
+  return (LIST_SIZES as readonly number[]).includes(value) ? (value as ListSize) : DEFAULT_LIST_SIZE;
+}
 
 function savedShelfWidth(): number {
   const value = Number(localStorage.getItem('orbit.observatory.width'));
@@ -343,6 +363,22 @@ export function LibraryView({
   /** Observatory shelf sizing: cover width in pixels, covers per row. */
   const [shelfWidth, setShelfWidth] = useState(savedShelfWidth);
   const [shelfRows, setShelfRows] = useState<ShelfRows>(savedShelfRows);
+  // A list row's height, in pixels. Covers are a grid of columns; a list is one
+  // column of rows, so its size is how tall each row is - the cover grows with
+  // it and so does the type beside it.
+  const [listSize, setListSize] = useState<ListSize>(savedListSize);
+  /**
+   * Whether a click in the Grid opens the game instead of only opening it in the
+   * Observatory.
+   *
+   * Playnite's behaviour, and the reason to want it: on a couch-sized cover wall
+   * the Grid is the library, so a single press that both selects and shows the
+   * game saves the second step. Off by default - a wall of covers where every
+   * click leaves the wall is surprising if you have only ever used a mouse.
+   */
+  const [gridOpensOnSelect, setGridOpensOnSelect] = useState<boolean>(
+    () => localStorage.getItem('orbit.library.openOnSelect') === '1',
+  );
   /** Grid wall sizing, kept apart from the shelf's. */
   const [gridWidth, setGridWidth] = useState(coverWidth);
   /** Whether the shelf widens its covers to fill the row it was given. */
@@ -368,6 +404,11 @@ export function LibraryView({
   useEffect(() => localStorage.setItem('orbit.library.facets', JSON.stringify(facets)), [facets]);
   useEffect(() => localStorage.setItem('orbit.observatory.width', String(shelfWidth)), [shelfWidth]);
   useEffect(() => localStorage.setItem('orbit.observatory.rows', String(shelfRows)), [shelfRows]);
+  useEffect(() => localStorage.setItem('orbit.observatory.listsize', String(listSize)), [listSize]);
+  useEffect(
+    () => localStorage.setItem('orbit.library.openOnSelect', gridOpensOnSelect ? '1' : '0'),
+    [gridOpensOnSelect],
+  );
   useEffect(() => localStorage.setItem('orbit.observatory.fill', shelfFill ? 'on' : 'off'), [shelfFill]);
   useEffect(() => localStorage.setItem('orbit.observatory.fit', shelfFit), [shelfFit]);
   useEffect(() => localStorage.setItem('orbit.library.fit', gridFit), [gridFit]);
@@ -537,6 +578,7 @@ export function LibraryView({
     setRail('covers');
     setShelfWidth(DEFAULT_SHELF_WIDTH);
     setShelfRows(DEFAULT_SHELF_ROWS);
+    setListSize(DEFAULT_LIST_SIZE);
     setShelfFill(false);
     setShelfShape(DEFAULT_SHAPE);
     setSections(SECTIONS.map((section) => section.value));
@@ -826,6 +868,29 @@ export function LibraryView({
                 <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
                   Reset to defaults
                 </button>
+
+                {rail === 'list' && (
+                  <div className="orbit-viewmenu-block">
+                    <span className="orbit-viewmenu-sublabel">Row size</span>
+                    <div className="orbit-seg" role="group" aria-label="Row size">
+                      {LIST_SIZES.map((size, index) => (
+                        <button
+                          key={size}
+                          type="button"
+                          aria-pressed={listSize === size}
+                          onClick={() => setListSize(size)}
+                          title={`${size} pixels tall`}
+                        >
+                          {index + 1}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="orbit-viewmenu-note">
+                      A taller row draws a bigger cover and names the game in full.
+                    </p>
+                  </div>
+                )}
+
               </div>
             )}
 
@@ -870,6 +935,24 @@ export function LibraryView({
                 <div className="orbit-viewmenu-block">
                   <span className="orbit-viewmenu-sublabel">Cover shape</span>
                   <ShapeRow value={gridShape} onChange={setGridShape} />
+                </div>
+
+                <div className="orbit-viewmenu-row orbit-viewmenu-rowsplit">
+                  <span>
+                    Open details on select
+                    <span className="orbit-viewmenu-hint">One press on a cover shows the game</span>
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={gridOpensOnSelect}
+                    aria-label="Open details on select"
+                    onClick={() => setGridOpensOnSelect((on) => !on)}
+                    className="orbit-switch"
+                    data-on={gridOpensOnSelect || undefined}
+                  >
+                    <i />
+                  </button>
                 </div>
 
                 <div className="orbit-viewmenu-block">
@@ -919,6 +1002,14 @@ export function LibraryView({
               games={shown}
               selectedId={null}
               onSelect={(id) => {
+                // Double click, or a single one when the Grid is asked to open
+                // on select, shows the game. A single click always selects it,
+                // so the two cannot disagree about which game was meant.
+                if (gridOpensOnSelect) {
+                  choose(id);
+                  setMode('details');
+                  return;
+                }
                 if (!gridOpen) {
                   onOpenDetails(id);
                   return;
@@ -983,20 +1074,32 @@ export function LibraryView({
                       key={game.id}
                       className="orbit-shelf-row"
                       data-orbit-game={game.id}
+                      data-size={listSize}
                       aria-current={game.id === focusId ? 'true' : undefined}
                       onClick={() => choose(game.id)}
                       title={game.title}
                     >
-                      <span className="relative block shrink-0">
-                        <Cover game={game} className="orbit-cover" style={{ width: 34, height: 45 }} loading="lazy" />
+                      <span className="orbit-shelf-rowart">
+                        <Cover
+                          game={game}
+                          className="orbit-cover"
+                          // The cover is the row, so it is drawn from the row's
+                          // height rather than from a fixed pair of numbers: a
+                          // bigger row is a bigger picture, not more padding.
+                          style={{ width: Math.round(listSize * 0.76 * 100) / 100, height: listSize - 12 }}
+                          loading="lazy"
+                        />
                         {game.id === runningId && (
                           <span className="orbit-pulse absolute -right-0.5 -top-0.5 z-10 size-1.5 rounded-full bg-emerald-400" />
                         )}
                       </span>
-                      <div>
+                      <span className="orbit-shelf-rowcopy">
                         <b>{game.title}</b>
-                        <span>{fmtMinutes(game.playSecs / 60)}</span>
-                      </div>
+                        <span>
+                          {fmtMinutes(game.playSecs / 60)}
+                          {game.lastPlayed ? ` · ${fmtDate(game.lastPlayed)}` : ''}
+                        </span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1289,6 +1392,19 @@ function GamePage({
             </section>
           )}
 
+          {sections.includes('journal') && (
+            <section className="orbit-section">
+              <h2>Journal</h2>
+              <div className="orbit-section-body">
+                <GameLogView game={game} onNotes={(notes) => onUpdate({ notes })} />
+              </div>
+            </section>
+          )}
+
+          {/* The achievements panel carries its own heading and progress.
+              It reads the list from Steam the first time it is shown. */}
+          {sections.includes('achievements') && <AchievementsTab game={game} onUpdate={onUpdate} />}
+
           {sections.includes('gallery') && (
           <section className="orbit-section">
             <h2>
@@ -1329,19 +1445,6 @@ function GamePage({
             </div>
           </section>
           )}
-
-          {sections.includes('journal') && (
-            <section className="orbit-section">
-              <h2>Journal</h2>
-              <div className="orbit-section-body">
-                <GameLogView game={game} onNotes={(notes) => onUpdate({ notes })} />
-              </div>
-            </section>
-          )}
-
-          {/* The achievements panel carries its own heading and progress.
-              It reads the list from Steam the first time it is shown. */}
-          {sections.includes('achievements') && <AchievementsTab game={game} onUpdate={onUpdate} />}
         </div>
 
         <aside className="orbit-gamepage-side">
