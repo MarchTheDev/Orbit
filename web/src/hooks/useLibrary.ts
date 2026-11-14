@@ -5,7 +5,7 @@ import { deleteGame as removeFromDb, listGames, overlayTheme, saveGame, clearLib
 import { rememberedPlaythrough } from '../services/playthroughs';
 import { loadSettings, normalizeSettings, saveSettings } from '../services/storage';
 import { DEFAULT_SETTINGS } from '../data/sampleGames';
-import { applyFont, applyTheme, nativePalette } from '../data/themes';
+import { applyFont, applyGlass, applyTheme, nativePalette } from '../data/themes';
 import { desktopOs } from '../utils/platform';
 import { inLibraryShelf } from '../utils/library';
 
@@ -88,6 +88,7 @@ export function useLibrary() {
         setGames(loaded);
         setSettingsState(loadedSettings);
         applyTheme(loadedSettings.theme, loadedSettings.customThemes ?? []);
+        applyGlass(loadedSettings.glass === true);
         applyFont(loadedSettings.fontFamily ?? 'system');
         // The native cards are drawn outside the page, so they get the same
         // colours the theme just put on the page.
@@ -243,6 +244,7 @@ export function useLibrary() {
         if (desktopOs() !== 'linux') void overlayTheme(nativePalette(resolved.theme, next.customThemes ?? []));
       }
       if (resolved.fontFamily) applyFont(resolved.fontFamily);
+      if (resolved.glass !== undefined) applyGlass(resolved.glass);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });
@@ -266,6 +268,7 @@ export function useLibrary() {
       applyTheme(next.theme, next.customThemes ?? []);
       if (desktopOs() !== 'linux') void overlayTheme(nativePalette(next.theme, next.customThemes ?? []));
       applyFont(next.fontFamily ?? 'system');
+      applyGlass(next.glass === true);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });
@@ -295,6 +298,7 @@ export function useLibrary() {
       .then(() => saveSettings(DEFAULT_SETTINGS))
       .then(() => {
         applyTheme(DEFAULT_SETTINGS.theme);
+        applyGlass(false);
         applyFont(DEFAULT_SETTINGS.fontFamily ?? 'system');
         location.reload();
       })

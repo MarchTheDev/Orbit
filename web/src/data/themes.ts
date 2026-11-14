@@ -76,6 +76,20 @@ export function applyTheme(id: string, custom: Theme[] = []) {
   r.setProperty('--c-on-accent', t.onAccent ?? '#ffffff');
 }
 
+/**
+ * Liquid glass, on or off.
+ *
+ * One class on the root and the rest is in index.css: every surface that opts in
+ * is given a translucent panel, a hairline of light along its top edge and a
+ * backdrop blur, and the window itself is given a slow wash of the theme's two
+ * signals to have something worth blurring. It is a class rather than a set of
+ * inline variables so a theme change does not have to reapply it, and so Linux
+ * can refuse it in one rule.
+ */
+export function applyGlass(on: boolean) {
+  document.documentElement.classList.toggle('orbit-glass', on);
+}
+
 export function applyFont(id: string) {
   const font = FONTS.find((candidate) => candidate.id === id) ?? FONTS[0];
   document.documentElement.style.setProperty('--font-sans', font.stack);

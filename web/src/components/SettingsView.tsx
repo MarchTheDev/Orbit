@@ -364,6 +364,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
   { label: 'Fonts and typeface', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
+  { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
   { label: 'Jump back in panel', section: 'orbit-library', keywords: 'hero recently played hide show home' },
@@ -1266,6 +1267,32 @@ export function SettingsView({
               <span className="mt-1 block text-xs text-muted">{font.sample}</span>
             </button>
           ))}
+        </div>
+
+        <SubHead>Surface</SubHead>
+        <div className="orbit-setrow">
+          <div className="orbit-setrow-copy">
+            <p className="orbit-setrow-label">Liquid glass</p>
+            <p className="orbit-setrow-hint">
+              Panels become frosted panes with a lit top edge, over a slow wash of the theme's
+              colours. The heaviest look in the app: every pane is its own compositing layer, so a
+              machine that drops frames should leave it off. Not available on Linux, where WebKit
+              keeps those layers until the window stalls.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.glass === true}
+            aria-label="Liquid glass"
+            onClick={() => setSettings({ glass: !(settings.glass === true) })}
+            className="orbit-switch"
+            data-on={settings.glass === true || undefined}
+            disabled={desktopOs() === 'linux'}
+            title={desktopOs() === 'linux' ? 'Not available on Linux' : 'Frosted panels and a lit edge'}
+          >
+            <i />
+          </button>
         </div>
 
         <SubHead>Covers</SubHead>

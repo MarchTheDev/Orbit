@@ -626,6 +626,16 @@ export interface Settings {
    */
   coverFit?: 'smart' | 'cover' | 'contain';
   /**
+   * Liquid glass: panels become frosted, the window behind them is a slow wash of
+   * the theme's accent, and the bar and the sheets sit on top of it.
+   *
+   * Off by default. It is the most expensive thing the interface can do - a
+   * backdrop filter is a texture per layer - so it is a choice rather than the
+   * look, and it never applies on Linux, where WebKitGTK keeps those textures
+   * until the window stalls.
+   */
+  glass?: boolean;
+  /**
    * Where the tint behind a hovered cover comes from.
    *
    * On by default: the picture's own colours, so the tile reads as one thing.
