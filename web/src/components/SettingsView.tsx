@@ -10,7 +10,6 @@ import {
   FolderOpen,
   HardDrive,
   Library as LibraryIcon,
-  Ghost,
   GitBranch,
   GripVertical,
   Heart,
@@ -74,7 +73,7 @@ import { fmtBytes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { driveLabel } from '../utils/drive';
 import { btnBrowse, inputCls } from './ui/Modal';
-import { Checkbox, CheckboxInline } from './ui/Checkbox';
+import { CheckboxInline } from './ui/Checkbox';
 import { Select } from './ui/Select';
 import { btnAccent, btnDanger } from './ui/buttons';
 import { LauncherIcon } from './ui/LauncherIcon';
@@ -123,6 +122,29 @@ function Setting<T extends string>({
         ariaLabel={label}
       />
       <p className="text-xs leading-relaxed text-muted">{current.hint}</p>
+    </div>
+  );
+}
+
+function SwitchRow({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
+  return (
+    <div className="orbit-setrow">
+      <div className="orbit-setrow-copy">
+        <p className="orbit-setrow-label">{label}</p>
+        {hint && <p className="orbit-setrow-hint">{hint}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => !disabled && onChange(!checked)}
+        className="orbit-switch"
+        data-on={checked || undefined}
+      >
+        <i />
+      </button>
     </div>
   );
 }
@@ -330,7 +352,6 @@ const SECTIONS = [
   { id: 'orbit-copy', label: 'Export' },
   { id: 'orbit-advanced', label: 'Advanced' },
   { id: 'orbit-logs', label: 'Logs' },
-  { id: 'orbit-tools', label: 'Tools' },
   { id: 'orbit-updates', label: 'Updates' },
   { id: 'orbit-about', label: 'About' },
 ];
@@ -357,7 +378,7 @@ const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
   { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
   { label: 'Games', ids: ['orbit-details', 'orbit-achievements', 'orbit-captures', 'orbit-overlay'] },
   { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-tabs', 'orbit-backups'] },
-  { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-tools', 'orbit-updates', 'orbit-about'] },
+  { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-updates', 'orbit-about'] },
 ];
 
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
@@ -409,7 +430,6 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Integrations', section: 'orbit-integrations', keywords: 'integrations discord steamgriddb webhook services connect account' },
   { label: 'Achievements', section: 'orbit-achievements', keywords: 'achievements trophies completion steam unlocks' },
   { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
-  { label: 'Ghost Hunter Pro', section: 'orbit-tools', keywords: 'tools save files cleanup' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
   { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
@@ -497,23 +517,23 @@ function OverlaySettings({
 
   return (
     <>
-      <Checkbox
+      <SwitchRow
         checked={enabled}
         onChange={(on) => setOverlay({ enabled: on })}
         label="Overlay"
-        hint="Off means your configured keyboard shortcut and Start + Select do nothing."
+        hint="Shortcut opens it in-game."
       />
-      <Checkbox
+      <SwitchRow
         checked={overlay?.gameOnly === true}
         onChange={(on) => setOverlay({ gameOnly: on })}
-        label="Only open while a game session is active"
-        hint="Off by default. When on, the keyboard shortcut and Start + Select cannot open the overlay from the desktop. They can still close it. A game must be running in an Orbit session."
+        label="Only while playing"
+        hint="Only open during a session."
       />
-      <Checkbox
+      <SwitchRow
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
-        label="Keep the last few seconds while a game is playing"
-        hint="The rolling replay is kept in a temporary file on disk (up to 288 MB), not in memory, and it is deleted when the game stops. Nothing becomes a saved clip until you save one. At 4K or for long clips, less than the selected duration may be available. Turn it off for the lightest resource use."
+        label="Keep replay buffer"
+        hint="Save last seconds on demand."
       />
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Replay lengths</p>
@@ -609,11 +629,11 @@ function OverlaySettings({
           Orbit records up to this size. A smaller screen is not stretched to 4K. 720p at 30 fps uses the least power; 4K and 60 use more. Performance readings refresh once a second, and the FPS sampler stops when its box is hidden.
         </p>
       </div>
-      <Checkbox
+      <SwitchRow
         checked={shutterOn}
         onChange={(on) => setOverlay({ shutter: on })}
-        label="Play a sound when a capture is saved"
-        hint="A short, light chime after a screenshot, recording, or replay is saved."
+        label="Capture sound"
+        hint="A chime after a screenshot, recording, or replay is saved."
       />
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-3">
@@ -640,27 +660,23 @@ function OverlaySettings({
         />
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
-      <Checkbox
+      <SwitchRow
         checked={overlay?.captureToast !== false}
         onChange={(on) => setOverlay({ captureToast: on })}
-        label="Show a note when a capture is saved"
-        hint="A small note for a screenshot, a recording, or a replay."
+        label="Capture toast"
+        hint="Show notification on save."
       />
-      <Checkbox
+      <SwitchRow
         checked={overlay?.readyNotice !== false}
         onChange={(on) => setOverlay({ readyNotice: on })}
-        label="Show that the overlay is working"
-        hint="A small note in Orbit's main window when you start a game. It does not appear when you open the overlay."
+        label="Ready notice"
+        hint="Show when game starts."
       />
-      <Checkbox
+      <SwitchRow
         checked={overlay?.liveStats !== false}
         onChange={(on) => setOverlay({ liveStats: on })}
-        label="Read live stats (FPS, CPU, GPU)"
-        hint={
-          overlay?.liveStats === false
-            ? 'Off. The FPS and performance boxes stay empty. Orbit turns this off by itself if the overlay closed while it was reading them.'
-            : 'The FPS box reads the picture the desktop presents. Turn this off if the overlay closes by itself over a game.'
-        }
+        label="Live stats"
+        hint="FPS, CPU, GPU in overlay."
       />
       <div className="orbit-setgroup">
         <div className="orbit-setgroup-head">
@@ -716,11 +732,11 @@ function OverlaySettings({
         openShortcut={overlay?.openShortcut ?? 'Alt+X'}
         onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
       />
-      <Checkbox
+      <SwitchRow
         checked={overlay?.captureShortcutsOutsideOverlay === true}
         onChange={(on) => setOverlay({ captureShortcutsOutsideOverlay: on })}
-        label="Allow capture shortcuts while the overlay is closed"
-        hint="Off by default: screenshot, recording, and replay shortcuts only work while the overlay is open. Turn this on to allow them over the game without opening the panel."
+        label="Capture without overlay"
+        hint="Shortcuts work even when closed."
       />
       <p className="text-xs leading-relaxed text-muted">
         The overlay takes focus and routes Orbit’s controls to its own UI. Some games can still read
@@ -1217,7 +1233,6 @@ export function SettingsView({
       <PageHead
         kicker="System"
         title="Settings"
-        lead="Make Orbit feel right for you. Changes save as you make them — there is no Save button to hunt for."
       />
 
       <div className="orbit-setlayout mt-7">
@@ -1239,7 +1254,7 @@ export function SettingsView({
         active={activeSection === 'orbit-appearance'}
         icon={Palette}
         title="Appearance"
-        lead="Choose a theme, tune the library's look, and decide what happens when Orbit opens."
+        lead="Theme, typeface and window."
       >
         <SubHead>Orbit themes</SubHead>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -1324,80 +1339,56 @@ export function SettingsView({
           })}
         </div>
 
-        <SubHead>Surface</SubHead>
         <div className="orbit-setrow">
           <div className="orbit-setrow-copy">
             <p className="orbit-setrow-label">Liquid glass</p>
-            <p className="orbit-setrow-hint">
-              Panels become frosted panes with a lit top edge, over a slow wash of the theme's
-              colours. The heaviest look in the app: every pane is its own compositing layer, so a
-              machine that drops frames should leave it off. Not available on Linux, where WebKit
-              keeps those layers until the window stalls.
-            </p>
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={settings.glass === true}
+            aria-checked={settings.glass !== false}
             aria-label="Liquid glass"
-            onClick={() => setSettings({ glass: !(settings.glass === true) })}
+            onClick={() => setSettings({ glass: !(settings.glass !== false) })}
             className="orbit-switch"
-            data-on={settings.glass === true || undefined}
+            data-on={settings.glass !== false || undefined}
             disabled={desktopOs() === 'linux'}
-            title={desktopOs() === 'linux' ? 'Not available on Linux' : 'Frosted panels and a lit edge'}
+            title={desktopOs() === 'linux' ? 'Not available on Linux' : 'Frosted panels'}
           >
             <i />
           </button>
         </div>
 
-        <SubHead>Covers</SubHead>
-        {/* Part of the theme rather than a setting of its own: it decides what
-            colour a cover is tinted with when the pointer is over it. */}
-        <Checkbox
-          checked={settings.coverTint !== false}
-          onChange={(v) => setSettings({ coverTint: v })}
-          label="Tint a cover's hover with its own colours"
-          hint="On uses each cover's colours for its hover glow. Off uses your theme colours for a more uniform library."
-        />
-
         <SubHead>When the app opens</SubHead>
-        <Checkbox
+        <SwitchRow
           checked={settings.startupAnimation !== false}
           onChange={(v) => setSettings({ startupAnimation: v })}
-          label="Play the opening when Orbit starts"
-          hint="Show Orbit's short animated opening. Turn this off to go straight to the library."
+          label="Opening animation"
+          hint="Short animated intro on launch."
         />
-        <Checkbox
+        <SwitchRow
           checked={settings.launchOnStartup === true}
           onChange={(value) => void setLaunchAtSignIn(value)}
+          label="Launch at sign-in"
+          hint={native ? 'Start with your PC.' : 'Desktop app only.'}
           disabled={!native || startupBusy}
-          label="Launch Orbit when this PC starts"
-          hint={native
-            ? 'Off by default. When enabled, Orbit starts when you sign in to this computer.'
-            : 'Available in the desktop app. Off by default; when enabled, Orbit starts when you sign in.'}
         />
-        <Checkbox
+        <SwitchRow
           checked={settings.launchOnStartupBackground === true}
           onChange={(value) => setSettings({ launchOnStartupBackground: value })}
+          label="Start in background"
+          hint="Open hidden in the tray."
           disabled={!native || settings.launchOnStartup !== true || startupBusy}
-          label="Start Orbit in the background"
-          hint={settings.launchOnStartup === true
-            ? 'At sign-in, keep the window hidden and leave Orbit available from the system tray. Opening Orbit normally still shows the window.'
-            : 'Turn on “Launch Orbit when this PC starts” above to use this option.'}
-          className="ml-5"
         />
         {startupError && <p role="alert" className="text-[11px] text-rose-300">Could not change startup: {startupError}</p>}
         {(desktopOs() === 'windows' || desktopOs() === 'linux') && (
           <>
             <SubHead>{desktopOs() === 'windows' ? 'Windows Explorer' : 'File manager'}</SubHead>
-            <Checkbox
+            <SwitchRow
               checked={settings.openExeInOrbit !== false}
               onChange={(enabled) => void setOpenExeInOrbit(enabled)}
+              label={desktopOs() === 'windows' ? 'Open in Orbit (Explorer)' : 'Open in Orbit'}
+              hint="Add to right-click menu."
               disabled={exeContextMenuBusy}
-              label={desktopOs() === 'windows' ? 'Add “Open in Orbit” to .exe right-click menus' : 'Add “Open in Orbit” to right-click menus'}
-              hint={desktopOs() === 'windows'
-                ? 'Enabled by default. Turn it off to remove Orbit’s entry from Explorer; it does not change any other file associations.'
-                : 'Enabled by default. Adds the action to KDE, Nemo and Thunar menus, to Nautilus and Caja under Scripts, and to Open With. It does not change which program opens a file. Close the file manager and open it again if the menu was already up.'}
             />
             {exeContextMenuError && (
               <p role="alert" className="text-[11px] text-rose-300">Could not update the menu: {exeContextMenuError}</p>
@@ -1411,28 +1402,28 @@ export function SettingsView({
         active={activeSection === 'orbit-library'}
         icon={LibraryIcon}
         title="Library and Backlog"
-        lead="Choose where new games appear and which folders Orbit keeps track of."
+        lead="New games, filters and folders."
       >
         <SubHead>Adding games</SubHead>
-        <Checkbox
+        <SwitchRow
           checked={settings.syncBacklog === true}
           onChange={(v) => setSettings({ syncBacklog: v })}
-          label="Backlog sync"
-          hint="When on, newly added Library games also join the Backlog. Turning it off never removes games already there; you can still add or remove individual games."
+          label="Add new games to Backlog"
+          hint="Also add them to your backlog."
         />
-        <Checkbox
+        <SwitchRow
           checked={settings.syncJournal !== false}
           onChange={(v) => setSettings({ syncJournal: v })}
-          label="Journal sync"
-          hint="When on, newly added Library games also join the Journal. Turning it off never removes existing entries; you can still add or remove games manually. Backlog-only plans are never included."
+          label="Add new games to Journal"
+          hint="Also add them to your journal."
         />
 
         <SubHead>Jump back in</SubHead>
-        <Checkbox
+        <SwitchRow
           checked={settings.showHero !== false}
           onChange={(v) => setSettings({ showHero: v })}
-          label="Show the Jump back in panel"
-          hint="Keep the recently played game and its Play button at the top of the Library."
+          label="Jump back in"
+          hint="Show recently played at top of Library."
         />
 
         <SubHead>Library filters</SubHead>
@@ -1513,7 +1504,7 @@ export function SettingsView({
         active={activeSection === 'orbit-playing'}
         icon={Monitor}
         title="Playing"
-        lead="Choose what Orbit does with its window when a game starts or closes."
+        lead="Window when playing."
       >
         <SubHead>Orbit's window around a game</SubHead>
         <p className="text-xs leading-relaxed text-muted">
@@ -1693,11 +1684,11 @@ export function SettingsView({
         title="Backups"
         lead="Add a cloud here. Disconnect one here too."
       >
-        <Checkbox
+        <SwitchRow
           checked={cloudAutoOn(settings.saves)}
           onChange={(on) => setSettings((current) => ({ saves: savesWithClouds(current.saves, { cloudAuto: on }) }))}
-          label="Also send a backup to the cloud"
-          hint="A backup saved on this PC is also sent to the clouds marked on the Cloud page. Off leaves it on this PC until you send it."
+          label="Auto-send to cloud"
+          hint="Send backups to connected clouds."
         />
         <AddCloud settings={settings} setSettings={setSettings} />
         <CloudTools />
@@ -1822,7 +1813,7 @@ export function SettingsView({
         icon={Sparkles}
         title="Metadata"
         note="Need work"
-        lead="What Orbit knows about a game, where it comes from, and how the artwork is drawn. Nothing here changes how a game starts."
+        lead="Where game info comes from."
       >
         <Group title="Where details come from">
           <div className="orbit-setrow">
@@ -1833,18 +1824,13 @@ export function SettingsView({
                 from here, for any game whose store page can be found.
               </p>
             </div>
-            <span className="orbit-settag is-on">On</span>
-          </div>
+            </div>
 
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
               <p className="orbit-setrow-label">Store artwork</p>
-              <p className="orbit-setrow-hint">
-                Steam&apos;s own covers, heroes and headers fill the shelf and the Stardeck with no key
-                and no account. A game nobody has drawn for keeps its store header.
-              </p>
+              <p className="orbit-setrow-hint">Steam&apos;s own covers, heroes and headers — no key needed.</p>
             </div>
-            <span className="orbit-settag is-on">On</span>
           </div>
 
           <div className="orbit-setrow">
@@ -1895,65 +1881,23 @@ export function SettingsView({
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
               <p className="orbit-setrow-label">HowLongToBeat</p>
-              <p className="orbit-setrow-hint">
-                Main story, main + extras and completionist times, and an estimate from the genre when
-                nothing is listed. Used every time a game is opened; no key, no account.
-              </p>
-            </div>
-            <span className="orbit-settag is-on">On</span>
-          </div>
-        </Group>
-
-        <Group title="When a cover is missing">
-          <div className="orbit-setrow-copy">
-            <p className="orbit-setrow-hint">
-              A game with no portrait falls back through its wide header, then its backdrop, then the
-              game&apos;s initials on a plate of its own colour. Nothing is left as an empty tile. A cover
-              can be pinned per game from its Edit page, where the store&apos;s own choices are browsable.
-            </p>
-          </div>
-        </Group>
-
-        <Group title="How a cover is drawn">
-          <div className="orbit-setrow">
-            <div className="orbit-setrow-copy">
-              <p className="orbit-setrow-label">Default fit</p>
-              <p className="orbit-setrow-hint">
-                Applied to every game that has not chosen for itself. A banner in a tall tile loses its
-                wordmark; a poster in a wide tile becomes a strip.
-              </p>
-            </div>
-            <div className="orbit-seg" role="group" aria-label="Default cover fit">
-              {([
-                ['smart', 'Smart'],
-                ['cover', 'Fill'],
-                ['contain', 'Fit whole'],
-              ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={(settings.coverFit ?? 'smart') === id}
-                  onClick={() => setSettings({ coverFit: id })}
-                >
-                  {label}
-                </button>
-              ))}
+              <p className="orbit-setrow-hint">Playtime estimates — no key needed.</p>
             </div>
           </div>
         </Group>
 
         <Group title="Looking things up">
-          <Checkbox
-            checked={settings.fetchMetadata}
+          <SwitchRow
+            checked={settings.fetchMetadata ?? true}
             onChange={(v) => setSettings({ fetchMetadata: v })}
-            label="Look games up when they are added"
-            hint="Fetch a summary, genres, cover art and playtime estimates as you add a game."
+            label="Lookup on add"
+            hint="Fetch info when adding a game."
           />
-          <Checkbox
-            checked={settings.autoFetchMetadata}
+          <SwitchRow
+            checked={settings.autoFetchMetadata ?? true}
             onChange={(v) => setSettings({ autoFetchMetadata: v })}
-            label="Fill in the gaps in the background"
-            hint="Fill in missing details for older games in the background, a few at a time."
+            label="Background fill"
+            hint="Fill missing info quietly."
           />
         </Group>
       </Section>
@@ -1973,11 +1917,11 @@ export function SettingsView({
         lead="A quiet chord, made in the app. Nothing is downloaded. A file you pick replaces it, and Restore brings the chord back."
       >
         <Group>
-          <Checkbox
+          <SwitchRow
             checked={settings.sound?.enabled !== false}
             onChange={(v) => setSettings({ sound: withSound(settings, { enabled: v }) })}
-            label="Play something quiet in the background"
-            hint="A slow melody over one soft chord, unless a file is chosen below. No random notes or chord changes."
+            label="Background music"
+            hint="Quiet chord. Your file replaces it."
           />
 
           <label className={cn('block space-y-1', settings.sound?.enabled === false && 'opacity-50')}>
@@ -2004,11 +1948,11 @@ export function SettingsView({
             </span>
           </label>
 
-          <Checkbox
+          <SwitchRow
             checked={settings.sound?.unfocused === true}
             onChange={(v) => setSettings({ sound: withSound(settings, { unfocused: v }) })}
-            label="Keep playing while Orbit is not the window in front"
-            hint="Off: the music steps aside when you click away, and comes back when you do. On: it carries on, which is what a second monitor wants."
+            label="Play when unfocused"
+            hint="Keep playing in background."
           />
 
           <SubHead>Your own music</SubHead>
@@ -2047,17 +1991,17 @@ export function SettingsView({
 
           <SubHead>In the top bar</SubHead>
 
-          <Checkbox
+          <SwitchRow
             checked={settings.topbarMusic !== false}
             onChange={(v) => setSettings({ topbarMusic: v })}
-            label="Put the music controls in the top bar"
-            hint="A music button beside Settings, for hushing it without coming back here."
+            label="Show in top bar"
+            hint="Music controls in header."
           />
-          <Checkbox
+          <SwitchRow
             checked={settings.musicBars !== false}
             onChange={(v) => setSettings({ musicBars: v })}
-            label="Dance a little while it plays"
-            hint="Four bars beside the button that rise and fall with the music. Off: the button alone says whether it is playing."
+            label="Music visualizer"
+            hint="Bars that move with music."
           />
         </Group>
       </Section>
@@ -2067,7 +2011,7 @@ export function SettingsView({
         active={activeSection === 'orbit-copy'}
         icon={ArrowLeftRight}
         title="Export and import"
-        lead="Save this Orbit to a file you keep, and bring that file back later. Settings always go in. The journal and the sessions go in only if you tick them. This is not a copy of the games' save files."
+        lead="Export or import your library file."
       >
         <CopySettings settings={settings} replaceSettings={replaceSettings} onLibraryChanged={onLibraryChanged} />
       </Section>
@@ -2198,19 +2142,6 @@ export function SettingsView({
         </pre>
       </Section>
 
-      <Section id="orbit-tools" active={activeSection === 'orbit-tools'} icon={Wand2} title="Other tools" lead="Programs made alongside Orbit, for the parts of a game that are not the game.">
-        <button
-          onClick={() => void openExternal('https://github.com/MarchTheDev/GhostHunterPro')}
-          className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel2 p-3 text-left transition hover:border-accent sm:w-auto sm:min-w-[24rem]"
-        >
-          <Ghost className="mt-0.5 size-5 shrink-0 text-accent" />
-          <span>
-            <span className="block text-sm font-semibold">Ghost Hunter Pro</span>
-            <span className="block text-xs text-muted">Find and clean out game save files and leftover data.</span>
-          </span>
-        </button>
-      </Section>
-
       <Section
         id="orbit-updates"
         active={activeSection === 'orbit-updates'}
@@ -2219,11 +2150,11 @@ export function SettingsView({
         lead="One request to GitHub's public releases page when Orbit opens. No account, no identifier, and nothing about your library is sent."
       >
         <Group>
-          <Checkbox
+          <SwitchRow
             checked={settings.updatePrerelease === true}
             onChange={(v) => setSettings({ updatePrerelease: v })}
             label="Include pre-releases"
-            hint="A build published as a pre-release is skipped by default, which keeps a test build out of everybody's way. Turn this on to be offered one."
+            hint="Offer test builds."
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -2269,11 +2200,11 @@ export function SettingsView({
 
           {updateNote && <p className="text-xs text-muted">{updateNote}</p>}
 
-          <Checkbox
+          <SwitchRow
             checked={settings.updateCheck !== false}
             onChange={(v) => setSettings({ updateCheck: v })}
-            label="Look for a new version when Orbit opens"
-            hint="Off: the check only happens when you press the button above."
+            label="Check on launch"
+            hint="Look for updates when opening."
           />
         </Group>
       </Section>
@@ -2331,13 +2262,10 @@ export function SettingsView({
           <ListChecks className="size-3.5 text-accent" />
           Hide a game, and it leaves the shelves without losing a second of what you played.
         </p>
-      </Section>
-
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-muted">
-        <p className="flex items-center gap-1.5">
-          Made with <Heart className="size-3.5 text-rose-400" fill="currentColor" strokeWidth={0} /> by TheMarch88
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-muted">
+          <p className="flex items-center gap-1.5">
+            Made with <Heart className="size-3.5 text-rose-400" fill="currentColor" strokeWidth={0} /> by TheMarch88
+          </p>
           <button
             onClick={() => void openExternal('https://github.com/MarchTheDev/Orbit')}
             className="flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 hover:border-accent hover:text-fg"
@@ -2346,7 +2274,9 @@ export function SettingsView({
             Orbit on GitHub
           </button>
         </div>
-      </footer>
+      </Section>
+
+
         </div>
       </div>
     </div>

@@ -1433,6 +1433,7 @@ export default function App() {
 
   const goHistory = useCallback(
     (direction: -1 | 1) => {
+      if (showThemeManager) { setShowThemeManager(false); return; }
       const from = direction === -1 ? backSteps : aheadSteps;
       const to = direction === -1 ? aheadSteps : backSteps;
       const here: Step = { page, selectedId, mode, rail, focusId: focusStep.current };
@@ -1459,7 +1460,7 @@ export default function App() {
       setHistoryFocus(step.focusId ? { id: step.focusId, page: step.page, token: ++historyFocusToken.current } : null);
       setHistoryDepth({ back: backSteps.current.length > 0, ahead: aheadSteps.current.length > 0 });
     },
-    [page, selectedId, mode, rail],
+    [page, selectedId, mode, rail, showThemeManager],
   );
 
   /**

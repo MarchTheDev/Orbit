@@ -308,7 +308,7 @@ function Backdrop({
             : failed);
         }
       });
-    }, 250);
+    }, 100);
     return () => {
       current = false;
       window.clearTimeout(timer);
@@ -969,7 +969,11 @@ export function TvMode({
   // no window background shows through anywhere the hub does not paint.
   useEffect(() => {
     document.documentElement.classList.add('orbit-tv');
-    return () => document.documentElement.classList.remove('orbit-tv');
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.documentElement.classList.remove('orbit-tv');
+      document.body.style.overflow = '';
+    };
   }, []);
 
   /**

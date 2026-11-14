@@ -88,7 +88,7 @@ export function useLibrary() {
         setGames(loaded);
         setSettingsState(loadedSettings);
         applyTheme(loadedSettings.theme, loadedSettings.customThemes ?? []);
-        applyGlass(loadedSettings.glass === true);
+        applyGlass(loadedSettings.glass !== false);
         applyFont(loadedSettings.fontFamily ?? 'system');
         // The native cards are drawn outside the page, so they get the same
         // colours the theme just put on the page.
@@ -244,7 +244,7 @@ export function useLibrary() {
         if (desktopOs() !== 'linux') void overlayTheme(nativePalette(resolved.theme, next.customThemes ?? []));
       }
       if (resolved.fontFamily) applyFont(resolved.fontFamily);
-      if (resolved.glass !== undefined) applyGlass(resolved.glass);
+      if (resolved.glass !== undefined) applyGlass(resolved.glass !== false);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });
@@ -268,7 +268,7 @@ export function useLibrary() {
       applyTheme(next.theme, next.customThemes ?? []);
       if (desktopOs() !== 'linux') void overlayTheme(nativePalette(next.theme, next.customThemes ?? []));
       applyFont(next.fontFamily ?? 'system');
-      applyGlass(next.glass === true);
+      applyGlass(next.glass !== false);
       queue.current = queue.current.then(() => saveSettings(next)).catch(console.error);
       return next;
     });
@@ -298,7 +298,7 @@ export function useLibrary() {
       .then(() => saveSettings(DEFAULT_SETTINGS))
       .then(() => {
         applyTheme(DEFAULT_SETTINGS.theme);
-        applyGlass(false);
+        applyGlass(true);
         applyFont(DEFAULT_SETTINGS.fontFamily ?? 'system');
         location.reload();
       })

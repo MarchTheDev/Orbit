@@ -77,7 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   coverScale: 100,
   coverTint: true,
   coverFit: 'smart',
-  glass: false,
+  glass: true,
   tabOrder: [],
   logOrder: [],
   backlogOrder: [],
