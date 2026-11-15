@@ -41,7 +41,6 @@ import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
 import { SearchField } from './ui/SearchField';
-import { CheckboxInline } from './ui/Checkbox';
 import { GameGrid } from './GameGrid';
 import { HltbCard } from './detail/HltbCard';
 import { AchievementsTab } from './detail/AchievementsTab';
@@ -889,7 +888,7 @@ export function LibraryView({
                     </div>
 
                     <div className="orbit-viewmenu-row">
-                      <CheckboxInline checked={shelfFill} onChange={setShelfFill} label="Fill the row" />
+                      <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Fill the row</p></div><button type="button" role="switch" aria-checked={shelfFill} onClick={() => setShelfFill(!shelfFill)} className="orbit-switch" data-on={shelfFill || undefined}><i /></button></div>
                     </div>
                   </>
                 )}
@@ -915,10 +914,10 @@ export function LibraryView({
 
                 <span className="orbit-viewmenu-label">Behaviour</span>
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
+                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div>
                 </div>
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
+                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div>
                 </div>
                 <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
                   Reset to defaults
@@ -1003,13 +1002,13 @@ export function LibraryView({
 
                 <span className="orbit-viewmenu-label">Behaviour</span>
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={lift} onChange={setLift} label="Lift on hover" />
+                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div>
                 </div>
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={coverTint} onChange={setCoverTint} label="Tint on hover" />
+                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div>
                 </div>
                 <div className="orbit-viewmenu-row">
-                  <CheckboxInline checked={gridOpen} onChange={setGridOpen} label="Open details on select" />
+                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Open details on select</p></div><button type="button" role="switch" aria-checked={gridOpen} onClick={() => setGridOpen(!gridOpen)} className="orbit-switch" data-on={gridOpen || undefined}><i /></button></div>
                 </div>
                 {sort === 'manual' && (
                   <p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>

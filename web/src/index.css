@@ -668,9 +668,9 @@ html.orbit-linux.orbit-glass .orbit-ovsheet {
   width: 42px;
   height: 24px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--c-text) 18%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--c-text) 22%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-panel2) 96%, transparent);
   cursor: pointer;
   transition: background-color .14s var(--ease-snap), border-color .14s var(--ease-snap);
 }
@@ -683,11 +683,11 @@ html.orbit-linux.orbit-glass .orbit-ovsheet {
   height: 18px;
   margin-top: -9px;
   border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  background: color-mix(in srgb, var(--c-text) 34%, transparent);
+  box-shadow: 0 1px 4px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.06);
   transition: transform .16s var(--ease-snap), background-color .14s var(--ease-snap);
 }
-.orbit-switch:hover { border-color: color-mix(in srgb, var(--c-text) 28%, transparent); }
+.orbit-switch:hover { border-color: color-mix(in srgb, var(--c-text) 34%, transparent); background: color-mix(in srgb, var(--c-panel) 88%, transparent); }
 .orbit-switch[data-on],
 .orbit-switch[aria-checked='true'] {
   background: var(--c-accent);
@@ -3476,6 +3476,8 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
    above the shelf rather than inside the scroll. */
 .orbit-album-under { position: relative; flex: none; }
 .orbit-stats-panel:has(.orbit-album-undermenu) { overflow: visible; }
+.orbit-album-tools { position: relative; z-index: 1; }
+.orbit-album-filterrow { position: relative; }
 .orbit-album-undercount {
   min-width: 15px;
   padding: 0 4px;
@@ -3489,7 +3491,7 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 40;
+  z-index: 50;
   width: 280px;
   padding: 6px;
   border-radius: 12px;
@@ -5001,8 +5003,12 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
    shadow, and its name at full strength. */
 .orbit-deck-card[aria-current='true'] .orbit-deck-frame {
   border-color: var(--c-accent);
-  box-shadow: 0 0 0 1px var(--c-accent), 0 20px 46px -22px color-mix(in srgb, var(--c-accent) 70%, transparent);
-  transform: translateY(-2px);
+  box-shadow: 0 0 0 1.5px var(--c-accent), 0 22px 50px -18px color-mix(in srgb, var(--c-accent) 72%, transparent);
+  transform: translateY(-4px) scale(1.04);
+}
+.orbit-deck-card[aria-current='true'] {
+  filter: brightness(1.06);
+  z-index: 2;
 }
 .orbit-deck-card:focus-visible .orbit-deck-frame {
   outline: 3px solid color-mix(in srgb, var(--c-accent) 70%, transparent);
@@ -5424,6 +5430,10 @@ html.orbit-tv body {
 html.orbit-tv body::after {
   display: none;
 }
+html.orbit-tv body, html.orbit-tv #root { background: #05040d; }
+.tv-root { min-height: 100dvh; }
+.orbit-deckmenu-wrap { background: transparent; }
+.orbit-deckmenu { background: color-mix(in srgb, var(--c-panel) 98%, transparent); }
 
 .tv-root {
   background:

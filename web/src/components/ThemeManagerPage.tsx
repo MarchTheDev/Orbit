@@ -301,8 +301,8 @@ export function ThemeManagerPage({
         title="Custom themes"
         lead="Two colours and a style. Orbit builds the palette."
       />
-      <button type="button" onClick={onBack} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-sm text-muted hover:border-accent hover:text-fg">
-        <ArrowLeft className="size-4" /> Back
+      <button type="button" onClick={onBack} className="mt-4 inline-flex items-center justify-center gap-1 rounded-lg border border-line p-2 text-sm text-muted hover:border-accent hover:text-fg" aria-label="Back" title="Back">
+        <ArrowLeft className="size-4" />
       </button>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[18rem_1fr]">

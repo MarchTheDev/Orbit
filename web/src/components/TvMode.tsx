@@ -617,9 +617,6 @@ function StardeckMenu({
             )}
 
             <div className="orbit-deckmenu-sep" />
-            <p className="orbit-deckmenu-note">
-              Escape opens and closes this menu. It never leaves Stardeck: leaving is the row below.
-            </p>
             <button type="button" onClick={onExit} className="orbit-deckmenu-leave">
               <Minimize2 className="size-4" />
               Leave Stardeck
@@ -898,6 +895,7 @@ export function TvMode({
    * key that quits.
    */
   const [menu, setMenu] = useState(false);
+  const [menuExiting, setMenuExiting] = useState(false);
   /**
    * Wide art found for the selected game by the catalogues, kept by id.
    *
@@ -907,6 +905,14 @@ export function TvMode({
    */
   const [heroes, setHeroes] = useState<Record<string, string | null>>({});
   const [menuPage, setMenuPage] = useState<'home' | 'look' | 'library' | 'about'>('home');
+  const closeMenu = () => {
+    setMenuExiting(true);
+    window.setTimeout(() => {
+      setMenu(false);
+      setMenuExiting(false);
+      setMenuPage('home');
+    }, 200);
+  };
   const menuBox = useRef<HTMLDivElement>(null);
 
   const list = useMemo(() => {
@@ -1051,7 +1057,7 @@ export function TvMode({
           setMenuPage('home');
           return;
         }
-        setMenu(false);
+        closeMenu();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -1334,13 +1340,13 @@ export function TvMode({
         </button>
       </header>
 
-      {menu && (
-        <div ref={menuBox} className="orbit-deckmenu-wrap">
+      {(menu || menuExiting) && (
+        <div ref={menuBox} className={`orbit-deckmenu-wrap ${menuExiting ? 'is-exiting' : ''}`}>
           <button
             type="button"
             aria-label="Close menu"
             tabIndex={-1}
-            onClick={() => setMenu(false)}
+            onClick={closeMenu}
             className="orbit-deckmenu-scrim"
           />
           <StardeckMenu
@@ -1348,7 +1354,7 @@ export function TvMode({
             onChange={setPrefs}
             page={menuPage}
             onPage={setMenuPage}
-            onClose={() => setMenu(false)}
+            onClose={closeMenu}
             onReset={() => setPrefs(STARDECK_DEFAULT)}
             onExit={exit}
             running={playingNow}
