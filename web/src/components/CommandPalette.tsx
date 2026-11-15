@@ -146,6 +146,7 @@ export function CommandPalette({
         ? [{ id: 'action-add-folder', label: 'Add from folder', hint: 'Find the games in a folder', Icon: FolderOpen, group: 'Actions' as const, run: onAddFolder }]
         : []),
       { id: 'action-tv', label: 'Stardeck', hint: 'Read the library from the couch', Icon: Gamepad2, group: 'Actions', run: onTv },
+      { id: 'action-settings', label: 'Open Settings', hint: 'Themes, covers, backups', Icon: SettingsIcon, group: 'Actions', run: onSettings },
     ];
     return [...pages, ...actions, ...extra];
   }, [extra, onAdd, onAddFolder, onPage, onSettings, onTv]);
@@ -258,6 +259,7 @@ export function CommandPalette({
     const genre = visibleGenres[gameIndex - visibleGames.length];
     if (genre) {
       onClose();
+      onPage('library');
       onGenre(genre.name);
     }
   };

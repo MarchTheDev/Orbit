@@ -294,7 +294,7 @@ export function LogsView({
         />
       )}
 
-      <div className="orbit-journal">
+      <div className="orbit-journal orbit-journal-v2">
         <aside className="orbit-journal-rail">
           <p className="orbit-journal-railhead">
             <NotebookPen className="size-3.5" />

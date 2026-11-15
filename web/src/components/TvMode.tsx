@@ -979,6 +979,10 @@ export function TvMode({
     return () => {
       document.documentElement.classList.remove('orbit-tv');
       document.body.style.overflow = '';
+      // Restore window bounds from taskbar overlap: trigger resize and ensure not fullscreen over it
+      window.dispatchEvent(new Event('resize'));
+      const w = (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { setFullscreen: (v:boolean)=>Promise<void> } } } }).__TAURI__?.window?.getCurrentWindow();
+      w?.setFullscreen(false).catch(()=>undefined);
     };
   }, []);
 
