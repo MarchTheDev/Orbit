@@ -305,7 +305,7 @@ export default function App() {
    * Whether this window is the one in front.
    *
    * A game taking focus is the usual reason it is not. The decorative loops
-   * stop then — the same way the music bars already do — so the webview has
+   * stop then - the same way the music bars already do - so the webview has
    * nothing left to repaint and can hand the CPU and GPU back to the game.
    */
   const [focused, setFocused] = useState(true);

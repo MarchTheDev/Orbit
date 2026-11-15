@@ -76,7 +76,7 @@ function scopeOf(query: string): { scope: 'all' | 'actions' | 'genres'; needle: 
  * The ordering is deliberate. What can be *started* comes first, because
  * `Play` is the one command somebody opens this for; then the games themselves;
  * then genres, which are the library's own answer to "what am I in the mood
- * for" — after that the pages and the actions, and the folders last.
+ * for" - after that the pages and the actions, and the folders last.
  */
 export function CommandPalette({
   open,

@@ -18,7 +18,7 @@ import { ArtworkThumb } from './ui/ArtworkThumb';
  * Nothing here is automatic. The library is only read when this page is opened,
  * every game arrives unticked, and a game is only added once it has been ticked,
  * so a Steam account with two hundred games never lands in the library by
- * surprise — not even most of it.
+ * surprise - not even most of it.
  *
  * It is a page rather than a card: a list of games wants the whole window, with
  * the list itself taking the room and scrolling inside it, and the controls for

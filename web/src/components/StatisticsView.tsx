@@ -171,8 +171,8 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
 /**
  * Statistics: the whole library's time in one place.
  *
- * The Overview answers the three questions a player actually has — how much
- * have I played, what was it, and when — in that order: the period's total in
+ * The Overview answers the three questions a player actually has - how much
+ * have I played, what was it, and when - in that order: the period's total in
  * the top game's own art, the shape of the period as a chart, then the games
  * that made it. Sessions, Journal and Backlog are the same rooms as ever,
  * folded in here rather than repeated in the menu.
@@ -543,7 +543,7 @@ export function StatisticsView({
                   <p className="orbit-figure-foot">{inPeriod.length > 0 ? `${Math.round((ranked[0].secs / Math.max(1, totalSecs)) * 100)}% of the period` : ''}</p>
                 </>
               ) : (
-                <p className="orbit-figure-value is-quiet">—</p>
+                <p className="orbit-figure-value is-quiet">-</p>
               )}
             </div>
           </section>
@@ -599,7 +599,7 @@ export function StatisticsView({
           </SectionPanel>
 
           <div className="orbit-stats-split">
-            <SectionPanel title="Something to play next" note="From your backlog — shuffled each time you open this page">
+            <SectionPanel title="Something to play next" note="From your backlog - shuffled each time you open this page">
               {(() => {
                 const pool = allGames.filter((game) => game.status === 'backlog');
                 if (pool.length === 0) {
@@ -666,7 +666,7 @@ export function StatisticsView({
                 </span>
               </div>
               <div className="orbit-stats-facts">
-                <p><Clock className="size-3.5" /> Longest session <b>{longest > 0 ? fmtMinutes(longest / 60) : '—'}</b></p>
+                <p><Clock className="size-3.5" /> Longest session <b>{longest > 0 ? fmtMinutes(longest / 60) : '-'}</b></p>
                 <p><CalendarDays className="size-3.5" /> Tracked for <b>{activeDays > 0 ? `${activeDays} days` : 'no time yet'}</b></p>
                 <p><Gamepad2 className="size-3.5" /> Games played <b>{games.filter((game) => game.sessionCount > 0).length}</b></p>
               </div>

@@ -324,7 +324,7 @@ export function PlanDialog({
                 <div>
                   <h2 className="text-lg font-semibold leading-tight">Plan a game</h2>
                   <p className="mt-1 text-xs leading-relaxed text-muted">
-                    Anything you mean to play — owned or not. Nothing here has to be installed.
+                    Anything you mean to play - owned or not. Nothing here has to be installed.
                   </p>
                 </div>
               </div>

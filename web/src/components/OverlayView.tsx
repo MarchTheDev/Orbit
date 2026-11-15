@@ -306,7 +306,7 @@ export function OverlayView() {
   /**
    * Why the boxes are empty, when they are.
    *
-   * Three different things can leave a box reading "—": the switch is off, the
+   * Three different things can leave a box reading "-": the switch is off, the
    * numbers have not arrived yet, or the reading failed. They used to look
    * identical, which is how a box that was working came to be reported as a box
    * that was not.
@@ -1574,7 +1574,7 @@ export function OverlayView() {
       )}
       {visible('fps') && (
         <Box id="fps" padSelected={padOn('fps')} title="FPS" place={places.fps} front={front === 'fps'} onDrag={drag} onResize={resize} onPin={pin} section="fps">
-          <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '—'}</p>
+          <p className="text-center text-4xl font-semibold tabular-nums leading-none">{stats?.fps ?? '-'}</p>
           <p className="mt-1 text-center text-[10px] leading-tight text-white/45">{statsNote}</p>
         </Box>
       )}
@@ -1777,7 +1777,7 @@ function Box({
 }
 
 function Meter({ label, value, detail = '' }: { label: string; value: number | null | undefined; detail?: string }) {
-  const shown = value == null ? '—' : `${value}%`;
+  const shown = value == null ? '-' : `${value}%`;
   return (
     <div className="mb-1.5">
       <div className="flex items-baseline justify-between gap-2 text-[10px] leading-tight">

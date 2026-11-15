@@ -34,11 +34,13 @@ export function CopySettings({
   const native = isNative();
   const [journal, setJournal] = useState(false);
   const [sessions, setSessions] = useState(false);
+  const [backlog, setBacklog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ path: string; file: CopyPreview } | null>(null);
   const [bringSettings, setBringSettings] = useState(true);
   const [bringJournal, setBringJournal] = useState(false);
   const [bringSessions, setBringSessions] = useState(false);
+  const [bringBacklog, setBringBacklog] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +58,11 @@ export function CopySettings({
       else parts.push('Journal was left out.');
       if (sessions) parts.push(`${count(info.sessions, 'session')}.`);
       else parts.push('Sessions were left out.');
+      if ((info as unknown as { backlog?: number }).backlog !== undefined) {
+        const b = (info as unknown as { backlog: number }).backlog;
+        if (backlog) parts.push(`${count(b, 'backlog entry', 'backlog entries')}.`);
+        else parts.push('Backlog was left out.');
+      } else if (backlog) { parts.push('Backlog entry count not reported by this build.'); }
       setNotice(parts.join(' '));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -76,6 +83,7 @@ export function CopySettings({
       setBringSettings(file.hasSettings);
       setBringJournal(journal && file.playthroughs + file.logs > 0);
       setBringSessions(sessions && file.sessions > 0);
+      setBringBacklog(backlog && (file as unknown as { backlog?: number }).backlog !== undefined ? (file as unknown as { backlog: number }).backlog > 0 : false);
     } catch (reason) {
       setPreview(null);
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -86,7 +94,7 @@ export function CopySettings({
 
   const bringIn = async () => {
     if (!preview) return;
-    if (!bringSettings && !bringJournal && !bringSessions) {
+    if (!bringSettings && !bringJournal && !bringSessions && !bringBacklog) {
       setError('Light what to bring in.');
       return;
     }
@@ -127,7 +135,7 @@ export function CopySettings({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-4">
         <Piece title="Settings" detail="Always in the file, with signed-in clouds" on locked />
         <Piece
           title="Journal"
@@ -143,9 +151,16 @@ export function CopySettings({
           disabled={!native || busy}
           onClick={() => setSessions((value) => !value)}
         />
+        <Piece
+          title="Backlog"
+          detail={backlog ? 'In the file' : 'Click to include'}
+          on={backlog}
+          disabled={!native || busy}
+          onClick={() => setBacklog((value) => !value)}
+        />
       </div>
       <p className="text-xs leading-relaxed text-muted">
-        A lit box goes into the file. Global Settings—including overlay preferences and shortcuts—always go in. Game records, per-game settings such as Proton choices, and save files do not. Settings includes keys and signed-in clouds, so keep the file somewhere you trust.
+        A lit box goes into the file. Global Settings-including overlay preferences and shortcuts-always go in. Game records, per-game settings such as Proton choices, and save files do not. Settings includes keys and signed-in clouds, so keep the file somewhere you trust.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -215,6 +230,13 @@ export function CopySettings({
                 on={bringSessions}
                 disabled={preview.file.sessions === 0 || busy}
                 onClick={() => setBringSessions((value) => !value)}
+              />
+              <Piece
+                title="Backlog"
+                detail={bringBacklog ? 'Will come in' : 'Left out'}
+                on={bringBacklog}
+                disabled={((preview.file as unknown as { backlog?: number }).backlog ?? 0) === 0 || busy}
+                onClick={() => setBringBacklog((value) => !value)}
               />
             </div>
             <button

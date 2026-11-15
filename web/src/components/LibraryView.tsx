@@ -386,8 +386,8 @@ export function LibraryView({
   /**
    * How artwork fills its frame, per view.
    *
-   * `auto` keeps the Cover component's own answer — a picture squarer than a
-   * poster is fitted whole over a blurred copy of itself — which is what a
+   * `auto` keeps the Cover component's own answer - a picture squarer than a
+   * poster is fitted whole over a blurred copy of itself - which is what a
    * library made of store banners needs, since a banner dropped into a tall
    * tile would otherwise be cropped down the middle of its artwork. Pinning
    * `contain` says the same thing for every cover in the view; `cover` says the
@@ -1520,15 +1520,15 @@ function GamePage({
           <section className="orbit-section">
             <h2>Details</h2>
             <dl className="orbit-facts">
-              <Fact label="Developer" value={game.meta?.developer || '—'} />
-              <Fact label="Released" value={game.meta?.releaseYear ? String(game.meta.releaseYear) : '—'} />
-              <Fact label="Genres" value={game.meta?.genres?.length ? game.meta.genres.join(', ') : '—'} />
-              <Fact label="Store rating" value={rating !== null && rating !== undefined ? `${rating}/100` : '—'} />
+              <Fact label="Developer" value={game.meta?.developer || '-'} />
+              <Fact label="Released" value={game.meta?.releaseYear ? String(game.meta.releaseYear) : '-'} />
+              <Fact label="Genres" value={game.meta?.genres?.length ? game.meta.genres.join(', ') : '-'} />
+              <Fact label="Store rating" value={rating !== null && rating !== undefined ? `${rating}/100` : '-'} />
               <Fact label="Sessions" value={String(game.sessionCount)} />
               <Fact label="Added" value={fmtDate(game.addedAt)} />
-              <Fact label="Size" value={game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : '—'} />
-              <Fact label="Drive" value={game.drive ? driveLabel(game.drive) : '—'} />
-              <Fact label="Folder" value={game.installDir || '—'} />
+              <Fact label="Size" value={game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : '-'} />
+              <Fact label="Drive" value={game.drive ? driveLabel(game.drive) : '-'} />
+              <Fact label="Folder" value={game.installDir || '-'} />
             </dl>
           </section>
 
@@ -1548,7 +1548,7 @@ function GamePage({
               </p>
               <p className="flex items-center gap-2">
                 <HardDrive className="size-3.5" />
-                Longest session {game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '—'}
+                Longest session {game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '-'}
               </p>
               <p className="flex items-center gap-2">
                 <Search className="size-3.5" />

@@ -3780,25 +3780,30 @@ html.orbit-linux .orbit-period { background: var(--c-panel); backdrop-filter: no
   margin-top: 16px;
 }
 .orbit-statsbar .orbit-period {
-  border-color: color-mix(in srgb, var(--c-text) 16%, transparent);
-  background: color-mix(in srgb, var(--c-panel) 72%, transparent);
-  box-shadow: 0 1px 6px rgba(0,0,0,.14);
+  border-color: color-mix(in srgb, var(--c-text) 18%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 82%, transparent);
+  box-shadow: 0 1px 8px rgba(0,0,0,.10);
   backdrop-filter: none;
 }
 .orbit-statsbar .orbit-period button {
-  color: color-mix(in srgb, var(--c-text) 62%, transparent);
+  color: color-mix(in srgb, var(--c-text) 72%, transparent);
+  font-weight: 600;
 }
 .orbit-statsbar .orbit-period button:hover {
-  color: color-mix(in srgb, var(--c-text) 88%, transparent);
-  background: color-mix(in srgb, var(--c-text) 7%, transparent);
+  color: var(--c-text);
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
 }
 .orbit-period button[aria-pressed='true'] {
+  background: var(--c-text);
+  color: var(--c-bg);
+  font-weight: 700;
+  box-shadow: 0 1px 5px rgba(0,0,0,.18);
+}
+html.orbit-glass .orbit-statsbar .orbit-period button[aria-pressed='true'] {
   background: var(--c-accent);
   color: var(--c-onaccent);
-  font-weight: 700;
-  box-shadow: 0 1px 4px rgba(0,0,0,.16);
 }
-.orbit-statsbar-lede { font-size: 11.5px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+.orbit-statsbar-lede { font-size: 11px; font-weight: 500; color: color-mix(in srgb, var(--c-text) 56%, transparent); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
 
 /* Three figures across the top (Played, Sessions, Most played) — Day streak removed. */
 .orbit-figures {

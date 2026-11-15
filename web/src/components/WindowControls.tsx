@@ -13,7 +13,7 @@ import { closeWindow, customTitleBar, minimizeWindow, toggleMaximizeWindow, watc
  * any display scale.
  *
  * The hit area is the part that matters for feel. Each button fills the whole
- * height of the bar and is 46 px wide — the size Windows gives them — and the
+ * height of the bar and is 46 px wide - the size Windows gives them - and the
  * group is lifted above the drag region, so a press is a press and never the
  * start of a window drag. Close keeps the red hover everyone expects; the other
  * two only brighten.

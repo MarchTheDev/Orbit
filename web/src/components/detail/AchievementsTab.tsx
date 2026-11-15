@@ -11,7 +11,7 @@ import { cn } from '../../utils/cn';
  * The game's achievements, read from its Steam Community page.
  *
  * Whether an achievement is unlocked is the player's own mark, and clicking it
- * is the whole interaction — unless the Steam client on this machine has the
+ * is the whole interaction - unless the Steam client on this machine has the
  * game, in which case it already knows the list and the moment each one
  * happened, needs nothing to be asked, and overwrites the ticks in both
  * directions because it knows what has *not* been unlocked too. For a game with

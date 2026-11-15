@@ -264,7 +264,7 @@ export function SessionsView({
                     className="flex min-w-0 items-center gap-3 rounded-xl text-left"
                     title={`Open ${row.gameTitle}`}
                   >
-                    {game ? <Cover game={game} className="size-20 shrink-0 rounded-xl shadow-md" /> : <span className="grid size-20 shrink-0 place-items-center rounded-xl bg-panel2 text-accent"><Clock className="size-5" /></span>}
+                    {game ? <Cover game={game} className="h-24 w-16 shrink-0 rounded-lg shadow-md" /> : <span className="grid h-24 w-16 shrink-0 place-items-center rounded-lg bg-panel2 text-accent"><Clock className="size-5" /></span>}
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-semibold">{row.gameTitle}</span>
                       <span className="mt-1 block text-xs text-muted">

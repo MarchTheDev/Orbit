@@ -46,7 +46,7 @@ export class CrashScreen extends Component<
           <p className="orbit-kicker">Orbit</p>
           <h1 className="mt-2 text-2xl font-bold tracking-tight">Something in this screen broke</h1>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            The rest of Orbit is still here — the window did not fail to start. Drawing
+            The rest of Orbit is still here - the window did not fail to start. Drawing
             {component ? ` ${component.replace(/^at\s+/, '')}` : ' this page'} threw the error below.
             Try again, and if it comes back, it is a bug worth reporting.
           </p>

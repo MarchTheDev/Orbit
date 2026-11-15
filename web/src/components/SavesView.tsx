@@ -42,8 +42,8 @@ import { HeadStat, PageHead } from './ui/Page';
 /**
  * Copies of the files a game writes while it is played.
  *
- * Orbit looks in the usual places — Documents, Saved Games, the game's own
- * folder, a Wine prefix, a Steam prefix — and copies what it finds. Nothing
+ * Orbit looks in the usual places - Documents, Saved Games, the game's own
+ * folder, a Wine prefix, a Steam prefix - and copies what it finds. Nothing
  * else has to be installed. A folder the player names is used instead. Those
  * copies can be sent to a cloud from this page. Nothing is installed for the copy that stays here.
  */

@@ -31,11 +31,6 @@ import {
   Volume2,
   Wand2,
   Plus,
-  Globe,
-  Gamepad2,
-  Boxes,
-  Clock,
-  ShieldCheck,
   X,
 } from 'lucide-react';
 import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, type Page, type Settings } from '../types';
@@ -173,23 +168,42 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
   const [draftUrl, setDraftUrl] = useState("");
   const toggle = (id: string, enabled: boolean) => setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
   const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
-  const iconFor = (id: string) => {
-    const map: Record<string, typeof Globe> = { steam: Monitor as unknown as typeof Globe, steamgriddb: Images as unknown as typeof Globe, hltb: Clock as unknown as typeof Globe, lutris: Gamepad2 as unknown as typeof Globe, libretro: Boxes as unknown as typeof Globe, protondb: ShieldCheck as unknown as typeof Globe, web: Globe as unknown as typeof Globe };
-    return map[id] ?? Globe;
+
+function SourceIcon({ id }: { id: string }) {
+  const map: Record<string, string> = {
+    steam: "S",
+    steamgriddb: "G",
+    hltb: "H",
+    lutris: "L",
+    libretro: "R",
+    protondb: "P",
+    web: "W",
   };
+  const colors: Record<string, string> = {
+    steam: "#1b2838",
+    steamgriddb: "#ff4a4a",
+    hltb: "#3a9ad9",
+    lutris: "#ff6d00",
+    libretro: "#1e3a8a",
+    protondb: "#8b5cf6",
+    web: "#0f172a",
+  };
+  const letter = map[id] ?? id.slice(0,1).toUpperCase();
+  const bg = colors[id] ?? "var(--c-panel2)";
+  return <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-[11px] font-bold text-white" style={{ background: bg }}>{letter}</span>;
+}
+
+
   return (
     <div className="space-y-2">
       <div className="space-y-1">
         {sources.map((src) => {
-          const Icon = iconFor(src.id);
           return (
           <div
             key={src.id}
             className="group flex items-center gap-2 rounded-xl border border-line bg-panel px-2.5 py-2 transition"
           >
-            <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-accent">
-              <Icon className="size-3.5" />
-            </span>
+            <SourceIcon id={src.id} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-fg">{src.label}</span>
               {src.note && <span className="block truncate text-[11px] text-muted">{src.note}</span>}
@@ -222,14 +236,14 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
       {addOpen && (
         <div className="rounded-xl border border-line bg-panel2 p-3 space-y-2">
           <p className="text-xs font-semibold text-fg">Add a metadata source</p>
-          <p className="text-[11px] text-muted">Community extensions (e.g., VNDB, IGDB) — URL is optional for now.</p>
-          <input value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} placeholder="Name — e.g., VNDB" className={inputCls} />
+          <p className="text-[11px] text-muted">Community extensions (e.g., VNDB). URL is required.</p>
+          <input value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} placeholder="Name - e.g., VNDB" className={inputCls} />
           <input value={draftUrl} onChange={(e) => setDraftUrl(e.target.value)} placeholder="https://api.example.com (optional)" className={`${inputCls} font-mono`} />
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setAddOpen(false)} className="orbit-btnquiet">Cancel</button>
             <button
               type="button"
-              disabled={!draftLabel.trim()}
+              disabled={!draftLabel.trim() || !draftUrl.trim() || !/^https?:\/\//.test(draftUrl.trim())}
               onClick={() => {
                 const id = draftLabel.trim().toLowerCase().replace(/\s+/g, "-") + "-" + Date.now().toString(36).slice(-4);
                 setSources([...sources, { id, label: draftLabel.trim(), enabled: true, kind: "custom", url: draftUrl.trim() || undefined, note: "Custom" }]);
@@ -1270,8 +1284,8 @@ export function SettingsView({
    *
    * A group's name and a card's button used to be both small words on the same
    * quiet background, so the list read as fifteen links with three stray
-   * headings in it. The name is now a held label — tracked, uppercased, with a
-   * hairline running out of it to the edge — and the buttons are rows with a
+   * headings in it. The name is now a held label - tracked, uppercased, with a
+   * hairline running out of it to the edge - and the buttons are rows with a
    * tick mark that only the chosen one keeps. Nothing is left to work out.
    */
   const settingsNav = (compact: boolean) => (
@@ -1692,7 +1706,7 @@ export function SettingsView({
             const count = captures?.filter((entry) => entry.kind === item.kind).length;
             return (
               <div key={item.kind} className="rounded-xl border border-line/70 bg-panel2/40 p-4">
-                <p className="text-2xl font-semibold tabular-nums text-fg">{count ?? '—'}</p>
+                <p className="text-2xl font-semibold tabular-nums text-fg">{count ?? '-'}</p>
                 <p className="mt-1 text-xs text-muted">{item.label}</p>
               </div>
             );
@@ -1896,12 +1910,12 @@ export function SettingsView({
 
       >
         <Group title="Sources">
-          <p className="text-xs leading-relaxed text-muted">Web search uses the game title to look up public metadata and artwork when no store match is found. It falls back to open sources and never sends your library.</p>
+          <p className="text-xs leading-relaxed text-muted">Web search uses the game title to look up public metadata when no store match is found. It never sends your library.</p>
           <MetadataSources settings={settings} setSettings={setSettings} />
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
               <label className="orbit-setrow-label" htmlFor="sgdb-key">SteamGridDB key</label>
-              <p className="orbit-setrow-hint">For alt covers. Optional — stays on this machine.</p>
+              <p className="orbit-setrow-hint">For alt covers. Optional - stays on this machine.</p>
               <div className="mt-2 flex gap-2">
                 <input
                   id="sgdb-key"
@@ -2050,7 +2064,7 @@ export function SettingsView({
                 {where?.path || (native ? 'Reading the folder…' : 'Orbit’s files live on this PC, in the desktop app.')}
               </p>
             </div>
-            <span className="text-sm tabular-nums text-muted">{where ? fmtBytes(where.size) : '—'}</span>
+            <span className="text-sm tabular-nums text-muted">{where ? fmtBytes(where.size) : '-'}</span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
