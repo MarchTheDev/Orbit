@@ -696,8 +696,8 @@ html.orbit-linux.orbit-glass .orbit-ovsheet {
 .orbit-switch[data-on] > i,
 .orbit-switch[aria-checked='true'] > i {
   transform: translateX(18px);
-  background: var(--c-onaccent);
-  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.32), 0 0 0 1px rgba(0,0,0,.08);
 }
 .orbit-switch:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
@@ -3656,6 +3656,7 @@ html.orbit-glass .orbit-album-undermenu {
   background: rgba(0, 0, 0, .82);
   cursor: zoom-out;
 }
+.orbit-lightbox-close { position: fixed; top: 18px; right: 18px; z-index: 2; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.42); color: #fff; backdrop-filter: blur(8px); cursor: pointer; }
 .orbit-lightbox img {
   max-width: 100%;
   max-height: 100%;

@@ -31,6 +31,11 @@ import {
   Volume2,
   Wand2,
   Plus,
+  Globe,
+  Gamepad2,
+  Boxes,
+  Clock,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, type Page, type Settings } from '../types';
@@ -168,24 +173,22 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
   const [draftUrl, setDraftUrl] = useState("");
   const toggle = (id: string, enabled: boolean) => setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
   const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
-  const move = (fromId: string, toId: string, after: boolean) => {
-    const ids = moveInOrder(sources.map((s) => s.id), fromId, toId, after);
-    const ordered = ids.map((id) => sources.find((src2) => src2.id === id)!).filter(Boolean) as typeof sources;
-    setSources(ordered);
+  const iconFor = (id: string) => {
+    const map: Record<string, typeof Globe> = { steam: Monitor as unknown as typeof Globe, steamgriddb: Images as unknown as typeof Globe, hltb: Clock as unknown as typeof Globe, lutris: Gamepad2 as unknown as typeof Globe, libretro: Boxes as unknown as typeof Globe, protondb: ShieldCheck as unknown as typeof Globe, web: Globe as unknown as typeof Globe };
+    return map[id] ?? Globe;
   };
-  const { bind, dragging, over } = useDragReorder((a, b, after) => move(a, b, after));
   return (
     <div className="space-y-2">
       <div className="space-y-1">
-        {sources.map((src) => (
+        {sources.map((src) => {
+          const Icon = iconFor(src.id);
+          return (
           <div
             key={src.id}
-            {...bind(src.id)}
-            data-orbit-drop={src.id}
-            className={`group flex items-center gap-2 rounded-xl border bg-panel px-2.5 py-2 transition ${over === src.id ? "border-accent ring-1 ring-accent/40" : "border-line"} ${dragging === src.id ? "opacity-60 rotate-[0.4deg] scale-[1.01] shadow-lg" : ""}`}
+            className="group flex items-center gap-2 rounded-xl border border-line bg-panel px-2.5 py-2 transition"
           >
-            <span data-orbit-drag-handle="" className="grid size-7 shrink-0 cursor-grab place-items-center rounded-lg border border-line bg-panel2 text-muted hover:border-accent hover:text-fg active:cursor-grabbing" title="Drag to reorder">
-              <GripVertical className="size-3.5" />
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-accent">
+              <Icon className="size-3.5" />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-fg">{src.label}</span>
@@ -209,7 +212,8 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
               <i />
             </button>
           </div>
-        ))}
+        );
+        })}
       </div>
       <div className="flex items-center justify-between pt-1">
         <button type="button" onClick={() => setAddOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"><Plus className="size-3.5" /> Add source</button>

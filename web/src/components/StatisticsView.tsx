@@ -246,6 +246,7 @@ export function StatisticsView({
   /** One game's captures, by capture folder, or every game's. */
   const [albumGame, setAlbumGame] = useState<string | 'all'>('all');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [videoSrc, setVideoSrc] = useState<{ src: string; name: string } | null>(null);
   const [captureMenu, setCaptureMenu] = useState<{ x: number; y: number; item: GalleryItem } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
   /** Which facts are written under each picture. All of them, to begin with. */
@@ -318,6 +319,12 @@ export function StatisticsView({
       window.removeEventListener('focus', load);
     };
   }, [captureTick]);
+
+  useEffect(() => {
+    if (!lightbox && !videoSrc) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [lightbox, videoSrc]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -602,16 +609,20 @@ export function StatisticsView({
                     </p>
                   );
                 }
-                // Shuffle reproducibly per open; Fisher-Yates with Math.random seeded by playNextSeed+pool
-                const shuffled = [...pool];
-                for (let index = shuffled.length - 1; index > 0; index -= 1) {
-                  const other = Math.floor(Math.random() * (index + 1));
-                  const tmp = shuffled[index];
-                  shuffled[index] = shuffled[other];
-                  shuffled[other] = tmp;
-                }
-                // Keep stable across renders until tab reopens via playNextSeed dependency
                 void playNextSeed;
+                const shuffled = (() => {
+                  const arr = [...pool];
+                  // Seeded shuffle using playNextSeed for stability across renders
+                  let seed = playNextSeed * 9301 + 49297;
+                  const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+                  for (let index = arr.length - 1; index > 0; index -= 1) {
+                    const other = Math.floor(rand() * (index + 1));
+                    const tmp = arr[index];
+                    arr[index] = arr[other];
+                    arr[other] = tmp;
+                  }
+                  return arr;
+                })();
                 return (
                   <ul className="orbit-playnext">
                     {shuffled.slice(0, 4).map((game) => (
@@ -632,7 +643,7 @@ export function StatisticsView({
               })()}
             </SectionPanel>
 
-            <SectionPanel title="The shape of the library" note={`${games.length} games`}>
+            <SectionPanel title="The shape of the library" note={`${shapeGames.length} games`}>
               <div className="orbit-statusbar" aria-hidden>
                 {(Object.keys(statusCounts) as GameStatus[]).map((status) => (
                   <i
@@ -847,7 +858,7 @@ export function StatisticsView({
                       {group.items.map((item) => (
                         <button
                           key={item.path}
-                          onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path))}
+                          onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : setVideoSrc({ src: fileSrc(item.path), name: item.name }))}
                           onContextMenu={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
@@ -906,7 +917,14 @@ export function StatisticsView({
           )}
           {lightbox && (
             <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
+              <button type="button" aria-label="Close" onClick={() => setLightbox(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
               <img src={lightbox} alt="" />
+            </div>
+          )}
+          {videoSrc && (
+            <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label={`Video ${videoSrc.name}`} onClick={() => setVideoSrc(null)}>
+              <button type="button" aria-label="Close" onClick={() => setVideoSrc(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
+              <video src={videoSrc.src} controls autoPlay className="max-h-[86vh] max-w-[92vw] rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
             </div>
           )}
         </>

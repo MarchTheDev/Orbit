@@ -33,7 +33,7 @@ import type {
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
-import { overlayGallery, overlayOpen, type GalleryItem } from '../services/native';
+import { overlayGallery, type GalleryItem } from '../services/native';
 import { fileSrc } from '../services/desktop';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { wideArt } from '../utils/art';
@@ -1311,6 +1311,7 @@ function GamePage({
   const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
   const [captureKind, setCaptureKind] = useState<CaptureKind | 'all'>('all');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [videoSrc, setVideoSrc] = useState<{ src: string; name: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1332,6 +1333,12 @@ function GamePage({
   }, [game.title]);
 
   useEffect(() => {
+    if (!lightbox && !videoSrc) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [lightbox, videoSrc]);
+
+  useEffect(() => {
     if (!lightbox) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setLightbox(null);
@@ -1346,7 +1353,7 @@ function GamePage({
 
   const openCapture = (item: GalleryItem) => {
     if (item.kind === 'screenshot') setLightbox(fileSrc(item.path));
-    else void overlayOpen(item.path);
+    else setVideoSrc({ src: fileSrc(item.path), name: item.name });
   };
 
   return (
@@ -1561,7 +1568,14 @@ function GamePage({
 
       {lightbox && (
         <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
+          <button type="button" aria-label="Close" onClick={() => setLightbox(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
           <img src={lightbox} alt="" />
+        </div>
+      )}
+      {videoSrc && (
+        <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label={`Video ${videoSrc.name}`} onClick={() => setVideoSrc(null)}>
+          <button type="button" aria-label="Close" onClick={() => setVideoSrc(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
+          <video src={videoSrc.src} controls autoPlay className="max-h-[86vh] max-w-[92vw] rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </div>
