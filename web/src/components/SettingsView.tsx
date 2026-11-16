@@ -539,6 +539,7 @@ function LibraryFilterOrder({
 const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
+  { id: 'orbit-backlog', label: 'Backlog' },
   { id: 'orbit-journal', label: 'Journal' },
   { id: 'orbit-playing', label: 'Playing' },
   { id: 'orbit-overlay', label: 'Overlay' },
@@ -587,9 +588,9 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
-  { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
+  { label: 'Add games to the Backlog', section: 'orbit-backlog', keywords: 'backlog sync add new games' },
+  { label: 'Upcoming release calendar on Backlog', section: 'orbit-backlog', keywords: 'backlog calendar upcoming release dates personal steam coming soon' },
   { label: 'Add new games to Journal', section: 'orbit-journal', keywords: 'journal sync new games automatic add' },
-  { label: 'Upcoming release calendar on Backlog', section: 'orbit-library', keywords: 'backlog calendar upcoming release dates personal steam coming soon' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
   { label: 'Library chips', section: 'orbit-library', keywords: 'all favorites hidden reorder show hide' },
@@ -1601,25 +1602,9 @@ export function SettingsView({
         id="orbit-library"
         active={activeSection === 'orbit-library'}
         icon={LibraryIcon}
-        title="Library and Backlog"
+        title="Library"
 
       >
-        <SubHead>Adding games</SubHead>
-        <SwitchRow
-          checked={settings.syncBacklog === true}
-          onChange={(v) => setSettings({ syncBacklog: v })}
-          label="Add new games to Backlog"
-          hint="Also add them to your backlog."
-        />
-
-        <SubHead>Backlog view</SubHead>
-        <SwitchRow
-          checked={settings.showBacklogCalendar !== false}
-          onChange={(v) => setSettings({ showBacklogCalendar: v })}
-          label="Show upcoming release calendar on Backlog"
-          hint="Display a Steam Personal Calendar-style bottom bar for Backlog games that have not released yet."
-        />
-
         <SubHead>Library filters</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Drag to choose the order of the Library chips. Hide the ones you do not use; at least one stays visible.
@@ -1691,6 +1676,28 @@ export function SettingsView({
             ))}
           </div>
         )}
+      </Section>
+
+      <Section
+        id="orbit-backlog"
+        active={activeSection === 'orbit-backlog'}
+        icon={LibraryIcon}
+        title="Backlog"
+      >
+        <SubHead>Adding games</SubHead>
+        <SwitchRow
+          checked={settings.syncBacklog === true}
+          onChange={(v) => setSettings({ syncBacklog: v })}
+          label="Add new games to Backlog"
+          hint="Also add newly discovered games to your backlog."
+        />
+        <SubHead>Backlog view</SubHead>
+        <SwitchRow
+          checked={settings.showBacklogCalendar !== false}
+          onChange={(v) => setSettings({ showBacklogCalendar: v })}
+          label="Show upcoming release calendar on Backlog"
+          hint="Display a Steam Personal Calendar-style bottom bar for unreleased games."
+        />
       </Section>
 
       <Section

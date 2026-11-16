@@ -1728,7 +1728,7 @@ export default function App() {
               onLibraryChanged={() => void reload()}
               update={update}
               onFoundUpdate={setUpdate}
-              onOpenAlbum={() => setPage('statistics')}
+              onOpenAlbum={() => { setStatsTab('album'); setPage('statistics'); }}
               section={settingsJump?.id}
             />
           </div>

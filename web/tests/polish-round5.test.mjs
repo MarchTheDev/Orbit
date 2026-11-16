@@ -13,7 +13,7 @@ const css = read('../src/index.css');
 
 console.log('polish round 5 checks');
 check('Command Palette right-click menu is compact and offers Edit game, not a favorite toggle',
-  palette.includes('min-w-36 rounded-lg') && palette.includes('Edit game') && !palette.includes('>Toggle favorite</button>'));
+  palette.includes('w-44 rounded-lg') && palette.includes('text-[13px]') && palette.includes('Edit game') && !palette.includes('>Toggle favorite</button>'));
 check('Command Palette right preview pane has a clickable favorite star',
   palette.includes('onToggleFavorite={onToggleFavorite}') && palette.includes('<Star className="size-4"'));
 check('Backlog sort and reordering applies across all lanes, and owned library matches retire wishlist duplicates',

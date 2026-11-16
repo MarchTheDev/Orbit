@@ -34,7 +34,7 @@ import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
 import { overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
-import { prewarmLibraryArtwork, resolveWideArt } from '../utils/art';
+import { prewarmLibraryArtwork, resolveWideArt, wideArtImmediateFallback } from '../utils/art';
 import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
@@ -1197,11 +1197,13 @@ function GamePage({
   onUpdate: (patch: Partial<Game>) => void;
   onDiscoverSteam: () => void;
 }) {
-  const [stageArt, setStageArt] = useState<string | null>(null);
+  const [stageArt, setStageArt] = useState<{ gameId: string; src: string | null }>({ gameId: '', src: null });
+  const currentStageArt = stageArt.gameId === game.id ? stageArt.src : wideArtImmediateFallback(game);
   useEffect(() => {
     let current = true;
+    setStageArt({ gameId: game.id, src: wideArtImmediateFallback(game) });
     void resolveWideArt(game).then((src) => {
-      if (current) setStageArt(src);
+      if (current) setStageArt({ gameId: game.id, src });
     });
     return () => { current = false; };
   }, [game.id, game.coverPath, game.meta?.steamAppId, game.meta?.backgroundUrl, game.meta?.headerUrl, game.meta?.coverUrl]);
@@ -1264,8 +1266,8 @@ function GamePage({
           className="orbit-gamepage-art"
           aria-hidden
           style={{
-            backgroundImage: stageArt
-              ? `url("${stageArt}")`
+            backgroundImage: currentStageArt
+              ? `url("${currentStageArt}")`
               : `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
             backgroundSize: 'cover, auto',
           }}

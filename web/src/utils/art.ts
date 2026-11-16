@@ -58,13 +58,22 @@ export function wideArtCandidates(game: Game): string[] {
   const id = steamAppId(game);
   const sources = [
     game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : null,
-    ...(id ? [steamAsset(id, 'library_hero_2x.jpg'), steamAsset(id, 'library_hero.jpg'), steamAsset(id, 'page_bg_raw.jpg')] : []),
+    ...(id ? [steamAsset(id, 'library_hero_2x.jpg'), steamAsset(id, 'library_hero.jpg')] : []),
     game.meta?.backgroundUrl,
+    ...(id ? [steamAsset(id, 'page_bg_raw.jpg')] : []),
     game.meta?.headerUrl,
-    game.meta?.coverUrl,
-    game.coverPath ? fileSrc(game.coverPath) : null,
   ].filter((url): url is string => Boolean(url));
+  // A portrait cover is not a banner fallback: stretching one over the whole
+  // stage looks like a blurred default image and makes games without hero art
+  // appear to keep the previous game's banner. Show this game's colour plate
+  // until a genuine wide source resolves instead.
   return [...new Set(sources.filter((url) => !/page_bg_generated/i.test(url)))];
+}
+
+/** A known usable source shown immediately while sharper Steam hero art resolves. */
+export function wideArtImmediateFallback(game: Game): string | null {
+  const candidate = game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : game.meta?.backgroundUrl ?? game.meta?.headerUrl;
+  return candidate && !/page_bg_generated/i.test(candidate) ? candidate : null;
 }
 
 /** The widest picture, preferring sharp Steam hero art over the blurred page background. */

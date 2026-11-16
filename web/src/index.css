@@ -3577,11 +3577,16 @@ html.orbit-glass .orbit-album-undermenu {
   transition: border-color .12s var(--ease-snap), transform .12s var(--ease-snap);
 }
 .orbit-album-gamechip-art.is-all {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 2 / 3;
   color: var(--c-muted);
+  background: #101018;
 }
+.orbit-album-all-covers { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; opacity: .86; }
+.orbit-album-all-cover { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
+.orbit-album-all-icon { position: relative; z-index: 1; filter: drop-shadow(0 1px 4px #000); color: white; }
 .orbit-album-gamechip:hover .orbit-album-gamechip-art {
   border-color: color-mix(in srgb, var(--c-text) 28%, transparent);
   transform: translateY(-1px);
@@ -5890,6 +5895,39 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   .orbit-deck *,
   .orbit-deck { transition: none !important; animation: none !important; }
 }
+
+/* The Deck is a shelf first: the selected cover sits at the centre of the
+   screen as the browsable object, while its name and launch controls rest in
+   a quiet strip below. The Library page offers the separate full-wall grid. */
+.orbit-deck:not(.is-side) .orbit-deck-index {
+  order: 1;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+}
+.orbit-deck:not(.is-side) .orbit-deck-cards {
+  align-items: center;
+  gap: clamp(12px, 1.8vw, 24px);
+  padding: 20px 12px;
+}
+.orbit-deck:not(.is-side) .orbit-deck-card[aria-current='true'] { transform: translateY(-4px) scale(1.04); }
+.orbit-deck:not(.is-side) .orbit-deck-stage {
+  order: 2;
+  flex: 0 0 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.orbit-deck:not(.is-side) :is(.orbit-deck-stageart, .orbit-deck-stagescrim, .orbit-deck-stagewash, .orbit-deck-art) { display: none; }
+.orbit-deck:not(.is-side) .orbit-deck-stageinner {
+  height: auto;
+  align-items: center;
+  padding: 4px 10px 8px;
+}
+.orbit-deck:not(.is-side) .orbit-deck-copy { max-width: min(100%, 52rem); }
 
 /* ------------------------------------------------------------------ TV mode */
 

@@ -1038,7 +1038,12 @@ export function StatisticsView({
                       onClick={() => setAlbumGame('all')}
                     >
                       <span className="orbit-album-gamechip-art is-all">
-                        <Images className="size-4" />
+                        <span className="orbit-album-all-covers" aria-hidden="true">
+                          {albumGames.slice(0, 4).map((entry) => entry.game && (
+                            <Cover key={entry.folder} game={entry.game} className="orbit-album-all-cover" fit="cover" />
+                          ))}
+                        </span>
+                        <Images className="orbit-album-all-icon size-4" />
                       </span>
                       <span className="orbit-album-gamechip-name">All games</span>
                     </button>

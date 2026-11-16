@@ -71,6 +71,8 @@ export interface StardeckPrefs {
   stats: boolean;
   /** What the index holds: every game, or only what can be started. */
   scope: 'all' | 'startable';
+  /** Details shown under the covers in the library wall. */
+  coverLabel: 'name' | 'info' | 'none';
   /** A subtle grain over the artwork, so a flat cover does not look like a hole. */
   grain: boolean;
   /** The clock's seconds, for anyone who sits there watching one. */
@@ -94,6 +96,7 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   facts: true,
   stats: true,
   scope: 'all',
+  coverLabel: 'name',
   grain: true,
   seconds: false,
   backdrop: true,
@@ -106,6 +109,14 @@ const STARDECK_DEFAULT: StardeckPrefs = {
  * build, is a reason to start from the defaults and nothing more: no setting
  * here is worth a blank screen.
  */
+function savedStardeckPage(): 'deck' | 'library' {
+  try {
+    return localStorage.getItem('orbit.stardeck.lastPage') === 'library' ? 'library' : 'deck';
+  } catch {
+    return 'deck';
+  }
+}
+
 function savedStardeck(): StardeckPrefs {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(STARDECK_KEY) ?? 'null');
@@ -120,6 +131,7 @@ function savedStardeck(): StardeckPrefs {
         facts: value.facts !== false,
         stats: value.stats !== false,
         scope: value.scope === 'startable' ? 'startable' : 'all',
+        coverLabel: value.coverLabel === 'none' || value.coverLabel === 'info' ? value.coverLabel : 'name',
         grain: value.grain !== false,
         seconds: value.seconds === true,
         summary: value.summary !== false,
@@ -740,6 +752,16 @@ function StardeckMenu({
               ]}
               onChange={(next) => set('scope', next as StardeckPrefs['scope'])}
             />
+            <PanelChoice
+              label="Under library covers"
+              value={prefs.coverLabel}
+              options={[
+                { id: 'name', label: 'Game name' },
+                { id: 'info', label: 'Game info' },
+                { id: 'none', label: 'Nothing' },
+              ]}
+              onChange={(next) => set('coverLabel', next as StardeckPrefs['coverLabel'])}
+            />
             <p className="orbit-deckmenu-note">
               {library.length} {library.length === 1 ? 'game' : 'games'} on the deck.
             </p>
@@ -934,6 +956,10 @@ export function TvMode({
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     runningId && list.some((game) => game.id === runningId) ? runningId : null,
   );
+  const [view, setView] = useState<'deck' | 'library'>(savedStardeckPage);
+  useEffect(() => {
+    try { localStorage.setItem('orbit.stardeck.lastPage', view); } catch { /* Storage may be unavailable in a private or test context. */ }
+  }, [view]);
   const active = list.find((game) => game.id === selectedId) ?? list[0] ?? null;
   const at = active ? list.indexOf(active) : 0;
   const running = active !== null && active.id === runningId;
@@ -1087,7 +1113,7 @@ export function TvMode({
     el instanceof HTMLElement && el.closest('[data-tv-action]') !== null;
   /** The controls in the bar along the top: the sound and the way out. */
   const barButtons = () =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-topbar] button'));
+    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-topbar] button:not([data-tv-page-toggle])'));
   const inTopbar = (el: EventTarget | null) =>
     el instanceof HTMLElement && el.closest('[data-tv-topbar]') !== null;
 
@@ -1096,6 +1122,11 @@ export function TvMode({
       // A game's own page reads its own keys, a dialog over the hub owns them
       // outright, and the settings sheet answers Escape itself.
       if (detailed || menu || document.querySelector('[role="dialog"]')) return;
+      if (event.key === 'l' || event.key === 'L') {
+        event.preventDefault();
+        setView((current) => current === 'deck' ? 'library' : 'deck');
+        return;
+      }
       const inActions = onAction(document.activeElement);
       const inBar = inTopbar(document.activeElement);
       // Nothing is focused yet - the first press of a controller lands here.
@@ -1159,8 +1190,7 @@ export function TvMode({
           // the page for the bar at the top, where the sound and the way out
           // are. Without that second step the bar would need a mouse.
           if (inActions) {
-            const bar = document.querySelector<HTMLElement>('[data-tv-topbar] button');
-            bar?.focus({ preventScroll: true });
+            barButtons()[0]?.focus({ preventScroll: true });
             return;
           }
           (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
@@ -1226,6 +1256,7 @@ export function TvMode({
       }
       start();
     };
+    const onPadPage = () => setView((current) => current === 'deck' ? 'library' : 'deck');
     const onPadBack = (event: Event) => {
       // Answered here rather than by the shell: only the hub knows whether it
       // is on the rail, on a game's page or inside its settings. The rail is
@@ -1242,9 +1273,11 @@ export function TvMode({
       }
     };
     window.addEventListener('orbit-pad-play', onPadPlay);
+    window.addEventListener('orbit-pad-page', onPadPage);
     window.addEventListener('orbit-pad-back', onPadBack, true);
     return () => {
       window.removeEventListener('orbit-pad-play', onPadPlay);
+      window.removeEventListener('orbit-pad-page', onPadPage);
       window.removeEventListener('orbit-pad-back', onPadBack, true);
     };
   }, [detailed, menu, onPlay, onStop, runningId, start]);
@@ -1306,6 +1339,11 @@ export function TvMode({
             </button>
           </span>
         )}
+
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-1" role="group" aria-label="Stardeck page">
+          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="rounded-full px-3 py-1.5 text-xs font-semibold text-white/75 hover:bg-white/10 aria-pressed:bg-white/15">Deck</button>
+          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="rounded-full px-3 py-1.5 text-xs font-semibold text-white/75 hover:bg-white/10 aria-pressed:bg-white/15">Library</button>
+        </div>
 
         <span className="flex-1" />
 
@@ -1403,6 +1441,26 @@ export function TvMode({
             </button>
           </div>
         ) : (
+          view === 'library' ? (
+            <section className="mx-auto w-full max-w-[1500px] flex-1 overflow-y-auto px-6 pb-10 pt-4 sm:px-10" aria-label="Stardeck library">
+              <div className="mb-6 flex items-end justify-between gap-4">
+                <div><p className="text-xs font-bold uppercase tracking-[.28em] text-white/40">Your collection</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-5xl">Library</h1></div>
+                <p className="text-sm text-white/45">{list.length} games · choose one to play</p>
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-6">
+                {list.map((game, n) => (
+                  <button key={game.id} data-tv-cover={n} type="button" onFocus={() => setSelectedId(game.id)} onClick={() => {
+                    setSelectedId(game.id);
+                    if (padJustActivated(400)) onPlay(game);
+                  }} onDoubleClick={() => onPlay(game)} aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title} className={cn('group min-w-0 text-left', game.id === active.id && 'rounded-xl ring-2 ring-accent ring-offset-4 ring-offset-[#05040d]')}>
+                    <span className="block aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-xl transition group-hover:-translate-y-1 group-hover:border-white/30"><Cover game={game} className="size-full" fit="cover" /></span>
+                    {prefs.coverLabel === 'name' && <span className="mt-2 block truncate text-sm font-semibold text-white/85">{game.title}</span>}
+                    {prefs.coverLabel === 'info' && <span className="mt-2 block truncate text-xs text-white/60">{game.meta?.releaseYear ?? game.meta?.genres?.[0] ?? game.status}</span>}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : (
           <div className={cn('orbit-deck', prefs.stage === 'side' && 'is-side')}>
             {/* The stage: the chosen game, filling the screen on its own wide
                 art. A television is watched from across a room, so the game is
@@ -1637,6 +1695,7 @@ export function TvMode({
               </ul>
             </section>
           </div>
+          )
         )}
       </main>
 

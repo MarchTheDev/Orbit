@@ -13,6 +13,7 @@
  * the window it is already in.
  */
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { isNative } from './native';
 
 /**
@@ -25,6 +26,7 @@ export const tvLite = navigator.userAgent.includes('Linux');
 
 /** Whether the document itself is the thing that was made fullscreen. */
 let askedTheDocument = false;
+let previousNativeBounds: { x: number; y: number; width: number; height: number } | null = null;
 
 /** The last thing to go wrong, for a caller that wants to say so. */
 let lastError: string | null = null;
@@ -46,7 +48,10 @@ export async function enterFullscreen(): Promise<boolean> {
   lastError = null;
   if (isNative()) {
     try {
-      await getCurrentWindow().setFullscreen(true);
+      const window = getCurrentWindow();
+      const [position, size] = await Promise.all([window.outerPosition(), window.outerSize()]);
+      previousNativeBounds = { x: position.x, y: position.y, width: size.width, height: size.height };
+      await window.setFullscreen(true);
       return true;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -72,7 +77,17 @@ export async function enterFullscreen(): Promise<boolean> {
 export async function leaveFullscreen(): Promise<void> {
   if (isNative()) {
     try {
-      await getCurrentWindow().setFullscreen(false);
+      const window = getCurrentWindow();
+      await window.setFullscreen(false);
+      const bounds = previousNativeBounds;
+      previousNativeBounds = null;
+      if (bounds) {
+        // Let the compositor finish leaving fullscreen before restoring the
+        // exact previous rectangle, including a window on a secondary screen.
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 80));
+        await window.setSize(new PhysicalSize(bounds.width, bounds.height));
+        await window.setPosition(new PhysicalPosition(bounds.x, bounds.y));
+      }
     } catch {
       /* The window was closed, or is not ours to resize any more. */
     }

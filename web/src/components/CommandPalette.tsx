@@ -1528,27 +1528,27 @@ export function CommandPalette({
           <div className="fixed inset-0 z-[70]" onMouseDown={() => setContextMenu(null)}>
             <div
               role="menu"
-              className="absolute min-w-36 rounded-lg border border-line bg-panel p-1 shadow-xl"
-              style={{ left: Math.min(contextMenu.x, window.innerWidth - 160), top: Math.min(contextMenu.y, window.innerHeight - 190) }}
+              className="absolute w-44 rounded-lg border border-line bg-panel p-1.5 text-sm shadow-xl"
+              style={{ left: Math.min(contextMenu.x, window.innerWidth - 176), top: Math.min(contextMenu.y, window.innerHeight - 190) }}
               onMouseDown={(event) => event.stopPropagation()}
             >
               {contextMenu.row.game ? (
                 <>
-                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>
+                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-panel2" onClick={() => { onGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>
                     Open game details
                   </button>
-                  {onPlay && !contextMenu.row.game.planned && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onPlay(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Run game</button>}
-                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => togglePinned(contextMenu.row)}>
+                  {onPlay && !contextMenu.row.game.planned && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-panel2" onClick={() => { onPlay(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Run game</button>}
+                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-panel2" onClick={() => togglePinned(contextMenu.row)}>
                     {pinnedIds.includes(contextMenu.row.game.id) ? 'Unpin from top' : 'Pin to top'}
                   </button>
-                  {onEditGame && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onEditGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Edit game</button>}
+                  {onEditGame && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-panel2" onClick={() => { onEditGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Edit game</button>}
                 </>
               ) : (
-                <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { executeRow(contextMenu.row); setContextMenu(null); }}>
+                <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-panel2" onClick={() => { executeRow(contextMenu.row); setContextMenu(null); }}>
                   Open / Run
                 </button>
               )}
-              {contextMenu.row.recentKey && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] text-red-300 hover:bg-panel2" onClick={() => { const next = recentKeys.filter((key) => key !== contextMenu.row.recentKey); setRecentKeys(next); try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ } setContextMenu(null); }}>Remove from Recent</button>}
+              {contextMenu.row.recentKey && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-red-300 hover:bg-panel2" onClick={() => { const next = recentKeys.filter((key) => key !== contextMenu.row.recentKey); setRecentKeys(next); try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ } setContextMenu(null); }}>Remove from Recent</button>}
             </div>
           </div>
         )}

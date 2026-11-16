@@ -824,7 +824,6 @@ export function BacklogView({
             unreleasedById={unreleasedById}
             movable={movableOrder}
             onMove={move}
-            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}
@@ -842,7 +841,6 @@ export function BacklogView({
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
             movable={movableOrder}
-            ranked={order === 'mine'}
             onMove={move}
             showTimes={showTimes}
           />
@@ -862,7 +860,6 @@ export function BacklogView({
             unreleasedById={unreleasedById}
             movable={movableOrder}
             onMove={move}
-            ranked={order === 'mine'}
             notOwned
             showTimes={showTimes}
             onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
@@ -887,7 +884,6 @@ export function BacklogView({
             unreleasedById={unreleasedById}
             movable={movableOrder}
             onMove={move}
-            ranked={order === 'mine'}
             readOnlyMoves
             showTimes={showTimes}
           />
@@ -907,7 +903,6 @@ export function BacklogView({
             unreleasedById={unreleasedById}
             movable={movableOrder}
             onMove={move}
-            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}
@@ -926,7 +921,6 @@ export function BacklogView({
             unreleasedById={unreleasedById}
             movable={movableOrder}
             onMove={move}
-            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}
@@ -965,7 +959,6 @@ function Section({
   onEditRelease,
   unreleasedById,
   movable,
-  ranked = false,
   onMove,
   onRemove,
   onOwned,
@@ -984,7 +977,6 @@ function Section({
   onEditRelease: (game: Game) => void;
   unreleasedById: Map<string, ReturnType<typeof parseGameRelease>>;
   movable: boolean;
-  ranked?: boolean;
   onMove?: (fromId: string, toId: string, after: boolean) => void;
   onRemove?: (id: string) => void;
   onOwned?: (id: string) => void;
@@ -1017,7 +1009,7 @@ function Section({
         </div>
       ) : (
         <ul ref={list} className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {games.map((g, index) => {
+          {games.map((g) => {
             const main = g.hltb?.main ?? 0;
             const left = Math.max(0, main - g.playSecs / 3600);
             const pct = main > 0 ? Math.min(100, (g.playSecs / 3600 / main) * 100) : 0;
@@ -1051,7 +1043,7 @@ function Section({
                     className="grid size-8 shrink-0 place-items-center rounded-lg border border-transparent text-xs font-semibold text-muted/55"
                     aria-hidden="true"
                   >
-                    {ranked ? `#${index + 1}` : <GripVertical className="size-4 opacity-40" />}
+                    <GripVertical className="size-4 opacity-40" />
                   </span>
                 )}
 
@@ -1062,11 +1054,6 @@ function Section({
                   title={`Open ${g.title}`}
                 >
                   <Cover game={g} fit="cover" className="h-28 w-[4.5rem] shrink-0 rounded-lg transition duration-200 group-hover:scale-105 [&_span]:text-sm" />
-                  {ranked && movable && (
-                    <span className="orbit-num absolute left-1 top-1 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                      #{index + 1}
-                    </span>
-                  )}
                 </button>
 
                 <div className="min-w-0 flex-1">
