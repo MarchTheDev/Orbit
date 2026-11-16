@@ -224,6 +224,9 @@ export default function App() {
   const [page, setPage] = useState<Page>('library');
   /** A genre the palette asked the library to show. */
   const [libraryGenre, setLibraryGenre] = useState<string | null>(null);
+  /** A game the palette asked the Journal to open directly. */
+  const [journalFocus, setJournalFocus] = useState<{ id: string; token: number } | null>(null);
+  const journalFocusToken = useRef(0);
   /** A game the history wants the shelf to select again. */
   const [historyFocus, setHistoryFocus] = useState<{ id: string; page: Page; token: number } | null>(null);
   const historyFocusToken = useRef(0);
@@ -1761,6 +1764,7 @@ export default function App() {
             onJournalMembership={setJournalMembership}
             onUpdate={(id, patch) => updateGame(id, patch)}
             onEditGame={openGameEditor}
+            focusRequest={journalFocus}
             // The Journal is read for the game being written about, so it can be
             // arranged in whatever order that reading wants.
             order={settings.logOrder ?? []}
@@ -2158,10 +2162,27 @@ export default function App() {
         <CommandPalette
           open={palette}
           games={games}
+          focusedGameId={page === 'library' ? focusStep.current : selectedId}
+          customThemes={settings.customThemes ?? []}
+          currentThemeId={settings.theme}
           onClose={() => setPalette(false)}
           onPage={goPage}
           onGame={openDetail}
+          onEditGame={(id) => openGameEditor(id)}
+          onToggleFavorite={toggleFavorite}
+          onUpdateGame={(id, patch) => updateGame(id, patch)}
+          onRevealGame={(game) => {
+            const target = game.installDir ?? game.exePath;
+            if (target) void revealInExplorer(target);
+          }}
+          onOpenJournal={(id) => {
+            setJournalMembership(id, true);
+            setJournalFocus({ id, token: ++journalFocusToken.current });
+            goPage('logs');
+          }}
           onSettings={() => openSettings()}
+          onSettingsSection={(secId) => openSettings(secId)}
+          onSelectTheme={(themeId) => setSettings({ theme: themeId })}
           onAdd={() => setShowAdd(true)}
           onAddFolder={() => {
             setImportFolder(settings.scanPath?.trim() || null);

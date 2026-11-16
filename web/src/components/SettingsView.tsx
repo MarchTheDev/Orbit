@@ -2,12 +2,12 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
-  Check,
   Database,
   Download,
   Eye,
   EyeOff,
   FolderOpen,
+  Globe,
   HardDrive,
   Library as LibraryIcon,
   GitBranch,
@@ -33,6 +33,20 @@ import {
   Plus,
   X,
 } from 'lucide-react';
+import {
+  siEpicgames,
+  siFandom,
+  siGogdotcom,
+  siIgdb,
+  siLutris,
+  siMetacritic,
+  siPcgamingwiki,
+  siProtondb,
+  siRetroarch,
+  siSteam,
+  siSteamdb,
+  siWikipedia,
+} from 'simple-icons';
 import { OVERLAY_BOXES, type FontChoice, type LauncherId, type OverlayBoxId, type Page, type Settings } from '../types';
 import { FONTS, THEMES } from '../data/themes';
 import { LAUNCHERS, NOT_SCANNABLE_NOTE, canScan, launcherOn } from '../data/launchers';
@@ -169,20 +183,111 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
   const toggle = (id: string, enabled: boolean) => setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
   const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
 
-function SourceIcon({ id }: { id: string }) {
-  const icons: Record<string, { bg: string; fg: string; label: string; svg: string }> = {
-    steam: { bg: "#1b2838", fg: "#fff", label: "Steam", svg: '<path d="M11.5 3a8.5 8.5 0 1 0 5.2 15.2L15 16.4a6.5 6.5 0 1 1 1.8-5.2H11.5V3z" fill="currentColor"/>' },
-    steamgriddb: { bg: "#0f172a", fg: "#ff4a4a", label: "SGDB", svg: '<rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M8 9h8M8 12h6M8 15h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
-    hltb: { bg: "#0e2a3a", fg: "#3ad2c4", label: "HLTB", svg: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>' },
-    lutris: { bg: "#ff6d00", fg: "#fff", label: "Lutris", svg: '<path d="M5 8l7-3 7 3-7 3-7-3zm0 5l7 3 7-3M5 13l7 3 7-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
-    libretro: { bg: "#1e1b4b", fg: "#a5b4fc", label: "Retro", svg: '<rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 5v3M12 16v3M5 12h3M16 12h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
-    protondb: { bg: "#3b0764", fg: "#c4b5fd", label: "Proton", svg: '<path d="M12 4L4 8v8l8 4 8-4V8l-8-4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M4 8l8 4 8-4M12 12v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
-    web: { bg: "#0f172a", fg: "#60a5fa", label: "Web", svg: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
+function resolveSourceKey(id: string, label?: string, url?: string): string {
+  const raw = `${id} ${label ?? ''} ${url ?? ''}`.toLowerCase();
+  if (id === 'steam' || (raw.includes('steampowered') && !raw.includes('steamgriddb') && !raw.includes('steamdb'))) return 'steam';
+  if (id === 'steamgriddb' || raw.includes('steamgriddb')) return 'steamgriddb';
+  if (id === 'steamdb' || raw.includes('steamdb')) return 'steamdb';
+  if (id === 'hltb' || raw.includes('howlongtobeat') || raw.includes('hltb')) return 'hltb';
+  if (id === 'lutris' || raw.includes('lutris')) return 'lutris';
+  if (id === 'libretro' || raw.includes('libretro') || raw.includes('retroarch')) return 'libretro';
+  if (id === 'protondb' || raw.includes('protondb')) return 'protondb';
+  if (id === 'igdb' || raw.includes('igdb')) return 'igdb';
+  if (id === 'pcgamingwiki' || raw.includes('pcgamingwiki')) return 'pcgamingwiki';
+  if (id === 'wikipedia' || raw.includes('wikipedia')) return 'wikipedia';
+  if (id === 'metacritic' || raw.includes('metacritic')) return 'metacritic';
+  if (id === 'gog' || raw.includes('gog.com')) return 'gog';
+  if (id === 'epic' || raw.includes('epicgames')) return 'epic';
+  if (id === 'fandom' || raw.includes('fandom.com')) return 'fandom';
+  if (id === 'vndb' || raw.includes('vndb')) return 'vndb';
+  if (id === 'web') return 'web';
+  return id;
+}
+
+function SourceIcon({ id, label, url }: { id: string; label?: string; url?: string }) {
+  const key = resolveSourceKey(id, label, url);
+  const simple: Record<string, { bg: string; fg: string; title: string; path: string }> = {
+    steam: { bg: '#171d25', fg: '#66c0f4', title: 'Steam', path: siSteam.path },
+    steamdb: { bg: '#131b26', fg: '#66c0f4', title: 'SteamDB', path: siSteamdb.path },
+    lutris: { bg: '#221910', fg: '#ff9900', title: 'Lutris', path: siLutris.path },
+    libretro: { bg: '#171a24', fg: '#e2e8f0', title: 'Libretro', path: siRetroarch.path },
+    protondb: { bg: '#231320', fg: '#f56565', title: 'ProtonDB', path: siProtondb.path },
+    igdb: { bg: '#1b1430', fg: '#9147ff', title: 'IGDB', path: siIgdb.path },
+    pcgamingwiki: { bg: '#131d2e', fg: '#6892d5', title: 'PCGamingWiki', path: siPcgamingwiki.path },
+    wikipedia: { bg: '#181a1f', fg: '#f8fafc', title: 'Wikipedia', path: siWikipedia.path },
+    metacritic: { bg: '#201c0e', fg: '#ffcc34', title: 'Metacritic', path: siMetacritic.path },
+    gog: { bg: '#1e1328', fg: '#c084fc', title: 'GOG', path: siGogdotcom.path },
+    epic: { bg: '#17181c', fg: '#f8fafc', title: 'Epic Games', path: siEpicgames.path },
+    fandom: { bg: '#24111a', fg: '#fa005a', title: 'Fandom', path: siFandom.path },
   };
-  const entry = icons[id] ?? { bg: "var(--c-panel2)", fg: "var(--c-text)", label: id.slice(0,2).toUpperCase(), svg: "" };
+  const brand = simple[key];
+  if (brand) {
+    return (
+      <span
+        className="grid size-7 shrink-0 place-items-center rounded-lg border border-line"
+        style={{ background: brand.bg, color: brand.fg }}
+        aria-label={brand.title}
+        title={brand.title}
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5 fill-current" aria-hidden>
+          <path d={brand.path} />
+        </svg>
+      </span>
+    );
+  }
+  if (key === 'steamgriddb') {
+    return (
+      <span
+        className="grid size-7 shrink-0 place-items-center rounded-lg border border-line"
+        style={{ background: '#0f1c2e', color: '#6cb6ff' }}
+        aria-label="SteamGridDB"
+        title="SteamGridDB"
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5 fill-current" aria-hidden>
+          <rect x="3" y="3" width="7.8" height="11" rx="1.7" />
+          <rect x="13.2" y="3" width="7.8" height="6.2" rx="1.7" opacity=".88" />
+          <rect x="3" y="16" width="7.8" height="5" rx="1.5" opacity=".72" />
+          <rect x="13.2" y="11.2" width="7.8" height="9.8" rx="1.7" />
+        </svg>
+      </span>
+    );
+  }
+  if (key === 'hltb') {
+    return (
+      <span
+        className="grid size-7 shrink-0 place-items-center rounded-lg border border-line"
+        style={{ background: '#112230', color: '#2ec4b6' }}
+        aria-label="HowLongToBeat"
+        title="HowLongToBeat"
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5" fill="none" aria-hidden>
+          <path d="M9.5 2.75h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="12" cy="13" r="7.5" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 9.2v4.1l2.8 1.7" stroke="#ff7f2a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+  if (key === 'vndb') {
+    return (
+      <span
+        className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-[9.5px] font-extrabold tracking-tight"
+        style={{ background: '#101d2c', color: '#7dd3fc' }}
+        aria-label="VNDB"
+        title="VNDB"
+      >
+        VN
+      </span>
+    );
+  }
   return (
-    <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-white" style={{ background: entry.bg, color: entry.fg }} aria-label={entry.label} title={entry.label}>
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden dangerouslySetInnerHTML={{ __html: entry.svg }} />
+    <span
+      className="grid size-7 shrink-0 place-items-center rounded-lg border border-line"
+      style={{ background: '#0f1c2e', color: '#60a5fa' }}
+      aria-label={label || 'Web'}
+      title={label || 'Web'}
+    >
+      <Globe className="size-3.5" aria-hidden />
     </span>
   );
 }
@@ -197,7 +302,7 @@ function SourceIcon({ id }: { id: string }) {
             key={src.id}
             className="group flex items-center gap-2 rounded-xl border border-line bg-panel px-2.5 py-2 transition"
           >
-            <SourceIcon id={src.id} />
+            <SourceIcon id={src.id} label={src.label} url={src.url} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-fg">{src.label}</span>
               {src.note && <span className="block truncate text-[11px] text-muted">{src.note}</span>}

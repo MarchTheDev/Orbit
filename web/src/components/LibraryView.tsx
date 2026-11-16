@@ -382,8 +382,6 @@ export function LibraryView({
   );
   /** Grid wall sizing, kept apart from the shelf's. */
   const [gridWidth, setGridWidth] = useState(coverWidth);
-  /** Whether the shelf widens its covers to fill the row it was given. */
-  const [shelfFill, setShelfFill] = useState(() => localStorage.getItem('orbit.observatory.fill') === 'on');
   /**
    * How artwork fills its frame, per view.
    *
@@ -410,7 +408,6 @@ export function LibraryView({
     () => localStorage.setItem('orbit.library.openOnSelect', gridOpensOnSelect ? '1' : '0'),
     [gridOpensOnSelect],
   );
-  useEffect(() => localStorage.setItem('orbit.observatory.fill', shelfFill ? 'on' : 'off'), [shelfFill]);
   useEffect(() => localStorage.setItem('orbit.observatory.fit', shelfFit), [shelfFit]);
   useEffect(() => localStorage.setItem('orbit.library.fit', gridFit), [gridFit]);
   // App's shape is the answer for a library that has never chosen one per view,
@@ -580,7 +577,6 @@ export function LibraryView({
     setShelfWidth(DEFAULT_SHELF_WIDTH);
     setShelfRows(DEFAULT_SHELF_ROWS);
     setListSize(DEFAULT_LIST_SIZE);
-    setShelfFill(false);
     setShelfShape(DEFAULT_SHAPE);
     setSections(SECTIONS.map((section) => section.value));
     setCorners('soft');
@@ -700,7 +696,7 @@ export function LibraryView({
           <div className="orbit-filter" ref={filterBox}>
             <button
               type="button"
-              className="chip shrink-0"
+              className={cn('chip shrink-0', facetCount > 0 && 'is-filtered')}
               data-open={filtersOpen || undefined}
               aria-expanded={filtersOpen}
               aria-label="Filter and sort the shelf"
@@ -708,11 +704,7 @@ export function LibraryView({
             >
               <SlidersHorizontal className="mr-1.5 size-3.5" />
               Filters
-              {facetCount > 0 && (
-                <span className="orbit-num ml-1.5 rounded-md bg-onaccent/15 px-1.5 py-px text-[9.5px] text-onaccent">
-                  {facetCount}
-                </span>
-              )}
+              {facetCount > 0 && <span className="orbit-filter-dot" aria-hidden />}
             </button>
             {filtersOpen && (
               <div className="orbit-viewmenu orbit-filterpop" role="dialog" aria-label="Filters and sorting">
@@ -852,7 +844,6 @@ export function LibraryView({
                       </div>
                       <div className="orbit-viewmenu-row"><span>Cover size</span><span className="orbit-viewmenu-value">{shelfWidth} px</span></div>
                       <input type="range" min={MIN_SHELF_WIDTH} max={MAX_SHELF_WIDTH} step={4} value={shelfWidth} onChange={(event) => setShelfWidth(Number(event.target.value))} className="orbit-range w-full cursor-pointer" aria-label="Shelf cover size" />
-                      <label className="orbit-viewmenu-check"><input type="checkbox" checked={shelfFill} onChange={() => setShelfFill(!shelfFill)} /> Fill the row</label>
                     </>
                   ) : (
                     <div className="orbit-viewmenu-block">
@@ -966,7 +957,7 @@ export function LibraryView({
             </div>
             <div className="orbit-shelf-scroll">
               {rail === 'covers' ? (
-                <div className={cn('orbit-shelf-grid', shelfFill && 'is-filled')}>
+                <div className="orbit-shelf-grid">
                   {shown.map((game) => (
                     <button
                       key={game.id}
@@ -1083,9 +1074,18 @@ function CollapsibleGroup({ title, children, defaultOpen = false }: { title: str
     <div className="orbit-viewgroup">
       <button type="button" className="orbit-viewgroup-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span>{title}</span>
-        <ChevronDown className={`size-3.5 transition ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className="orbit-viewgroup-chev size-3.5" />
       </button>
-      {open && <div className="orbit-viewgroup-body">{children}</div>}
+      <div
+        className="orbit-viewgroup-collapse"
+        data-open={open ? 'true' : 'false'}
+        aria-hidden={!open}
+        inert={!open || undefined}
+      >
+        <div className="orbit-viewgroup-inner">
+          <div className="orbit-viewgroup-body">{children}</div>
+        </div>
+      </div>
     </div>
   );
 }

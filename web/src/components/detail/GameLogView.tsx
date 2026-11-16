@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, ChevronUp, Clock, GripVertical, ListFilter, NotebookPen, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Game, GameLog, Playthrough } from '../../types';
 import { addGameLog, addPlaythrough, deleteGameLog, deletePlaythrough, listGameLogs, listPlaythroughs, renamePlaythrough, reorderGameLogs, setCurrentPlaythrough, updateGameLog } from '../../services/native';
 import { rememberPlaythrough } from '../../services/playthroughs';
@@ -90,6 +90,7 @@ export function GameLogView({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order>('mine');
+  const [entryFilter, setEntryFilter] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detailsDraft, setDetailsDraft] = useState('');
   const [detailsSaving, setDetailsSaving] = useState(false);
@@ -175,7 +176,10 @@ export function GameLogView({
    * back and forth never loses an arrangement.
    */
   const shown = useMemo(() => {
-    const list = [...rows];
+    const q = entryFilter.trim().toLowerCase();
+    const list = q
+      ? rows.filter((r) => r.note.toLowerCase().includes(q) || (r.details ?? '').toLowerCase().includes(q))
+      : [...rows];
     switch (order) {
       case 'newest':
         return list.sort((a, b) => b.at - a.at || b.id - a.id);
@@ -188,7 +192,7 @@ export function GameLogView({
       default:
         return list;
     }
-  }, [rows, order]);
+  }, [rows, order, entryFilter]);
 
   /**
    * Move one entry to where another one is.
@@ -366,6 +370,108 @@ export function GameLogView({
     }
   };
 
+  const renderDraftCard = (mode: 'new' | 'edit') => {
+    if (!draft) return null;
+    return (
+      <div className={cn('orbit-jdraft', mode === 'edit' && 'is-inline')}>
+        <div className="orbit-jdraft-top">
+          <span className="orbit-jdraft-badge">
+            <NotebookPen className="size-3.5 text-accent" />
+            {mode === 'edit' ? 'Editing entry' : 'New journal entry'}
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {QUICK_NOTES.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => setDraft({ ...draft, note: q })}
+                className={cn('orbit-logquick', draft.note === q && 'is-chosen')}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="block">
+          <span className="orbit-logfield">What happened</span>
+          <input
+            className={inputCls}
+            value={draft.note}
+            autoFocus
+            onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+            placeholder="Finished main story, reached a new region, beat a tough boss…"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) void save();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+          />
+        </label>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="orbit-logfield">Day (required) · time optional</span>
+            <DateTimePicker
+              value={draft.at}
+              onChange={(at) => setDraft({ ...draft, at })}
+              placeholder="Choose a day"
+              title="Choose the day; clock time is optional"
+              optionalTime
+              clearable
+            />
+          </label>
+          <label className="block">
+            <span className="orbit-logfield">Play duration (optional)</span>
+            <input
+              className={inputCls}
+              value={draft.secs}
+              onChange={(e) => setDraft({ ...draft, secs: e.target.value })}
+              placeholder="10h, 45m, or leave empty"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+
+        <label className="block">
+          <span className="orbit-logfield">More about this entry (optional)</span>
+          <textarea
+            className={`${inputCls} mt-1 min-h-20 resize-y text-sm leading-relaxed`}
+            rows={3}
+            value={draft.details}
+            onChange={(e) => setDraft({ ...draft, details: e.target.value })}
+            placeholder="Builds, story thoughts, screenshots context, or anything else to remember."
+          />
+        </label>
+
+        {error && <p className="text-[11.5px] font-medium text-rose-400">{error}</p>}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setDraft(null);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted transition hover:border-fg/25 hover:text-fg"
+          >
+            <X className="size-3.5" />
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            className={cn('inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold', btnAccent)}
+          >
+            <Check className="size-3.5" />
+            Save entry
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const canDragEntries = order === 'mine' && entryFilter.trim() === '';
+
   return (
     <section className="orbit-logview">
       <PlaythroughBar
@@ -377,284 +483,262 @@ export function GameLogView({
         onRename={(id, name) => void renameRun(id, name)}
         onDelete={(run) => void removeRun(run)}
       />
-      <div className="orbit-loghead">
-        <div className="min-w-0">
-          <h3 className="orbit-loghead-title">
-            <NotebookPen className="size-4" />
-            Log
-          </h3>
-          <p className="orbit-loghead-sub">Your notes about {gameTitle}. Nothing here is tracked for you.</p>
-        </div>
-        {/* The total time is the drawer's business, where the log sits beside
-            the session clock. In the Journal the page is the writing, and the
-            hours above the count were one more set of numbers to read past. */}
-        <p className="text-[11px] text-muted">
-          {withClock ? `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}` : fmtClock(total)}
-          {!withClock && (
-            <>
-              {' '}
-              across {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
-            </>
-          )}
-        </p>
-      </div>
 
       <div
+        className="orbit-jcard"
         data-orbit-pad-zone={withClock ? 'journal-logs' : undefined}
         data-orbit-pad-game={withClock ? gameId : undefined}
       >
-      {draft ? (
-        <div className="orbit-logdraft">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="orbit-logfield">Day (required) · time optional</span>
-              <DateTimePicker
-                value={draft.at}
-                onChange={(at) => setDraft({ ...draft, at })}
-                placeholder="Choose a day"
-                title="Choose the day; clock time is optional"
-                optionalTime
-                clearable
-              />
-            </label>
-            <label className="block">
-              <span className="orbit-logfield">Play duration (optional)</span>
-              <input
-                className={inputCls}
-                value={draft.secs}
-                onChange={(e) => setDraft({ ...draft, secs: e.target.value })}
-                placeholder="10h, 45m, or leave empty"
-                spellCheck={false}
-              />
-            </label>
+        <div className="orbit-jcard-head">
+          <div className="min-w-0">
+            <h3 className="orbit-jcard-title">
+              <NotebookPen className="size-4 text-accent" />
+              <span>Entries</span>
+              <span className="orbit-jcard-count orbit-num">{rows.length}</span>
+              {!withClock && total > 0 && (
+                <span className="text-[11px] font-normal text-muted">· {fmtClock(total)}</span>
+              )}
+            </h3>
+            <p className="orbit-jcard-sub">
+              Milestones, sessions, and moments on {current ? current.name : gameTitle}.
+            </p>
           </div>
-          <label className="block">
-            <span className="orbit-logfield">What happened</span>
-            <input
-              className={inputCls}
-              value={draft.note}
-              onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-              placeholder="finished main story"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void save();
-              }}
-            />
-          </label>
-          <label className="block">
-            <span className="orbit-logfield">More about this entry (optional)</span>
-            <textarea
-              className={`${inputCls} mt-1 min-h-20 resize-y text-sm leading-relaxed`}
-              rows={3}
-              value={draft.details}
-              onChange={(e) => setDraft({ ...draft, details: e.target.value })}
-              placeholder="A separate note with anything else you want to remember."
-            />
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            {QUICK_NOTES.map((q) => (
-              <button
-                key={q}
-                onClick={() => setDraft({ ...draft, note: q })}
-                className="orbit-logquick"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-          {error && <p className="text-[11px] text-rose-400">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={() => void save()}
-              className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs', btnAccent)}
-            >
-              <Check className="size-3.5" />
-              Save entry
-            </button>
-            <button
-              onClick={() => setDraft(null)}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted hover:text-fg"
-            >
-              <X className="size-3.5" />
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => {
-            setError(null);
-            setDraft(blank());
-          }}
-          className="orbit-logadd"
-        >
-          <Plus className="size-4" />
-          Add an entry
-        </button>
-      )}
 
-      {rows.length > 1 && (
-        <div className="mb-3 flex items-center gap-2">
-          <ListFilter className="size-3.5 shrink-0 text-muted" />
-          <Select
-            value={order}
-            onChange={setOrder}
-            className="w-56 !py-1 text-[11px]"
-            menuClassName="w-56"
-            ariaLabel="How the entries are ordered"
-            options={ORDERS.map((o) => ({ value: o.id, label: o.label }))}
-          />
-          {order === 'mine' && rows.length > 1 && (
-            <span className="text-[11px] text-muted">Drag an entry by its handle to move it.</span>
-          )}
-        </div>
-      )}
-
-      {rows.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted">
-          Nothing written yet. Finished the story, beat the DLC, went back to an older save: those go here.
-        </p>
-      ) : (
-        <ol className="orbit-loglist">
-          {shown.map((r) => {
-            const expanded = expandedId === r.id;
-            const savedDetails = r.details ?? '';
-            const detailsChanged = detailsDraft !== savedDetails;
-            return (
-              <li
-                key={r.id}
-                {...bindLogRow(r.id, order === 'mine', drag.bind)}
-                className={`orbit-logrow ${order === 'mine' ? 'is-draggable' : ''} ${
-                  order === 'mine' && drag.over === String(r.id) ? 'is-over' : ''
-                } ${order === 'mine' && drag.dragging === String(r.id) ? 'is-dragging' : ''}`}
-              >
-                {/* The timeline's own mark: a dot on the rule, with the day
-                    beside it, so a list of entries reads as a sequence rather
-                    than as a table of timestamps. */}
-                <span className="orbit-logrow-mark" aria-hidden>
-                  <i />
-                </span>
-                <div className="orbit-logrow-body">
-                  {order === 'mine' && (
-                    <span
-                      title="Press here and move to place this entry"
-                      aria-label="Press here and move to place this entry"
-                      className="shrink-0 text-muted"
-                    >
-                      <GripVertical className="size-4" />
-                    </span>
-                  )}
+          <div className="orbit-jcard-controls">
+            {(rows.length > 2 || entryFilter.trim() !== '') && (
+              <label className="orbit-jsearch">
+                <Search className="size-3.5 shrink-0 text-muted" />
+                <input
+                  value={entryFilter}
+                  onChange={(e) => setEntryFilter(e.target.value)}
+                  placeholder="Filter entries…"
+                  aria-label="Filter entries"
+                />
+                {entryFilter && (
                   <button
                     type="button"
-                    onClick={() => toggleDetails(r)}
-                    disabled={draft?.id === r.id}
-                    data-orbit-pad={withClock ? 'journal-entry' : undefined}
-                    className="orbit-logrow-main"
-                    aria-expanded={expanded}
-                    title={draft?.id === r.id ? 'This entry is being edited above' : expanded ? 'Close this entry' : 'Open this entry'}
+                    onClick={() => setEntryFilter('')}
+                    className="text-muted hover:text-fg"
+                    aria-label="Clear entry filter"
                   >
-                    {/* The length sits beside the date in the drawer, where
-                        the row is a record of a session. In the Journal it is
-                        a note, and the clocks were noise beside the date. */}
-                    <span className="orbit-logrow-when">{displayLogDate(r.at, withClock)}</span>
-                    {!withClock && (
-                      <span className="orbit-logrow-length">{fmtShort(r.secs) || ''}</span>
-                    )}
-                    <span className="orbit-logrow-note">
-                      {r.note || <span className="opacity-60">no note</span>}
-                    </span>
-                    {expanded ? (
-                      <ChevronUp className="size-3.5 shrink-0 text-muted" />
-                    ) : (
-                      <ChevronDown className="size-3.5 shrink-0 text-muted" />
-                    )}
+                    <X className="size-3" />
                   </button>
-                  <span className="orbit-logrow-tools">
-                    <button
-                      type="button"
-                      onClick={() => editEntry(r)}
-                      className="orbit-logtool"
-                      title="Edit this entry"
-                      aria-label="Edit this entry"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm('Remove this entry?')) {
-                          void deleteGameLog(r.id).then(refresh);
-                        }
-                      }}
-                      className="orbit-logtool is-danger"
-                      title="Remove this entry"
-                      aria-label="Remove this entry"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </span>
-                </div>
-                {expanded && (
-                  <div className="orbit-logrow-more">
-                    <label className="block">
-                      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted">
-                        More about this entry
-                      </span>
-                      <textarea
-                        className={`${inputCls} mt-1 min-h-20 resize-y text-sm leading-relaxed`}
-                        rows={3}
-                        value={detailsDraft}
-                        onChange={(e) => setDetailsDraft(e.target.value)}
-                        placeholder="Anything else you want to remember about this moment."
-                      />
-                    </label>
-                    {error && <p className="text-[11px] text-rose-400">{error}</p>}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-[11px] text-muted">Separate from “What happened,” and saved with this entry.</p>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setDetailsDraft(savedDetails)}
-                          disabled={!detailsChanged || detailsSaving}
-                          className="rounded-lg px-2.5 py-1.5 text-xs text-muted transition hover:text-fg disabled:opacity-40"
-                        >
-                          Undo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void saveDetails(r)}
-                          disabled={!detailsChanged || detailsSaving}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 py-1.5 text-xs font-semibold text-accent transition hover:bg-accent/25 disabled:opacity-40"
-                        >
-                          <Check className="size-3.5" />
-                          {detailsSaving ? 'Saving…' : 'Save details'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
                 )}
-              </li>
-            );
-          })}
-        </ol>
-      )}
+              </label>
+            )}
+            {rows.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <ListFilter className="size-3.5 shrink-0 text-muted" />
+                <Select
+                  value={order}
+                  onChange={setOrder}
+                  className="w-48 !py-1 text-[11.5px]"
+                  menuClassName="w-56"
+                  ariaLabel="How the entries are ordered"
+                  options={ORDERS.map((o) => ({ value: o.id, label: o.label }))}
+                />
+              </div>
+            )}
+            {draft?.id !== null && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (draft && unsavedEntry() && !confirm('Discard your unsaved entry changes?')) return;
+                  setError(null);
+                  setDraft(blank());
+                }}
+                className="orbit-jadd-btn"
+              >
+                <Plus className="size-3.5" />
+                Add entry
+              </button>
+            )}
+          </div>
+        </div>
 
+        {draft?.id === null && renderDraftCard('new')}
+
+        {rows.length === 0 ? (
+          draft?.id === null ? null : (
+            <div className="orbit-jempty">
+              <p className="text-[13px] font-medium text-fg">Nothing written on this playthrough yet</p>
+              <p className="mt-1 text-xs text-muted">
+                Finished the story, beat the DLC, or returned to an old save — record any moment here.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setDraft(blank());
+                }}
+                className="orbit-logadd !mb-0 mt-3 max-w-xs mx-auto"
+              >
+                <Plus className="size-4" />
+                Write first entry
+              </button>
+            </div>
+          )
+        ) : shown.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted">No entries match "{entryFilter}".</p>
+        ) : (
+          <ol className="orbit-jtimeline">
+            {shown.map((r) => {
+              const isEditingThis = draft?.id === r.id;
+              const expanded = expandedId === r.id;
+              const savedDetails = r.details ?? '';
+              const detailsChanged = detailsDraft !== savedDetails;
+              const lenLabel = fmtShort(r.secs);
+
+              if (isEditingThis) {
+                return (
+                  <li key={r.id} className="orbit-jentry is-editing">
+                    <span className="orbit-jentry-rail" aria-hidden><i /></span>
+                    <div className="min-w-0 flex-1">{renderDraftCard('edit')}</div>
+                  </li>
+                );
+              }
+
+              return (
+                <li
+                  key={r.id}
+                  {...bindLogRow(r.id, canDragEntries, drag.bind)}
+                  className={cn(
+                    'orbit-jentry',
+                    canDragEntries && 'is-draggable',
+                    canDragEntries && drag.over === String(r.id) && 'is-over',
+                    canDragEntries && drag.dragging === String(r.id) && 'is-dragging',
+                  )}
+                >
+                  <span className="orbit-jentry-rail" aria-hidden>
+                    <i />
+                  </span>
+                  <div className="orbit-jentry-card">
+                    <div className="orbit-jentry-meta">
+                      {canDragEntries && (
+                        <span
+                          title="Press here and move to place this entry"
+                          aria-label="Press here and move to place this entry"
+                          className="orbit-jentry-grip"
+                        >
+                          <GripVertical className="size-3.5" />
+                        </span>
+                      )}
+                      <span className="orbit-jentry-when">{displayLogDate(r.at, withClock)}</span>
+                      {lenLabel && (
+                        <span className="orbit-jentry-duration">
+                          <Clock className="size-3" />
+                          {lenLabel}
+                        </span>
+                      )}
+                      <span className="ml-auto flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => editEntry(r)}
+                          className="orbit-jentry-tool"
+                          title="Edit this entry"
+                          aria-label="Edit this entry"
+                        >
+                          <Pencil className="size-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm('Remove this entry?')) {
+                              void deleteGameLog(r.id).then(refresh);
+                            }
+                          }}
+                          className="orbit-jentry-tool is-danger"
+                          title="Remove this entry"
+                          aria-label="Remove this entry"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleDetails(r)}
+                      data-orbit-pad={withClock ? 'journal-entry' : undefined}
+                      className="orbit-jentry-body"
+                      aria-expanded={expanded}
+                      title={expanded ? 'Close entry details' : savedDetails ? 'Read or edit entry details' : 'Add details to this entry'}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="orbit-jentry-headline">
+                          {r.note || <span className="italic text-muted">Untitled entry</span>}
+                        </p>
+                        {!expanded && savedDetails && (
+                          <p className="orbit-jentry-snippet">{savedDetails}</p>
+                        )}
+                      </div>
+                      <span className="orbit-jentry-expand">
+                        {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                      </span>
+                    </button>
+
+                    {expanded && (
+                      <div className="orbit-jentry-details">
+                        <label className="block">
+                          <span className="orbit-logfield">More about this entry</span>
+                          <textarea
+                            className={`${inputCls} mt-1 min-h-20 resize-y text-sm leading-relaxed`}
+                            rows={3}
+                            value={detailsDraft}
+                            onChange={(e) => setDetailsDraft(e.target.value)}
+                            placeholder="Anything else you want to remember about this moment."
+                          />
+                        </label>
+                        {error && <p className="text-[11px] text-rose-400">{error}</p>}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] text-muted">Saved with this entry.</p>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setDetailsDraft(savedDetails)}
+                              disabled={!detailsChanged || detailsSaving}
+                              className="rounded-lg px-2.5 py-1.5 text-xs text-muted transition hover:text-fg disabled:opacity-40"
+                            >
+                              Undo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void saveDetails(r)}
+                              disabled={!detailsChanged || detailsSaving}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 py-1.5 text-xs font-semibold text-accent transition hover:bg-accent/25 disabled:opacity-40"
+                            >
+                              <Check className="size-3.5" />
+                              {detailsSaving ? 'Saving…' : 'Save details'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </div>
 
-      {/* The game's own notes, underneath the entries: what the player wants to
-          remember about playing it, as opposed to what happened when. Write in
-          ordinary Markdown, then switch to View to see how it will read. */}
+      {/* Playthrough scratchpad & notes card */}
       {onNotes && (
         <div
-          className="mt-5 border-t border-line pt-4"
+          className="orbit-jcard"
           data-orbit-pad-zone={withClock ? 'journal-notes' : undefined}
         >
-          <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-            <span className="text-[11px] uppercase tracking-widest text-muted">
-              Notes{current ? ` for ${current.name}` : ` on ${gameTitle}`}
-            </span>
-            <span className="text-[11px] text-muted/70">
-              Markdown source, with a rendered View when you need it
-            </span>
+          <div className="orbit-jcard-head !pb-2.5">
+            <div className="min-w-0">
+              <h3 className="orbit-jcard-title">
+                <BookOpen className="size-4 text-accent" />
+                <span>Notes{current ? ` · ${current.name}` : ''}</span>
+              </h3>
+              <p className="orbit-jcard-sub">
+                Where you left off, builds, quest reminders, or codes — Markdown supported.
+              </p>
+            </div>
           </div>
           <MarkdownEditor
             value={game.notes}
@@ -739,31 +823,23 @@ function PlaythroughBar({
   };
 
   return (
-    <div className="mb-4 border-b border-line pb-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-widest text-muted">Playthrough</span>
-        <span className="text-[11px] text-muted/80">Entries and notes stay with this run. Time stays with the game.</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="orbit-jruns">
+      <span className="orbit-jruns-label">Playthrough</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {runs.map((run) => (
           <button
             key={run.id}
             type="button"
             disabled={busy}
             onClick={() => onChoose(run)}
-            className={cn(
-              'rounded-full border px-3 py-1 text-xs transition disabled:opacity-50',
-              run.id === currentId
-                ? 'border-accent/60 bg-accent/10 text-fg'
-                : 'border-line text-muted hover:border-accent/40 hover:text-fg',
-            )}
+            className={cn('orbit-jrun-pill', run.id === currentId && 'is-active')}
           >
             {run.name}
           </button>
         ))}
         {adding ? (
           <input
-            className={`${inputCls} w-36 py-1 text-xs`}
+            className={`${inputCls} !w-36 !py-1 text-xs`}
             value={draft}
             autoFocus
             placeholder="New game+"
@@ -790,12 +866,15 @@ function PlaythroughBar({
               setAdding(true);
               setDraft('');
             }}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted transition hover:border-accent/50 hover:text-fg disabled:opacity-50"
+            className="orbit-jrun-add"
           >
             <Plus className="size-3" />
-            New
+            New run
           </button>
         )}
+      </div>
+
+      <div className="flex items-center gap-1">
         {current && !renaming && (
           <button
             type="button"
@@ -807,16 +886,17 @@ function PlaythroughBar({
               setRenaming(true);
               setRename(current.name);
             }}
-            className="rounded-lg p-1 text-muted hover:bg-panel hover:text-fg disabled:opacity-50"
+            className="orbit-jentry-tool"
             title="Rename this playthrough"
             aria-label={`Rename ${current.name}`}
           >
             <Pencil className="size-3.5" />
+            <span className="hidden sm:inline">Rename</span>
           </button>
         )}
         {current && renaming && (
           <input
-            className={`${inputCls} w-36 py-1 text-xs`}
+            className={`${inputCls} !w-36 !py-1 text-xs`}
             value={rename}
             autoFocus
             onChange={(e) => setRename(e.target.value)}
@@ -831,13 +911,13 @@ function PlaythroughBar({
             aria-label="New name"
           />
         )}
-        {current && (
+        {current && runs.length > 1 && (
           <button
             type="button"
-            disabled={busy || runs.length <= 1}
+            disabled={busy}
             onClick={() => onDelete(current)}
-            className="rounded-lg p-1 text-muted hover:bg-panel hover:text-rose-300 disabled:opacity-40"
-            title={runs.length <= 1 ? 'A game keeps one playthrough' : `Remove ${current.name}`}
+            className="orbit-jentry-tool is-danger"
+            title={`Remove ${current.name}`}
             aria-label={`Remove ${current.name}`}
           >
             <Trash2 className="size-3.5" />

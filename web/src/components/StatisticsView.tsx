@@ -76,16 +76,53 @@ function dayKey(unixSeconds: number): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-/** The colour a game keeps across the chart, the legend and its covers. */
-function gameColour(game: Game | undefined): string {
-  return game ? `hsl(${game.hue} 58% 56%)` : 'color-mix(in srgb, var(--c-muted) 60%, transparent)';
+/** Color-blind-checked high-separation series so adjacent games are unmistakable. */
+const CHART_SERIES = [
+  '#3987e5', // cobalt
+  '#e06332', // coral
+  '#1db584', // emerald
+  '#eab308', // amber
+  '#e0528a', // rose
+  '#9b87f5', // violet
+  '#22d3ee', // cyan
+  '#a3e635', // lime
+] as const;
+
+const OTHER_SERIES_COLOUR = 'color-mix(in srgb, var(--c-text) 28%, transparent)';
+
+function seriesColour(id: string, topIds: string[]): string {
+  if (id === 'other') return OTHER_SERIES_COLOUR;
+  const idx = topIds.indexOf(id);
+  return idx >= 0 ? CHART_SERIES[idx % CHART_SERIES.length] : OTHER_SERIES_COLOUR;
+}
+
+function niceAxisCeiling(maxSecs: number): number {
+  if (maxSecs <= 0) return 3600;
+  const mins = maxSecs / 60;
+  const steps = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 960, 1440];
+  for (const step of steps) {
+    if (mins <= step) return step * 60;
+  }
+  const hours = Math.ceil(maxSecs / 3600);
+  const niceHourStep = hours <= 40 ? 5 : hours <= 100 ? 10 : hours <= 250 ? 25 : 50;
+  return Math.ceil(hours / niceHourStep) * niceHourStep * 3600;
+}
+
+function fmtAxisTick(secs: number): string {
+  if (secs <= 0) return '0';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = secs / 3600;
+  return Number.isInteger(hrs) ? `${hrs}h` : `${hrs.toFixed(1)}h`;
 }
 
 interface Bin {
   key: string;
   label: string;
+  shortLabel: string;
+  isToday?: boolean;
   total: number;
-  /** Per game, widest first, already cut down to the chart's share. */
+  /** Per game, ordered consistently by series rank for clean stacked bands. */
   parts: { id: string; secs: number }[];
 }
 
@@ -94,8 +131,8 @@ interface Bin {
  *
  * A month is read by day, a year by month, and everything by year, which is
  * the only grouping that stays honest over an arbitrary span. Games outside
- * the six biggest of the period are folded into one neutral band so the chart
- * stays a shape rather than a patchwork.
+ * the eight biggest of the period are folded into one neutral band so the chart
+ * stays legible rather than a patchwork.
  */
 function buildBins(sessions: Session[], period: Period, now: number): { bins: Bin[]; topIds: string[] } {
   const todays = startOfDay(now);
@@ -104,8 +141,10 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
 
   const totals = new Map<string, number>();
   for (const row of usable) totals.set(row.gameId, (totals.get(row.gameId) ?? 0) + row.durationSecs);
-  const topIds = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id]) => id);
+  const topIds = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, CHART_SERIES.length).map(([id]) => id);
   const kept = new Set(topIds);
+  const seriesOrder = new Map<string, number>(topIds.map((id, idx) => [id, idx]));
+  seriesOrder.set('other', topIds.length + 1);
 
   const startMs = new Date((period === 'all' && usable.length > 0 ? Math.min(...usable.map((row) => row.startedAt)) : since) * 1000);
   const bins: Bin[] = [];
@@ -116,18 +155,23 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
       const date = new Date(start * 1000);
       bins.push({
         key: String(start),
-        label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        label: date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
+        shortLabel: index === 0 ? 'Today' : date.getDate() === 1 ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : String(date.getDate()),
+        isToday: index === 0,
         total: 0,
         parts: [],
       });
     }
   } else if (period === 'year') {
+    const nowDate = new Date(now * 1000);
     for (let index = 11; index >= 0; index -= 1) {
-      const date = new Date(now * 1000);
-      const start = new Date(date.getFullYear(), date.getMonth() - index, 1).getTime() / 1000;
+      const start = new Date(nowDate.getFullYear(), nowDate.getMonth() - index, 1).getTime() / 1000;
+      const d = new Date(start * 1000);
       bins.push({
         key: String(start),
-        label: new Date(start * 1000).toLocaleDateString(undefined, { month: 'short' }),
+        label: d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        shortLabel: d.toLocaleDateString(undefined, { month: 'short' }),
+        isToday: index === 0,
         total: 0,
         parts: [],
       });
@@ -137,7 +181,14 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
     const lastYear = new Date(now * 1000).getFullYear();
     const from = Math.min(firstYear, lastYear);
     for (let year = from; year <= lastYear; year += 1) {
-      bins.push({ key: String(year), label: String(year), total: 0, parts: [] });
+      bins.push({
+        key: String(year),
+        label: String(year),
+        shortLabel: String(year),
+        isToday: year === lastYear,
+        total: 0,
+        parts: [],
+      });
     }
   }
 
@@ -162,7 +213,7 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
   bins.forEach((bin, index) => {
     bin.parts = [...byPart[index].entries()]
       .map(([id, secs]) => ({ id, secs }))
-      .sort((a, b) => b.secs - a.secs);
+      .sort((a, b) => (seriesOrder.get(a.id) ?? 99) - (seriesOrder.get(b.id) ?? 99));
   });
 
   return { bins, topIds };
@@ -431,15 +482,27 @@ export function StatisticsView({
   const activeDays = sessions.length > 0
     ? Math.round((now - Math.min(...sessions.map((row) => row.startedAt))) / DAY) + 1
     : 0;
+  const [hoveredBinKey, setHoveredBinKey] = useState<string | null>(null);
+  const [hoveredGameId, setHoveredGameId] = useState<string | null>(null);
+  const [pinnedGameId, setPinnedGameId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHoveredBinKey(null);
+    setHoveredGameId(null);
+    setPinnedGameId(null);
+  }, [period]);
+
   const busiest = bins.reduce<Bin | null>((best, bin) => (!best || bin.total > best.total ? bin : best), null);
   const maxTotal = Math.max(1, ...bins.map((bin) => bin.total));
+  const axisCeiling = niceAxisCeiling(maxTotal);
   const hasData = bins.some((bin) => bin.total > 0);
+  const focusGameId = hoveredGameId ?? pinnedGameId;
+  const activeBin = hoveredBinKey ? bins.find((b) => b.key === hoveredBinKey) ?? null : null;
   const topGames = [...games].filter((game) => game.playSecs > 0).sort((a, b) => b.playSecs - a.playSecs).slice(0, 8);
   const shapeGames = games.filter((game) => !game.planned);
   const statusCounts: Record<GameStatus, number> = { playing: 0, completed: 0, dropped: 0, backlog: 0 };
   for (const game of shapeGames) statusCounts[game.status] += 1;
   const librarySize = Math.max(1, shapeGames.length);
-  const axis = bins.length > 0 ? [0, Math.floor((bins.length - 1) / 2), bins.length - 1] : [];
   const hours = totalSecs / 3600;
 
   const tabCounts: Record<StatsTab, number> = {
@@ -552,56 +615,196 @@ export function StatisticsView({
             title={period === 'month' ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
             note={
               busiest && busiest.total > 0
-                ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)} · precise to the minute`
+                ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)}`
                 : loaded ? 'Nothing tracked yet' : 'Reading sessions…'
             }
           >
             {!hasData ? (
               <p className="orbit-chart-empty">{loaded ? 'Nothing tracked in this period. Play something, or widen the period.' : 'Reading sessions…'}</p>
             ) : (
-              <div className="orbit-playtime">
-                <div className="orbit-playtime-summary">
-                  <span><b>{fmtMinutes(totalSecs / 60)}</b> total</span>
-                  <span><b>{bins.filter(b => b.total>0).length}</b> active {period==='month'?'days':period==='year'?'months':'years'}</span>
-                  <span><b>{fmtMinutes((totalSecs / Math.max(1, bins.filter(b=>b.total>0).length))/60)}</b> avg per active {period==='month'?'day':period==='year'?'month':'year'}</span>
-                </div>
-                <div className="orbit-playtime-grid" role="table" aria-label={`Playtime ${PERIOD_LABEL[period]}`}>
-                  <div className="orbit-playtime-head" role="row">
-                    <span role="columnheader">{period==='month'?'Day':period==='year'?'Month':'Year'}</span>
-                    <span role="columnheader">Played</span>
-                    <span role="columnheader">Top game</span>
-                    <span role="columnheader" className="orbit-playtime-barcol">Distribution</span>
-                  </div>
-                  {bins.map((bin) => {
-                    const topPart = bin.parts[0];
-                    const topGame = topPart ? byGame.get(topPart.id) : null;
-                    const pct = bin.total > 0 ? (bin.total / maxTotal) * 100 : 0;
-                    const isEmpty = bin.total === 0;
-                    return (
-                      <div key={bin.key} className={`orbit-playtime-row ${isEmpty ? 'is-empty' : ''}`} role="row" title={`${bin.label}: ${fmtMinutes(bin.total/60)}`}>
-                        <span className="orbit-playtime-when" role="cell">{bin.label}</span>
-                        <span className="orbit-playtime-mins" role="cell">{bin.total > 0 ? fmtMinutes(bin.total/60) : '—'}</span>
-                        <span className="orbit-playtime-game" role="cell">{topGame ? topGame.title : bin.total>0 ? 'Multiple' : '—'}</span>
-                        <span className="orbit-playtime-barcol" role="cell">
-                          <span className="orbit-playtime-track"><span className="orbit-playtime-fill" style={{ width: `${pct}%` }} /></span>
-                          {bin.total>0 && <span className="orbit-playtime-pct">{Math.round(pct)}%</span>}
+              <div className="orbit-activity">
+                {/* Summary / live hover inspector: shows period totals at rest, and exact per-game breakdown when inspecting any bar */}
+                <div className="orbit-activity-inspector">
+                  {activeBin ? (
+                    <div className="orbit-activity-inspect-row">
+                      <div className="orbit-activity-inspect-head">
+                        <span className="orbit-activity-inspect-when">{activeBin.label}</span>
+                        <span className="orbit-activity-inspect-total">
+                          {activeBin.total > 0 ? fmtMinutes(activeBin.total / 60) : 'No sessions'}
                         </span>
                       </div>
-                    );
-                  })}
+                      {activeBin.parts.length > 0 && (
+                        <div className="orbit-activity-inspect-parts">
+                          {[...activeBin.parts].sort((a, b) => b.secs - a.secs).map((part) => {
+                            const g = part.id === 'other' ? undefined : byGame.get(part.id);
+                            const col = seriesColour(part.id, topIds);
+                            return (
+                              <span key={part.id} className="orbit-activity-inspect-chip">
+                                <i className="orbit-activity-dot" style={{ background: col }} />
+                                {g && (
+                                  <span className="orbit-activity-miniart">
+                                    <Cover game={g} className="size-full" fit="cover" />
+                                  </span>
+                                )}
+                                <span className="truncate max-w-[11rem] font-medium text-fg">
+                                  {part.id === 'other' ? 'Other games' : g?.title ?? 'Unknown game'}
+                                </span>
+                                <span className="orbit-num text-muted">{fmtMinutes(part.secs / 60)}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="orbit-playtime-summary !mb-0">
+                      <span><b>{fmtMinutes(totalSecs / 60)}</b> total</span>
+                      <span><b>{bins.filter((b) => b.total > 0).length}</b> active {period === 'month' ? 'days' : period === 'year' ? 'months' : 'years'}</span>
+                      <span><b>{fmtMinutes((totalSecs / Math.max(1, bins.filter((b) => b.total > 0).length)) / 60)}</b> avg per active {period === 'month' ? 'day' : period === 'year' ? 'month' : 'year'}</span>
+                      {focusGameId && (
+                        <span className="text-accent font-medium">
+                          Highlighting {focusGameId === 'other' ? 'Other games' : byGame.get(focusGameId)?.title ?? 'game'}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-            {topIds.length > 0 && (
-              <div className="orbit-legend">
-                {topIds.map((id) => (
-                  <span key={id}>
-                    <i style={{ background: gameColour(byGame.get(id)) }} />
-                    {byGame.get(id)?.title ?? 'Another game'}
-                  </span>
-                ))}
-                {bins.some((bin) => bin.parts.some((part) => part.id === 'other')) && (
-                  <span><i style={{ background: gameColour(undefined) }} />Everything else</span>
+
+                {/* Stacked bar chart: Y-axis scale + horizontal gridlines + stacked per-game segments */}
+                <div
+                  className="orbit-activity-stage"
+                  role="img"
+                  aria-label={`Stacked playtime bar chart ${PERIOD_LABEL[period]}`}
+                  onMouseLeave={() => setHoveredBinKey(null)}
+                >
+                  <div className="orbit-activity-yaxis" aria-hidden>
+                    <span>{fmtAxisTick(axisCeiling)}</span>
+                    <span>{fmtAxisTick(axisCeiling / 2)}</span>
+                    <span>0</span>
+                  </div>
+
+                  <div className="orbit-activity-plot">
+                    <div className="orbit-activity-gridlines" aria-hidden>
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+
+                    <div
+                      className="orbit-activity-bars"
+                      style={{ gridTemplateColumns: `repeat(${bins.length}, minmax(0, 1fr))` }}
+                    >
+                      {bins.map((bin, idx) => {
+                        const totalPct = bin.total > 0 ? Math.min(100, Math.max(3, (bin.total / axisCeiling) * 100)) : 0;
+                        const isHovered = hoveredBinKey === bin.key;
+                        const showTick =
+                          period !== 'month' ||
+                          idx === 0 ||
+                          idx === bins.length - 1 ||
+                          bin.shortLabel.includes(' ') ||
+                          idx % 5 === 4;
+                        return (
+                          <button
+                            key={bin.key}
+                            type="button"
+                            className={`orbit-activity-col ${isHovered ? 'is-hovered' : ''} ${bin.isToday ? 'is-today' : ''}`}
+                            onMouseEnter={() => setHoveredBinKey(bin.key)}
+                            onFocus={() => setHoveredBinKey(bin.key)}
+                            onBlur={() => setHoveredBinKey(null)}
+                            onClick={() => {
+                              const topPart = [...bin.parts].sort((a, b) => b.secs - a.secs)[0];
+                              if (topPart && topPart.id !== 'other' && byGame.has(topPart.id)) {
+                                onOpenGame(topPart.id);
+                              }
+                            }}
+                            aria-label={`${bin.label}: ${bin.total > 0 ? fmtMinutes(bin.total / 60) : 'no sessions'}`}
+                          >
+                            <span className="orbit-activity-track">
+                              {bin.total > 0 ? (
+                                <span className="orbit-activity-stack" style={{ height: `${totalPct}%` }}>
+                                  {bin.parts.map((part) => {
+                                    const sharePct = (part.secs / Math.max(1, bin.total)) * 100;
+                                    const dimmed = focusGameId !== null && focusGameId !== part.id;
+                                    return (
+                                      <span
+                                        key={part.id}
+                                        className={`orbit-activity-seg ${dimmed ? 'is-dimmed' : ''}`}
+                                        style={{
+                                          height: `${sharePct}%`,
+                                          background: seriesColour(part.id, topIds),
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                </span>
+                              ) : (
+                                <span className="orbit-activity-zero" />
+                              )}
+                            </span>
+                            <span className={`orbit-activity-tick ${showTick ? 'is-shown' : ''}`}>
+                              {showTick ? bin.shortLabel : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interactive game legend: distinct color swatch + mini cover + title + duration; hover or click to isolate */}
+                {topIds.length > 0 && (
+                  <div className="orbit-activity-legend" role="group" aria-label="Games in chart">
+                    {topIds.map((id) => {
+                      const g = byGame.get(id);
+                      const secs = perGame.get(id) ?? 0;
+                      const col = seriesColour(id, topIds);
+                      const isPinned = pinnedGameId === id;
+                      const isDimmed = focusGameId !== null && focusGameId !== id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={isPinned}
+                          onMouseEnter={() => setHoveredGameId(id)}
+                          onMouseLeave={() => setHoveredGameId(null)}
+                          onClick={() => setPinnedGameId((cur) => (cur === id ? null : id))}
+                          className={`orbit-activity-legend-btn ${isPinned ? 'is-pinned' : ''} ${isDimmed ? 'is-dimmed' : ''}`}
+                          title="Hover or click to highlight this game across the chart"
+                        >
+                          <i className="orbit-activity-dot" style={{ background: col }} />
+                          {g && (
+                            <span className="orbit-activity-miniart">
+                              <Cover game={g} className="size-full" fit="cover" />
+                            </span>
+                          )}
+                          <span className="truncate max-w-[10.5rem] font-medium">{g?.title ?? 'Another game'}</span>
+                          <span className="orbit-num opacity-70">{fmtMinutes(secs / 60)}</span>
+                        </button>
+                      );
+                    })}
+                    {bins.some((bin) => bin.parts.some((part) => part.id === 'other')) && (
+                      <button
+                        type="button"
+                        aria-pressed={pinnedGameId === 'other'}
+                        onMouseEnter={() => setHoveredGameId('other')}
+                        onMouseLeave={() => setHoveredGameId(null)}
+                        onClick={() => setPinnedGameId((cur) => (cur === 'other' ? null : 'other'))}
+                        className={`orbit-activity-legend-btn ${pinnedGameId === 'other' ? 'is-pinned' : ''} ${focusGameId !== null && focusGameId !== 'other' ? 'is-dimmed' : ''}`}
+                      >
+                        <i className="orbit-activity-dot" style={{ background: OTHER_SERIES_COLOUR }} />
+                        <span>Other games</span>
+                      </button>
+                    )}
+                    {pinnedGameId && (
+                      <button
+                        type="button"
+                        onClick={() => setPinnedGameId(null)}
+                        className="orbit-activity-legend-clear"
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -34,6 +34,7 @@ export function LogsView({
   order = [],
   onOrder,
   embedded = false,
+  focusRequest = null,
 }: {
   /** The games currently included in the Journal. */
   games: Game[];
@@ -48,6 +49,8 @@ export function LogsView({
   onOrder?: (ids: string[]) => void;
   /** Drawn inside Statistics, where the page header belongs to that page. */
   embedded?: boolean;
+  /** External request (e.g. from the command palette) to select a specific game. */
+  focusRequest?: { id: string; token: number } | null;
 }) {
   const [logs, setLogs] = useState<GameLog[]>([]);
   /** How many there are in total, which can be more than were read. */
@@ -56,7 +59,7 @@ export function LogsView({
   const [currents, setCurrents] = useState<CurrentPlaythrough[]>([]);
   /** The run on screen, whose count is what the journal itself is showing. */
   const [openRun, setOpenRun] = useState<{ gameId: string; id: string; name: string; count: number; runs: number } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => focusRequest?.id ?? null);
   const [query, setQuery] = useState('');
   const [version, setVersion] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -87,6 +90,9 @@ export function LogsView({
   }, [version]);
 
   useEffect(() => load(), [load]);
+  useEffect(() => {
+    if (focusRequest) setSelectedId(focusRequest.id);
+  }, [focusRequest]);
   useEffect(() => {
     const onJournalChanged = () => setVersion((current) => current + 1);
     window.addEventListener('orbit-journal-changed', onJournalChanged);
@@ -279,9 +285,6 @@ export function LogsView({
           kicker="Field notes"
           title="Journal"
           lead="Everything you have written down, game by game. Orbit writes the first entry itself: the moment a game is played for the first time, a line saying so appears here."
-          // Counts, not clocks: the Journal is read for what was written, and
-          // the hours and minutes beside every date were a second set of
-          // numbers to skip past.
           meta={
             <>
               <HeadStat value={visibleLogCount} label={visibleLogCount === 1 ? 'log' : 'logs'} />
@@ -294,79 +297,165 @@ export function LogsView({
         />
       )}
 
-      {/* New journal: top bar with game chips, search, and sort - then clean timeline cards */}
-      <div className="orbit-journal-v2">
-        <div className="orbit-journal-topbar">
-          <div className="orbit-journal-chips" role="group" aria-label="Filter by game">
-            <button type="button" className={`orbit-journal-chip ${!selectedId ? 'is-on' : ''}`} aria-pressed={!selectedId} onClick={() => setSelectedId(null)}>All games <span className="orbit-num opacity-60">{games.length}</span></button>
-            {ordered.slice(0, 12).map((g) => {
-              const active = selected?.id === g.id;
+      <div className="grid gap-6 lg:grid-cols-[18.5rem_1fr]">
+        <aside className="space-y-3">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Find a game"
+            className="w-full"
+            inputWrapperClassName="min-w-0 flex-1"
+            inputClassName="w-full"
+          >
+            <button
+              type="button"
+              onClick={() => setShowAddGames(true)}
+              title="Add games to the Journal"
+              aria-label="Add games to the Journal"
+              className="grid size-10 shrink-0 place-items-center rounded-full border border-line bg-panel text-muted transition hover:border-accent hover:bg-accent/10 hover:text-accent"
+            >
+              <Plus className="size-4" />
+            </button>
+          </SearchField>
+          {onOrder && query.trim() === '' && (
+            <p className="px-1 text-[11px] text-muted">
+              Press a game and move it to put the ones you write about most first.
+            </p>
+          )}
+
+          <ul
+            ref={list}
+            className="space-y-1 p-1 lg:max-h-[calc(100vh-15.5rem)] lg:overflow-y-auto"
+          >
+            {ordered.map((g) => {
               const counts = perGame.get(g.id);
+              const active = selected?.id === g.id;
               return (
-                <button key={g.id} type="button" className={`orbit-journal-chip ${active ? 'is-on' : ''}`} aria-pressed={active} onClick={() => setSelectedId(g.id)} onContextMenu={(e) => { e.preventDefault(); setSelectedId(g.id); setMenu({ x: e.clientX, y: e.clientY, id: g.id }); }} title={g.title}>
-                  <Cover game={g} className="size-5 rounded-sm" />
-                  <span className="truncate max-w-[7rem]">{g.title}</span>
-                  <span className="orbit-num opacity-60">{counts?.count ?? 0}</span>
-                </button>
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(g.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSelectedId(g.id);
+                      setActionError(null);
+                      setMenu({ x: event.clientX, y: event.clientY, id: g.id });
+                    }}
+                    data-orbit-journal-game={g.id}
+                    {...bind(g.id)}
+                    className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
+                      active ? 'border-accent bg-accent/10' : 'border-line hover:border-accent/60'
+                    } ${dragging === g.id ? 'opacity-50' : ''} ${
+                      over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
+                    }`}
+                  >
+                    <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{g.title}</span>
+                      <span className="block truncate text-[11px] text-muted">
+                        {logCountLabel(counts)}
+                      </span>
+                    </span>
+                  </button>
+                </li>
               );
             })}
-            {ordered.length > 12 && <span className="text-[11px] text-muted">+{ordered.length - 12} more</span>}
-            <button type="button" onClick={() => setShowAddGames(true)} aria-label="Add games to the Journal" title="Add games to the Journal" className="orbit-btnquiet !h-7 !px-2.5 text-[11px]"><Plus className="size-3" /> Add game</button>
-            <span hidden>Use + beside the game search to add games to the Journal.</span>
-          </div>
-          <div className="orbit-journal-toolbar">
-            <SearchField value={query} onChange={setQuery} placeholder="Search journal or filter games" className="flex-1 min-w-[180px]" inputClassName="w-full text-sm" />
-            {selected && (
-              <>
-                <span className="hidden sm:flex items-center gap-2 text-xs text-muted"><NotebookPen className="size-3.5" />{selected.title}</span>
-                <button type="button" disabled={!selectedRun} onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'logs', run: selectedRun })} className="orbit-btnquiet orbit-btnquiet-danger !h-8 text-xs" title={selectedRun ? `Clear entries for ${selectedRun.name}` : ''}><Trash2 className="size-3.5" /> Clear</button>
-              </>
+            {ordered.length === 0 && (
+              <li className="px-2 py-3 text-sm text-muted">
+                {games.length === 0
+                  ? 'No games in the Journal yet. Use + beside the game search to add games to the Journal.'
+                  : 'No games match that.'}
+              </li>
             )}
-          </div>
-        </div>
+          </ul>
+        </aside>
 
-        <div className="orbit-journal-content">
-          {!selected ? (
-            <div className="orbit-journal-timeline">
-              <p className="orbit-journal-timeline-head">{visibleLogCount} {visibleLogCount===1?'entry':'entries'} across {gamesWithLogs} {gamesWithLogs===1?'game':'games'} - newest first</p>
-              {logs.length === 0 ? (
-                <div className="orbit-empty"><NotebookPen className="size-7" /><p>Nothing written yet</p><p>Open a game and add an entry - your story starts here.</p></div>
-              ) : (
-                <div className="orbit-timeline">
-                  {logs.filter(l => !query || perGame.get(l.gameId) || games.find(g=>g.id===l.gameId)?.title.toLowerCase().includes(query.toLowerCase())).slice(0, 50).map((log) => {
-                    const g = games.find(x => x.id === log.gameId);
-                    return (
-                      <div key={log.id} className="orbit-timeline-card" onClick={() => g && setSelectedId(g.id)} role="button" tabIndex={0}>
-                        <div className="orbit-timeline-card-head">
-                          <span className="orbit-timeline-dot" />
-                          <span className="text-xs font-semibold truncate">{g?.title ?? log.gameId}</span>
-                          <span className="ml-auto text-[11px] text-muted">{log.at ? new Date(log.at*1000).toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'}) : ''} {log.secs>0 ? `· ${Math.round(log.secs/60)}m` : ''}</span>
-                        </div>
-                        <p className="orbit-timeline-note">{log.note || <span className="opacity-50">No note</span>}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="orbit-journal-game">
-              <div className="orbit-journal-head">
-                <Cover game={selected} className="orbit-journal-headart" />
+        <section className="min-w-0">
+          {selected ? (
+            <div className="orbit-jworkspace">
+              <div className="orbit-jhero">
+                <Cover game={selected} className="orbit-jhero-art" fit="cover" />
                 <div className="min-w-0 flex-1">
-                  <h2 className="orbit-journal-title">{selected.title}</h2>
-                  <p className="orbit-journal-sub">{logCountLabel(perGame.get(selected.id))}{selectedRun ? ` · ${selectedRun.name}` : ''}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="orbit-jhero-title">{selected.title}</h2>
+                    {selectedRun && (
+                      <span className="orbit-jhero-badge">
+                        {selectedRun.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="orbit-jhero-sub">
+                    {logCountLabel(perGame.get(selected.id))}
+                    {selected.meta?.developer ? ` · ${selected.meta.developer}` : ''}
+                  </p>
                 </div>
-                <div className="orbit-journal-actions">
-                  <button type="button" disabled={!selectedRun} onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'logs', run: selectedRun })} className="orbit-btnquiet orbit-btnquiet-danger" title={selectedRun ? `Remove entries for ${selectedRun.name}` : ''}><Trash2 className="size-3.5" /> Clear entries</button>
-                  <button type="button" disabled={!selectedRun} onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'notes', run: selectedRun })} className="orbit-btnquiet orbit-btnquiet-danger"><RotateCcw className="size-3.5" /> Clear notes</button>
+                <div className="orbit-jhero-actions">
+                  <button
+                    type="button"
+                    onClick={() => setAddRequest({ id: selected.id, token: ++addToken.current })}
+                    className="btn-accent inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold"
+                  >
+                    <Plus className="size-3.5" />
+                    New entry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onEditGame(selected.id)}
+                    className="orbit-btnquiet"
+                    title="Edit game details"
+                  >
+                    <Pencil className="size-3.5" />
+                    Edit game
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedRun}
+                    onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'logs', run: selectedRun })}
+                    className="orbit-btnquiet orbit-btnquiet-danger"
+                    title={selectedRun ? `Clear entries on ${selectedRun.name}` : ''}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Clear entries
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedRun}
+                    onClick={() => selectedRun && setClearTarget({ game: selected, kind: 'notes', run: selectedRun })}
+                    className="orbit-btnquiet orbit-btnquiet-danger"
+                    title={selectedRun ? `Clear notes on ${selectedRun.name}` : ''}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    Clear notes
+                  </button>
                 </div>
               </div>
-              {actionError && <p role="alert" className="mb-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{actionError}</p>}
-              <GameLogView key={`${selected.id}-${version}`} game={selected} onChanged={() => setVersion((n) => n + 1)} onPlaythrough={reportRun} onNotes={(notes) => onUpdate(selected.id, { notes })} addRequest={addRequest?.id === selected.id ? addRequest.token : undefined} onAddHandled={() => setAddRequest(null)} withClock />
+              {actionError && (
+                <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {actionError}
+                </p>
+              )}
+              <GameLogView
+                key={`${selected.id}-${version}`}
+                game={selected}
+                onChanged={() => setVersion((n) => n + 1)}
+                onPlaythrough={reportRun}
+                onNotes={(notes) => onUpdate(selected.id, { notes })}
+                addRequest={addRequest?.id === selected.id ? addRequest.token : undefined}
+                onAddHandled={() => setAddRequest(null)}
+                withClock
+              />
+            </div>
+          ) : (
+            <div className="orbit-empty rounded-2xl border border-line bg-panel p-10 text-center">
+              <NotebookPen className="mx-auto size-7 text-muted" />
+              <p className="mt-2 text-sm font-medium text-fg">No games in the Journal yet</p>
+              <p className="mt-1 text-xs text-muted">
+                Use + beside the game search to add games to the Journal.
+              </p>
             </div>
           )}
-        </div>
+        </section>
       </div>
 
       {showAddGames && (

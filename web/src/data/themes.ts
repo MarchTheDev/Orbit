@@ -60,6 +60,14 @@ export function nativePalette(id: string, custom: Theme[] = []): { panel: string
   return { panel: theme.panel, text: theme.text, muted: theme.muted, accent: theme.accent };
 }
 
+function relativeLuminance(hex: string): number {
+  const clean = hex.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return 0;
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(clean.slice(offset, offset + 2), 16) / 255);
+  const linear = channels.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
 export function applyTheme(id: string, custom: Theme[] = []) {
   const t = themeById(id, custom);
   const r = document.documentElement.style;
@@ -71,9 +79,10 @@ export function applyTheme(id: string, custom: Theme[] = []) {
   r.setProperty('--c-muted', t.muted);
   r.setProperty('--c-accent', t.accent);
   r.setProperty('--c-accent2', t.accent2);
-  // Read by every button that sits on the accent: white by default, dark when
-  // the accent is too light for white to read.
-  r.setProperty('--c-on-accent', t.onAccent ?? '#ffffff');
+  // Read by every button that sits on the accent: computed from luminance when
+  // the theme did not supply an explicit ink, so bright accents never draw white text.
+  const computedOnAccent = relativeLuminance(t.accent) > 0.42 ? '#14161a' : '#ffffff';
+  r.setProperty('--c-on-accent', t.onAccent ?? computedOnAccent);
 }
 
 /**
