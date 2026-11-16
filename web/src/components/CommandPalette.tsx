@@ -25,6 +25,7 @@ import {
   Settings,
   SlidersHorizontal,
   Square,
+  Star,
   Tag,
   Tv,
   X,
@@ -82,7 +83,7 @@ type VerbKind = 'play' | 'stop' | 'edit' | 'folder' | 'fav' | 'hide' | 'journal'
 const VERB_LABELS: Record<VerbKind, string> = {
   play: 'Play game',
   stop: 'Stop game',
-  edit: 'Game settings',
+  edit: 'Edit game',
   folder: 'Open game folder',
   fav: 'Toggle favourite',
   hide: 'Hide or unhide',
@@ -1512,7 +1513,7 @@ export function CommandPalette({
           {/* Heronite-style preview pane on desktop */}
           <aside className="hidden w-60 shrink-0 flex-col justify-between bg-bg/35 p-4 md:flex">
             {activeRow?.game ? (
-              <GamePreview game={activeRow.game} running={runningId === activeRow.game.id} />
+              <GamePreview game={activeRow.game} running={runningId === activeRow.game.id} onToggleFavorite={onToggleFavorite} />
             ) : activeRow ? (
               <ActionPreview row={activeRow} />
             ) : (
@@ -1527,28 +1528,27 @@ export function CommandPalette({
           <div className="fixed inset-0 z-[70]" onMouseDown={() => setContextMenu(null)}>
             <div
               role="menu"
-              className="absolute min-w-48 rounded-xl border border-line bg-panel p-1.5 shadow-2xl"
-              style={{ left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 250) }}
+              className="absolute min-w-36 rounded-lg border border-line bg-panel p-1 shadow-xl"
+              style={{ left: Math.min(contextMenu.x, window.innerWidth - 160), top: Math.min(contextMenu.y, window.innerHeight - 190) }}
               onMouseDown={(event) => event.stopPropagation()}
             >
               {contextMenu.row.game ? (
                 <>
-                  <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>
+                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>
                     Open game details
                   </button>
-                  {onPlay && !contextMenu.row.game.planned && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onPlay(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Run game</button>}
-                  <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => togglePinned(contextMenu.row)}>
+                  {onPlay && !contextMenu.row.game.planned && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onPlay(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Run game</button>}
+                  <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => togglePinned(contextMenu.row)}>
                     {pinnedIds.includes(contextMenu.row.game.id) ? 'Unpin from top' : 'Pin to top'}
                   </button>
-                  {onToggleFavorite && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onToggleFavorite(contextMenu.row.game!.id); setContextMenu(null); }}>Toggle favorite</button>}
-                  {onEditGame && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onEditGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Game settings</button>}
+                  {onEditGame && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { onEditGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Edit game</button>}
                 </>
               ) : (
-                <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { executeRow(contextMenu.row); setContextMenu(null); }}>
+                <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] hover:bg-panel2" onClick={() => { executeRow(contextMenu.row); setContextMenu(null); }}>
                   Open / Run
                 </button>
               )}
-              {contextMenu.row.recentKey && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-panel2" onClick={() => { const next = recentKeys.filter((key) => key !== contextMenu.row.recentKey); setRecentKeys(next); try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ } setContextMenu(null); }}>Remove from Recent</button>}
+              {contextMenu.row.recentKey && <button role="menuitem" type="button" className="w-full rounded-md px-2.5 py-1.5 text-left text-[11px] text-red-300 hover:bg-panel2" onClick={() => { const next = recentKeys.filter((key) => key !== contextMenu.row.recentKey); setRecentKeys(next); try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ } setContextMenu(null); }}>Remove from Recent</button>}
             </div>
           </div>
         )}
@@ -1589,13 +1589,27 @@ export function CommandPalette({
   );
 }
 
-function GamePreview({ game, running }: { game: Game; running: boolean }) {
+function GamePreview({ game, running, onToggleFavorite }: { game: Game; running: boolean; onToggleFavorite?: (id: string) => void }) {
   return (
     <div className="flex flex-col items-center text-center">
       <div className="w-28 aspect-[2/3] overflow-hidden rounded-xl border border-line shadow-lg">
         <Cover game={game} className="size-full" fit="cover" />
       </div>
-      <h4 className="mt-3 line-clamp-2 text-sm font-bold text-fg">{game.title}</h4>
+      <div className="mt-3 flex w-full items-start justify-center gap-1.5">
+        <h4 className="line-clamp-2 min-w-0 flex-1 text-sm font-bold text-fg">{game.title}</h4>
+        {onToggleFavorite && !game.planned && (
+          <button
+            type="button"
+            aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
+            aria-pressed={game.favorite}
+            title={game.favorite ? 'Remove favorite' : 'Add favorite'}
+            onClick={() => onToggleFavorite(game.id)}
+            className="grid size-7 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-panel2 hover:text-amber-300"
+          >
+            <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
+          </button>
+        )}
+      </div>
       <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
         {launcherLabel(game) !== 'Installed' && (
           <span className="rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] font-medium text-muted">

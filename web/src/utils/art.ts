@@ -1,8 +1,9 @@
 import type { Game } from '../types';
 import { fileSrc } from '../services/desktop';
 
-const MAX_DECODED = 64;
+const MAX_DECODED = 160;
 const decoded = new Map<string, HTMLImageElement>();
+const inflight = new Map<string, Promise<HTMLImageElement>>();
 const missing = new Set<string>();
 const resolved = new Map<string, string>();
 
@@ -12,25 +13,32 @@ function remember(src: string, image: HTMLImageElement) {
   while (decoded.size > MAX_DECODED) decoded.delete(decoded.keys().next().value!);
 }
 
-export async function decodeArtwork(src: string): Promise<HTMLImageElement> {
+export function decodeArtwork(src: string): Promise<HTMLImageElement> {
   const existing = decoded.get(src);
   if (existing?.complete && existing.naturalWidth > 0) {
     decoded.delete(src);
     decoded.set(src, existing);
-    return existing;
+    return Promise.resolve(existing);
   }
-  if (missing.has(src)) throw new Error('Artwork previously unavailable');
+  const pending = inflight.get(src);
+  if (pending) return pending;
+  if (missing.has(src)) return Promise.reject(new Error('Artwork previously unavailable'));
+
   const image = new Image();
   image.decoding = 'async';
   image.src = src;
-  try {
-    await image.decode();
-    remember(src, image);
-    return image;
-  } catch (error) {
-    missing.add(src);
-    throw error;
-  }
+  const request = image.decode()
+    .then(() => {
+      remember(src, image);
+      return image;
+    })
+    .catch((error: unknown) => {
+      missing.add(src);
+      throw error;
+    })
+    .finally(() => inflight.delete(src));
+  inflight.set(src, request);
+  return request;
 }
 
 function steamAppId(game: Game): number | null {
@@ -49,6 +57,7 @@ const steamAsset = (id: number, name: string) => `https://cdn.akamai.steamstatic
 export function wideArtCandidates(game: Game): string[] {
   const id = steamAppId(game);
   const sources = [
+    game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : null,
     ...(id ? [steamAsset(id, 'library_hero_2x.jpg'), steamAsset(id, 'library_hero.jpg'), steamAsset(id, 'page_bg_raw.jpg')] : []),
     game.meta?.backgroundUrl,
     game.meta?.headerUrl,
@@ -58,7 +67,7 @@ export function wideArtCandidates(game: Game): string[] {
   return [...new Set(sources.filter((url) => !/page_bg_generated/i.test(url)))];
 }
 
-/** The widest available picture, with high-resolution Steam hero art first. */
+/** The widest picture, preferring sharp Steam hero art over the blurred page background. */
 export function wideArt(game: Game): string | null {
   return wideArtCandidates(game)[0] ?? null;
 }
@@ -67,6 +76,7 @@ export function coverArtCandidates(game: Game): string[] {
   const id = steamAppId(game);
   return [...new Set([
     game.coverPath ? fileSrc(game.coverPath) : null,
+    (game.meta?.coverUrlCustom || game.meta?.edited) ? game.meta.coverUrl : null,
     ...(id ? [steamAsset(id, 'library_600x900_2x.jpg'), steamAsset(id, 'library_600x900.jpg')] : []),
     game.meta?.coverUrl,
     game.meta?.headerUrl,
@@ -74,12 +84,13 @@ export function coverArtCandidates(game: Game): string[] {
   ].filter((url): url is string => Boolean(url)))];
 }
 
-/** Warm artwork for the visible shelf, prioritizing heroes and covers near the front. */
-export function prewarmLibraryArtwork(games: Game[], limit = 12): void {
-  for (const game of games.slice(0, limit)) {
-    // First-choice hero and poster only: warming every fallback for every game
-    // would trade a small transition flash for a burst of unnecessary traffic.
-    const sources = [wideArtCandidates(game)[0], coverArtCandidates(game)[0]].filter((src): src is string => Boolean(src));
+/** Warm posters across the visible shelf; hero art is limited to the active item. */
+export function prewarmLibraryArtwork(games: Game[], limit = 16, includeHeroes = false): void {
+  for (const [index, game] of games.slice(0, limit).entries()) {
+    const sources = [
+      ...(includeHeroes || index === 0 ? [wideArtCandidates(game)[0]] : []),
+      coverArtCandidates(game)[0],
+    ].filter((src): src is string => Boolean(src));
     for (const src of sources) {
       if (!decoded.has(src) && !missing.has(src)) void decodeArtwork(src).catch(() => undefined);
     }
@@ -96,7 +107,9 @@ export async function resolveWideArt(game: Game): Promise<string | null> {
     if (missing.has(candidate)) continue;
     try {
       await decodeArtwork(candidate);
+      resolved.delete(key);
       resolved.set(key, candidate);
+      if (resolved.size > 256) resolved.delete(resolved.keys().next().value!);
       return candidate;
     } catch { /* continue down fallback chain */ }
   }

@@ -35,7 +35,7 @@ check('Drag no longer adds a square box-shadow overlay', !drag.includes('slotEl.
 check('Observatory manual shelf tiles and rows wire through useDragReorder',
   library.includes('sort === \'manual\' ? onReorder : undefined') && library.includes('shelfDrag.bind(game.id)'));
 check('Backlog KPI strip is removed, search is wider, catalogue entries open PlanDialog, and calendar is not sticky',
-  !backlog.includes('orbit-backlog-kpis') && backlog.includes('sm:max-w-xl') && backlog.includes('initialGame={catalogueGame ?? undefined}') && /\.orbit-release-bar\s*\{[^}]*position:\s*relative/s.test(css));
+  !backlog.includes('orbit-backlog-kpis') && backlog.includes('flex-[2]') && backlog.includes('initialGame={catalogueGame ?? undefined}') && /\.orbit-release-bar\s*\{[^}]*position:\s*relative/s.test(css));
 check('High-resolution Steam hero and portrait fallbacks are ordered ahead of low-resolution artwork',
   art.includes('library_hero_2x.jpg') && art.includes('library_hero.jpg') && art.includes('library_600x900_2x.jpg') && art.includes('decodeArtwork') && art.includes('prewarmLibraryArtwork'));
 check('GamePage keeps the selected page mounted and retains the previous decoded hero during transitions',

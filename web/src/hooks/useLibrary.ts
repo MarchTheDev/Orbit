@@ -135,7 +135,17 @@ export function useLibrary() {
       if (!target) return;
       if (origin === 'auto' && target.meta?.edited) return;
       const next = typeof patch === 'function' ? patch(target) : patch;
-      const updated = { ...target, ...next };
+      const safeNext = origin === 'auto' && next.meta && target.meta
+        ? {
+            ...next,
+            meta: {
+              ...next.meta,
+              ...(target.meta.coverUrlCustom ? { coverUrl: target.meta.coverUrl, coverUrlCustom: true } : {}),
+              ...(target.meta.backgroundUrlCustom ? { backgroundUrl: target.meta.backgroundUrl, backgroundUrlCustom: true } : {}),
+            },
+          }
+        : next;
+      const updated = { ...target, ...safeNext };
       // Pointing Orbit at a program is what turns a plan into a game: it stops
       // being something written down and becomes something it can start.
       const launchTarget = next.launch as { kind?: string } | undefined;

@@ -139,6 +139,7 @@ export function BacklogView({
   const [showTimes, setShowTimes] = useState(false);
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [releaseEditGame, setReleaseEditGame] = useState<Game | null>(null);
+  const resolvedOwnedPlans = useRef<Set<string>>(new Set());
 
   // Quietly enrich Steam-linked Backlog/planned games with releaseDate + comingSoon once per session
   const enrichedIds = useRef<Set<string>>(new Set());
@@ -195,13 +196,28 @@ export function BacklogView({
     [games, syncLibrary, backlogOn, backlogOff],
   );
 
+  // If a planned catalogue entry later matches a game already in the Library,
+  // retire the wishlist duplicate and put the owned Library record on Backlog.
+  useEffect(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (const wish of games.filter((game) => game.planned && !resolvedOwnedPlans.current.has(game.id))) {
+      const ownedMatch = games.find((candidate) => !candidate.planned && inLibraryShelf(candidate) && (
+        (wish.meta?.steamAppId && candidate.meta?.steamAppId === wish.meta.steamAppId) ||
+        normalize(candidate.title) === normalize(wish.title)
+      ));
+      if (!ownedMatch) continue;
+      resolvedOwnedPlans.current.add(wish.id);
+      onRemove(wish.id);
+      onBacklogMembership(ownedMatch.id, true);
+    }
+  }, [games, onRemove, onBacklogMembership]);
+
   const filteredFromLibrary = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
     if (!q) return fromLibrary;
     return fromLibrary.filter((g) => g.title.toLowerCase().includes(q));
   }, [fromLibrary, libraryQuery]);
 
-  const planned = useMemo(() => allPlanned.filter(match), [allPlanned, query, lengthFilter]);
 
   const plan = ({ name, appId, coverUrl, facts, hltb: times, platform, nonSteamDetails }: PlanPick) => {
     const title = name.trim();
@@ -311,22 +327,29 @@ export function BacklogView({
     }
   };
 
-  const backlog = useMemo(() => {
-    const list = owned.filter((g) => g.status === 'backlog' && match(g));
-    return [...list].sort((a, b) => {
-      if (order === 'mine') {
-        const ai = myOrder.indexOf(a.id);
-        const bi = myOrder.indexOf(b.id);
-        if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
-        if (ai === -1) return 1;
-        if (bi === -1) return -1;
-        return ai - bi;
-      }
-      if (order === 'shortest') return byLength(a) - byLength(b) || a.title.localeCompare(b.title);
-      if (order === 'longest') return byLength(b) - byLength(a) || a.title.localeCompare(b.title);
-      return b.addedAt.localeCompare(a.addedAt);
-    });
-  }, [owned, query, lengthFilter, order, myOrder]);
+  const sortByOrder = (items: Game[]) => [...items].sort((a, b) => {
+    if (order === 'mine') {
+      const ai = myOrder.indexOf(a.id);
+      const bi = myOrder.indexOf(b.id);
+      if (ai === -1 && bi === -1) return a.title.localeCompare(b.title);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    }
+    if (order === 'shortest') return byLength(a) - byLength(b) || a.title.localeCompare(b.title);
+    if (order === 'longest') return byLength(b) - byLength(a) || a.title.localeCompare(b.title);
+    return b.addedAt.localeCompare(a.addedAt);
+  });
+
+  const backlog = useMemo(() => sortByOrder(owned.filter((g) => g.status === 'backlog' && match(g))), [owned, query, lengthFilter, order, myOrder]);
+  const playing = useMemo(() => sortByOrder(owned.filter((g) => g.status === 'playing' && match(g))), [owned, query, lengthFilter, order, myOrder]);
+  const completed = useMemo(() => sortByOrder(owned.filter((g) => g.status === 'completed' && match(g))), [owned, query, lengthFilter, order, myOrder]);
+  const dropped = useMemo(() => sortByOrder(owned.filter((g) => g.status === 'dropped' && match(g))), [owned, query, lengthFilter, order, myOrder]);
+  const planned = useMemo(() => sortByOrder(allPlanned.filter(match)), [allPlanned, query, lengthFilter, order, myOrder]);
+  const favorites = useMemo(
+    () => sortByOrder([...owned.filter((g) => g.favorite && match(g)), ...planned.filter((g) => g.favorite)]),
+    [owned, planned, query, lengthFilter, order, myOrder],
+  );
 
   const openCatalogue = (id: string, readOnlyMoves?: boolean) => {
     const game = games.find((candidate) => candidate.id === id);
@@ -338,23 +361,12 @@ export function BacklogView({
     onSelect(id, readOnlyMoves);
   };
 
+  // One persisted order drives every lane. Each section displays its own
+  // filtered slice of that order, so rearranging a lane never changes status.
   const move = (fromId: string, toId: string, after: boolean) => {
-    const ids = moveInOrder(
-      backlog.map((g) => g.id),
-      fromId,
-      toId,
-      after,
-    );
+    const ids = moveInOrder(sortByOrder([...owned, ...allPlanned]).map((g) => g.id), fromId, toId, after);
     setMyOrder([...ids, ...myOrder.filter((id) => !ids.includes(id))]);
   };
-
-  const playing = useMemo(() => owned.filter((g) => g.status === 'playing' && match(g)), [owned, query, lengthFilter]);
-  const completed = useMemo(() => owned.filter((g) => g.status === 'completed' && match(g)), [owned, query, lengthFilter]);
-  const dropped = useMemo(() => owned.filter((g) => g.status === 'dropped' && match(g)), [owned, query, lengthFilter]);
-  const favorites = useMemo(
-    () => [...owned.filter((g) => g.favorite && match(g)), ...planned.filter((g) => g.favorite)],
-    [owned, planned, query, lengthFilter],
-  );
 
   // Upcoming unreleased games across Backlog & Planned
   const unreleasedEntries = useMemo(
@@ -409,8 +421,8 @@ export function BacklogView({
     { id: 'dropped', label: 'Dropped', count: dropped.length },
   ];
 
-  const showCalendarBar = showReleaseCalendar !== false && unreleasedEntries.length > 0;
-  const movableBacklog = order === 'mine' && query.trim() === '' && lengthFilter === 'all';
+  const showCalendarBar = showReleaseCalendar !== false && unreleasedEntries.length > 0 && laneFilter === 'all';
+  const movableOrder = order === 'mine' && query.trim() === '' && lengthFilter === 'all';
 
   return (
     <div className={cn(embedded ? 'flex min-h-full flex-col space-y-5' : 'orbit-page flex min-h-full flex-col', showCalendarBar && 'pb-6')}>
@@ -448,7 +460,7 @@ export function BacklogView({
             value={query}
             onChange={setQuery}
             placeholder="Search backlog, studio, genre..."
-            className="mr-auto min-w-[250px] flex-[1.5] sm:max-w-xl"
+            className="mr-auto min-w-[300px] flex-[2]"
             inputClassName="!w-full"
           />
 
@@ -810,7 +822,9 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={false}
+            movable={movableOrder}
+            onMove={move}
+            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}
@@ -818,7 +832,7 @@ export function BacklogView({
         {(laneFilter === 'all' || laneFilter === 'backlog') && (
           <Section
             title="Backlog"
-            subtitle={movableBacklog ? 'Drag cards to set the exact order you want to play next' : 'Ordered by your active filter'}
+            subtitle={movableOrder ? 'Drag cards to set your order' : 'Ordered by your active filter'}
             icon={CircleDashed}
             games={backlog}
             empty="Nothing on the Backlog. Plan a game, or add one from the Library."
@@ -827,7 +841,7 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={movableBacklog}
+            movable={movableOrder}
             ranked={order === 'mine'}
             onMove={move}
             showTimes={showTimes}
@@ -836,7 +850,7 @@ export function BacklogView({
 
         {(laneFilter === 'all' ? planned.length > 0 : laneFilter === 'planned') && (
           <Section
-            title="Not owned yet"
+            title="Wishlist / Planned"
             subtitle="Planned pickups and upcoming wishlist releases"
             icon={Plus}
             games={planned}
@@ -846,7 +860,9 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={false}
+            movable={movableOrder}
+            onMove={move}
+            ranked={order === 'mine'}
             notOwned
             showTimes={showTimes}
             onOwned={(id) => onUpdate(id, { planned: false, status: 'backlog' })}
@@ -869,7 +885,9 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={false}
+            movable={movableOrder}
+            onMove={move}
+            ranked={order === 'mine'}
             readOnlyMoves
             showTimes={showTimes}
           />
@@ -887,7 +905,9 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={false}
+            movable={movableOrder}
+            onMove={move}
+            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}
@@ -904,7 +924,9 @@ export function BacklogView({
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
             unreleasedById={unreleasedById}
-            movable={false}
+            movable={movableOrder}
+            onMove={move}
+            ranked={order === 'mine'}
             showTimes={showTimes}
           />
         )}

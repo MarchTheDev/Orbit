@@ -70,6 +70,7 @@ const checks = [
   'tests/polish-round2.test.mjs',
   'tests/polish-round3.test.mjs',
   'tests/polish-round4.test.mjs',
+  'tests/polish-round5.test.mjs',
 ];
 
 try {

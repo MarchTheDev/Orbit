@@ -112,6 +112,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         .filter(Boolean),
       coverUrl: coverUrl.trim() || null,
       backgroundUrl: backdropUrl.trim() || null,
+      coverUrlCustom: Boolean(coverUrl.trim()) && (meta?.coverUrlCustom === true || coverUrl.trim() !== (meta?.coverUrl ?? '')),
+      backgroundUrlCustom: Boolean(backdropUrl.trim()) && (meta?.backgroundUrlCustom === true || backdropUrl.trim() !== (meta?.backgroundUrl ?? '')),
       coverFit: fit === 'auto' ? undefined : fit,
       headerUrl: meta?.headerUrl ?? null,
       steamAppId: meta?.steamAppId ?? null,

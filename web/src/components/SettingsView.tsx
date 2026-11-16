@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
+  BookOpen,
   Database,
   Download,
   Eye,
@@ -538,6 +539,7 @@ function LibraryFilterOrder({
 const SECTIONS = [
   { id: 'orbit-appearance', label: 'Appearance' },
   { id: 'orbit-library', label: 'Library' },
+  { id: 'orbit-journal', label: 'Journal' },
   { id: 'orbit-playing', label: 'Playing' },
   { id: 'orbit-overlay', label: 'Overlay' },
   { id: 'orbit-captures', label: 'Captures' },
@@ -575,7 +577,7 @@ function NeedsWork({ on = false }: { on?: boolean }) {
 const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
   { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
   { label: 'Games', ids: ['orbit-details', 'orbit-achievements', 'orbit-captures', 'orbit-overlay'] },
-  { label: 'Library', ids: ['orbit-library', 'orbit-libraries', 'orbit-backups'] },
+  { label: 'Library', ids: ['orbit-library', 'orbit-journal', 'orbit-libraries', 'orbit-backups'] },
   { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-updates', 'orbit-about'] },
 ];
 
@@ -586,6 +588,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-library', keywords: 'backlog sync add new games' },
+  { label: 'Add new games to Journal', section: 'orbit-journal', keywords: 'journal sync new games automatic add' },
   { label: 'Upcoming release calendar on Backlog', section: 'orbit-library', keywords: 'backlog calendar upcoming release dates personal steam coming soon' },
   { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
   { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
@@ -1608,12 +1611,6 @@ export function SettingsView({
           label="Add new games to Backlog"
           hint="Also add them to your backlog."
         />
-        <SwitchRow
-          checked={settings.syncJournal !== false}
-          onChange={(v) => setSettings({ syncJournal: v })}
-          label="Add new games to Journal"
-          hint="Also add them to your journal."
-        />
 
         <SubHead>Backlog view</SubHead>
         <SwitchRow
@@ -1694,6 +1691,24 @@ export function SettingsView({
             ))}
           </div>
         )}
+      </Section>
+
+      <Section
+        id="orbit-journal"
+        active={activeSection === 'orbit-journal'}
+        icon={BookOpen}
+        title="Journal"
+      >
+        <SubHead>Adding games to Journal</SubHead>
+        <p className="max-w-2xl text-xs leading-relaxed text-muted">
+          Keep Journal settings separate from Library organization. This only controls new games; it does not change existing Journal entries.
+        </p>
+        <SwitchRow
+          checked={settings.syncJournal !== false}
+          onChange={(v) => setSettings({ syncJournal: v })}
+          label="Add new games to Journal"
+          hint="Add eligible games to Journal when they enter your Library."
+        />
       </Section>
 
       <Section

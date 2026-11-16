@@ -87,6 +87,10 @@ export interface MetaData {
   edited?: boolean;
   /** How the cover fills its frame: `cover` crops, `contain` fits it whole. */
   coverFit?: 'cover' | 'contain';
+  /** A cover chosen by the player must not be replaced by background lookups. */
+  coverUrlCustom?: boolean;
+  /** A custom stage backdrop chosen by the player is kept across metadata refreshes. */
+  backgroundUrlCustom?: boolean;
   /** What the store calls the game, when the lookup started from an app id. */
   name?: string | null;
   summary: string;

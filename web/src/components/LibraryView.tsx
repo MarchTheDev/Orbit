@@ -11,7 +11,6 @@ import {
   NotebookPen,
   Pencil,
   Play,
-  Search,
   SlidersHorizontal,
   Square,
   Star,
@@ -564,8 +563,12 @@ export function LibraryView({
   const focus = shown.find((game) => game.id === focusId) ?? null;
 
   useEffect(() => {
-    prewarmLibraryArtwork(shown, 24);
+    prewarmLibraryArtwork(shown, 16);
   }, [shown]);
+
+  useEffect(() => {
+    if (focus) prewarmLibraryArtwork([focus], 1, true);
+  }, [focus]);
   const playedSecs = shown.reduce((sum, game) => sum + game.playSecs, 0);
 
   // The switch changes the view; the view you are already in opens its
@@ -1445,10 +1448,6 @@ function GamePage({
               <p className="flex items-center gap-2">
                 <HardDrive className="size-3.5" />
                 Longest session {game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '-'}
-              </p>
-              <p className="flex items-center gap-2">
-                <Search className="size-3.5" />
-                {game.meta?.steamAppId ? `Steam app ${game.meta.steamAppId}` : 'No store id'}
               </p>
             </div>
           </section>

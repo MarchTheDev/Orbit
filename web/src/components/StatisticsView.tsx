@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BarChart3, BookOpen, CalendarDays, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
   NotebookPen, Play, Trash2, Trophy,
@@ -59,6 +59,24 @@ function sizeOf(item: GalleryItem): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function dayKeyOf(item: GalleryItem): string {
+  if (!item.at) return 'undated';
+  const date = new Date(item.at * 1000);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function dayLabelOf(item: GalleryItem): string {
+  if (!item.at) return 'Date unknown';
+  const date = new Date(item.at * 1000);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const sameDay = (left: Date, right: Date) => left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+  if (sameDay(date, now)) return 'Today';
+  if (sameDay(date, yesterday)) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
 }
 
 function whenOf(item: GalleryItem): string {
@@ -1047,22 +1065,7 @@ export function StatisticsView({
                       </button>
                     ))}
                   </div>
-                  {albumGame !== 'all' && (
-                    <div className="animate-in fade-in slide-in-from-top-1 rounded-xl border border-line bg-panel/60 p-2">
-                      <div className="mb-2 flex items-center justify-between px-1">
-                        <span className="text-xs font-medium text-fg">Captures for {byFolder.get(albumGame)?.title ?? albumGame}</span>
-                        <button type="button" onClick={() => setAlbumGame('all')} className="rounded-md px-2 py-1 text-[11px] text-muted hover:bg-panel2 hover:text-fg">Show all</button>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                        {(captures ?? []).filter((item) => item.game === albumGame && (albumKind === 'all' || item.kind === albumKind)).slice(0, 8).map((item) => (
-                          <button key={item.path} type="button" onClick={() => setViewerItem(item)} className="group overflow-hidden rounded-lg border border-line bg-panel2 text-left">
-                            <span className="block aspect-video overflow-hidden"><CaptureThumb item={item} /></span>
-                            <span className="block truncate px-1.5 py-1 text-[10px] text-muted group-hover:text-fg">{item.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+
                 </div>
               )}
             </div>
@@ -1100,14 +1103,17 @@ export function StatisticsView({
                       </div>
                     </div>
                     <div className="orbit-gallery">
-                      {group.items.map((item) => {
+                      {group.items.map((item, itemIndex) => {
+                        const dayKey = dayKeyOf(item);
+                        const showDayLabel = itemIndex === 0 || dayKeyOf(group.items[itemIndex - 1]) !== dayKey;
                         const whenLabel = under.date ? whenOf(item) : '';
                         const sizeLabel = under.size ? sizeOf(item) : '';
                         const hasFacts = Boolean(whenLabel || sizeLabel);
                         const hasFooter = Boolean(under.name || hasFacts);
                         return (
+                          <Fragment key={item.path}>
+                          {showDayLabel && <p className="orbit-album-day-label">{dayLabelOf(item)}</p>}
                           <button
-                            key={item.path}
                             type="button"
                             onClick={() => setViewerItem(item)}
                             onContextMenu={(event) => {
@@ -1138,6 +1144,7 @@ export function StatisticsView({
                               </span>
                             )}
                           </button>
+                          </Fragment>
                         );
                       })}
                     </div>
