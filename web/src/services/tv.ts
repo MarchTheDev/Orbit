@@ -26,7 +26,7 @@ export const tvLite = navigator.userAgent.includes('Linux');
 
 /** Whether the document itself is the thing that was made fullscreen. */
 let askedTheDocument = false;
-let previousNativeBounds: { x: number; y: number; width: number; height: number } | null = null;
+let previousNativeBounds: { x: number; y: number; width: number; height: number; maximized: boolean } | null = null;
 
 /** The last thing to go wrong, for a caller that wants to say so. */
 let lastError: string | null = null;
@@ -49,8 +49,8 @@ export async function enterFullscreen(): Promise<boolean> {
   if (isNative()) {
     try {
       const window = getCurrentWindow();
-      const [position, size] = await Promise.all([window.outerPosition(), window.outerSize()]);
-      previousNativeBounds = { x: position.x, y: position.y, width: size.width, height: size.height };
+      const [position, size, maximized] = await Promise.all([window.outerPosition(), window.outerSize(), window.isMaximized()]);
+      previousNativeBounds = { x: position.x, y: position.y, width: size.width, height: size.height, maximized };
       await window.setFullscreen(true);
       return true;
     } catch (error) {
@@ -76,20 +76,25 @@ export async function enterFullscreen(): Promise<boolean> {
 /** Give the window back its chrome. Leaving something that was never taken is fine. */
 export async function leaveFullscreen(): Promise<void> {
   if (isNative()) {
-    try {
-      const window = getCurrentWindow();
-      await window.setFullscreen(false);
-      const bounds = previousNativeBounds;
-      previousNativeBounds = null;
-      if (bounds) {
+    const window = getCurrentWindow();
+    const bounds = previousNativeBounds;
+    previousNativeBounds = null;
+    try { await window.setFullscreen(false); } catch { /* Still try to restore the saved window state. */ }
+    if (bounds) {
+      try {
         // Let the compositor finish leaving fullscreen before restoring the
-        // exact previous rectangle, including a window on a secondary screen.
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 80));
-        await window.setSize(new PhysicalSize(bounds.width, bounds.height));
-        await window.setPosition(new PhysicalPosition(bounds.x, bounds.y));
+        // previous state. Maximized windows need their maximized state restored,
+        // not the work-area rectangle captured while they filled the desktop.
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
+        if (bounds.maximized) {
+          await window.maximize();
+        } else {
+          await window.setSize(new PhysicalSize(bounds.width, bounds.height));
+          await window.setPosition(new PhysicalPosition(bounds.x, bounds.y));
+        }
+      } catch {
+        /* The window was closed, or is not ours to resize any more. */
       }
-    } catch {
-      /* The window was closed, or is not ours to resize any more. */
     }
     return;
   }

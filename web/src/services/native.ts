@@ -92,6 +92,13 @@ export function saveGame(game: Game): Promise<void> {
   return call('db_upsert_game', { game }, () => undefined);
 }
 
+/** Install a chosen ReShade DLL and optional preset beside the selected game. */
+export function applyReshade(gameId: string, dllPath: string, presetPath: string, api: string): Promise<string> {
+  return call('apply_reshade', { gameId, dllPath, presetPath: presetPath || null, api }, () => {
+    throw new Error('Applying ReShade needs the Orbit desktop app.');
+  });
+}
+
 export function deleteGame(id: string): Promise<void> {
   return call('db_delete_game', { id }, () => undefined);
 }

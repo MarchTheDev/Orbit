@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { FolderOpen, Image, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { FolderOpen, Image, RotateCcw, Sparkles } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
-import { findArtwork, findSave, isNative, saveHintsOf, suggestSaves } from '../../services/native';
+import { applyReshade, findArtwork, findSave, isNative, revealInExplorer, saveHintsOf, suggestSaves } from '../../services/native';
 import { say } from '../../utils/toast';
-import { fileSrc, pickAnyFile, pickFolder } from '../../services/desktop';
+import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
 import { cn } from '../../utils/cn';
 import { LaunchEditor } from './LaunchEditor';
 import { Select } from '../ui/Select';
-import { MarkdownEditor } from '../ui/Markdown';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
-import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
+import { PortraitBrowser } from '../ui/PortraitBrowser';
 
 /**
  * Everything about a game, in one place.
@@ -36,6 +35,10 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuggestions, setSaveSuggestions] = useState<string[]>([]);
+  const [reshadeDll, setReshadeDll] = useState('');
+  const [reshadePreset, setReshadePreset] = useState('');
+  const [reshadeApi, setReshadeApi] = useState('dxgi');
+  const [reshadeBusy, setReshadeBusy] = useState(false);
   const saveAttempted = useRef(false);
 
   const [title, setTitle] = useState(game.title);
@@ -51,9 +54,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [mainExtra, setMainExtra] = useState(hltb ? String(hltb.mainExtra) : '');
   const [completionist, setCompletionist] = useState(hltb ? String(hltb.completionist) : '');
   const [sizeGb, setSizeGb] = useState(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
-  const [notes, setNotes] = useState(game.notes);
   const [fit, setFit] = useState<'auto' | 'cover' | 'contain'>(meta?.coverFit ?? 'auto');
-  const [planned, setPlanned] = useState(!!game.planned);
   const [status, setStatus] = useState<GameStatus>(game.status);
   const [favorite, setFavorite] = useState(game.favorite);
   const [hidden, setHidden] = useState(!!game.hidden);
@@ -74,9 +75,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     setMainExtra(game.hltb ? String(game.hltb.mainExtra) : '');
     setCompletionist(game.hltb ? String(game.hltb.completionist) : '');
     setSizeGb(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
-    setNotes(game.notes);
     setFit(game.meta?.coverFit ?? 'auto');
-    setPlanned(!!game.planned);
     setStatus(game.status);
     setFavorite(game.favorite);
     setHidden(!!game.hidden);
@@ -117,7 +116,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   };
 
   const formSnap = JSON.stringify({
-    title, notes, planned, status, favorite, hidden, coverPath, coverUrl, backdropUrl,
+    title, status, favorite, hidden, coverPath, coverUrl, backdropUrl,
     summary, developer, releaseYear, rating, genres, fit, sizeGb, main, mainExtra, completionist,
   });
   const initialSnap = useRef<string | null>(null);
@@ -173,8 +172,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     const gb = Number(sizeGb.replace(',', '.'));
     onUpdateRef.current({
       title: title.trim() || game.title,
-      notes,
-      planned,
       status,
       favorite,
       hidden,
@@ -198,38 +195,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
 
   return (
     <section className="orbit-edit">
-      {/* The game's own face, at the top of its own record. A form whose first
-          field is "Author / developer" asks somebody to type before it tells
-          them which game they opened. */}
-      <header className="orbit-edit-face">
-        <PortraitFrame
-          src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || (game.coverPath ? fileSrc(game.coverPath) : null)}
-          className="orbit-edit-faceart"
-        />
-        <div className="orbit-edit-facecopy">
-          <span className="orbit-edit-kicker">
-            <Pencil className="size-3" />
-            Editing
-          </span>
-          <label className="block">
-            <span className="sr-only">Title</span>
-            <input
-              className="orbit-edit-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              spellCheck={false}
-              aria-label="Game title"
-            />
-          </label>
-          <p className="orbit-edit-headmeta">
-            {developer || releaseYear || genres
-              ? [developer, releaseYear, genres].filter(Boolean).join(' · ')
-              : 'Anything the store got wrong, or Orbit guessed from a file name, can be fixed below.'}
-          </p>
-        </div>
-        <p className="orbit-edit-saved">Saved as you type · there is no save button</p>
-      </header>
-
       <div className="orbit-edit-tabs" role="tablist" aria-label="Edit game sections">
         {([
           ['details', 'Details'],
@@ -244,11 +209,14 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
 
       <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
-          <h4 className="orbit-editsection-title">What it is</h4>
-          <p className="orbit-editsection-note">The facts the library sorts and searches by.</p>
+          <h4 className="orbit-editsection-title">Game details</h4>
+          <p className="orbit-editsection-note">Name, description and useful library information.</p>
         </header>
-      <div className="orbit-edit-facts">
-
+        <div className="orbit-edit-facts">
+        <label className="block sm:col-span-2">
+          <span className={labelCls}>Game name</span>
+          <input className={inputCls} value={title} onChange={(event) => setTitle(event.target.value)} spellCheck={false} />
+        </label>
         <label className="block">
           <span className={labelCls}>Author / developer</span>
           <input className={inputCls} value={developer} onChange={(e) => setDeveloper(e.target.value)} />
@@ -306,126 +274,47 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
 
       <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
-          <h4 className="orbit-editsection-title">
-            <Image className="size-3.5" />
-            Artwork
-          </h4>
-          <p className="orbit-editsection-note">
-            A cover is a portrait poster; a backdrop is the wide picture behind the title. Either can be a
-            file on this PC or a link.
-          </p>
+          <h4 className="orbit-editsection-title"><Image className="size-3.5" />Artwork</h4>
+          <p className="orbit-editsection-note">Choose a cover and a wide Stardeck backdrop. A preview stays beside each choice.</p>
         </header>
-
-        <div className="orbit-edit-artrow">
-          <PortraitFrame
-            src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || null}
-            className="orbit-edit-artpreview"
-          />
-          <div className="min-w-0 flex-1 space-y-2">
-            <label className="block">
-              <span className={labelCls}>Cover picture (a file on this PC)</span>
-              <div className="flex gap-2">
-                <input
-                  className={inputCls}
-                  value={coverPath}
-                  onChange={(e) => setCoverPath(e.target.value)}
-                  placeholder="Leave empty and Orbit uses the store's art"
-                  spellCheck={false}
-                />
-                {isNative() && (
-                  <button
-                    type="button"
-                    className={`${btnBrowse} flex items-center gap-2`}
-                    onClick={() => void pickAnyFile('Choose cover art').then((p) => p && setCoverPath(p))}
-                  >
-                    <FolderOpen className="size-4" />
-                    Browse
-                  </button>
-                )}
+        <div className="orbit-art-workbench">
+          <article className="orbit-art-choice">
+            <div className="orbit-art-choice-preview is-cover">
+              {(coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl) ?
+                <img src={coverPath.trim() ? fileSrc(coverPath.trim()) : coverUrl.trim() || game.meta?.coverUrl || ''} alt="Cover preview" /> :
+                <span>{game.title}</span>}
+            </div>
+            <div className="orbit-art-choice-copy">
+              <h5>Cover</h5><p>The poster shown on library tiles.</p>
+              <div className="flex flex-wrap gap-2">
+                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickAnyFile('Choose cover art').then((path) => path && setCoverPath(path))}><FolderOpen className="size-3.5" />Choose file</button>}
+                <PortraitBrowser resetKey={game.id} selected={coverUrl} load={(page) => findArtwork(game.id, page)} onChoose={(pick) => { setCoverUrl(pick.url); setCoverPath(''); say('Cover updated.'); }} />
+                {(coverPath || coverUrl) && <button type="button" className={btnGhost} onClick={() => { setCoverPath(''); setCoverUrl(''); }}>Use library art</button>}
               </div>
-            </label>
-
-            <label className="block">
-              <span className={labelCls}>Cover picture (a link)</span>
-              <input
-                className={inputCls}
-                value={coverUrl}
-                onChange={(e) => setCoverUrl(e.target.value)}
-                placeholder="https://..."
-                spellCheck={false}
-              />
-            </label>
-          </div>
+              <details className="orbit-art-url"><summary>Enter a cover URL</summary><input className={inputCls} type="url" value={coverUrl} onChange={(event) => { setCoverUrl(event.target.value); setCoverPath(''); }} placeholder="https://…" spellCheck={false} /></details>
+              <details className="orbit-art-url">
+                <summary>Fit in the library tile</summary>
+                <div className="flex w-fit rounded-lg border border-line p-0.5">
+                  {([['auto', 'Auto'], ['cover', 'Fill'], ['contain', 'Fit']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={fit === id} onClick={() => setFit(id)} className="orbit-art-fit">{label}</button>)}
+                </div>
+              </details>
+            </div>
+          </article>
+          <article className="orbit-art-choice is-wide">
+            <div className="orbit-art-choice-preview is-backdrop">
+              {(backdropUrl.trim() || game.meta?.headerUrl || game.meta?.backgroundUrl) ? <img src={backdropUrl.trim() || game.meta?.headerUrl || game.meta?.backgroundUrl || ''} alt="Backdrop preview" /> : <span>Stardeck backdrop</span>}
+            </div>
+            <div className="orbit-art-choice-copy">
+              <h5>Wide backdrop</h5><p>The atmospheric image behind the selected game in Stardeck.</p>
+              <div className="flex flex-wrap gap-2">
+                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickAnyFile('Choose a wide backdrop').then((path) => path && setBackdropUrl(fileSrc(path)))}><FolderOpen className="size-3.5" />Choose file</button>}
+                {backdropUrl && <button type="button" className={btnGhost} onClick={() => setBackdropUrl('')}>Use automatic art</button>}
+              </div>
+              <details className="orbit-art-url"><summary>Enter a backdrop URL</summary><input className={inputCls} type="url" value={backdropUrl} onChange={(event) => setBackdropUrl(event.target.value)} placeholder="https://…" spellCheck={false} /></details>
+            </div>
+          </article>
         </div>
-
-        <label className="block">
-          <span className={labelCls}>Backdrop picture (the wide one behind the title)</span>
-          <input
-            className={inputCls}
-            value={backdropUrl}
-            onChange={(e) => setBackdropUrl(e.target.value)}
-            placeholder="A link, or leave empty for the header art"
-            spellCheck={false}
-          />
-        </label>
-
-        {/* How the picture sits in a tall tile. The guess based on shape is
-            right most of the time; this is for the times it is not. */}
-        <div>
-          <span className={labelCls}>How the cover sits in its frame</span>
-          <div className="flex w-fit rounded-lg border border-line p-0.5">
-            {(
-              [
-                ['auto', 'Automatic'],
-                ['cover', 'Fill the frame'],
-                ['contain', 'Fit it whole'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setFit(id)}
-                className={`rounded-md px-2.5 py-1 text-[11px] transition ${
-                  fit === id ? 'bg-panel2 text-fg' : 'text-muted hover:text-fg'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-[11px] text-muted">
-            Fill fills the tile and crops what does not fit; fit shows the whole picture. Closing this keeps it.
-          </p>
-        </div>
-
-        <PortraitBrowser
-          resetKey={game.id}
-          selected={coverUrl}
-          load={(page) => findArtwork(game.id, page)}
-          onChoose={(pick) => {
-            setCoverUrl(pick.url);
-            setCoverPath('');
-            say('Cover chosen. Closing this keeps it.');
-          }}
-        />
       </section>
-
-      <label className="orbit-editrow" hidden={activeTab !== 'details'}>
-        <input
-          type="checkbox"
-          checked={planned}
-          onChange={(e) => setPlanned(e.target.checked)}
-          className="mt-0.5 size-4 accent-[var(--c-accent)]"
-        />
-        <span>
-          <span className="block text-[13px] font-semibold">Not owned yet</span>
-          <span className="orbit-editrow-hint">
-            Tick this for a game you mean to play but do not have here. It stays on the Backlog page instead
-            of the library, with no Play button, until a program is pointed at it.
-          </span>
-        </span>
-      </label>
-
       <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">In the library</h4>
@@ -448,22 +337,46 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
           />
         </label>
         <div className="orbit-edit-choices">
-          <label className="orbit-editchoice">
-            <input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} className="size-4 accent-[var(--c-accent)]" />
-            <span>
-              <b>Favorite</b>
-              <i>Kept at the front of the shelf.</i>
-            </span>
-          </label>
-          <label className="orbit-editchoice">
-            <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} className="size-4 accent-[var(--c-accent)]" />
-            <span>
-              <b>Hide from Library</b>
-              <i>Still findable by search and in the Journal.</i>
-            </span>
-          </label>
+          <EditSwitch label="Favorite" hint="Keep this game easy to find." checked={favorite} onChange={setFavorite} />
+          <EditSwitch label="Hide from Library" hint="Keep it out of the Library grid; it remains searchable." checked={hidden} onChange={setHidden} />
         </div>
       </section>
+
+      {activeTab === 'tools' && !hideLaunchSettings && (
+        <section className="orbit-editsection orbit-reshade-panel">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title"><Sparkles className="size-3.5" />ReShade</h4>
+            <p className="orbit-editsection-note">Apply an existing ReShade DLL and optional preset directly to this game. Any DLL or preset already in the game folder is backed up first.</p>
+          </header>
+          <div className="orbit-edit-facts">
+            <label className="block sm:col-span-2">
+              <span className={labelCls}>ReShade DLL</span>
+              <div className="flex gap-2">
+                <input className={inputCls} value={reshadeDll} onChange={(event) => setReshadeDll(event.target.value)} placeholder="Choose a ReShade .dll" spellCheck={false} />
+                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFile('Choose ReShade DLL', ['dll']).then((path) => path && setReshadeDll(path))}><FolderOpen className="size-3.5" />Browse</button>}
+              </div>
+            </label>
+            <label className="block">
+              <span className={labelCls}>Graphics API proxy</span>
+              <Select value={reshadeApi} onChange={setReshadeApi} ariaLabel="ReShade graphics API" options={[{ value: 'dxgi', label: 'DirectX 10 / 11 / 12 (dxgi.dll)' }, { value: 'd3d11', label: 'Direct3D 11 (d3d11.dll)' }, { value: 'd3d9', label: 'Direct3D 9 (d3d9.dll)' }, { value: 'opengl32', label: 'OpenGL (opengl32.dll)' }]} />
+            </label>
+            <label className="block">
+              <span className={labelCls}>Preset (optional)</span>
+              <div className="flex gap-2">
+                <input className={inputCls} value={reshadePreset} onChange={(event) => setReshadePreset(event.target.value)} placeholder="Choose a .ini preset" spellCheck={false} />
+                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFile('Choose ReShade preset', ['ini']).then((path) => path && setReshadePreset(path))}><FolderOpen className="size-3.5" />Browse</button>}
+              </div>
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={cn(btnBrowse, 'font-semibold')} disabled={!isNative() || !reshadeDll.trim() || reshadeBusy} onClick={() => {
+              setReshadeBusy(true);
+              void applyReshade(game.id, reshadeDll, reshadePreset, reshadeApi).then((message) => say(message)).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
+            }}>{reshadeBusy ? 'Applying…' : 'Apply ReShade to game'}</button>
+            <span className="text-xs text-muted">Windows or Wine games · files are kept beside the game executable.</span>
+          </div>
+        </section>
+      )}
 
       {!hideLaunchSettings && (activeTab === 'launch' || activeTab === 'tools') && (
         <LaunchEditor
@@ -478,12 +391,11 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
         <section className="orbit-editsection">
           <header className="orbit-editsection-head">
             <h4 className="orbit-editsection-title">Save location</h4>
-            <p className="orbit-editsection-note">Orbit searches this game’s common folders and Steam or Wine prefixes automatically. PCGamingWiki suggestions are shown when no existing save directory is found.</p>
           </header>
           <label className="block">
             <span className={labelCls}>Detected or chosen folder</span>
             <div className="flex gap-2">
-              <input className={inputCls} value={savePath} onChange={(event) => setSavePath(event.target.value)} placeholder="No save folder found yet" spellCheck={false} />
+              <input className={inputCls} value={savePath} onChange={(event) => { setSavePath(event.target.value); onSaveDir?.(event.target.value); }} placeholder="No save folder found yet" spellCheck={false} />
               {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFolder('Choose this game’s save folder', savePath || undefined).then((path) => { if (path) { setSavePath(path); onSaveDir?.(path); } })}>Browse</button>}
             </div>
           </label>
@@ -497,9 +409,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
             }}>
               <FolderOpen className="size-3.5" /> {saveBusy ? 'Searching…' : 'Find save folder'}
             </button>
-            {savePath.trim() && <button type="button" className={btnGhost} onClick={() => { setSavePath(''); onSaveDir?.(''); }}>Clear saved location</button>}
+            {savePath.trim() && <button type="button" disabled={!isNative()} className={btnGhost} onClick={() => void revealInExplorer(savePath)}>Open folder</button>}
           </div>
-          {savePath.trim() && <p className="text-xs text-emerald-300">Saved folder: <span className="font-mono">{savePath}</span></p>}
           {saveSuggestions.length > 0 && <div className="space-y-2 rounded-xl border border-line bg-panel p-3"><p className="text-xs font-semibold">PCGamingWiki lists these candidate locations for {game.title}:</p>{saveSuggestions.map((suggestion) => <p key={suggestion} className="break-all font-mono text-xs text-muted" title={suggestion}>{suggestion}</p>)}</div>}
           {saveError && <p role="alert" className="text-xs text-rose-300">{saveError}</p>}
         </section>
@@ -545,21 +456,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
         </button>
       </section>
 
-      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
-        <span className={labelCls}>
-          Notes
-          <span className="ml-2 normal-case tracking-normal text-muted/70">
-            For the current playthrough. Markdown, with a rendered View when you need it
-          </span>
-        </span>
-        <MarkdownEditor
-          value={notes}
-          onChange={setNotes}
-          rows={6}
-          placeholder="Anything you want to remember."
-        />
-      </section>
-
       {activeTab === 'details' && game.installDir && (
         <p className="orbit-edit-path">
           {game.installDir}
@@ -567,30 +463,12 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
         </p>
       )}
 
-      <div className="orbit-edit-foot" hidden={activeTab !== 'details'}>
-        <button
-          type="button"
-          onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}
-          className="orbit-edit-footbtn"
-          title="Ask HowLongToBeat for the times again"
-        >
-          <RotateCcw className="size-3.5" />
-          Refresh times
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (confirm('Clear the notes for this game?')) {
-              setNotes('');
-              onUpdate({ notes: '' });
-            }
-          }}
-          className="orbit-edit-footbtn is-danger"
-        >
-          <Trash2 className="size-3.5" />
-          Clear notes
-        </button>
-      </div>
+
     </section>
   );
+}
+
+
+function EditSwitch({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <div className="orbit-setrow"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">{label}</p><p className="orbit-setrow-hint">{hint}</p></div><button type="button" role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)} className="orbit-switch" data-on={checked || undefined}><i /></button></div>;
 }

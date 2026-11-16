@@ -463,10 +463,14 @@ fn candidates(title: &str, install_dir: Option<&str>) -> Vec<String> {
                 if !base.is_empty() { found.push(base.to_string()); }
             }
         }
-        for (from, to) in [("Part I", "Part 1"), ("Part II", "Part 2"), ("Part III", "Part 3"), ("Part 1", "Part I"), ("Part 2", "Part II"), ("Part 3", "Part III"), (" III", " 3"), (" II", " 2"), (" IV", " 4")] {
-            if name.contains(from) {
-                let alternate = name.replace(from, to);
-                if alternate != *name { found.push(alternate); }
+        let numerals = [("Part I", "Part 1"), ("Part II", "Part 2"), ("Part III", "Part 3"), ("Part 1", "Part I"), ("Part 2", "Part II"), ("Part 3", "Part III"), (" III", " 3"), (" II", " 2"), (" IV", " 4")];
+        let bases = std::iter::once(name.to_string()).chain(found.iter().cloned()).collect::<Vec<_>>();
+        for base in bases {
+            for (from, to) in numerals {
+                if base.contains(from) {
+                    let alternate = base.replace(from, to);
+                    if alternate != base { found.push(alternate); }
+                }
             }
         }
         found

@@ -155,8 +155,8 @@ const render = async (games, runningId = null, extra = {}) => {
 
 await render(library);
 check('the hub fills the window rather than sitting in the page', !!document.querySelector('[data-orbit-tv]'));
-check('Deck keeps a single focused cover visible while the other games are browsed by step',
-  covers().length === 1 && selected() === '0', String(covers().length));
+check('Deck keeps the selected cover in the middle with one neighboring cover on each side',
+  covers().length === 3 && selected() === '0' && document.querySelector('[data-tv-cover="0"][data-deck-position="0"][aria-current="true"]') !== null, String(covers().length));
 check('there are no shelves or category tabs to choose between first',
   !document.querySelector('[data-tv-shelf]') &&
     !['Up next', 'Favourites', 'Jump back in'].some((label) => document.body.textContent.includes(label)));
@@ -302,7 +302,7 @@ console.log('TV mode opens without entrance choreography');
 
 await render(library);
 check('it opens directly on the library without a boot veil',
-  !document.querySelector('.tv-boot') && covers().length === 1 &&
+  !document.querySelector('.tv-boot') && covers().length === 3 &&
     document.activeElement?.getAttribute('data-tv-cover') === '0');
 check('the backdrop does not scale or transition when the selected game changes',
   !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
@@ -351,13 +351,13 @@ check('the sort sits in the mode\'s own menu, not up in the top bar',
 await act(async () => {
   buttonWith('A–Z').click();
 });
-check('A–Z keeps the focused Deck and updates the visible order indicator',
-  covers().length === 1 && !!buttonWith('A–Z'), `${title()} / ${selected()}`);
+check('A–Z keeps the focused Deck and its book-page neighbors visible',
+  covers().length === 3 && !!buttonWith('A–Z'), `${title()} / ${selected()}`);
 check('and says which order it is in', !!buttonWith('A–Z'));
 // Back out of the menu so the rest of the checks are looking at the deck.
 await key('Escape');
 await key('Escape');
-check('switching order keeps the single focused cover visible', covers().length === 1);
+check('switching order keeps the focused cover and neighboring pages visible', covers().length === 3);
 // A long name is the one thing a rail cannot guess at: it gets two lines rather
 // than an ellipsis on the first.
 check('rail titles are allowed to wrap instead of being cut',

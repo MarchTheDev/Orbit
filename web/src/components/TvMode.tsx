@@ -18,7 +18,7 @@ import type { Game, Settings } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { inLibraryShelf } from '../utils/library';
 import { cn } from '../utils/cn';
-import { wideArt } from '../utils/art';
+import { wideArt, wideArtImmediateFallback } from '../utils/art';
 import { Cover, warmCover, warmImage } from './ui/Cover';
 import { Logo } from './ui/Logo';
 import { TvDetails } from './TvDetails';
@@ -962,6 +962,14 @@ export function TvMode({
   }, [view]);
   const active = list.find((game) => game.id === selectedId) ?? list[0] ?? null;
   const at = active ? list.indexOf(active) : 0;
+  const deckCards = active
+    ? list.length > 2
+      ? [-1, 0, 1].map((offset) => {
+          const index = (at + offset + list.length) % list.length;
+          return { game: list[index], index, position: offset };
+        })
+      : list.map((game, index) => ({ game, index, position: index === at ? 0 : (index < at ? -1 : 1) }))
+    : [];
   const running = active !== null && active.id === runningId;
   /** The game whose own page is open, when it is still one of the playable ones. */
   const detailed = detailId ? (list.find((game) => game.id === detailId) ?? null) : null;
@@ -978,8 +986,12 @@ export function TvMode({
       const game = list[n];
       if (!game) continue;
       warmCover(game);
-      const first = backdropsFor(game)[0];
-      warmImage(first);
+      const candidates = backdropsFor(game);
+      const first = candidates[0];
+      // Warm a known provider hero before asking the network for any speculative
+      // 2x Steam CDN variant, then keep the sharp candidate decoding in parallel.
+      warmImage(wideArtImmediateFallback(game) ?? first);
+      if (first && first !== wideArtImmediateFallback(game)) warmImage(first);
       warmImage(game.meta?.headerUrl ?? game.meta?.backgroundUrl);
     }
   }, [at, list]);
@@ -1011,10 +1023,10 @@ export function TvMode({
     return () => {
       document.documentElement.classList.remove('orbit-tv');
       document.body.style.overflow = '';
-      // Restore window bounds from taskbar overlap: trigger resize and ensure not fullscreen over it
+      // The App's exit handler restores the desktop window once, after this
+      // view has unmounted. A second setFullscreen(false) here raced its saved
+      // size/position and could put a maximized window below the taskbar.
       try { window.dispatchEvent(new window.Event('resize')); } catch {}
-      const w = (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { setFullscreen: (v:boolean)=>Promise<void> } } } }).__TAURI__?.window?.getCurrentWindow();
-      w?.setFullscreen(false).catch(()=>undefined);
     };
   }, []);
 
@@ -1519,12 +1531,12 @@ export function TvMode({
                 drawn in it. The art is the backdrop, dimmed and vignetted at the
                 bottom and left so the type has somewhere to live. */}
             <section className="orbit-deck-stage" data-deck-stage>
-              {prefs.backdrop !== false && (heroes[active.id] || wideArt(active)) ? (
+              {prefs.backdrop !== false && (heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active)) ? (
                 <div
                   aria-hidden
                   key={`${active.id}-art`}
                   className="orbit-deck-stageart"
-                  style={{ backgroundImage: `url("${heroes[active.id] || wideArt(active)}")` }}
+                  style={{ backgroundImage: `url("${heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active)}")` }}
                 />
               ) : (
                 <div
@@ -1695,13 +1707,13 @@ export function TvMode({
                 }}
                 className="orbit-deck-cards orbit-scroll"
               >
-                {[active].map((game) => {
-                  const n = at;
-                  const chosen = true;
+                {deckCards.map(({ game, index: n, position }) => {
+                  const chosen = position === 0;
                   return (
                     <li key={game.id}>
                       <button
                         data-tv-cover={n}
+                        data-deck-position={position}
                         draggable={false}
                         onDragStart={(event) => event.preventDefault()}
                         onFocus={() => setSelectedId(game.id)}
@@ -1731,6 +1743,7 @@ export function TvMode({
                             game={game}
                             className="size-full [&_span]:text-xl"
                             fit="cover"
+                            loading="eager"
                           />
                           {game.id === runningId && (
                             <span className="orbit-deck-on">

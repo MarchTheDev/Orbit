@@ -16,6 +16,26 @@ use tauri::Emitter;
 
 use crate::launch::parse_args;
 
+/// Build a direct or shell-backed command for a game/script path.
+pub(crate) fn command_for_path(path: &Path) -> Command {
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if cfg!(windows) && matches!(extension.as_str(), "bat" | "cmd") {
+        let mut command = Command::new("cmd.exe");
+        command.arg("/C").arg(path);
+        command
+    } else if cfg!(windows) && extension == "ps1" {
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(path);
+        command
+    } else if cfg!(unix) && extension == "sh" {
+        let mut command = Command::new("/bin/sh");
+        command.arg(path);
+        command
+    } else {
+        Command::new(path)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 // The `kind` tag is snake_case on the wire, but the fields inside each variant are
 // camelCase, because that is what the TypeScript side writes and reads.
@@ -220,7 +240,7 @@ pub fn spawn(target: &LaunchTarget) -> Result<Option<Child>, String> {
             if !path.exists() {
                 return Err(format!("{} is not there any more.", path.display()));
             }
-            let mut cmd = Command::new(path);
+            let mut cmd = command_for_path(path);
             let args = args.trim();
             if !args.is_empty() {
                 cmd.args(parse_args(args));

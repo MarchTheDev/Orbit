@@ -655,22 +655,7 @@ pub fn spawn_detached(path: &Path, args: &str) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("{} is not there any more.", path.display()));
     }
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
-    let mut cmd = if cfg!(windows) && matches!(extension.as_str(), "bat" | "cmd") {
-        let mut shell = std::process::Command::new("cmd.exe");
-        shell.arg("/C").arg(path);
-        shell
-    } else if cfg!(windows) && extension == "ps1" {
-        let mut shell = std::process::Command::new("powershell.exe");
-        shell.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(path);
-        shell
-    } else if cfg!(unix) && extension == "sh" {
-        let mut shell = std::process::Command::new("/bin/sh");
-        shell.arg(path);
-        shell
-    } else {
-        std::process::Command::new(path)
-    };
+    let mut cmd = crate::launch_target::command_for_path(path);
     let args = args.trim();
     if !args.is_empty() {
         cmd.args(parse_args(args));

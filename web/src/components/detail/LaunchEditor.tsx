@@ -226,7 +226,7 @@ export function LaunchEditor({
                 <button
                   className={`${btnBrowse} mt-5 flex items-center gap-2`}
                   onClick={() =>
-                    void pickFile('Choose the program', ['exe', 'bat', 'cmd'], target.path || undefined).then(
+                    void pickFile('Choose the program or script', ['exe', 'bat', 'cmd', 'ps1', 'sh'], target.path || undefined).then(
                       (p) => p && setTarget({ ...target, path: p }),
                     )
                   }
@@ -329,14 +329,14 @@ export function LaunchEditor({
       {/* Started with the game, never watched. */}
       <div className="border-t border-line pt-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Tools and launch companions</h3>
+          <h3 className="text-sm font-semibold">Start alongside</h3>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: null }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add program or script</button>
+            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: null }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add program / script</button>
             <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: '' }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add web page</button>
           </div>
         </div>
         <p className="mb-3 text-xs text-muted">
-          Start a mod manager, ReShade setup or preset utility, settings tool, shell script, or open a reference page when the game launches. Programs can take arguments; web pages open in your system browser.
+          Start a mod manager, settings tool, script, or another utility with the game, or open a web page. Each program or script has its own arguments; web pages open in your system browser.
         </p>
 
         {companions.length === 0 ? (

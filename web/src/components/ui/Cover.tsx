@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Game } from '../../types';
 import { fileSrc } from '../../services/desktop';
-import { coverArtCandidates, decodeArtwork } from '../../utils/art';
+import { coverArtCandidates } from '../../utils/art';
 import { cn } from '../../utils/cn';
 
 /**
@@ -28,6 +28,7 @@ export function warmImage(src: string | null | undefined) {
   if (!src || warmImages.has(src)) return;
   const image = new Image();
   image.decoding = 'async';
+  image.fetchPriority = 'high';
   image.src = src;
   warmImages.set(src, image);
   if (warmImages.size > 16) {
@@ -151,14 +152,10 @@ function Artwork({
   const [displaySrc, setDisplaySrc] = useState(src);
   useEffect(() => {
     setWide(aspectRatios.get(src) ?? false);
-    if (src === displaySrc) return;
-    let active = true;
-    // Keep the previous decoded cover visible until the new high-resolution
-    // candidate is ready, then swap in one paint rather than flashing empty.
-    void decodeArtwork(src)
-      .then(() => { if (active) setDisplaySrc(src); })
-      .catch(() => { if (active) onFail(); });
-    return () => { active = false; };
+    // Start drawing the current source immediately. Waiting for a separate
+    // decode promise kept the previous game's banner on screen for seconds on
+    // slower WebKit machines even though the browser was already fetching this.
+    setDisplaySrc(src);
   }, [src]);
   // A pinned choice wins; otherwise a picture squarer than a poster is fitted
   // whole rather than cropped to a strip. Its measured shape is kept across
@@ -198,6 +195,7 @@ function Artwork({
           setWide(isWide);
         }}
         decoding="async"
+        fetchPriority={loading === 'eager' ? 'high' : 'auto'}
         onError={onFail}
         className={cn('relative size-full', fitted ? 'object-contain' : 'object-cover')}
       />

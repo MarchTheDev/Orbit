@@ -286,7 +286,7 @@ function Piece({
       className={cn(
         'rounded-2xl border px-3 py-3 text-left transition',
         on
-          ? 'border-accent bg-accent/15 text-fg shadow-[0_0_24px_-12px_var(--c-accent)]'
+          ? 'border-accent bg-transparent text-fg'
           : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
         locked && 'cursor-default',
         disabled && !locked && 'cursor-not-allowed opacity-40',

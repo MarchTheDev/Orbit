@@ -372,6 +372,74 @@ fn db_upsert_game(orbit: State<'_, Orbit>, game: GameWrite) -> Result<(), String
     orbit.db.upsert_game(&game)
 }
 
+/// Apply a locally supplied ReShade DLL and optional preset to this game's install directory.
+#[tauri::command]
+fn apply_reshade(
+    orbit: State<'_, Orbit>,
+    game_id: String,
+    dll_path: String,
+    preset_path: Option<String>,
+    api: String,
+) -> Result<String, String> {
+    use std::path::{Path, PathBuf};
+
+    let target_name = match api.as_str() {
+        "dxgi" => "dxgi.dll",
+        "d3d11" => "d3d11.dll",
+        "d3d9" => "d3d9.dll",
+        "opengl32" => "opengl32.dll",
+        _ => return Err("Choose a supported graphics API for ReShade.".into()),
+    };
+    let source = PathBuf::from(dll_path.trim());
+    if !source.is_file() || !source.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("dll")) {
+        return Err("Choose an existing ReShade .dll file.".into());
+    }
+    let preset = preset_path.map(|path| PathBuf::from(path.trim())).filter(|path| !path.as_os_str().is_empty());
+    if let Some(path) = &preset {
+        if !path.is_file() || !path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("ini")) {
+            return Err("Choose an existing ReShade .ini preset, or leave it empty.".into());
+        }
+    }
+    let game = orbit.db.game(&game_id)?.ok_or_else(|| "This game is no longer in the library.".to_string())?;
+    let launch_json = game.launch.to_string();
+    let launch_path = crate::launch_target::LaunchTarget::parse(Some(&launch_json)).primary_path().map(Path::to_path_buf);
+    let install = game.install_dir.as_deref().map(PathBuf::from).filter(|path| path.is_dir())
+        .or_else(|| game.exe_path.as_deref().and_then(|path| Path::new(path).parent()).filter(|path| path.is_dir()).map(Path::to_path_buf))
+        .or_else(|| launch_path.as_deref().and_then(Path::parent).filter(|path| path.is_dir()).map(Path::to_path_buf))
+        .ok_or_else(|| "Orbit needs the game's install folder or executable path before ReShade can be applied.".to_string())?;
+    let destination = install.join(target_name);
+    let source_canonical = source.canonicalize().ok();
+    let destination_canonical = destination.canonicalize().ok();
+    if source_canonical != destination_canonical {
+        backup_reshade_file(&destination)?;
+        std::fs::copy(&source, &destination).map_err(|error| format!("Could not install ReShade at {}: {error}", destination.display()))?;
+    }
+    if let Some(preset) = preset {
+        let preset_destination = install.join("Orbit-ReShade-Preset.ini");
+        backup_reshade_file(&preset_destination)?;
+        std::fs::copy(&preset, &preset_destination).map_err(|error| format!("Could not copy the preset: {error}"))?;
+        let config = install.join("ReShade.ini");
+        backup_reshade_file(&config)?;
+        std::fs::write(&config, "[GENERAL]\nPresetPath=Orbit-ReShade-Preset.ini\n")
+            .map_err(|error| format!("Could not configure the ReShade preset: {error}"))?;
+    }
+    Ok(format!("ReShade was applied to {}.", install.display()))
+}
+
+fn backup_reshade_file(path: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
+    if !path.exists() { return Ok(None); }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let mut backup = path.with_file_name(format!("{name}.orbit-backup-{stamp}"));
+    let mut suffix = 1u32;
+    while backup.exists() {
+        backup = path.with_file_name(format!("{name}.orbit-backup-{stamp}-{suffix}"));
+        suffix += 1;
+    }
+    std::fs::copy(path, &backup).map_err(|error| format!("Could not back up {}: {error}", path.display()))?;
+    Ok(Some(backup))
+}
+
 /// Forget a game and all of its sessions.
 #[tauri::command]
 fn db_delete_game(orbit: State<'_, Orbit>, id: String) -> Result<(), String> {
@@ -2689,6 +2757,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db_list_games,
             db_upsert_game,
+            apply_reshade,
             db_delete_game,
             db_clear_library,
             db_known_exe_paths,

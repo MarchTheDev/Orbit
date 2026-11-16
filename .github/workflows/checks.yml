@@ -139,7 +139,9 @@ jobs:
 
       - name: Put the failures where they can be read
         if: failure()
-        run: tail -25 web.log | sed -E 's/^/::error ::/' || true
+        run: |
+          grep -E '^  FAIL|[0-9]+ check\(s\) failed' web.log | head -25 | sed -E 's/^/::error ::/' || true
+          tail -25 web.log | sed -E 's/^/::error ::/' || true
 
       - name: Say what ran
         if: always()
