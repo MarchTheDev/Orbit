@@ -3241,7 +3241,7 @@ body.is-resizing * { cursor: col-resize !important; user-select: none !important
   -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
   mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
   pointer-events: none;
-  animation: orbit-gamepage-in .3s var(--ease-out) both;
+  animation: none;
 }
 @keyframes orbit-gamepage-in {
   from { opacity: 0; }
@@ -6324,7 +6324,8 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  min-height: 40px;
+  height: 40px;
   padding: 0 12px 0 8px;
   border-radius: 11px;
   border: 1px solid color-mix(in srgb, var(--c-text) 11%, transparent);
@@ -6886,10 +6887,9 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
 
 /* ------------------ Steam Personal Calendar-style Upcoming Release Bottom Bar */
 .orbit-release-bar {
-  position: sticky;
-  bottom: 12px;
-  z-index: 25;
-  margin-top: 24px;
+  position: relative;
+  z-index: 1;
+  margin-top: 0;
   border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--c-accent) 32%, color-mix(in srgb, var(--c-text) 10%, transparent));
   background: color-mix(in srgb, var(--c-panel) 94%, var(--c-bg));

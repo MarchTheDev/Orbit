@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -44,6 +45,7 @@ import { parseRequirements, storageOf, withoutStorage } from '../../utils/requir
 export function PlanPage({
   suggestion,
   adding,
+  alreadyAdded = false,
   onAdd,
   onClose,
   onBack,
@@ -52,6 +54,7 @@ export function PlanPage({
   suggestion: GameSuggestion;
   /** True while the add it asked for is being written. */
   adding: boolean;
+  alreadyAdded?: boolean;
   /**
    * Put this game on the list. The facts and times already on screen travel
    * with it, so adding is instant instead of asking the store the same
@@ -328,6 +331,13 @@ export function PlanPage({
         )}
 
         <div className="space-y-7">
+          {(facts?.comingSoon || (facts?.releaseDate && isUpcomingDate(facts.releaseDate))) && (
+            <section className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Upcoming release</p>
+              <p className="mt-1.5 text-lg font-bold text-fg">{facts?.releaseDate || 'Release date to be announced'}</p>
+              <p className="mt-1 text-xs text-muted">Release information from the Steam catalogue.</p>
+            </section>
+          )}
           {/* How long it takes is the answer a plan is decided by, so it does
               not wait its turn under the pictures. */}
           <section>
@@ -541,7 +551,7 @@ export function PlanPage({
           {onBack ? 'Back' : 'Not yet'}
         </button>
         <button
-          disabled={adding}
+          disabled={adding || alreadyAdded}
           onClick={() =>
             onAdd({
               name: title,
@@ -553,8 +563,8 @@ export function PlanPage({
           }
           className="btn-accent flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold disabled:opacity-50"
         >
-          {adding ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-          Add to backlog
+          {adding ? <LoaderCircle className="size-4 animate-spin" /> : alreadyAdded ? <Check className="size-4" /> : <Plus className="size-4" />}
+          {alreadyAdded ? 'Already in Orbit' : 'Add to backlog'}
         </button>
       </div>
 
@@ -564,6 +574,11 @@ export function PlanPage({
 }
 
 /** `12h`, or `12h 30m` when a half hour matters. */
+function isUpcomingDate(value: string): boolean {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 function fmtHours(hours: number): string {
   const minutes = Math.round(hours * 60);
   const h = Math.floor(minutes / 60);

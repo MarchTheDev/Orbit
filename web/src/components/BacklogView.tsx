@@ -132,6 +132,7 @@ export function BacklogView({
   const [lengthFilter, setLengthFilter] = useState<LengthFilter>('all');
   const [laneFilter, setLaneFilter] = useState<LaneFilter>('all');
   const [planning, setPlanning] = useState(false);
+  const [catalogueGame, setCatalogueGame] = useState<Game | null>(null);
   const [planRemovalTarget, setPlanRemovalTarget] = useState<Game | null>(null);
   const [picking, setPicking] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState('');
@@ -202,7 +203,7 @@ export function BacklogView({
 
   const planned = useMemo(() => allPlanned.filter(match), [allPlanned, query, lengthFilter]);
 
-  const plan = ({ name, appId, coverUrl, facts, hltb: times, platform }: PlanPick) => {
+  const plan = ({ name, appId, coverUrl, facts, hltb: times, platform, nonSteamDetails }: PlanPick) => {
     const title = name.trim();
     if (!title) return;
     const meta: MetaData | undefined = facts
@@ -220,6 +221,19 @@ export function BacklogView({
           steamAppId: appId ?? null,
           source: 'steam',
         }
+      : nonSteamDetails
+        ? {
+            name: title,
+            summary: nonSteamDetails.description || nonSteamDetails.wikipediaSummary || '',
+            genres: nonSteamDetails.genres ?? [],
+            developer: nonSteamDetails.developers?.join(', ') ?? '',
+            releaseYear: Number(nonSteamDetails.releaseDate?.match(/\b(?:19|20)\d{2}\b/)?.[0]) || null,
+            releaseDate: nonSteamDetails.releaseDate ?? null,
+            comingSoon: Boolean(nonSteamDetails.releaseDate && (Date.parse(nonSteamDetails.releaseDate) > Date.now() || Number(nonSteamDetails.releaseDate.match(/\b(?:19|20)\d{2}\b/)?.[0]) > new Date().getFullYear())),
+            rating: null,
+            coverUrl: coverUrl ?? null,
+            headerUrl: null,
+          }
       : appId || coverUrl
         ? {
             summary: '',
@@ -314,6 +328,16 @@ export function BacklogView({
     });
   }, [owned, query, lengthFilter, order, myOrder]);
 
+  const openCatalogue = (id: string, readOnlyMoves?: boolean) => {
+    const game = games.find((candidate) => candidate.id === id);
+    if (game) {
+      setCatalogueGame(game);
+      setPlanning(true);
+      return;
+    }
+    onSelect(id, readOnlyMoves);
+  };
+
   const move = (fromId: string, toId: string, after: boolean) => {
     const ids = moveInOrder(
       backlog.map((g) => g.id),
@@ -389,7 +413,7 @@ export function BacklogView({
   const movableBacklog = order === 'mine' && query.trim() === '' && lengthFilter === 'all';
 
   return (
-    <div className={cn(embedded ? 'space-y-5' : 'orbit-page', showCalendarBar && 'pb-6')}>
+    <div className={cn(embedded ? 'flex min-h-full flex-col space-y-5' : 'orbit-page flex min-h-full flex-col', showCalendarBar && 'pb-6')}>
       {!embedded && (
         <PageHead
           kicker="On the horizon"
@@ -417,67 +441,6 @@ export function BacklogView({
         />
       )}
 
-      {/* Smart KPI Overview Strip */}
-      <div className="orbit-backlog-kpis">
-        <button
-          type="button"
-          onClick={() => setLaneFilter(laneFilter === 'backlog' ? 'all' : 'backlog')}
-          className={cn('orbit-backlog-kpi', laneFilter === 'backlog' && 'is-selected')}
-        >
-          <span className="orbit-kicker">Up Next Queue</span>
-          <div className="mt-1 flex items-baseline justify-between gap-2">
-            <strong className="orbit-num text-xl font-bold text-fg">{backlog.length}</strong>
-            <span className="text-[11.5px] text-muted">
-              {movableBacklog ? 'Drag to rank' : ORDERS.find((o) => o.id === order)?.shortLabel}
-            </span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setShowTimes((v) => !v)}
-          className={cn('orbit-backlog-kpi', showTimes && 'is-selected')}
-        >
-          <span className="orbit-kicker">Main Story Left</span>
-          <div className="mt-1 flex items-baseline justify-between gap-2">
-            <strong className="orbit-num text-xl font-bold text-fg">
-              {backlogHours > 0 ? `${Math.round(backlogHours)}h` : '—'}
-            </strong>
-            <span className="text-[11.5px] text-muted">
-              {showTimes ? 'Comparing HLTB' : 'Click for HLTB breakdown'}
-            </span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setLaneFilter(laneFilter === 'playing' ? 'all' : 'playing')}
-          className={cn('orbit-backlog-kpi', laneFilter === 'playing' && 'is-selected')}
-        >
-          <span className="orbit-kicker">Playing Now</span>
-          <div className="mt-1 flex items-baseline justify-between gap-2">
-            <strong className="orbit-num text-xl font-bold text-fg">{playing.length}</strong>
-            <span className="text-[11.5px] text-muted">
-              {playing.length === 1 ? 'Active run' : 'Active runs'}
-            </span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setLaneFilter(laneFilter === 'planned' ? 'all' : 'planned')}
-          className={cn('orbit-backlog-kpi', laneFilter === 'planned' && 'is-selected')}
-        >
-          <span className="orbit-kicker">Planned &amp; Upcoming</span>
-          <div className="mt-1 flex items-baseline justify-between gap-2">
-            <strong className="orbit-num text-xl font-bold text-fg">{allPlanned.length}</strong>
-            <span className="text-[11.5px] text-muted">
-              {unreleasedEntries.length > 0 ? `${unreleasedEntries.length} unreleased` : 'Wishlist'}
-            </span>
-          </div>
-        </button>
-      </div>
-
       {/* Unified Command Bar */}
       <div className="orbit-backlog-commandbar">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -485,7 +448,7 @@ export function BacklogView({
             value={query}
             onChange={setQuery}
             placeholder="Search backlog, studio, genre..."
-            className="mr-auto min-w-[210px] flex-1 sm:max-w-xs"
+            className="mr-auto min-w-[250px] flex-[1.5] sm:max-w-xl"
             inputClassName="!w-full"
           />
 
@@ -565,7 +528,7 @@ export function BacklogView({
             </button>
             <button
               type="button"
-              onClick={() => setPlanning(true)}
+              onClick={() => { setCatalogueGame(null); setPlanning(true); }}
               className={cn(btnAccent, 'flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm')}
               title="Add something you plan to play, even if you do not own it yet"
             >
@@ -771,9 +734,27 @@ export function BacklogView({
       {planning && (
         <PlanDialog
           games={games}
-          initialQuery={query}
+          initialQuery={catalogueGame?.title ?? query}
+          initialGame={catalogueGame ?? undefined}
           onAdd={plan}
-          onClose={() => setPlanning(false)}
+          onEnrichExisting={(id, details) => {
+            const game = games.find((candidate) => candidate.id === id);
+            if (!game) return;
+            const releaseDate = details.releaseDate ?? game.meta?.releaseDate ?? null;
+            onUpdate(id, {
+              meta: {
+                summary: details.description || details.wikipediaSummary || game.meta?.summary || '',
+                genres: details.genres?.length ? details.genres : game.meta?.genres ?? [],
+                developer: details.developers?.join(', ') || game.meta?.developer || '',
+                releaseYear: Number(releaseDate?.match(/\b(?:19|20)\d{2}\b/)?.[0]) || game.meta?.releaseYear || null,
+                rating: game.meta?.rating ?? null,
+                ...game.meta,
+                releaseDate,
+                comingSoon: releaseDate ? (Date.parse(releaseDate) > Date.now() || Number(releaseDate.match(/\b(?:19|20)\d{2}\b/)?.[0]) > new Date().getFullYear()) : game.meta?.comingSoon,
+              },
+            });
+          }}
+          onClose={() => { setPlanning(false); setCatalogueGame(null); }}
         />
       )}
 
@@ -824,7 +805,7 @@ export function BacklogView({
             icon={Play}
             games={playing}
             empty="Nothing part-way through right now."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -841,7 +822,7 @@ export function BacklogView({
             icon={CircleDashed}
             games={backlog}
             empty="Nothing on the Backlog. Plan a game, or add one from the Library."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -860,7 +841,7 @@ export function BacklogView({
             icon={Plus}
             games={planned}
             empty="Nothing written down that you do not own."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -883,7 +864,7 @@ export function BacklogView({
             icon={Star}
             games={favorites}
             empty="No favorites in your Backlog yet."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -901,7 +882,7 @@ export function BacklogView({
             icon={CircleCheck}
             games={completed}
             empty="Nothing finished yet."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -918,7 +899,7 @@ export function BacklogView({
             icon={SquareArrowRight}
             games={dropped}
             empty="Nothing dropped."
-            onSelect={onSelect}
+            onSelect={openCatalogue}
             onEdit={onEdit}
             onStatus={onStatus}
             onEditRelease={setReleaseEditGame}
@@ -931,11 +912,13 @@ export function BacklogView({
 
       {/* Steam Personal Calendar-style Upcoming Release Bottom Bar */}
       {showCalendarBar && (
+        <div className="pt-6" style={{ marginTop: 'auto' }}>
         <PersonalReleaseCalendarBar
           entries={unreleasedEntries}
-          onSelectGame={(id) => onSelect(id)}
+          onSelectGame={(id) => openCatalogue(id)}
           onEditRelease={setReleaseEditGame}
         />
+        </div>
       )}
     </div>
   );

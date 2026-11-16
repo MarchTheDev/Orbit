@@ -103,7 +103,6 @@ export function useDragReorder(
             el.style.removeProperty('transition');
             el.style.zIndex = '';
             el.style.position = '';
-            el.style.boxShadow = '';
             el.style.pointerEvents = '';
             el.style.willChange = '';
           }, 180);
@@ -113,7 +112,6 @@ export function useDragReorder(
           el.style.transform = '';
           el.style.zIndex = '';
           el.style.position = '';
-          el.style.boxShadow = '';
           el.style.pointerEvents = '';
           el.style.willChange = '';
         }
@@ -253,24 +251,55 @@ export function useDragReorder(
             width: s.width,
             height: s.height,
           }));
-          // Require pointer to enter inner 82% core of a slot when switching targets to avoid edge flicker
-          const currentTargetIdx = held.previewIds.indexOf(heldId);
-          const hitId = cardAt(cards, x, y, heldId);
-          if (hitId) {
-            const hitIdx = slots.findIndex((s) => s.id === hitId);
-            if (hitIdx >= 0 && hitIdx !== currentTargetIdx) {
-              const targetBox = slots[hitIdx];
-              const padX = targetBox.width * 0.1;
-              const padY = targetBox.height * 0.1;
-              const insideCore =
-                x >= targetBox.left + padX &&
-                x <= targetBox.left + targetBox.width - padX &&
-                y >= targetBox.top + padY &&
-                y <= targetBox.top + targetBox.height - padY;
-              if (insideCore || Math.hypot(rawDX, rawDY) > Math.min(targetBox.width, targetBox.height) * 0.45) {
-                held.previewIds = moveInOrder(baseIds, heldId, hitId, hitIdx > origIdx);
+
+          // Check ALL geometric grid cells (including `origIdx` / slot 0!) against the
+          // dragged card's live center `(cx, cy)` first so:
+          // 1) grabbing from a far-left drag handle swaps as soon as the card crosses over a neighbor, and
+          // 2) dragging the 1st card out and back onto slot 0 restores `baseIds` immediately.
+          const cx = draggedSlot.left + draggedSlot.width / 2 + rawDX;
+          const cy = draggedSlot.top + draggedSlot.height / 2 + rawDY;
+
+          let matchedSlotIdx = -1;
+          for (let k = 0; k < slots.length; k += 1) {
+            const box = slots[k];
+            const padX = box.width * 0.08;
+            const padY = box.height * 0.08;
+            if (
+              cx >= box.left + padX &&
+              cx <= box.left + box.width - padX &&
+              cy >= box.top + padY &&
+              cy <= box.top + box.height - padY
+            ) {
+              matchedSlotIdx = k;
+              break;
+            }
+          }
+
+          if (matchedSlotIdx < 0) {
+            // Also check if the pointer itself returned inside the original slot's core
+            const origBox = slots[origIdx];
+            const oPadX = origBox.width * 0.08;
+            const oPadY = origBox.height * 0.08;
+            if (
+              x >= origBox.left + oPadX &&
+              x <= origBox.left + origBox.width - oPadX &&
+              y >= origBox.top + oPadY &&
+              y <= origBox.top + origBox.height - oPadY
+            ) {
+              matchedSlotIdx = origIdx;
+            } else {
+              const hitId = cardAt(cards, x, y, heldId);
+              if (hitId) {
+                matchedSlotIdx = slots.findIndex((s) => s.id === hitId);
               }
             }
+          }
+
+          if (matchedSlotIdx === origIdx) {
+            held.previewIds = baseIds;
+          } else if (matchedSlotIdx >= 0) {
+            const targetId = slots[matchedSlotIdx].id;
+            held.previewIds = moveInOrder(baseIds, heldId, targetId, matchedSlotIdx > origIdx);
           } else {
             // Pointer dragged far outside grid — revert preview cleanly
             const boundsLeft = Math.min(...slots.map((s) => s.left)) - 90;
@@ -345,16 +374,14 @@ export function useDragReorder(
       }
       setOver(held.over ? held.over.id : null);
 
-      // 1. Move dragged element 1:1 with cursor (transition: none !important prevents Tailwind lag)
+      // 1. Move dragged element 1:1 with cursor with no rectangular boxShadow overlay
       draggedSlot.slotEl.dataset.orbitDraggingItem = 'true';
-      draggedSlot.slotEl.style.setProperty('transition', 'box-shadow 140ms ease', 'important');
+      draggedSlot.slotEl.style.setProperty('transition', 'none', 'important');
       draggedSlot.slotEl.style.willChange = 'transform';
       draggedSlot.slotEl.style.position = 'relative';
       draggedSlot.slotEl.style.zIndex = '50';
       draggedSlot.slotEl.style.pointerEvents = 'none';
-      draggedSlot.slotEl.style.boxShadow =
-        '0 18px 38px -12px rgba(0, 0, 0, 0.58), 0 0 0 1px color-mix(in srgb, var(--c-accent) 50%, transparent)';
-      draggedSlot.slotEl.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.012)`;
+      draggedSlot.slotEl.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.015)`;
       held.styledEls.add(draggedSlot.slotEl);
 
       // 2. Smoothly glide every non-dragged sibling to its exact previewed slot
@@ -479,11 +506,17 @@ export function useDragReorder(
           'data-orbit-drop': id,
           onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
             if (e.button !== 0) return;
-            const target = e.target as HTMLElement | null;
+            // Use `Element` rather than `HTMLElement` so `<svg>` / `<path>` icons inside drag handles work cleanly
+            const target = e.target instanceof Element ? e.target : null;
+            const handle = target?.closest('[data-orbit-drag-handle]');
             const blocked = options?.fromButtons
               ? 'a, input, textarea, select, [role="button"], [data-orbit-no-drag]'
               : 'button, a, input, textarea, select, [role="button"], [data-orbit-no-drag]';
-            if (!target?.closest('[data-orbit-drag-handle]') && target?.closest(blocked)) return;
+            if (!handle && target?.closest(blocked)) return;
+            if (handle) {
+              // Prevent child `<button>` focus/capture from hijacking pointer tracking
+              e.preventDefault();
+            }
             const held = {
               id,
               pointerId: e.pointerId,
@@ -493,7 +526,7 @@ export function useDragReorder(
               lastX: e.clientX,
               lastY: e.clientY,
               live: false,
-              ready: !options?.hold,
+              ready: Boolean(handle) || !options?.hold,
               over: null as { id: string; after: boolean } | null,
               timer: null as number | null,
               baseSlots: [] as BaseSlot[],
@@ -505,12 +538,11 @@ export function useDragReorder(
               startScrollTop: 0,
               styledEls: new Set<HTMLElement>(),
             };
-            if (options?.hold) {
+            if (options?.hold && !handle) {
               held.timer = window.setTimeout(() => {
                 if (gesture.current !== held) return;
                 held.ready = true;
                 if (!held.live) {
-                  // Trigger live hold start using the same layout snapshot path
                   window.dispatchEvent(
                     new PointerEvent('pointermove', {
                       clientX: held.lastX + START_PX,
@@ -526,7 +558,6 @@ export function useDragReorder(
         }
       : {};
 
-  // Keep symbol compatible withpolish tests (`applyLivePreview` / `cardAt(cards, x, y, heldId)` / `setPointerCapture`)
   void (function applyLivePreview() {});
 
   return { bind, dragging, over, active: dragging !== null };

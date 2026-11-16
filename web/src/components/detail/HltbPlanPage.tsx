@@ -2,6 +2,7 @@ import { ArrowLeft, Clock, ExternalLink, LoaderCircle, Plus, Sparkles, X } from 
 import { useEffect, useState } from 'react';
 import type { HltbGameDetails, HltbSuggestion } from '../../types';
 import { fetchHltbDetails } from '../../services/hltb';
+import { fetchNonSteamFacts } from '../../services/nonSteam';
 import { openExternal } from '../../services/desktop';
 import { cn } from '../../utils/cn';
 
@@ -13,13 +14,15 @@ export function HltbPlanPage({
   adding,
   alreadyAdded,
   onAdd,
+  onEnriched,
   onBack,
   onClose,
 }: {
   suggestion: HltbSuggestion;
   adding: boolean;
   alreadyAdded: boolean;
-  onAdd: () => void;
+  onAdd: (details?: HltbGameDetails) => void;
+  onEnriched?: (details: Partial<HltbGameDetails>) => void;
   onBack: () => void;
   onClose: () => void;
 }) {
@@ -41,9 +44,20 @@ export function HltbPlanPage({
   useEffect(() => {
     let current = true;
     setLoading(true);
-    void fetchHltbDetails(suggestion.id)
-      .then((result) => {
-        if (current) setDetails(result);
+    void Promise.all([fetchHltbDetails(suggestion.id), fetchNonSteamFacts(suggestion.name)])
+      .then(([result, external]) => {
+        const combined: HltbGameDetails = {
+          ...result,
+          ...external,
+          releaseDate: normalizeReleaseDate(result.releaseDate || external.releaseDate || null),
+          developers: result.developers?.length ? result.developers : external.developers,
+          publishers: result.publishers?.length ? result.publishers : external.publishers,
+          genres: result.genres?.length ? result.genres : external.genres,
+        };
+        if (current) {
+          setDetails(combined);
+          onEnriched?.(combined);
+        }
       })
       .catch(() => {
         if (current) setLoadError(true);
@@ -105,6 +119,24 @@ export function HltbPlanPage({
       </header>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
+        {(details?.releaseDate || details?.developers?.length || details?.publishers?.length || details?.genres?.length || details?.wikipediaSummary) && (
+          <section className="rounded-2xl border border-line bg-panel2/35 p-4">
+            <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Release & catalogue information</h3>
+            {details.releaseDate && (
+              <p className="mb-2 flex flex-wrap items-center gap-2 text-sm text-fg">
+                <span className="font-semibold">Release date</span>
+                <span>{formatRelease(details.releaseDate)}</span>
+                {isUpcoming(details.releaseDate) && <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">Upcoming</span>}
+              </p>
+            )}
+            {details.releaseRegions?.length ? <p className="mb-2 text-xs text-muted"><b className="text-fg">Regional release dates:</b> {details.releaseRegions.map(formatRelease).join(' · ')}</p> : null}
+            {details.developers?.length ? <p className="text-xs text-muted"><b className="text-fg">Developer:</b> {details.developers.join(', ')}</p> : null}
+            {details.publishers?.length ? <p className="mt-1 text-xs text-muted"><b className="text-fg">Publisher:</b> {details.publishers.join(', ')}</p> : null}
+            {details.genres?.length ? <p className="mt-1 text-xs text-muted"><b className="text-fg">Genres:</b> {details.genres.join(', ')}</p> : null}
+            {details.wikipediaSummary && <p className="mt-3 text-sm leading-relaxed text-muted">{details.wikipediaSummary}</p>}
+            <p className="mt-3 text-[10px] text-muted/70">HLTB catalogue · Wikidata / Wikipedia when available</p>
+          </section>
+        )}
         <section>
           <h3 className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
             <Clock className="size-3.5" /> How long to beat
@@ -159,7 +191,7 @@ export function HltbPlanPage({
         <button
           type="button"
           disabled={adding || alreadyAdded}
-          onClick={onAdd}
+          onClick={() => onAdd(details ?? undefined)}
           className={cn('btn-accent flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold disabled:opacity-50')}
         >
           {adding ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
@@ -168,6 +200,35 @@ export function HltbPlanPage({
       </footer>
     </div>
   );
+}
+
+function normalizeReleaseDate(value: string | null): string | null {
+  if (!value) return null;
+  if (/^\d{9,13}$/.test(value)) {
+    const numeric = Number(value);
+    const date = new Date(numeric < 1_000_000_000_000 ? numeric * 1000 : numeric);
+    return Number.isNaN(date.getTime()) ? value : date.toISOString().slice(0, 10);
+  }
+  return value;
+}
+
+function releaseTimestamp(value: string): number {
+  if (/^\d{9,13}$/.test(value)) {
+    const numeric = Number(value);
+    return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+  }
+  return Date.parse(value);
+}
+
+function formatRelease(value: string): string {
+  const date = new Date(releaseTimestamp(value));
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
+function isUpcoming(value: string): boolean {
+  const timestamp = releaseTimestamp(value);
+  const year = Number(value.match(/\b(?:19|20)\d{2}\b/)?.[0]);
+  return (Number.isFinite(timestamp) && timestamp > Date.now()) || year > new Date().getFullYear();
 }
 
 function formatHours(hours: number): string {

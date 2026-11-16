@@ -507,6 +507,18 @@ export function StatisticsView({
     setPinnedGameId(null);
   }, [period]);
 
+  useEffect(() => {
+    if (!pinnedGameId || tab !== 'overview') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (document.body.dataset.orbitViewerOpen === 'true' || document.querySelector('[role="dialog"], [data-overlay-hit="1"]')) return;
+      e.preventDefault();
+      setPinnedGameId(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pinnedGameId, tab]);
+
   const busiest = bins.reduce<Bin | null>((best, bin) => (!best || bin.total > best.total ? bin : best), null);
   const maxTotal = Math.max(1, ...bins.map((bin) => bin.total));
   const axisCeiling = niceAxisCeiling(maxTotal);
@@ -821,6 +833,7 @@ export function StatisticsView({
                         type="button"
                         onClick={() => setPinnedGameId(null)}
                         className="orbit-activity-legend-clear"
+                        title="Clear highlighted game (Esc)"
                       >
                         Show all
                       </button>

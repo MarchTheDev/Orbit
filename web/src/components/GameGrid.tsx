@@ -169,7 +169,7 @@ function Tile({
       className={cn(
         'group',
         'cursor-pointer active:cursor-grabbing',
-        dragging && 'opacity-60',
+        dragging && 'opacity-95',
       )}
     >
       <div

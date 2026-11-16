@@ -2163,7 +2163,6 @@ export default function App() {
         <CommandPalette
           open={palette}
           games={games}
-          focusedGameId={page === 'library' ? focusStep.current : selectedId}
           customThemes={settings.customThemes ?? []}
           currentThemeId={settings.theme}
           onClose={() => setPalette(false)}

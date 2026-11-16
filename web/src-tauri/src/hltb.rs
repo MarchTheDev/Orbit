@@ -56,6 +56,11 @@ pub struct HltbSuggestion {
 pub struct HltbGameDetails {
     pub description: String,
     pub platforms: Vec<String>,
+    pub release_date: Option<String>,
+    pub release_regions: Vec<String>,
+    pub developers: Vec<String>,
+    pub publishers: Vec<String>,
+    pub genres: Vec<String>,
 }
 
 /// One entry as HLTB returns it: times arrive in seconds, ids as numbers.
@@ -278,7 +283,36 @@ fn parse_game_details(html: &str) -> Result<HltbGameDetails, String> {
         .filter(|platform| !platform.is_empty())
         .map(str::to_owned)
         .collect();
-    Ok(HltbGameDetails { description, platforms })
+    let field_text = |key: &str| -> String {
+        game.get(key)
+            .and_then(|value| value.as_str().map(str::to_owned).or_else(|| value.as_i64().map(|n| n.to_string())))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    };
+    let regions = ["release_world", "release_na", "release_eu", "release_jp"]
+        .into_iter()
+        .map(|key| field_text(key))
+        .filter(|value| !value.is_empty() && value != "0")
+        .collect::<Vec<_>>();
+    let split_names = |key: &str| -> Vec<String> {
+        field_text(key)
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let release_date = regions.first().cloned();
+    Ok(HltbGameDetails {
+        description,
+        platforms,
+        release_date,
+        release_regions: regions,
+        developers: split_names("profile_dev"),
+        publishers: split_names("profile_pub"),
+        genres: split_names("profile_genre"),
+    })
 }
 
 /// HLTB summaries may contain simple markup or entities; show readable text.

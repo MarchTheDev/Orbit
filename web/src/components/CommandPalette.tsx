@@ -113,7 +113,18 @@ interface PaletteRow {
 }
 
 const RECENT_STORAGE_KEY = 'orbit.palette.recent';
+const PINNED_STORAGE_KEY = 'orbit.palette.pinned';
 const MAX_RECENT = 8;
+
+function loadPinned(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PINNED_STORAGE_KEY) ?? '[]');
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 
 function loadRecent(): string[] {
   try {
@@ -364,7 +375,6 @@ export function CommandPalette({
   open,
   initialQuery = '',
   games,
-  focusedGameId,
   customThemes = [],
   currentThemeId,
   onClose,
@@ -390,7 +400,6 @@ export function CommandPalette({
   open: boolean;
   initialQuery?: string;
   games: Game[];
-  focusedGameId?: string | null;
   customThemes?: Theme[];
   currentThemeId?: string;
   onClose: () => void;
@@ -423,6 +432,9 @@ export function CommandPalette({
     savedActive: number;
   } | null>(null);
   const [recentKeys, setRecentKeys] = useState<string[]>(() => loadRecent());
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => loadPinned());
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: PaletteRow } | null>(null);
+  const lastHoverPosition = useRef<{ x: number; y: number } | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -983,12 +995,20 @@ export function CommandPalette({
       keepOpen: true,
       run: () => enterGameLevel(g),
     }));
+    const pinnedBrowseRows = pinnedIds
+      .map((id) => gameRows.find((candidate) => candidate.game?.id === id))
+      .filter((row): row is PaletteRow => Boolean(row))
+      .map((row) => ({ ...row, id: `pinned-${row.id}`, group: 'Pinned' }));
 
     // Empty-query smart browse (Heronite `browse()` layout)
     if (!q) {
-      if (effectiveFilter === 'pages') return staticRows.filter((r) => r.filterCat === 'pages');
-      if (effectiveFilter === 'actions') return staticRows.filter((r) => r.filterCat === 'actions' && !r.secondary);
-      if (effectiveFilter === 'games') return playableGames.slice(0, 30).map((g) => gameRows.find((r) => r.game?.id === g.id)!).filter(Boolean);
+      if (effectiveFilter === 'pages') return [...pinnedBrowseRows, ...staticRows.filter((r) => r.filterCat === 'pages')];
+      if (effectiveFilter === 'actions') return [...pinnedBrowseRows, ...staticRows.filter((r) => r.filterCat === 'actions' && !r.secondary)];
+      if (effectiveFilter === 'games') {
+        const visibleGames = playableGames.slice(0, 30).map((g) => gameRows.find((r) => r.game?.id === g.id)!).filter(Boolean);
+        const pinnedIdsSet = new Set(pinnedIds);
+        return [...pinnedBrowseRows, ...visibleGames.filter((row) => !pinnedIdsSet.has(row.game?.id ?? ''))];
+      }
 
       const out: PaletteRow[] = [];
       const seenIds = new Set<string>();
@@ -998,29 +1018,16 @@ export function CommandPalette({
         out.push(r);
       };
 
-      // 1. Running game stop action first if active
-      for (const r of staticRows.filter((x) => x.group === 'Now running')) pushRow(r);
-
-      // 2. Focused library game quick context actions (like Heronite `selected_game`)
-      const focused = focusedGameId ? games.find((g) => g.id === focusedGameId && !g.planned) ?? null : null;
-      if (focused) {
-        const quick = buildSingleGameActions(focused, true).slice(0, 3);
-        for (const item of quick) pushRow(item);
-        pushRow({
-          id: `gact-more-${focused.id}`,
-          group: focused.title,
-          filterCat: 'actions',
-          label: `All actions for ${focused.title}…`,
-          hint: 'Status, folder, journal, settings',
-          game: focused,
-          drillGame: focused,
-          keepOpen: true,
-          Icon: ChevronRight,
-          run: () => enterGameLevel(focused),
-        });
+      // Pinned games are always the first section in browse mode.
+      for (const id of pinnedIds) {
+        const row = gameRows.find((candidate) => candidate.game?.id === id);
+        if (row) pushRow({ ...row, id: `pinned-${row.id}`, group: 'Pinned' });
       }
 
-      // 3. Recent commands / games from palette history
+      // Running-game actions follow pinned games.
+      for (const r of staticRows.filter((x) => x.group === 'Now running')) pushRow(r);
+
+      // Recent commands / games from palette history
       const allLookup = [...staticRows, ...gameRows];
       for (const rKey of recentKeys.slice(0, 5)) {
         const found = allLookup.find((r) => r.recentKey === rKey);
@@ -1160,12 +1167,17 @@ export function CommandPalette({
       }
     }
 
-    return topList;
+    const pinnedRows = pinnedIds
+      .map((id) => gameRows.find((row) => row.game?.id === id))
+      .filter((row): row is PaletteRow => Boolean(row))
+      .filter((row) => scoreRow(q, row) !== null)
+      .map((row) => ({ ...row, id: `pinned-${row.id}`, group: 'Pinned' }));
+    return [...pinnedRows, ...topList.filter((row) => !pinnedIds.includes(row.game?.id ?? ''))].slice(0, 24);
   }, [
     customThemes,
+    pinnedIds,
     currentThemeId,
     filter,
-    focusedGameId,
     games,
     genres,
     levelGame,
@@ -1213,11 +1225,21 @@ export function CommandPalette({
     if (!row.keepOpen) onClose();
   };
 
-  // Group rows while preserving rank order within each group
+  const togglePinned = (row: PaletteRow) => {
+    const id = row.game?.id;
+    if (!id) return;
+    const next = pinnedIds.includes(id) ? pinnedIds.filter((value) => value !== id) : [id, ...pinnedIds];
+    setPinnedIds(next);
+    try { localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    setContextMenu(null);
+  };
+
+  // Group only adjacent rows. Hoisting a repeated group name above intervening
+  // rows makes visual order disagree with keyboard row indices.
   const grouped: { group: string; items: { row: PaletteRow; index: number }[] }[] = [];
   rows.forEach((row, index) => {
-    const existing = grouped.find((g) => g.group === row.group);
-    if (existing) existing.items.push({ row, index });
+    const last = grouped[grouped.length - 1];
+    if (last?.group === row.group) last.items.push({ row, index });
     else grouped.push({ group: row.group, items: [{ row, index }] });
   });
 
@@ -1260,11 +1282,13 @@ export function CommandPalette({
           }
           if (e.key === 'ArrowDown') {
             e.preventDefault();
+            e.stopPropagation();
             if (rows.length > 0) setActive((i) => (i + 1) % rows.length);
             return;
           }
           if (e.key === 'ArrowUp') {
             e.preventDefault();
+            e.stopPropagation();
             if (rows.length > 0) setActive((i) => (i - 1 + rows.length) % rows.length);
             return;
           }
@@ -1376,7 +1400,7 @@ export function CommandPalette({
               </div>
             ) : (
               grouped.map((grp) => (
-                <div key={grp.group} className="mb-2 last:mb-0">
+                <div key={`${grp.group}-${grp.items[0]?.index ?? 0}`} className="mb-2 last:mb-0">
                   <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-widest text-muted">
                     {grp.group}
                   </p>
@@ -1387,7 +1411,16 @@ export function CommandPalette({
                       <div
                         key={row.id}
                         data-palette-idx={index}
-                        onMouseEnter={() => setActive(index)}
+                        onMouseEnter={(event) => {
+                          const point = { x: event.clientX, y: event.clientY };
+                          const previous = lastHoverPosition.current;
+                          lastHoverPosition.current = point;
+                          if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) > 2) setActive(index);
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setContextMenu({ x: event.clientX, y: event.clientY, row });
+                        }}
                         className={`group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition ${
                           isSelected ? 'bg-accent/14 text-fg' : 'text-fg/90 hover:bg-panel2/70'
                         }`}
@@ -1490,6 +1523,36 @@ export function CommandPalette({
           </aside>
         </div>
 
+        {contextMenu && (
+          <div className="fixed inset-0 z-[70]" onMouseDown={() => setContextMenu(null)}>
+            <div
+              role="menu"
+              className="absolute min-w-48 rounded-xl border border-line bg-panel p-1.5 shadow-2xl"
+              style={{ left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 250) }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {contextMenu.row.game ? (
+                <>
+                  <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>
+                    Open game details
+                  </button>
+                  {onPlay && !contextMenu.row.game.planned && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onPlay(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Run game</button>}
+                  <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => togglePinned(contextMenu.row)}>
+                    {pinnedIds.includes(contextMenu.row.game.id) ? 'Unpin from top' : 'Pin to top'}
+                  </button>
+                  {onToggleFavorite && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onToggleFavorite(contextMenu.row.game!.id); setContextMenu(null); }}>Toggle favorite</button>}
+                  {onEditGame && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { onEditGame(contextMenu.row.game!.id); setContextMenu(null); onClose(); }}>Game settings</button>}
+                </>
+              ) : (
+                <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-panel2" onClick={() => { executeRow(contextMenu.row); setContextMenu(null); }}>
+                  Open / Run
+                </button>
+              )}
+              {contextMenu.row.recentKey && <button role="menuitem" type="button" className="w-full rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-panel2" onClick={() => { const next = recentKeys.filter((key) => key !== contextMenu.row.recentKey); setRecentKeys(next); try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next)); } catch { /* private mode */ } setContextMenu(null); }}>Remove from Recent</button>}
+            </div>
+          </div>
+        )}
+
         {/* Footer keyboard hints */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-bg/40 px-4 py-2 text-[11px] text-muted">
           <div className="flex flex-wrap items-center gap-3">
@@ -1534,9 +1597,11 @@ function GamePreview({ game, running }: { game: Game; running: boolean }) {
       </div>
       <h4 className="mt-3 line-clamp-2 text-sm font-bold text-fg">{game.title}</h4>
       <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
-        <span className="rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] font-medium text-muted">
-          {launcherLabel(game)}
-        </span>
+        {launcherLabel(game) !== 'Installed' && (
+          <span className="rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] font-medium text-muted">
+            {launcherLabel(game)}
+          </span>
+        )}
         {running && (
           <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-300">
             Running

@@ -60,6 +60,12 @@ export interface HltbSuggestion {
 export interface HltbGameDetails {
   description: string;
   platforms: string[];
+  releaseDate?: string | null;
+  releaseRegions?: string[];
+  developers?: string[];
+  publishers?: string[];
+  genres?: string[];
+  wikipediaSummary?: string | null;
 }
 
 /**

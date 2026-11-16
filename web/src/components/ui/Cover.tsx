@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Game } from '../../types';
 import { fileSrc } from '../../services/desktop';
+import { coverArtCandidates, decodeArtwork } from '../../utils/art';
 import { cn } from '../../utils/cn';
 
 /**
@@ -75,18 +76,14 @@ export function Cover({
   fit?: 'cover' | 'contain';
   loading?: 'eager' | 'lazy';
 }) {
-  const identity = JSON.stringify([game.coverPath, game.meta?.coverUrl, game.meta?.headerUrl, game.meta?.backgroundUrl]);
-  const [failures, setFailures] = useState<{ identity: string; local: boolean; remote: boolean; header: boolean; backdrop: boolean }>({
-    identity: '', local: false, remote: false, header: false, backdrop: false,
-  });
-  // Read failures for the current artwork identity during render. Resetting
-  // them from an effect briefly showed initials or a fallback cover whenever
-  // focus moved to a different game.
-  const current = failures.identity === identity
-    ? failures
-    : { identity, local: false, remote: false, header: false, backdrop: false };
-  const fail = (which: 'local' | 'remote' | 'header' | 'backdrop') => {
-    setFailures((old) => ({ ...(old.identity === identity ? old : current), [which]: true }));
+  const candidates = coverArtCandidates(game);
+  const identity = JSON.stringify(candidates);
+  const [failures, setFailures] = useState<{ identity: string; failed: string[] }>({ identity: '', failed: [] });
+  // Failures are per-artwork set, not per game. A source that was unavailable
+  // for one title cannot suppress the same source for another title.
+  const current = failures.identity === identity ? failures : { identity, failed: [] };
+  const fail = (src: string) => {
+    setFailures((old) => ({ identity, failed: [...(old.identity === identity ? old.failed : []), src] }));
   };
 
   // The order is: the arrangement's own mind (the TV's backdrop, a shelf's
@@ -94,23 +91,9 @@ export function Cover({
   // Settings, and only then the guess made from the picture's shape.
   const fit = fitOverride ?? game.meta?.coverFit ?? libraryFit();
 
-  if (game.coverPath && !current.local) {
-    return <Artwork src={fileSrc(game.coverPath)} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('local')} />;
-  }
-
-  if (game.meta?.coverUrl && !current.remote) {
-    return <Artwork src={game.meta.coverUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('remote')} />;
-  }
-
-  if (game.meta?.headerUrl && !current.header) {
-    return <Artwork src={game.meta.headerUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('header')} />;
-  }
-
-  // The wide backdrop is the last picture worth trying before initials: it is
-  // always there on a store page, and a letterboxed backdrop still reads as the
-  // game rather than as a coloured square.
-  if (game.meta?.backgroundUrl && !current.backdrop) {
-    return <Artwork src={game.meta.backgroundUrl} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail('backdrop')} />;
+  const source = candidates.find((candidate) => !current.failed.includes(candidate));
+  if (source) {
+    return <Artwork src={source} alt={game.title} className={className} style={style} fit={fit} loading={loading} onFail={() => fail(source)} />;
   }
 
   const initials = game.title
@@ -144,6 +127,8 @@ export function Cover({
  * the picture sits inside it: filled when it is already taller than it is wide,
  * and letterboxed over a blur when it is not.
  */
+const aspectRatios = new Map<string, boolean>();
+
 function Artwork({
   src,
   alt,
@@ -162,9 +147,22 @@ function Artwork({
   loading: 'eager' | 'lazy';
   onFail: () => void;
 }) {
-  const [wide, setWide] = useState(false);
+  const [wide, setWide] = useState(() => aspectRatios.get(src) ?? false);
+  const [displaySrc, setDisplaySrc] = useState(src);
+  useEffect(() => {
+    setWide(aspectRatios.get(src) ?? false);
+    if (src === displaySrc) return;
+    let active = true;
+    // Keep the previous decoded cover visible until the new high-resolution
+    // candidate is ready, then swap in one paint rather than flashing empty.
+    void decodeArtwork(src)
+      .then(() => { if (active) setDisplaySrc(src); })
+      .catch(() => { if (active) onFail(); });
+    return () => { active = false; };
+  }, [src]);
   // A pinned choice wins; otherwise a picture squarer than a poster is fitted
-  // whole rather than cropped to a strip.
+  // whole rather than cropped to a strip. Its measured shape is kept across
+  // selection changes so an already-seen cover doesn't flash into crop mode.
   const fitted = fit === 'contain' || (fit === undefined && wide);
 
   return (
@@ -174,7 +172,7 @@ function Artwork({
           artwork rather than as a gap with a picture in it. */}
       {fitted && (
         <img
-          src={src}
+          src={displaySrc}
           alt=""
           aria-hidden
           draggable={false}
@@ -184,7 +182,7 @@ function Artwork({
         />
       )}
       <img
-        src={src}
+        src={displaySrc}
         alt={alt}
         draggable={false}
         loading={loading}
@@ -194,7 +192,10 @@ function Artwork({
           // Filling a tall frame with a picture that is barely taller than it is
           // wide cuts the sides off whatever the artwork actually shows, so
           // anything squarer than a poster is fitted whole instead.
-          setWide(w > 0 && h > 0 && w / h > 0.72);
+          const isWide = w > 0 && h > 0 && w / h > 0.72;
+          aspectRatios.set(src, isWide);
+          if (aspectRatios.size > 128) aspectRatios.delete(aspectRatios.keys().next().value!);
+          setWide(isWide);
         }}
         decoding="async"
         onError={onFail}

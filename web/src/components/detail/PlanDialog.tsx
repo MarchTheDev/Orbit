@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Game, GameFacts, GameSuggestion, HltbData, HltbSuggestion, PlanPlatform } from '../../types';
+import type { Game, GameFacts, GameSuggestion, HltbData, HltbGameDetails, HltbSuggestion, PlanPlatform } from '../../types';
 import { fetchFacts, knownGames, searchGames } from '../../services/metadata';
 import { fetchHltb, fetchHltbDetails, searchHltbGames } from '../../services/hltb';
 import { cn } from '../../utils/cn';
@@ -30,6 +30,7 @@ export interface PlanPick {
   facts?: GameFacts;
   hltb?: HltbData;
   platform?: PlanPlatform;
+  nonSteamDetails?: Partial<HltbGameDetails>;
 }
 
 /**
@@ -72,7 +73,9 @@ type ChosenResult =
 export function PlanDialog({
   games,
   initialQuery = '',
+  initialGame,
   onAdd,
+  onEnrichExisting,
   onClose,
 }: {
   /** Everything already known, so a game cannot be planned twice by accident. */
@@ -83,7 +86,10 @@ export function PlanDialog({
    * up in the store rather than typed again.
    */
   initialQuery?: string;
+  /** Open an existing Backlog entry directly on its catalogue information page. */
+  initialGame?: Game;
   onAdd: (pick: PlanPick) => Promise<void> | void;
+  onEnrichExisting?: (gameId: string, details: Partial<HltbGameDetails>) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
@@ -93,7 +99,12 @@ export function PlanDialog({
   const [hltbError, setHltbError] = useState<string | null>(null);
   const [looking, setLooking] = useState(false);
   /** The suggestion whose own page is open, if one is. */
-  const [chosen, setChosen] = useState<ChosenResult | null>(null);
+  const [chosen, setChosen] = useState<ChosenResult | null>(() => {
+    const appId = initialGame?.meta?.steamAppId;
+    return initialGame && appId
+      ? { source: 'steam', suggestion: { appId, name: initialGame.meta?.name || initialGame.title, coverUrl: initialGame.meta?.coverUrl ?? null } }
+      : null;
+  });
   /** The row the keyboard is on, as a number in the results. */
   const [at, setAt] = useState(0);
   const [adding, setAdding] = useState(false);
@@ -107,6 +118,7 @@ export function PlanDialog({
    * screen. Only the reply to the latest question is painted.
    */
   const asked = useRef(0);
+  const initialCatalogueAttempt = useRef(false);
 
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -178,6 +190,20 @@ export function PlanDialog({
       window.clearTimeout(hltbTimer);
     };
   }, [query]);
+
+  useEffect(() => {
+    if (!initialGame || initialGame.meta?.steamAppId || chosen || initialCatalogueAttempt.current) return;
+    initialCatalogueAttempt.current = true;
+    let current = true;
+    void searchHltbGames(initialGame.title).then((found) => {
+      if (!current || chosen) return;
+      const normalized = titleKey(initialGame.title);
+      const match = found.find((item) => titleKey(item.name) === normalized)
+        ?? found.find((item) => titleKey(item.name).includes(normalized) || normalized.includes(titleKey(item.name)));
+      if (match) setChosen({ source: 'hltb', suggestion: match });
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [initialGame?.id, chosen]);
 
   // Escape leaves the search. On a game's page the page owns the key, because
   // it has a lightbox and a way back to answer to first.
@@ -295,6 +321,7 @@ export function PlanDialog({
             key={`steam-${chosen.suggestion.appId}`}
             suggestion={chosen.suggestion}
             adding={adding}
+            alreadyAdded={isHeld(chosen.suggestion.name)}
             onAdd={(pick) => void add(pick)}
             onClose={onClose}
             onBack={() => setChosen(null)}
@@ -305,12 +332,14 @@ export function PlanDialog({
             suggestion={chosen.suggestion}
             adding={adding}
             alreadyAdded={isHeld(chosen.suggestion.name)}
-            onAdd={() => void add({
+            onAdd={(details) => void add({
               name: chosen.suggestion.name,
               platform: 'Other',
               coverUrl: chosen.suggestion.coverUrl,
               hltb: chosen.suggestion.hltb,
+              nonSteamDetails: details,
             })}
+            onEnriched={initialGame ? (details) => onEnrichExisting?.(initialGame.id, details) : undefined}
             onBack={() => setChosen(null)}
             onClose={onClose}
           />

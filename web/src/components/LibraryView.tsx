@@ -35,10 +35,11 @@ import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
 import { overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
-import { wideArt } from '../utils/art';
+import { prewarmLibraryArtwork, resolveWideArt } from '../utils/art';
 import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
+import { useDragReorder } from '../hooks/useDragReorder';
 import { CaptureViewerModal } from './ui/CaptureViewerModal';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { SearchField } from './ui/SearchField';
@@ -397,6 +398,12 @@ export function LibraryView({
   const [gridFit, setGridFit] = useState<FitChoice>(() => savedFit('orbit.library.fit'));
   const viewSwitch = useRef<HTMLDivElement>(null);
   const filterBox = useRef<HTMLDivElement>(null);
+  const shelfListRef = useRef<HTMLDivElement>(null);
+  const shelfDrag = useDragReorder(sort === 'manual' ? onReorder : undefined, {
+    container: shelfListRef,
+    fromButtons: true,
+    grid: rail === 'covers',
+  });
 
   useEffect(() => localStorage.setItem('orbit.library.corners', corners), [corners]);
   useEffect(() => localStorage.setItem('orbit.library.lift', lift ? 'on' : 'off'), [lift]);
@@ -555,6 +562,10 @@ export function LibraryView({
   const filters: FilterDefinition[] = (orderedLibraryFilters(filterOrder).filter((item) => !hidden.has(item.id)));
   const chips = filters.length > 0 ? filters : [LIBRARY_FILTERS[0]];
   const focus = shown.find((game) => game.id === focusId) ?? null;
+
+  useEffect(() => {
+    prewarmLibraryArtwork(shown, 24);
+  }, [shown]);
   const playedSecs = shown.reduce((sum, game) => sum + game.playSecs, 0);
 
   // The switch changes the view; the view you are already in opens its
@@ -958,11 +969,12 @@ export function LibraryView({
             </div>
             <div className="orbit-shelf-scroll">
               {rail === 'covers' ? (
-                <div className="orbit-shelf-grid">
+                <div ref={shelfListRef} className="orbit-shelf-grid">
                   {shown.map((game) => (
                     <button
                       key={game.id}
-                      className="orbit-shelf-tile"
+                      className={cn('orbit-shelf-tile', shelfDrag.dragging === game.id && 'opacity-90')}
+                      {...shelfDrag.bind(game.id)}
                       data-orbit-game={game.id}
                       aria-current={game.id === focusId ? 'true' : undefined}
                       onClick={() => choose(game.id)}
@@ -979,11 +991,12 @@ export function LibraryView({
                   ))}
                 </div>
               ) : (
-                <div className="orbit-shelf-rows">
+                <div ref={shelfListRef} className="orbit-shelf-rows">
                   {shown.map((game) => (
                     <button
                       key={game.id}
-                      className="orbit-shelf-row"
+                      className={cn('orbit-shelf-row', shelfDrag.dragging === game.id && 'opacity-90')}
+                      {...shelfDrag.bind(game.id)}
                       data-orbit-game={game.id}
                       data-size={listSize}
                       aria-current={game.id === focusId ? 'true' : undefined}
@@ -1043,7 +1056,6 @@ export function LibraryView({
 
           {focus ? (
             <GamePage
-              key={focus.id}
               game={focus}
               shape={shelfShape}
               sections={sections}
@@ -1182,7 +1194,14 @@ function GamePage({
   onUpdate: (patch: Partial<Game>) => void;
   onDiscoverSteam: () => void;
 }) {
-  const art = wideArt(game);
+  const [stageArt, setStageArt] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    void resolveWideArt(game).then((src) => {
+      if (current) setStageArt(src);
+    });
+    return () => { current = false; };
+  }, [game.id, game.coverPath, game.meta?.steamAppId, game.meta?.backgroundUrl, game.meta?.headerUrl, game.meta?.coverUrl]);
   const main = game.hltb?.main ?? 0;
   const hours = game.playSecs / 3600;
   const progress = main > 0 ? Math.min(100, Math.round((hours / main) * 100)) : null;
@@ -1241,14 +1260,12 @@ function GamePage({
         <div
           className="orbit-gamepage-art"
           aria-hidden
-          style={
-            art
-              ? { backgroundImage: `url("${art}")` }
-              : {
-                  backgroundImage: `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
-                  backgroundSize: 'auto, auto',
-                }
-          }
+          style={{
+            backgroundImage: stageArt
+              ? `url("${stageArt}")`
+              : `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
+            backgroundSize: 'cover, auto',
+          }}
         />
         <Cover
           game={game}

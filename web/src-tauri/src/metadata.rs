@@ -263,18 +263,25 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     } else {
         app.header_image.clone()
     };
-    // The background is a different, larger picture than the header on most
-    // pages; where it is missing or the same, the header does the job.
-    let background = if app.background_image.is_empty() || app.background_image == header {
-        None
-    } else {
-        Some(app.background_image.clone())
-    };
+    // Prefer the full-resolution, unblurred background. Steam's
+    // `background_image` is commonly a pre-blurred vignette (`page_bg_generated`)
+    // intended as a page overlay, not a library banner.
+    let background = [app.background_raw.as_str(), app.background_image.as_str()]
+        .into_iter()
+        .find(|url| !url.is_empty() && *url != header.as_str() && !url.contains("page_bg_generated"))
+        .map(str::to_owned);
     // The portrait picture is what a grid of covers actually wants, and the
     // wide header is the fallback, so the front end never has to fall through
     // to initials when the store has any artwork at all.
+    let portrait_2x = format!("{PORTRAIT}/{app_id}/library_600x900_2x.jpg");
     let portrait = format!("{PORTRAIT}/{app_id}/library_600x900.jpg");
-    let mut cover_url = if exists(client, &portrait).await { Some(portrait) } else { None };
+    let mut cover_url = if exists(client, &portrait_2x).await {
+        Some(portrait_2x)
+    } else if exists(client, &portrait).await {
+        Some(portrait)
+    } else {
+        None
+    };
     // A newer title often has no file at the old portrait name. Bonker still
     // has the library capsule Steam shows in its own grid.
     if cover_url.is_none() {
