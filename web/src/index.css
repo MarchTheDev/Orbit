@@ -3822,6 +3822,265 @@ html.orbit-glass .orbit-album-undermenu {
   accent-color: var(--c-accent);
 }
 
+/* Custom Orbit video player inside CaptureViewerModal */
+.orbit-vplayer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 840px);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #05070b;
+  border: 1px solid color-mix(in srgb, #fff 10%, transparent);
+  box-shadow: 0 24px 54px -22px rgba(0, 0, 0, .88);
+  user-select: none;
+}
+.orbit-vplayer:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  background: #000;
+}
+.orbit-vplayer.is-idle {
+  cursor: none;
+}
+.orbit-vplayer-surface {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 560px);
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+.orbit-vplayer:fullscreen .orbit-vplayer-surface {
+  max-height: 100vh;
+  height: 100%;
+}
+.orbit-vplayer-centerbtn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 78%, rgba(0, 0, 0, .72));
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, .72), 0 0 0 1px color-mix(in srgb, var(--c-accent) 32%, transparent);
+  cursor: pointer;
+  transition: transform .14s var(--ease-snap), border-color .14s var(--ease-snap), background-color .14s var(--ease-snap);
+}
+.orbit-vplayer-centerbtn:hover {
+  transform: translate(-50%, -50%) scale(1.06);
+  border-color: color-mix(in srgb, var(--c-accent) 65%, #fff);
+  background: color-mix(in srgb, var(--c-accent) 26%, rgba(10, 13, 20, .86));
+}
+.orbit-vplayer-hud {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px 14px 12px;
+  background: linear-gradient(
+    to top,
+    rgba(5, 7, 12, .92) 0%,
+    rgba(5, 7, 12, .62) 56%,
+    rgba(5, 7, 12, 0) 100%
+  );
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.orbit-vplayer.is-idle .orbit-vplayer-hud {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+.orbit-vplayer-scrub {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  cursor: pointer;
+  touch-action: none;
+}
+.orbit-vplayer-scrub:focus-visible {
+  outline: none;
+}
+.orbit-vplayer-rail {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .18);
+  overflow: visible;
+  transition: height .12s var(--ease-snap);
+}
+.orbit-vplayer-scrub:hover .orbit-vplayer-rail,
+.orbit-vplayer-scrub:focus-visible .orbit-vplayer-rail {
+  height: 6px;
+}
+.orbit-vplayer-buf {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .28);
+  pointer-events: none;
+}
+.orbit-vplayer-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  border-radius: 999px;
+  background: var(--c-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--c-accent) 55%, transparent);
+  pointer-events: none;
+}
+.orbit-vplayer-thumb {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--c-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform .12s var(--ease-snap);
+  pointer-events: none;
+}
+.orbit-vplayer-scrub:hover .orbit-vplayer-thumb,
+.orbit-vplayer-scrub:focus-visible .orbit-vplayer-thumb {
+  transform: translate(-50%, -50%) scale(1);
+}
+.orbit-vplayer-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(10, 13, 20, .92);
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.orbit-vplayer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.orbit-vplayer-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .07);
+  color: rgba(248, 250, 252, .9);
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap), border-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-vplayer-btn:hover {
+  border-color: rgba(255, 255, 255, .26);
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+}
+.orbit-vplayer-btn.is-primary {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, rgba(255, 255, 255, .18));
+  background: color-mix(in srgb, var(--c-accent) 26%, rgba(255, 255, 255, .06));
+  color: #fff;
+}
+.orbit-vplayer-btn.is-primary:hover {
+  border-color: color-mix(in srgb, var(--c-accent) 80%, #fff);
+  background: color-mix(in srgb, var(--c-accent) 38%, rgba(255, 255, 255, .1));
+}
+.orbit-vplayer-vol {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+}
+.orbit-vplayer-volslider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 68px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .24);
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+.orbit-vplayer-volslider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--c-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.orbit-vplayer-volslider::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--c-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.orbit-vplayer-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+  font-size: 12px;
+  color: rgba(226, 232, 240, .74);
+}
+.orbit-vplayer-clock > b {
+  font-weight: 700;
+  color: #f8fafc;
+}
+.orbit-vplayer-rate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 44px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .07);
+  color: rgba(248, 250, 252, .9);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color .12s var(--ease-snap), border-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-vplayer-rate:hover {
+  border-color: rgba(255, 255, 255, .26);
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+}
+
 .orbit-blank {
   display: flex;
   flex-direction: column;
@@ -5858,7 +6117,7 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
   margin-top: 12px;
 }
 .orbit-activity-inspector {
-  min-height: 48px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   padding: 9px 14px;
@@ -5900,12 +6159,17 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
 .orbit-activity-inspect-chip {
   display: inline-flex;
   align-items: center;
+  height: 40px;
+  min-height: 40px;
   gap: 8px;
   padding: 4px 11px 4px 7px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--c-text) 11%, transparent);
   background: color-mix(in srgb, var(--c-panel) 88%, transparent);
   font-size: 12.5px;
+}
+.orbit-activity-inspect-chip:not(:has(.orbit-activity-miniart)) {
+  padding-left: 11px;
 }
 .orbit-activity-dot {
   display: inline-block;
@@ -6515,3 +6779,300 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
 /* Bigger covers and text for Sessions and Backlog */
 .orbit-stats-panel .orbit-playnext-art { width: 36px; height: 50px; }
 .orbit-topgames .orbit-cover { border-radius: 12px; }
+
+/* ----------------------------------------------------- Reworked Backlog View */
+.orbit-backlog-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (min-width: 900px) {
+  .orbit-backlog-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.orbit-backlog-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px 15px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .14s var(--ease-snap), background-color .14s var(--ease-snap), transform .14s var(--ease-snap);
+}
+.orbit-backlog-kpi:hover {
+  border-color: color-mix(in srgb, var(--c-text) 20%, transparent);
+  background: var(--c-panel);
+}
+.orbit-backlog-kpi.is-selected {
+  border-color: color-mix(in srgb, var(--c-accent) 52%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 10%, var(--c-panel));
+}
+
+.orbit-backlog-commandbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 94%, transparent);
+}
+.orbit-backlog-lanes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 7%, transparent);
+}
+.orbit-backlog-lanetab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 48%, transparent);
+  color: var(--c-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap), background-color .12s var(--ease-snap), color .12s var(--ease-snap);
+}
+.orbit-backlog-lanetab:hover {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-text) 20%, transparent);
+}
+.orbit-backlog-lanetab.is-active {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 15%, var(--c-panel));
+  color: var(--c-text);
+}
+.orbit-backlog-lanecount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 9%, transparent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.orbit-backlog-lanetab.is-active .orbit-backlog-lanecount {
+  background: color-mix(in srgb, var(--c-accent) 26%, transparent);
+  color: var(--c-accent);
+}
+
+.orbit-backlog-spotlight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 42%, transparent);
+  background:
+    radial-gradient(600px circle at 0% 50%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent 70%),
+    color-mix(in srgb, var(--c-panel) 95%, transparent);
+}
+
+/* ------------------ Steam Personal Calendar-style Upcoming Release Bottom Bar */
+.orbit-release-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 25;
+  margin-top: 24px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 32%, color-mix(in srgb, var(--c-text) 10%, transparent));
+  background: color-mix(in srgb, var(--c-panel) 94%, var(--c-bg));
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .72);
+  overflow: hidden;
+}
+.orbit-release-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--c-accent) 11%, transparent) 0%, transparent 45%),
+    color-mix(in srgb, var(--c-panel) 90%, transparent);
+}
+.orbit-release-bar.is-collapsed .orbit-release-head {
+  border-bottom-color: transparent;
+}
+.orbit-release-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  color: var(--c-accent);
+  flex-shrink: 0;
+}
+.orbit-release-body {
+  padding: 14px 16px 16px;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+}
+
+.orbit-pcal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@media (min-width: 1080px) {
+  .orbit-pcal-layout:has(.orbit-pcal-tba) {
+    grid-template-columns: minmax(0, 1fr) 256px;
+  }
+}
+
+.orbit-pcal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.orbit-pcal-weekday {
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+.orbit-pcal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+.orbit-pcal-cell {
+  min-height: 54px;
+  padding: 5px 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 7%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 46%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-pcal-cell.is-outside {
+  opacity: .38;
+}
+.orbit-pcal-cell.is-today {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 8%, var(--c-bg));
+}
+.orbit-pcal-cell.has-release {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--c-accent) 52%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 11%, var(--c-panel));
+}
+.orbit-pcal-daynum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--c-muted);
+}
+.orbit-pcal-cell.has-release .orbit-pcal-daynum,
+.orbit-pcal-cell.is-today .orbit-pcal-daynum {
+  color: var(--c-text);
+}
+.orbit-pcal-todaytag {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+}
+.orbit-pcal-releases {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.orbit-pcal-gamepill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 5px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  cursor: pointer;
+  transition: border-color .12s var(--ease-snap), transform .12s var(--ease-snap);
+}
+.orbit-pcal-gamepill:hover {
+  border-color: var(--c-accent);
+  transform: translateY(-1px);
+}
+
+.orbit-pcal-tba {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 52%, transparent);
+}
+.orbit-pcal-tbaitem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  background: color-mix(in srgb, var(--c-panel) 88%, transparent);
+}
+
+.orbit-pcal-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+.orbit-pcal-stripcard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 10%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 55%, var(--c-panel));
+  transition: border-color .12s var(--ease-snap);
+}
+.orbit-pcal-stripcard:hover {
+  border-color: color-mix(in srgb, var(--c-accent) 50%, transparent);
+}
+.orbit-pcal-datebadge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  min-height: 54px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 10%, var(--c-panel));
+  flex-shrink: 0;
+  text-align: center;
+}
+

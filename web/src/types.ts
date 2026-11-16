@@ -87,6 +87,10 @@ export interface MetaData {
   genres: string[];
   developer: string;
   releaseYear: number | null;
+  /** Full release date string (e.g. "Dec 11, 2026", "2027-02-19", or "Coming soon"). */
+  releaseDate?: string | null;
+  /** True when the game has not released yet. */
+  comingSoon?: boolean;
   rating: number | null;
   /** Portrait artwork, when the store has it. */
   coverUrl?: string | null;
@@ -691,6 +695,12 @@ export interface Settings {
    * Games taken off the Backlog without being removed from the Library.
    */
   backlogOff?: string[];
+  /**
+   * Show the Steam Personal Calendar-style upcoming release bottom bar on the
+   * Backlog page whenever at least one Backlog game is not yet released.
+   * On by default.
+   */
+  showBacklogCalendar?: boolean;
   /** Whether games are automatically listed in the Journal; on by default for existing libraries. */
   syncJournal?: boolean;
   /** Games manually included in the Journal when synchronization is off. */

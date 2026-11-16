@@ -33,13 +33,14 @@ import type {
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
-import { overlayGallery, type GalleryItem } from '../services/native';
-import { fileSrc } from '../services/desktop';
+import { overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { wideArt } from '../utils/art';
 import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
+import { CaptureViewerModal } from './ui/CaptureViewerModal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { SearchField } from './ui/SearchField';
 import { GameGrid } from './GameGrid';
 import { HltbCard } from './detail/HltbCard';
@@ -496,7 +497,7 @@ export function LibraryView({
   // Esc lets the page go blank without leaving the library.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || viewMenu) return;
+      if (event.key !== 'Escape' || viewMenu || document.body.dataset.orbitViewerOpen === 'true') return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName))) return;
       if (!focusId) return;
@@ -1203,8 +1204,9 @@ function GamePage({
   // back from the game.
   const [captures, setCaptures] = useState<GalleryItem[] | null>(null);
   const [captureKind, setCaptureKind] = useState<CaptureKind | 'all'>('all');
-  const [lightbox, setLightbox] = useState<string | null>(null);
-  const [videoSrc, setVideoSrc] = useState<{ src: string; name: string } | null>(null);
+  const [viewerItem, setViewerItem] = useState<GalleryItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
+  const [captureTick, setCaptureTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -1223,30 +1225,14 @@ function GamePage({
       alive = false;
       window.removeEventListener('focus', load);
     };
-  }, [game.title]);
-
-  useEffect(() => {
-    if (!lightbox && !videoSrc) return;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, [lightbox, videoSrc]);
-
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setLightbox(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightbox]);
+  }, [game.title, captureTick]);
 
   const captureTotal = captures?.length ?? 0;
   const kindCounts = captureCounts(captures ?? []);
   const shownCaptures = (captures ?? []).filter((item) => captureKind === 'all' || item.kind === captureKind);
 
   const openCapture = (item: GalleryItem) => {
-    if (item.kind === 'screenshot') setLightbox(fileSrc(item.path));
-    else setVideoSrc({ src: fileSrc(item.path), name: item.name });
+    setViewerItem(item);
   };
 
   return (
@@ -1459,18 +1445,30 @@ function GamePage({
         </aside>
       </div>
 
-      {lightbox && (
-        <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
-          <button type="button" aria-label="Close" onClick={() => setLightbox(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
-          <img src={lightbox} alt="" />
-        </div>
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this capture?"
+          description={`${deleteTarget.name} is removed from the disk. This cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            if (viewerItem?.path === target.path) setViewerItem(null);
+            void overlayDelete(target.path)
+              .then(() => setCaptureTick((t) => t + 1))
+              .catch(() => undefined);
+          }}
+        />
       )}
-      {videoSrc && (
-        <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label={`Video ${videoSrc.name}`} onClick={() => setVideoSrc(null)}>
-          <button type="button" aria-label="Close" onClick={() => setVideoSrc(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
-          <video src={videoSrc.src} controls autoPlay className="max-h-[86vh] max-w-[92vw] rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
+      <CaptureViewerModal
+        item={viewerItem}
+        items={shownCaptures}
+        resolveGame={() => ({ game, title: game.title })}
+        onSelect={setViewerItem}
+        onClose={() => setViewerItem(null)}
+        onDelete={setDeleteTarget}
+      />
     </div>
   );
 }

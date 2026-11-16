@@ -1750,6 +1750,7 @@ export default function App() {
             onBacklogMembership={setBacklogMembership}
             myOrder={settings.backlogOrder}
             setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
+            showReleaseCalendar={settings.showBacklogCalendar !== false}
           />
         ) : page === 'sessions' ? (
           <SessionsView

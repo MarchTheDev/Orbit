@@ -11,7 +11,7 @@ export const SAMPLE_GAMES: Game[] = [
     status: 'backlog', favorite: false, manualPlaySecs: 0, playSecs: 0 * 60, lastPlayed: null, addedAt: d(12),
     // Written down before it is owned: it lives on the Backlog page only.
     notes: '', hue: 275, coverPath: null, planned: true, sessionCount: 0, longestSecs: 0, running: false, companions: [],
-    meta: { summary: '', genres: [], developer: 'Team Cherry', releaseYear: null, rating: null },
+    meta: { summary: '', genres: [], developer: 'Team Cherry', releaseYear: 2026, releaseDate: 'Dec 11, 2026', comingSoon: true, rating: null },
   },
   {
     id: 'g1', title: 'Elden Ring', launch: { kind: 'none' },
@@ -81,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tabOrder: [],
   logOrder: [],
   backlogOrder: [],
+  showBacklogCalendar: true,
   syncJournal: true,
   journalOn: [],
   journalOff: [],

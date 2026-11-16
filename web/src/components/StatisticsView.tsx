@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  BarChart3, BookOpen, CalendarDays, ChevronLeft, ChevronRight, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
-  NotebookPen, Play, Trash2, Trophy, X,
+  BarChart3, BookOpen, CalendarDays, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
+  NotebookPen, Play, Trash2, Trophy,
 } from 'lucide-react';
 import type { Game, GameStatus, Session, Settings } from '../types';
 import {
   listSessions, overlayDelete, overlayGallery, revealInExplorer, type GalleryItem,
 } from '../services/native';
-import { fileSrc } from '../services/desktop';
 import { fmtMinutes } from '../utils/format';
 import { onBacklogPage } from '../utils/library';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
+import { CaptureViewerModal } from './ui/CaptureViewerModal';
 import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, captureFolderName, isCaptureKind, type CaptureKind } from './Captures';
 import { SessionsView } from './SessionsView';
 import { BacklogView } from './BacklogView';
@@ -398,20 +397,6 @@ export function StatisticsView({
     };
   }, [captureTick]);
 
-  // Lock both document.body and Orbit's primary .orbit-scroll container while the viewer modal is open
-  useEffect(() => {
-    if (!viewerItem) return;
-    const scroller = document.querySelector<HTMLElement>('.orbit-scroll');
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevScrollerOverflow = scroller?.style.overflow ?? '';
-    document.body.style.overflow = 'hidden';
-    if (scroller) scroller.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevBodyOverflow;
-      if (scroller) scroller.style.overflow = prevScrollerOverflow;
-    };
-  }, [viewerItem]);
-
   const byFolder = useMemo(() => {
     const map = new Map<string, Game>();
     for (const game of games) map.set(captureFolderName(game.title), game);
@@ -470,26 +455,6 @@ export function StatisticsView({
     () => albumGroups.flatMap((group) => group.items),
     [albumGroups],
   );
-  const viewerIndex = viewerItem
-    ? visibleCaptures.findIndex((item) => item.path === viewerItem.path)
-    : -1;
-
-  useEffect(() => {
-    if (!viewerItem) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setViewerItem(null);
-      } else if (event.key === 'ArrowLeft' && viewerIndex > 0) {
-        event.preventDefault();
-        setViewerItem(visibleCaptures[viewerIndex - 1]);
-      } else if (event.key === 'ArrowRight' && viewerIndex >= 0 && viewerIndex < visibleCaptures.length - 1) {
-        event.preventDefault();
-        setViewerItem(visibleCaptures[viewerIndex + 1]);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [viewerItem, viewerIndex, visibleCaptures]);
 
   const captureItems = (item: GalleryItem): MenuItem[] => [
     {
@@ -1193,140 +1158,17 @@ export function StatisticsView({
               }}
             />
           )}
-          {viewerItem &&
-            createPortal(
-              <div
-                className="orbit-viewer-backdrop"
-                role="dialog"
-                aria-modal="true"
-                aria-label={viewerItem.kind === 'screenshot' ? `Screenshot ${viewerItem.name}` : `Video ${viewerItem.name}`}
-                onClick={() => setViewerItem(null)}
-              >
-                <div
-                  className="orbit-viewer-card"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <header className="orbit-viewer-head">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {(() => {
-                        const viewerGame = byFolder.get(viewerItem.game);
-                        const viewerTitle = viewerGame?.title ?? viewerItem.game;
-                        return (
-                          <>
-                            <span className="orbit-viewer-cover">
-                              {viewerGame ? (
-                                <Cover game={viewerGame} className="size-full" fit="cover" />
-                              ) : (
-                                <span className="grid size-full place-items-center bg-panel2 text-[10px] font-bold text-muted">
-                                  {viewerTitle.slice(0, 2).toUpperCase()}
-                                </span>
-                              )}
-                            </span>
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h4 className="truncate text-[13.5px] font-bold text-fg">{viewerTitle}</h4>
-                                <span className="orbit-viewer-badge">
-                                  {viewerItem.kind === 'screenshot'
-                                    ? 'Screenshot'
-                                    : viewerItem.kind === 'recording'
-                                      ? 'Recording'
-                                      : 'Replay'}
-                                </span>
-                              </div>
-                              <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted">
-                                <span className="truncate max-w-[18rem]">{viewerItem.name}</span>
-                                {whenOf(viewerItem) && <span>· {whenOf(viewerItem)}</span>}
-                                {sizeOf(viewerItem) && <span>· {sizeOf(viewerItem)}</span>}
-                              </p>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      {visibleCaptures.length > 1 && viewerIndex >= 0 && (
-                        <div className="mr-1 flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={viewerIndex <= 0}
-                            onClick={() => viewerIndex > 0 && setViewerItem(visibleCaptures[viewerIndex - 1])}
-                            className="orbit-viewer-iconbtn"
-                            title="Previous capture (←)"
-                            aria-label="Previous capture"
-                          >
-                            <ChevronLeft className="size-4" />
-                          </button>
-                          <span className="orbit-num px-1 text-[11px] font-medium text-muted">
-                            {viewerIndex + 1} / {visibleCaptures.length}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={viewerIndex >= visibleCaptures.length - 1}
-                            onClick={() =>
-                              viewerIndex < visibleCaptures.length - 1 &&
-                              setViewerItem(visibleCaptures[viewerIndex + 1])
-                            }
-                            className="orbit-viewer-iconbtn"
-                            title="Next capture (→)"
-                            aria-label="Next capture"
-                          >
-                            <ChevronRight className="size-4" />
-                          </button>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => void revealInExplorer(viewerItem.path)}
-                        className="orbit-btnquiet"
-                        title="Show in its folder"
-                      >
-                        <FolderOpen className="size-3.5" />
-                        <span className="hidden sm:inline">Show in folder</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(viewerItem)}
-                        className="orbit-viewer-iconbtn is-danger"
-                        title="Delete capture"
-                        aria-label="Delete capture"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Close"
-                        title="Close (Esc)"
-                        onClick={() => setViewerItem(null)}
-                        className="orbit-viewer-iconbtn"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    </div>
-                  </header>
-
-                  <div className="orbit-viewer-stage">
-                    {viewerItem.kind === 'screenshot' ? (
-                      <img
-                        src={fileSrc(viewerItem.path)}
-                        alt={viewerItem.name}
-                        className="orbit-viewer-media"
-                      />
-                    ) : (
-                      <video
-                        key={viewerItem.path}
-                        src={fileSrc(viewerItem.path)}
-                        controls
-                        autoPlay
-                        playsInline
-                        className="orbit-viewer-video"
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>,
-              document.body,
-            )}
+          <CaptureViewerModal
+            item={viewerItem}
+            items={visibleCaptures}
+            resolveGame={(item) => {
+              const g = byFolder.get(item.game);
+              return { game: g, title: g?.title ?? item.game };
+            }}
+            onSelect={setViewerItem}
+            onClose={() => setViewerItem(null)}
+            onDelete={setDeleteTarget}
+          />
         </>
       ) : tab === 'journal' ? (
         <LogsView
@@ -1355,6 +1197,7 @@ export function StatisticsView({
           onBacklogMembership={onBacklogMembership}
           myOrder={settings.backlogOrder}
           setMyOrder={(ids) => setSettings({ backlogOrder: ids })}
+          showReleaseCalendar={settings.showBacklogCalendar !== false}
           embedded
         />
       )}

@@ -32,6 +32,10 @@ pub struct Meta {
     /// The store's own id for the game, which is what a `steam://` launch needs.
     pub steam_app_id: Option<u64>,
     pub release_year: Option<i32>,
+    /// The release date string as written by the store (e.g. "Feb 14, 2027" or "Coming soon").
+    pub release_date: Option<String>,
+    /// True when the store marks the game as not yet released.
+    pub coming_soon: bool,
     /// Out of 100, or absent when nobody has scored it.
     pub rating: Option<i32>,
     /// Portrait artwork, if the store has it. The front end falls back to the
@@ -179,6 +183,8 @@ struct Named {
 struct ReleaseDate {
     #[serde(default)]
     date: String,
+    #[serde(default)]
+    coming_soon: bool,
 }
 
 /// A store-page screenshot, in two sizes: the full one is what a backdrop wants.
@@ -297,6 +303,8 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
             .unwrap_or_default(),
         steam_app_id: Some(app_id),
         release_year: year_in(&app.release_date.date),
+        release_date: neat(Some(app.release_date.date)),
+        coming_soon: app.release_date.coming_soon,
         rating: app.metacritic.and_then(|m| m.score).filter(|s| *s > 0),
         cover_url,
         header_url: Some(header).filter(|url| !url.is_empty()),

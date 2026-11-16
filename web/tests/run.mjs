@@ -68,6 +68,7 @@ const checks = [
   'tests/proton.test.mjs',
   'tests/pad-devices.test.mjs',
   'tests/polish-round2.test.mjs',
+  'tests/polish-round3.test.mjs',
 ];
 
 try {

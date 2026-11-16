@@ -967,7 +967,7 @@ export function CommandPalette({
     const effectiveFilter: FilterKind = parsed.actionsOnly ? 'actions' : filter;
     const q = parsed.actionsOnly ? parsed.rest : query.trim();
 
-    // Build game rows
+    // Build game rows — clicking or pressing Enter opens all per-game actions inside the palette
     const gameRows: PaletteRow[] = games.map((g) => ({
       id: `game-${g.id}`,
       recentKey: `game:${g.id}`,
@@ -980,7 +980,8 @@ export function CommandPalette({
       keywords: [...(g.meta?.genres ?? []), g.meta?.developer ?? '', g.status],
       game: g,
       drillGame: g,
-      run: () => onGame(g.id),
+      keepOpen: true,
+      run: () => enterGameLevel(g),
     }));
 
     // Empty-query smart browse (Heronite `browse()` layout)
@@ -1450,7 +1451,7 @@ export function CommandPalette({
                           {row.shortcut && <Kbd>{row.shortcut}</Kbd>}
                         </button>
 
-                        {!levelGame && row.drillGame && !row.keepOpen && (
+                        {!levelGame && row.drillGame && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1459,12 +1460,12 @@ export function CommandPalette({
                             }}
                             title={`Actions for ${row.drillGame.title} (→)`}
                             aria-label={`Actions for ${row.drillGame.title}`}
-                            className="grid size-7 shrink-0 place-items-center rounded-lg text-muted opacity-60 transition hover:bg-panel hover:text-fg group-hover:opacity-100"
+                            className="grid size-7 shrink-0 place-items-center rounded-lg text-muted opacity-70 transition hover:bg-panel hover:text-fg group-hover:opacity-100"
                           >
                             <ChevronRight className="size-4" />
                           </button>
                         )}
-                        {isSelected && (!row.drillGame || levelGame || row.keepOpen) && (
+                        {isSelected && (!row.drillGame || levelGame) && (
                           <CornerDownLeft className="size-3.5 shrink-0 text-accent" />
                         )}
                       </div>

@@ -156,11 +156,13 @@ check(
     dragSrc.includes('200ms cubic-bezier(0.2, 0, 0, 1)'),
 );
 
+const viewerModalSrc = readFileSync(new URL('../src/components/ui/CaptureViewerModal.tsx', import.meta.url), 'utf8');
 check(
   'Album fixes Shown under metadata visibility, removes Which game, enlarges group covers, and portals viewer with scroll lock',
   !statsSrc.includes("'Which game'") &&
-    statsSrc.includes('createPortal(') &&
-    statsSrc.includes("document.querySelector<HTMLElement>('.orbit-scroll')") &&
+    statsSrc.includes('<CaptureViewerModal') &&
+    viewerModalSrc.includes('createPortal(') &&
+    viewerModalSrc.includes("document.querySelector<HTMLElement>('.orbit-scroll')") &&
     css.includes('.orbit-album .orbit-gallery > .orbit-album-tile') &&
     /\.orbit-album-headart\s*\{[^}]*width:\s*42px;[^}]*height:\s*58px;/s.test(css),
 );
