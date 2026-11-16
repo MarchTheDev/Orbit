@@ -1526,7 +1526,6 @@ export function CommandPalette({
 }
 
 function GamePreview({ game, running }: { game: Game; running: boolean }) {
-  const statusInfo = STATUS_DOT[game.status];
   return (
     <div className="flex flex-col items-center text-center">
       <div className="w-28 aspect-[2/3] overflow-hidden rounded-xl border border-line shadow-lg">
@@ -1554,13 +1553,6 @@ function GamePreview({ game, running }: { game: Game; running: boolean }) {
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted">Last played</span>
           <span className="font-medium text-fg">{fmtRelative(game.lastPlayed)}</span>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-muted">Status</span>
-          <span className="inline-flex items-center gap-1.5 font-medium text-fg">
-            <span className="size-2 rounded-full" style={{ background: statusInfo.color }} />
-            {statusInfo.label}
-          </span>
         </div>
       </div>
 

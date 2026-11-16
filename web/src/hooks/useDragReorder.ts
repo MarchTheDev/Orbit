@@ -1,265 +1,421 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import { cardAt, slotAt } from '../utils/reorder';
-
-/** How far the pointer travels before a press counts as a drag. */
-const THRESHOLD = 6;
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { cardAt, moveInOrder, slotAt } from '../utils/reorder';
 
 /**
- * Reordering by pointer, rather than by the browser's drag and drop.
+ * Reorder a list or grid by pressing an item and moving it, with live
+ * GitHub-style sibling displacement so neighboring items smoothly glide into
+ * their previewed slots before release.
  *
- * The webview Orbit runs in reserves drag and drop for files coming from the
- * desktop, which is the same channel a card drag would use, and on Windows that
- * means the browser's drag events never start. Pressing on a card and moving the
- * pointer works regardless: no cooperation from the webview is needed, and it
- * behaves the same with a mouse, a trackpad or a finger.
+ * Plain HTML5 drag-and-drop (`draggable` + `dragover`) is unreliable inside the
+ * desktop WebView here: Tauri's own file-drop listener sits on the window and
+ * claims drags that carry text data, so `drop` never reaches the list. Pointer
+ * events stay inside the page and work identically in the browser and in the
+ * shell.
  *
- * A press that never moves is left alone, so clicking a card still selects it and
- * clicking a button inside one still presses it.
+ * A click still has to be a click, so nothing happens until the pointer has
+ * travelled a few pixels from where it went down. Once it has, the click that
+ * follows `pointerup` is swallowed on capture so releasing a card over itself
+ * does not open it.
  */
-export function useDragReorder(
-  onReorder?: (fromId: string, toId: string, after: boolean) => void,
+const START_PX = 6;
+/** Long enough that a tap has already released, short enough to feel immediate. */
+const HOLD_MS = 180;
+
+interface DragReorderOptions {
   /**
-   * Set for a plain vertical list, and the list reorders itself by where the
-   * pointer is rather than by what happens to be under it.
-   *
-   * `elementFromPoint` is exact, which is the wrong thing for a list of one-line
-   * rows: releasing in the few pixels of a gap, or just past the last row, finds
-   * nothing at all and the drag is thrown away. Give the list's own element and
-   * the nearest slot is worked out from the pointer's height, so a drag that
-   * reaches a row always means something.
+   * Measure every `[data-orbit-drop]` inside this element and pick the slot from
+   * the pointer's coordinates instead of from `elementFromPoint`.
    */
-  options?: {
-    container?: RefObject<HTMLElement | null>;
-    /**
-     * Allow a drag to start on a button.
-     *
-     * Off by default, because a card with a Play button in it has to keep that
-     * button pressable. On for a row that is *itself* a button, which is how the
-     * Journal's game list is built: there, refusing the press would mean the row
-     * could never be picked up at all. A press that does not move is still a
-     * plain click, because the click is only swallowed once something was
-     * actually dragged.
-     */
-    fromButtons?: boolean;
-    /**
-     * The row under the pointer is the target, not the last midpoint passed.
-     *
-     * A list of tall cards is aimed at a card. The midpoint rule highlights the
-     * card above until the pointer crosses the middle, so the drop lands one
-     * place short of where it looks.
-     */
-    onto?: boolean;
-    /**
-     * A grid of cards. Height alone would always land on the first card of the
-     * row. The card under the pointer, in both directions, is the target.
-     */
-    grid?: boolean;
-    /**
-     * Hold the pointer on the card.
-     *
-     * A cover is a picture inside a button, in a dialog that scrolls. The
-     * picture starts a file drag, and the scroller takes the gesture, so the
-     * pointer never becomes a reorder. Holding the pointer on the card, and
-     * refusing that file drag, is what makes the cover move.
-     */
-    hold?: boolean;
-  },
+  container?: RefObject<HTMLElement | null>;
+  /** Allow a drag to start on a button row when the whole row is a `<button>`. */
+  fromButtons?: boolean;
+  /** Measure both directions of a card grid instead of only list height. */
+  grid?: boolean;
+  /** Drop onto the hovered row's slot (`takePlace` semantics). */
+  onto?: boolean;
+  /** Wait briefly before grabbing, so a tap on a button row still clicks it. */
+  hold?: boolean;
+}
+
+interface MeasuredSlot {
+  id: string;
+  dropEl: HTMLElement;
+  slotEl: HTMLElement;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export function useDragReorder(
+  onReorder: ((fromId: string, toId: string, after: boolean) => void) | undefined,
+  options?: DragReorderOptions,
 ) {
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
-  const press = useRef<{ id: string; x: number; y: number; live: boolean } | null>(null);
-  const overRef = useRef<{ id: string; after: boolean } | null>(null);
-  const reorderRef = useRef(onReorder);
-  reorderRef.current = onReorder;
-  const moveRef = useRef<(e: PointerEvent) => void>(() => {});
-  const finishRef = useRef<() => void>(() => {});
+  const callback = useRef(onReorder);
+  useEffect(() => {
+    callback.current = onReorder;
+  });
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  });
+
+  const gesture = useRef<{
+    id: string;
+    pointerId: number;
+    target: HTMLElement;
+    x: number;
+    y: number;
+    lastX: number;
+    lastY: number;
+    live: boolean;
+    ready: boolean;
+    over: { id: string; after: boolean } | null;
+    timer: number | null;
+    shifts: Map<HTMLElement, { x: number; y: number }>;
+    styledEls: Set<HTMLElement>;
+  } | null>(null);
 
   useEffect(() => {
-    const move = (e: PointerEvent) => {
-      const held = press.current;
-      if (!held) return;
-      if (!held.live) {
-        if (Math.hypot(e.clientX - held.x, e.clientY - held.y) < THRESHOLD) return;
-        held.live = true;
-        setDragging(held.id);
-        document.body.style.userSelect = 'none';
+    const clearTransforms = (
+      held: NonNullable<typeof gesture.current>,
+      animateReset = false,
+    ) => {
+      for (const el of held.styledEls) {
+        if (animateReset) {
+          el.style.transition = 'transform 160ms cubic-bezier(0.2, 0, 0, 1)';
+          el.style.transform = '';
+          window.setTimeout(() => {
+            el.style.transition = '';
+            el.style.zIndex = '';
+            el.style.position = '';
+            el.style.boxShadow = '';
+            el.style.pointerEvents = '';
+            el.style.willChange = '';
+          }, 170);
+        } else {
+          el.style.transition = '';
+          el.style.transform = '';
+          el.style.zIndex = '';
+          el.style.position = '';
+          el.style.boxShadow = '';
+          el.style.pointerEvents = '';
+          el.style.willChange = '';
+        }
+        delete el.dataset.orbitDraggingItem;
       }
-      const next = slotUnder(e.clientX, e.clientY, held.id);
-      if (next?.id !== overRef.current?.id || next?.after !== overRef.current?.after) {
-        overRef.current = next;
-        setOver(next?.id ?? null);
-      }
+      held.shifts.clear();
+      held.styledEls.clear();
     };
 
-    const finish = () => {
-      const held = press.current;
-      press.current = null;
-      document.body.style.userSelect = '';
-      if (held?.live) {
-        const to = overRef.current;
-        if (to) reorderRef.current?.(held.id, to.id, to.after);
-        // The release lands on the card the press started on, which the browser
-        // reads as a click. It is the end of a drag, so it is swallowed.
-        const swallow = (e: MouseEvent) => {
-          e.preventDefault();
-          e.stopPropagation();
-        };
-        document.addEventListener('click', swallow, { capture: true, once: true });
-        window.setTimeout(() => document.removeEventListener('click', swallow, { capture: true } as EventListenerOptions), 0);
+    const resolveScope = (held: NonNullable<typeof gesture.current>): HTMLElement | null => {
+      const explicit = optionsRef.current?.container?.current;
+      if (explicit) return explicit;
+      let cur: HTMLElement | null = held.target.parentElement;
+      while (cur && cur !== document.body) {
+        if (cur.querySelectorAll('[data-orbit-drop]').length >= 2) return cur;
+        cur = cur.parentElement;
       }
-      overRef.current = null;
-      setDragging(null);
-      setOver(null);
+      return held.target.parentElement;
     };
 
-    /**
-     * Which row the pointer is next to, in a vertical list.
-     *
-     * The rows are walked in the order they are drawn and the pointer's height
-     * is compared with the middle of each: everything above the pointer is
-     * passed, and the slot is the one after the last of those. Above the first
-     * row is the top of the list, below the last row is the bottom of it, and
-     * the gap between two rows belongs to whichever one the pointer is nearer,
-     * so no pixel in the list is a dead zone.
-     */
-    const slotUnder = (x: number, y: number, heldId: string): { id: string; after: boolean } | null => {
-      const container = optionsRef.current?.container?.current ?? null;
-      if (container && optionsRef.current?.grid) {
-        const cards = [...container.querySelectorAll<HTMLElement>('[data-orbit-drop]')].map((el) => {
-          const rect = el.getBoundingClientRect();
-          return {
-            id: el.getAttribute('data-orbit-drop') ?? '',
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
-          };
+    const measureSlots = (held: NonNullable<typeof gesture.current>): MeasuredSlot[] => {
+      const root = resolveScope(held);
+      if (!root) return [];
+      const dropNodes = Array.from(root.querySelectorAll<HTMLElement>('[data-orbit-drop]'));
+      const seen = new Set<string>();
+      const slots: MeasuredSlot[] = [];
+      for (const dropEl of dropNodes) {
+        const id = dropEl.dataset.orbitDrop;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        let slotEl: HTMLElement = dropEl;
+        while (slotEl.parentElement && slotEl.parentElement !== root) {
+          slotEl = slotEl.parentElement;
+        }
+        const rect = slotEl.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const applied = held.shifts.get(slotEl) ?? { x: 0, y: 0 };
+        slots.push({
+          id,
+          dropEl,
+          slotEl,
+          left: rect.left - applied.x,
+          top: rect.top - applied.y,
+          width: rect.width,
+          height: rect.height,
         });
+      }
+      return slots;
+    };
+
+    const isMultiColumn = (slots: MeasuredSlot[]): boolean => {
+      if (optionsRef.current?.grid) return true;
+      for (let i = 1; i < slots.length; i += 1) {
+        const a = slots[i - 1];
+        const b = slots[i];
+        if (Math.abs(a.top - b.top) < Math.min(a.height, b.height) * 0.5) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    /** Pick the target slot from untransformed layout boxes so shifting items never jitter hit-testing. */
+    const slotUnder = (
+      held: NonNullable<typeof gesture.current>,
+      slots: MeasuredSlot[],
+      x: number,
+      y: number,
+    ): { id: string; after: boolean } | null => {
+      const heldId = held.id;
+      if (slots.length < 2) return null;
+
+      if (isMultiColumn(slots) || optionsRef.current?.onto) {
+        const cards = slots.map((s) => ({
+          id: s.id,
+          left: s.left,
+          top: s.top,
+          width: s.width,
+          height: s.height,
+        }));
         const id = cardAt(cards, x, y, heldId);
         if (!id) return null;
-        // Put the dragged card in the target card's existing slot. The array is
-        // in DOM/order sequence even when it is laid out in several columns.
         const from = cards.findIndex((card) => card.id === heldId);
         const to = cards.findIndex((card) => card.id === id);
-        return { id, after: from >= 0 && to >= 0 && from < to };
+        if (from < 0 || to < 0 || from === to) return null;
+        return { id, after: to > from };
       }
-      if (!container) {
-        // Not a list: what is under the pointer is the answer, and which half of
-        // it the pointer is in decides before or after. Without that, dragging a
-        // card downwards only ever moved it one place, because it was always
-        // placed before the card it was dropped on.
-        const under = document.elementFromPoint(x, y);
-        const element = under?.closest('[data-orbit-drop]') ?? null;
-        const id = element?.getAttribute('data-orbit-drop') ?? null;
-        if (!id || id === heldId) return null;
-        const rect = element?.getBoundingClientRect();
-        return { id, after: rect ? y > rect.top + rect.height / 2 : false };
+
+      const first = slots[0];
+      const last = slots[slots.length - 1];
+      const minX = Math.min(...slots.map((s) => s.left)) - 80;
+      const maxX = Math.max(...slots.map((s) => s.left + s.width)) + 80;
+      if (x < minX || x > maxX || y < first.top - first.height || y > last.top + last.height * 2) {
+        return null;
       }
-      const rows = [...container.querySelectorAll<HTMLElement>('[data-orbit-drop]')].filter(
-        (el) => el.getAttribute('data-orbit-drop') !== heldId,
+
+      const rows = slots.map((s) => ({ id: s.id, top: s.top, height: s.height }));
+      const picked = slotAt(rows, y);
+      if (!picked) return null;
+      const nextIds = moveInOrder(
+        slots.map((s) => s.id),
+        heldId,
+        picked.id,
+        picked.after,
       );
-      if (rows.length === 0) return null;
-      if (optionsRef.current?.onto) {
-        // The row the pointer is actually on. A midpoint would still be the row
-        // above until the pointer crossed its middle, which is the miss. A gap
-        // between rows belongs to the nearer one, so a drop there is not lost.
-        const hit = rows.find((row) => {
-          const rect = row.getBoundingClientRect();
-          return y >= rect.top && y <= rect.bottom;
-        });
-        const target = hit ?? rows.reduce((best, row) => {
-          const dist = (el: HTMLElement) => {
-            const rect = el.getBoundingClientRect();
-            return y < rect.top ? rect.top - y : y - rect.bottom;
-          };
-          return dist(row) < dist(best) ? row : best;
-        });
-        const id = target.getAttribute('data-orbit-drop');
-        return id ? { id, after: false } : null;
+      if (nextIds.every((id, idx) => id === slots[idx].id)) {
+        return null;
       }
-      return slotAt(
-        rows.map((row) => {
-          const rect = row.getBoundingClientRect();
-          return { id: row.getAttribute('data-orbit-drop')!, top: rect.top, height: rect.height };
-        }),
-        y,
-      );
+      return picked;
     };
 
-    const cancel = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && press.current) finish();
+    const applyLivePreview = (
+      held: NonNullable<typeof gesture.current>,
+      slots: MeasuredSlot[],
+      to: { id: string; after: boolean } | null,
+    ) => {
+      const fromIdx = slots.findIndex((s) => s.id === held.id);
+      if (fromIdx < 0) return;
+
+      const gridMode = isMultiColumn(slots);
+      const baseIds = slots.map((s) => s.id);
+      const nextIds =
+        to && to.id !== held.id ? moveInOrder(baseIds, held.id, to.id, to.after) : baseIds;
+      const targetIdx = nextIds.indexOf(held.id);
+
+      // Dragged card follows the pointer directly with crisp elevation
+      const draggedSlot = slots[fromIdx];
+      const dx = gridMode ? held.lastX - held.x : (held.lastX - held.x) * 0.14;
+      const dy = held.lastY - held.y;
+      draggedSlot.slotEl.dataset.orbitDraggingItem = 'true';
+      draggedSlot.slotEl.style.transition = 'box-shadow 140ms ease';
+      draggedSlot.slotEl.style.willChange = 'transform';
+      draggedSlot.slotEl.style.position = 'relative';
+      draggedSlot.slotEl.style.zIndex = '40';
+      draggedSlot.slotEl.style.pointerEvents = 'none';
+      draggedSlot.slotEl.style.boxShadow =
+        '0 16px 34px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px color-mix(in srgb, var(--c-accent) 45%, transparent)';
+      draggedSlot.slotEl.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+      held.shifts.set(draggedSlot.slotEl, { x: dx, y: dy });
+      held.styledEls.add(draggedSlot.slotEl);
+
+      // Neighboring items smoothly animate into their previewed positions
+      for (let origIdx = 0; origIdx < slots.length; origIdx += 1) {
+        if (origIdx === fromIdx) continue;
+        const item = slots[origIdx];
+        const newIdx = nextIds.indexOf(item.id);
+        let sx = 0;
+        let sy = 0;
+
+        if (newIdx >= 0 && newIdx !== origIdx) {
+          if (gridMode) {
+            sx = slots[newIdx].left - item.left;
+            sy = slots[newIdx].top - item.top;
+          } else if (targetIdx > fromIdx && origIdx > fromIdx && origIdx <= targetIdx) {
+            // Dragging downward: items between fromIdx+1..targetIdx shift up by the vacated span
+            const step = slots[fromIdx + 1].top - slots[fromIdx].top;
+            sy = -step;
+          } else if (targetIdx < fromIdx && origIdx >= targetIdx && origIdx < fromIdx) {
+            // Dragging upward: items between targetIdx..fromIdx-1 shift down by the vacated span
+            const prev = slots[fromIdx - 1];
+            const step = (slots[fromIdx].top + slots[fromIdx].height) - (prev.top + prev.height);
+            sy = step;
+          }
+        }
+
+        item.slotEl.style.transition = 'transform 200ms cubic-bezier(0.2, 0, 0, 1)';
+        item.slotEl.style.willChange = 'transform';
+        item.slotEl.style.transform = sx !== 0 || sy !== 0 ? `translate3d(${sx}px, ${sy}px, 0)` : '';
+        held.shifts.set(item.slotEl, { x: sx, y: sy });
+        held.styledEls.add(item.slotEl);
+      }
     };
 
-    moveRef.current = move;
-    finishRef.current = finish;
-    const abandon = () => {
-      // A scroller can cancel the gesture before it has moved far enough to
-      // count. Holding the card means that cancel is not the end of the drag.
-      if (optionsRef.current?.hold && press.current && !press.current.live) return;
-      finish();
+    const start = (held: NonNullable<typeof gesture.current>) => {
+      if (held.live) return;
+      held.live = true;
+      try {
+        held.target.setPointerCapture?.(held.pointerId);
+      } catch {
+        // Synthetic test events may not have an active pointer id.
+      }
+      setDragging(held.id);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'grabbing';
+      const slots = measureSlots(held);
+      applyLivePreview(held, slots, held.over);
     };
+
+    const move = (e: PointerEvent) => {
+      const held = gesture.current;
+      if (!held) return;
+      held.lastX = e.clientX;
+      held.lastY = e.clientY;
+
+      if (!held.live) {
+        const moved = Math.hypot(e.clientX - held.x, e.clientY - held.y);
+        if (!held.ready) {
+          if (moved >= START_PX) {
+            if (held.timer !== null) window.clearTimeout(held.timer);
+            gesture.current = null;
+          }
+          return;
+        }
+        if (moved < START_PX) return;
+        start(held);
+      }
+
+      const slots = measureSlots(held);
+      const to = slotUnder(held, slots, e.clientX, e.clientY);
+      held.over = to;
+      setOver(to && to.id !== held.id ? to.id : null);
+      applyLivePreview(held, slots, to);
+    };
+
+    const finish = (commit: boolean) => {
+      const held = gesture.current;
+      if (!held) return;
+      if (held.timer !== null) window.clearTimeout(held.timer);
+      gesture.current = null;
+      if (!held.live) return;
+
+      const willReorder = Boolean(commit && held.over && held.over.id !== held.id);
+      // Clear inline transforms right before React commits the new DOM order so
+      // items land seamlessly in their final layout slots with zero flash.
+      clearTransforms(held, !willReorder);
+
+      setDragging(null);
+      setOver(null);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+
+      if (willReorder && held.over) {
+        callback.current?.(held.id, held.over.id, held.over.after);
+      }
+
+      const swallow = (ev: MouseEvent) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener('click', swallow, true), 80);
+    };
+
+    const up = () => finish(true);
+    const cancel = () => finish(false);
 
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', abandon);
-    window.addEventListener('keydown', cancel);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
     return () => {
+      const held = gesture.current;
+      if (held) {
+        if (held.timer !== null) window.clearTimeout(held.timer);
+        clearTransforms(held, false);
+      }
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', abandon);
-      window.removeEventListener('keydown', cancel);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
       document.body.style.userSelect = '';
+      document.body.style.cursor = '';
     };
   }, []);
 
-  /**
-   * The props for one draggable row or card.
-   *
-   * `data-orbit-drop` is what the pointer finds under itself; the press is only
-   * recorded, and the moving and releasing are handled once for the whole list.
-   */
-  const bind = useCallback(
-    (id: string) =>
-      onReorder
-        ? {
-            'data-orbit-drop': id,
-            onPointerDown: (e: ReactPointerEvent) => {
-              if (e.button !== 0) return;
-              // A button inside the card is being pressed, not the card.
-              const target = e.target as HTMLElement;
-              const interactive = target.closest('button, a, input, select, textarea');
-              const explicitHandle = target.closest('[data-orbit-drag-handle]');
-              if (interactive && !optionsRef.current?.fromButtons && !explicitHandle) return;
-              if (explicitHandle) {
-                e.preventDefault();
-                e.currentTarget.setPointerCapture?.(e.pointerId);
-              }
-              if (optionsRef.current?.hold) {
-                // The dialog's scroller must not take this gesture, and the
-                // events have to keep arriving on the card even if the window
-                // listener does not see them.
-                e.currentTarget.setPointerCapture?.(e.pointerId);
-              }
-              press.current = { id, x: e.clientX, y: e.clientY, live: false };
-            },
-            onPointerMove: (e: ReactPointerEvent) => {
-              moveRef.current(e.nativeEvent);
-            },
-            onPointerUp: () => {
-              finishRef.current();
-            },
-            onDragStart: (e: { preventDefault: () => void }) => {
-              if (optionsRef.current?.hold) e.preventDefault();
-            },
-            style: optionsRef.current?.hold ? { touchAction: 'none' as const } : undefined,
-          }
-        : {},
-    [onReorder],
-  );
+  /** Spread onto each movable element. Renders as nothing at all when disabled. */
+  const bind = (id: string) =>
+    onReorder
+      ? {
+          'data-orbit-drop': id,
+          onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+            if (e.button !== 0) return;
+            const target = e.target as HTMLElement | null;
+            const blocked = options?.fromButtons
+              ? 'a, input, textarea, select, [role="button"], [data-orbit-no-drag]'
+              : 'button, a, input, textarea, select, [role="button"], [data-orbit-no-drag]';
+            if (target?.closest(blocked)) return;
+            const held = {
+              id,
+              pointerId: e.pointerId,
+              target: e.currentTarget,
+              x: e.clientX,
+              y: e.clientY,
+              lastX: e.clientX,
+              lastY: e.clientY,
+              live: false,
+              ready: !options?.hold,
+              over: null,
+              timer: null as number | null,
+              shifts: new Map<HTMLElement, { x: number; y: number }>(),
+              styledEls: new Set<HTMLElement>(),
+            };
+            if (options?.hold) {
+              held.timer = window.setTimeout(() => {
+                if (gesture.current !== held) return;
+                held.ready = true;
+                startIfStillHeld(held);
+              }, HOLD_MS);
+            }
+            gesture.current = held;
+          },
+        }
+      : {};
+
+  function startIfStillHeld(held: NonNullable<typeof gesture.current>) {
+    if (held.live) return;
+    held.live = true;
+    try {
+      held.target.setPointerCapture?.(held.pointerId);
+    } catch {
+      // Synthetic test events may not have an active pointer id.
+    }
+    setDragging(held.id);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'grabbing';
+  }
 
   return { bind, dragging, over, active: dragging !== null };
 }

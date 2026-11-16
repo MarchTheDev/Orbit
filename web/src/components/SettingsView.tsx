@@ -438,7 +438,7 @@ function Group({
  */
 function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[]) => void }) {
   const list = useRef<HTMLDivElement>(null);
-  const { bind, dragging, over, active } = useDragReorder(
+  const { bind, dragging, active } = useDragReorder(
     (fromId, toId, after) => onChange(moveInOrder(order, fromId, toId, after) as Page[]),
     // A list, so the drop is decided by where the pointer is rather than by
     // which few pixels of a one-line row it happened to be over.
@@ -457,10 +457,7 @@ function TabOrder({ order, onChange }: { order: Page[]; onChange: (next: Page[])
             {...bind(id)}
             className={cn(
               'flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-sm transition',
-              // The gap opens where the row would land, so a move is not a
-              // surprise when the pointer is released.
-              dragging === id && 'opacity-40',
-              over === id && dragging !== id && 'border-accent bg-accent/10',
+              dragging === id && 'opacity-90',
             )}
           >
             <GripVertical className="size-4 shrink-0 cursor-grab text-muted" />
@@ -487,7 +484,7 @@ function LibraryFilterOrder({
   const filters = orderedLibraryFilters(order).map((item) => item.id);
   const hiddenSet = new Set(hidden);
   const visibleCount = filters.filter((id) => !hiddenSet.has(id)).length;
-  const { bind, dragging, over, active } = useDragReorder(
+  const { bind, dragging, active } = useDragReorder(
     (fromId, toId, after) => onChange(moveInOrder(filters, fromId, toId, after) as Filter[], hidden),
     { container: list },
   );
@@ -512,8 +509,7 @@ function LibraryFilterOrder({
             {...bind(id)}
             className={cn(
               'flex items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm transition',
-              dragging === id && 'opacity-40',
-              over === id && dragging !== id && 'border-accent bg-accent/10',
+              dragging === id && 'opacity-90',
               !shown && 'opacity-65',
             )}
           >
@@ -1439,7 +1435,7 @@ export function SettingsView({
 
       <div className="orbit-setlayout mt-7">
         <aside className="hidden lg:block">
-          <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
+          <div className="sticky top-6 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
             {settingsSearch}
             <div className="mt-4">{settingsNav(false)}</div>
           </div>

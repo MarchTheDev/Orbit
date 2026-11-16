@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  BarChart3, BookOpen, CalendarDays, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
-  NotebookPen, Play, Trash2, Trophy,
+  BarChart3, BookOpen, CalendarDays, ChevronLeft, ChevronRight, Clock, FolderOpen, Gamepad2, Images, ListOrdered,
+  NotebookPen, Play, Trash2, Trophy, X,
 } from 'lucide-react';
 import type { Game, GameStatus, Session, Settings } from '../types';
 import {
-  listSessions, overlayDelete, overlayGallery, overlayOpen, revealInExplorer, type GalleryItem,
+  listSessions, overlayDelete, overlayGallery, revealInExplorer, type GalleryItem,
 } from '../services/native';
 import { fileSrc } from '../services/desktop';
 import { fmtMinutes } from '../utils/format';
+import { onBacklogPage } from '../utils/library';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
 import { CAPTURE_KINDS, CAPTURE_LABELS, CaptureThumb, captureCounts, captureFolderName, isCaptureKind, type CaptureKind } from './Captures';
@@ -18,14 +20,29 @@ import { LogsView } from './LogsView';
 import { ContextMenu, type MenuItem } from './ui/ContextMenu';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 
-type Period = 'month' | 'year' | 'all';
+type Period = 'week' | 'fortnight' | 'month' | 'year' | 'all';
 export type StatsTab = 'overview' | 'sessions' | 'album' | 'journal' | 'backlog';
 
 const PERIOD_LABEL: Record<Period, string> = {
+  week: 'in the last 7 days',
+  fortnight: 'in the last 14 days',
   month: 'in the last 30 days',
   year: 'in the last year',
   all: 'all time',
 };
+
+function periodStart(period: Period, now: number): number {
+  const todays = startOfDay(now);
+  if (period === 'week') return todays - 6 * DAY;
+  if (period === 'fortnight') return todays - 13 * DAY;
+  if (period === 'month') return todays - 29 * DAY;
+  if (period === 'year') return todays - 364 * DAY;
+  return 0;
+}
+
+function isDailyPeriod(period: Period): boolean {
+  return period === 'week' || period === 'fortnight' || period === 'month';
+}
 
 const DAY = 86_400;
 
@@ -136,7 +153,7 @@ interface Bin {
  */
 function buildBins(sessions: Session[], period: Period, now: number): { bins: Bin[]; topIds: string[] } {
   const todays = startOfDay(now);
-  const since = period === 'month' ? todays - 29 * DAY : period === 'year' ? todays - 364 * DAY : 0;
+  const since = periodStart(period, now);
   const usable = sessions.filter((row) => row.startedAt >= since && row.durationSecs > 0);
 
   const totals = new Map<string, number>();
@@ -149,14 +166,25 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
   const startMs = new Date((period === 'all' && usable.length > 0 ? Math.min(...usable.map((row) => row.startedAt)) : since) * 1000);
   const bins: Bin[] = [];
 
-  if (period === 'month') {
-    for (let index = 29; index >= 0; index -= 1) {
+  if (isDailyPeriod(period)) {
+    const daySpan = period === 'week' ? 7 : period === 'fortnight' ? 14 : 30;
+    for (let index = daySpan - 1; index >= 0; index -= 1) {
       const start = todays - index * DAY;
       const date = new Date(start * 1000);
+      const shortLabel =
+        index === 0
+          ? 'Today'
+          : period === 'week'
+            ? date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })
+            : period === 'fortnight'
+              ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              : date.getDate() === 1
+                ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                : String(date.getDate());
       bins.push({
         key: String(start),
         label: date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
-        shortLabel: index === 0 ? 'Today' : date.getDate() === 1 ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : String(date.getDate()),
+        shortLabel,
         isToday: index === 0,
         total: 0,
         parts: [],
@@ -195,7 +223,7 @@ function buildBins(sessions: Session[], period: Period, now: number): { bins: Bi
   const byPart = bins.map(() => new Map<string, number>());
 
   for (const row of usable) {
-    const index = period === 'month'
+    const index = isDailyPeriod(period)
       ? bins.findIndex((bin) => Number(bin.key) === startOfDay(row.startedAt))
       : period === 'year'
         ? (() => {
@@ -296,12 +324,11 @@ export function StatisticsView({
   const [albumKind, setAlbumKind] = useState<CaptureKind | 'all'>('all');
   /** One game's captures, by capture folder, or every game's. */
   const [albumGame, setAlbumGame] = useState<string | 'all'>('all');
-  const [lightbox, setLightbox] = useState<string | null>(null);
-  const [videoSrc, setVideoSrc] = useState<{ src: string; name: string } | null>(null);
+  const [viewerItem, setViewerItem] = useState<GalleryItem | null>(null);
   const [captureMenu, setCaptureMenu] = useState<{ x: number; y: number; item: GalleryItem } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryItem | null>(null);
-  /** Which facts are written under each picture. All of them, to begin with. */
-  const [under, setUnder] = useState({ name: true, date: true, size: true, game: false });
+  /** Which facts are written under each picture. */
+  const [under, setUnder] = useState({ name: true, date: true, size: true });
   const [underOpen, setUnderOpen] = useState(false);
   const underBox = useRef<HTMLDivElement>(null);
 
@@ -371,20 +398,19 @@ export function StatisticsView({
     };
   }, [captureTick]);
 
+  // Lock both document.body and Orbit's primary .orbit-scroll container while the viewer modal is open
   useEffect(() => {
-    if (!lightbox && !videoSrc) return;
+    if (!viewerItem) return;
+    const scroller = document.querySelector<HTMLElement>('.orbit-scroll');
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevScrollerOverflow = scroller?.style.overflow ?? '';
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, [lightbox, videoSrc]);
-
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setLightbox(null);
+    if (scroller) scroller.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      if (scroller) scroller.style.overflow = prevScrollerOverflow;
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightbox]);
+  }, [viewerItem]);
 
   const byFolder = useMemo(() => {
     const map = new Map<string, Game>();
@@ -440,12 +466,36 @@ export function StatisticsView({
    * look at it, show it in its folder, or delete it. Deleting asks first - the
    * picture is the only copy.
    */
+  const visibleCaptures = useMemo(
+    () => albumGroups.flatMap((group) => group.items),
+    [albumGroups],
+  );
+  const viewerIndex = viewerItem
+    ? visibleCaptures.findIndex((item) => item.path === viewerItem.path)
+    : -1;
+
+  useEffect(() => {
+    if (!viewerItem) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setViewerItem(null);
+      } else if (event.key === 'ArrowLeft' && viewerIndex > 0) {
+        event.preventDefault();
+        setViewerItem(visibleCaptures[viewerIndex - 1]);
+      } else if (event.key === 'ArrowRight' && viewerIndex >= 0 && viewerIndex < visibleCaptures.length - 1) {
+        event.preventDefault();
+        setViewerItem(visibleCaptures[viewerIndex + 1]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerItem, viewerIndex, visibleCaptures]);
+
   const captureItems = (item: GalleryItem): MenuItem[] => [
     {
       label: item.kind === 'screenshot' ? 'Open the picture' : 'Play this clip',
       icon: item.kind === 'screenshot' ? Images : Play,
-      onSelect: () =>
-        item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path),
+      onSelect: () => setViewerItem(item),
     },
     { label: 'Show in its folder', icon: FolderOpen, onSelect: () => void revealInExplorer(item.path) },
     { kind: 'sep' },
@@ -455,7 +505,7 @@ export function StatisticsView({
   const now = Date.now() / 1000;
   const byGame = useMemo(() => new Map(games.map((game) => [game.id, game])), [games]);
   const { bins, topIds } = useMemo(() => buildBins(sessions, period, now), [sessions, period, now]);
-  const since = period === 'month' ? startOfDay(now) - 29 * DAY : period === 'year' ? startOfDay(now) - 364 * DAY : 0;
+  const since = periodStart(period, now);
   const inPeriod = useMemo(() => sessions.filter((row) => row.startedAt >= since), [sessions, since]);
 
   const totalSecs = inPeriod.reduce((sum, row) => sum + row.durationSecs, 0);
@@ -505,12 +555,16 @@ export function StatisticsView({
   const librarySize = Math.max(1, shapeGames.length);
   const hours = totalSecs / 3600;
 
+  const syncBacklog = settings.syncBacklog === true;
+  const backlogOn = settings.backlogOn ?? [];
+  const backlogOff = settings.backlogOff ?? [];
+
   const tabCounts: Record<StatsTab, number> = {
     overview: 0,
     sessions: sessions.length,
     album: captures?.length ?? 0,
     journal: journalGames.length,
-    backlog: allGames.filter((game) => game.planned).length,
+    backlog: allGames.filter((game) => game.planned || onBacklogPage(game, syncBacklog, backlogOn, backlogOff)).length,
   };
 
   return (
@@ -551,6 +605,8 @@ export function StatisticsView({
           <div className="orbit-statsbar">
             <div className="orbit-period" role="group" aria-label="How far back to count">
               {([
+                ['week', '7 days'],
+                ['fortnight', '14 days'],
                 ['month', '30 days'],
                 ['year', 'Year'],
                 ['all', 'All time'],
@@ -612,7 +668,7 @@ export function StatisticsView({
           </section>
 
           <SectionPanel
-            title={period === 'month' ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
+            title={isDailyPeriod(period) ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
             note={
               busiest && busiest.total > 0
                 ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)}`
@@ -622,7 +678,7 @@ export function StatisticsView({
             {!hasData ? (
               <p className="orbit-chart-empty">{loaded ? 'Nothing tracked in this period. Play something, or widen the period.' : 'Reading sessions…'}</p>
             ) : (
-              <div className="orbit-activity">
+              <div className="orbit-activity" data-period={period}>
                 {/* Summary / live hover inspector: shows period totals at rest, and exact per-game breakdown when inspecting any bar */}
                 <div className="orbit-activity-inspector">
                   {activeBin ? (
@@ -646,10 +702,10 @@ export function StatisticsView({
                                     <Cover game={g} className="size-full" fit="cover" />
                                   </span>
                                 )}
-                                <span className="truncate max-w-[11rem] font-medium text-fg">
+                                <span className="truncate max-w-[14rem] font-semibold text-fg">
                                   {part.id === 'other' ? 'Other games' : g?.title ?? 'Unknown game'}
                                 </span>
-                                <span className="orbit-num text-muted">{fmtMinutes(part.secs / 60)}</span>
+                                <span className="orbit-num font-medium text-muted">{fmtMinutes(part.secs / 60)}</span>
                               </span>
                             );
                           })}
@@ -659,8 +715,8 @@ export function StatisticsView({
                   ) : (
                     <div className="orbit-playtime-summary !mb-0">
                       <span><b>{fmtMinutes(totalSecs / 60)}</b> total</span>
-                      <span><b>{bins.filter((b) => b.total > 0).length}</b> active {period === 'month' ? 'days' : period === 'year' ? 'months' : 'years'}</span>
-                      <span><b>{fmtMinutes((totalSecs / Math.max(1, bins.filter((b) => b.total > 0).length)) / 60)}</b> avg per active {period === 'month' ? 'day' : period === 'year' ? 'month' : 'year'}</span>
+                      <span><b>{bins.filter((b) => b.total > 0).length}</b> active {isDailyPeriod(period) ? 'days' : period === 'year' ? 'months' : 'years'}</span>
+                      <span><b>{fmtMinutes((totalSecs / Math.max(1, bins.filter((b) => b.total > 0).length)) / 60)}</b> avg per active {isDailyPeriod(period) ? 'day' : period === 'year' ? 'month' : 'year'}</span>
                       {focusGameId && (
                         <span className="text-accent font-medium">
                           Highlighting {focusGameId === 'other' ? 'Other games' : byGame.get(focusGameId)?.title ?? 'game'}
@@ -698,11 +754,11 @@ export function StatisticsView({
                         const totalPct = bin.total > 0 ? Math.min(100, Math.max(3, (bin.total / axisCeiling) * 100)) : 0;
                         const isHovered = hoveredBinKey === bin.key;
                         const showTick =
-                          period !== 'month' ||
-                          idx === 0 ||
-                          idx === bins.length - 1 ||
-                          bin.shortLabel.includes(' ') ||
-                          idx % 5 === 4;
+                          period === 'week' ||
+                          (period === 'fortnight' && (idx === 0 || idx === bins.length - 1 || idx % 2 === 1)) ||
+                          (period === 'month' && (idx === 0 || idx === bins.length - 1 || bin.shortLabel.includes(' ') || idx % 5 === 4)) ||
+                          period === 'year' ||
+                          period === 'all';
                         return (
                           <button
                             key={bin.key}
@@ -777,8 +833,8 @@ export function StatisticsView({
                               <Cover game={g} className="size-full" fit="cover" />
                             </span>
                           )}
-                          <span className="truncate max-w-[10.5rem] font-medium">{g?.title ?? 'Another game'}</span>
-                          <span className="orbit-num opacity-70">{fmtMinutes(secs / 60)}</span>
+                          <span className="truncate max-w-[13rem] font-semibold">{g?.title ?? 'Another game'}</span>
+                          <span className="orbit-num font-medium opacity-75">{fmtMinutes(secs / 60)}</span>
                         </button>
                       );
                     })}
@@ -950,7 +1006,6 @@ export function StatisticsView({
                       ['name', 'File name', 'Screenshot 2026-11-13 21-04-11.png'],
                       ['date', 'When it was taken', 'Today, 21:04'],
                       ['size', 'File size', '2.4 MB'],
-                      ['game', 'Which game', 'Elden Ring'],
                     ] as const).map(([key, label, sample]) => (
                       <label key={key} className="orbit-album-underrow">
                         <span className="min-w-0">
@@ -1022,7 +1077,7 @@ export function StatisticsView({
                       </div>
                       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                         {(captures ?? []).filter((item) => item.game === albumGame && (albumKind === 'all' || item.kind === albumKind)).slice(0, 8).map((item) => (
-                          <button key={item.path} onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : void overlayOpen(item.path))} className="group overflow-hidden rounded-lg border border-line bg-panel2">
+                          <button key={item.path} type="button" onClick={() => setViewerItem(item)} className="group overflow-hidden rounded-lg border border-line bg-panel2 text-left">
                             <span className="block aspect-video overflow-hidden"><CaptureThumb item={item} /></span>
                             <span className="block truncate px-1.5 py-1 text-[10px] text-muted group-hover:text-fg">{item.name}</span>
                           </button>
@@ -1067,36 +1122,46 @@ export function StatisticsView({
                       </div>
                     </div>
                     <div className="orbit-gallery">
-                      {group.items.map((item) => (
-                        <button
-                          key={item.path}
-                          onClick={() => (item.kind === 'screenshot' ? setLightbox(fileSrc(item.path)) : setVideoSrc({ src: fileSrc(item.path), name: item.name }))}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setCaptureMenu({ x: event.clientX, y: event.clientY, item });
-                          }}
-                          title={item.name}
-                          className="orbit-album-tile"
-                        >
-                          <span className="orbit-album-tileart">
-                            <CaptureThumb item={item} />
-                            {item.kind !== 'screenshot' && (
-                              <span className="orbit-album-tilebadge">
-                                {item.kind === 'recording' ? 'REC' : 'REPLAY'}
+                      {group.items.map((item) => {
+                        const whenLabel = under.date ? whenOf(item) : '';
+                        const sizeLabel = under.size ? sizeOf(item) : '';
+                        const hasFacts = Boolean(whenLabel || sizeLabel);
+                        const hasFooter = Boolean(under.name || hasFacts);
+                        return (
+                          <button
+                            key={item.path}
+                            type="button"
+                            onClick={() => setViewerItem(item)}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setCaptureMenu({ x: event.clientX, y: event.clientY, item });
+                            }}
+                            title={item.name}
+                            className="orbit-album-tile"
+                          >
+                            <span className="orbit-album-tileart">
+                              <CaptureThumb item={item} />
+                              {item.kind !== 'screenshot' && (
+                                <span className="orbit-album-tilebadge">
+                                  {item.kind === 'recording' ? 'REC' : 'REPLAY'}
+                                </span>
+                              )}
+                            </span>
+                            {hasFooter && (
+                              <span className="orbit-album-tilefoot">
+                                {under.name && <span className="orbit-album-tilename">{item.name}</span>}
+                                {hasFacts && (
+                                  <span className="orbit-album-tilefacts">
+                                    {whenLabel && <span>{whenLabel}</span>}
+                                    {sizeLabel && <span>{sizeLabel}</span>}
+                                  </span>
+                                )}
                               </span>
                             )}
-                          </span>
-                          <span className="orbit-album-tilefoot">
-                            {under.name && <span className="orbit-album-tilename">{item.name}</span>}
-                            <span className="orbit-album-tilefacts">
-                              {under.date && whenOf(item) && <span>{whenOf(item)}</span>}
-                              {under.size && sizeOf(item) && <span>{sizeOf(item)}</span>}
-                              {under.game && <span>{group.title}</span>}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -1121,24 +1186,147 @@ export function StatisticsView({
               onConfirm={() => {
                 const target = deleteTarget;
                 setDeleteTarget(null);
+                if (viewerItem?.path === target.path) setViewerItem(null);
                 void overlayDelete(target.path)
                   .then(refreshCaptures)
                   .catch(() => undefined);
               }}
             />
           )}
-          {lightbox && (
-            <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" onClick={() => setLightbox(null)}>
-              <button type="button" aria-label="Close" onClick={() => setLightbox(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
-              <img src={lightbox} alt="" />
-            </div>
-          )}
-          {videoSrc && (
-            <div className="orbit-lightbox" role="dialog" aria-modal="true" aria-label={`Video ${videoSrc.name}`} onClick={() => setVideoSrc(null)}>
-              <button type="button" aria-label="Close" onClick={() => setVideoSrc(null)} className="orbit-lightbox-close"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M15 5L5 15M5 5l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>
-              <video src={videoSrc.src} controls autoPlay className="max-h-[86vh] max-w-[92vw] rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
-            </div>
-          )}
+          {viewerItem &&
+            createPortal(
+              <div
+                className="orbit-viewer-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-label={viewerItem.kind === 'screenshot' ? `Screenshot ${viewerItem.name}` : `Video ${viewerItem.name}`}
+                onClick={() => setViewerItem(null)}
+              >
+                <div
+                  className="orbit-viewer-card"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <header className="orbit-viewer-head">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {(() => {
+                        const viewerGame = byFolder.get(viewerItem.game);
+                        const viewerTitle = viewerGame?.title ?? viewerItem.game;
+                        return (
+                          <>
+                            <span className="orbit-viewer-cover">
+                              {viewerGame ? (
+                                <Cover game={viewerGame} className="size-full" fit="cover" />
+                              ) : (
+                                <span className="grid size-full place-items-center bg-panel2 text-[10px] font-bold text-muted">
+                                  {viewerTitle.slice(0, 2).toUpperCase()}
+                                </span>
+                              )}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="truncate text-[13.5px] font-bold text-fg">{viewerTitle}</h4>
+                                <span className="orbit-viewer-badge">
+                                  {viewerItem.kind === 'screenshot'
+                                    ? 'Screenshot'
+                                    : viewerItem.kind === 'recording'
+                                      ? 'Recording'
+                                      : 'Replay'}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted">
+                                <span className="truncate max-w-[18rem]">{viewerItem.name}</span>
+                                {whenOf(viewerItem) && <span>· {whenOf(viewerItem)}</span>}
+                                {sizeOf(viewerItem) && <span>· {sizeOf(viewerItem)}</span>}
+                              </p>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {visibleCaptures.length > 1 && viewerIndex >= 0 && (
+                        <div className="mr-1 flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={viewerIndex <= 0}
+                            onClick={() => viewerIndex > 0 && setViewerItem(visibleCaptures[viewerIndex - 1])}
+                            className="orbit-viewer-iconbtn"
+                            title="Previous capture (←)"
+                            aria-label="Previous capture"
+                          >
+                            <ChevronLeft className="size-4" />
+                          </button>
+                          <span className="orbit-num px-1 text-[11px] font-medium text-muted">
+                            {viewerIndex + 1} / {visibleCaptures.length}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={viewerIndex >= visibleCaptures.length - 1}
+                            onClick={() =>
+                              viewerIndex < visibleCaptures.length - 1 &&
+                              setViewerItem(visibleCaptures[viewerIndex + 1])
+                            }
+                            className="orbit-viewer-iconbtn"
+                            title="Next capture (→)"
+                            aria-label="Next capture"
+                          >
+                            <ChevronRight className="size-4" />
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void revealInExplorer(viewerItem.path)}
+                        className="orbit-btnquiet"
+                        title="Show in its folder"
+                      >
+                        <FolderOpen className="size-3.5" />
+                        <span className="hidden sm:inline">Show in folder</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(viewerItem)}
+                        className="orbit-viewer-iconbtn is-danger"
+                        title="Delete capture"
+                        aria-label="Delete capture"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Close"
+                        title="Close (Esc)"
+                        onClick={() => setViewerItem(null)}
+                        className="orbit-viewer-iconbtn"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  </header>
+
+                  <div className="orbit-viewer-stage">
+                    {viewerItem.kind === 'screenshot' ? (
+                      <img
+                        src={fileSrc(viewerItem.path)}
+                        alt={viewerItem.name}
+                        className="orbit-viewer-media"
+                      />
+                    ) : (
+                      <video
+                        key={viewerItem.path}
+                        src={fileSrc(viewerItem.path)}
+                        controls
+                        autoPlay
+                        playsInline
+                        className="orbit-viewer-video"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
         </>
       ) : tab === 'journal' ? (
         <LogsView

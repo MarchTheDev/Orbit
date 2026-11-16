@@ -1661,10 +1661,9 @@ export default function App() {
           // dialogs would then scroll with the page instead of sitting over it.
           // `orbit-idle` is the other half of that: when a game has the window,
           // the decorative loops stop so this shell has nothing to repaint.
-          `${opening ? 'orbit-enter ' : ''}orbit-scroll relative h-full overflow-y-auto text-fg${focused ? '' : ' orbit-idle'}`
+          `${opening ? 'orbit-enter ' : ''}orbit-app flex h-full flex-col overflow-hidden text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
-      <div className="orbit-app">
       <TopNav
         page={page}
         onNavigate={(next) => {
@@ -1688,6 +1687,7 @@ export default function App() {
         onTv={enterTv}
       />
 
+      <div className="orbit-scroll relative min-h-0 flex-1 overflow-y-auto">
       {dragOver && !showAdd && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-bg/80 backdrop-blur-sm">
           <div className="rounded-2xl border border-dashed border-accent/70 px-12 py-10 text-center">

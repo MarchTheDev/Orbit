@@ -548,9 +548,10 @@ export function GameLogView({
                   setDraft(blank());
                 }}
                 className="orbit-jadd-btn"
+                title="Add entry"
+                aria-label="Add entry"
               >
-                <Plus className="size-3.5" />
-                Add entry
+                <Plus className="size-4" />
               </button>
             )}
           </div>
@@ -605,7 +606,6 @@ export function GameLogView({
                   className={cn(
                     'orbit-jentry',
                     canDragEntries && 'is-draggable',
-                    canDragEntries && drag.over === String(r.id) && 'is-over',
                     canDragEntries && drag.dragging === String(r.id) && 'is-dragging',
                   )}
                 >

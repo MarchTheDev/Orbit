@@ -200,7 +200,7 @@ export function LogsView({
   }, [allGames, games, addQuery]);
 
   const list = useRef<HTMLUListElement>(null);
-  const { bind, dragging, over } = useDragReorder(
+  const { bind, dragging } = useDragReorder(
     onOrder
       ? (fromId, toId, after) => onOrder(moveInOrder(ordered.map((g) => g.id), fromId, toId, after))
       : undefined,
@@ -297,7 +297,7 @@ export function LogsView({
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[18.5rem_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[20.5rem_1fr]">
         <aside className="space-y-3">
           <SearchField
             value={query}
@@ -325,7 +325,7 @@ export function LogsView({
 
           <ul
             ref={list}
-            className="space-y-1 p-1 lg:max-h-[calc(100vh-15.5rem)] lg:overflow-y-auto"
+            className="space-y-1.5 p-1 lg:max-h-[calc(100vh-15.5rem)] lg:overflow-y-auto"
           >
             {ordered.map((g) => {
               const counts = perGame.get(g.id);
@@ -344,16 +344,18 @@ export function LogsView({
                     }}
                     data-orbit-journal-game={g.id}
                     {...bind(g.id)}
-                    className={`flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition ${
+                    className={`flex w-full items-center gap-3.5 rounded-xl border px-3 py-2.5 text-left transition ${
                       active ? 'border-accent bg-accent/10' : 'border-line hover:border-accent/60'
-                    } ${dragging === g.id ? 'opacity-50' : ''} ${
-                      over === g.id && dragging && dragging !== g.id ? 'ring-2 ring-accent' : ''
-                    }`}
+                    } ${dragging === g.id ? 'opacity-90' : ''}`}
                   >
-                    <Cover game={g} className="size-9 shrink-0 rounded-lg [&_span]:text-[10px]" />
+                    <Cover
+                      game={g}
+                      fit="cover"
+                      className="h-14 w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 shadow-sm [&_span]:text-[10px]"
+                    />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{g.title}</span>
-                      <span className="block truncate text-[11px] text-muted">
+                      <span className="block truncate text-[14px] font-semibold leading-snug">{g.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-muted">
                         {logCountLabel(counts)}
                       </span>
                     </span>
@@ -391,14 +393,6 @@ export function LogsView({
                   </p>
                 </div>
                 <div className="orbit-jhero-actions">
-                  <button
-                    type="button"
-                    onClick={() => setAddRequest({ id: selected.id, token: ++addToken.current })}
-                    className="btn-accent inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold"
-                  >
-                    <Plus className="size-3.5" />
-                    New entry
-                  </button>
                   <button
                     type="button"
                     onClick={() => onEditGame(selected.id)}

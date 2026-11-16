@@ -22,7 +22,7 @@ interface Props {
 }
 
 export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite, onPlay, scale, onReorder }: Props) {
-  const { bind, dragging, over } = useDragReorder(onReorder);
+  const { bind, dragging } = useDragReorder(onReorder);
   const [dismissedFavoriteIds, setDismissedFavoriteIds] = useState<Set<string>>(() => new Set());
   const previousFavorites = useRef(new Map<string, boolean>());
 
@@ -103,8 +103,7 @@ export function GameList({ games, selectedId, onSelect, onEdit, onToggleFavorite
               'group grid cursor-pointer grid-cols-[1fr_110px_100px_120px_70px_110px] items-center gap-3 rounded-lg border px-3 py-2 transition',
               selectedId === g.id ? 'border-accent/55 bg-panel2' : 'border-transparent hover:bg-panel',
               onReorder && 'cursor-grab active:cursor-grabbing',
-              over === g.id && 'ring-2 ring-accent',
-              dragging === g.id && 'opacity-60',
+              dragging === g.id && 'opacity-90',
             )}
           >
             <div className="flex min-w-0 items-center gap-3">

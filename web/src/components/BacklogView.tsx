@@ -582,7 +582,7 @@ function Section({
   // A grid needs its own measured drop targets: elementFromPoint alone can lose
   // the gesture in card gaps or after the pointer leaves the original card.
   const list = useRef<HTMLUListElement>(null);
-  const { bind, dragging, over } = useDragReorder(
+  const { bind, dragging } = useDragReorder(
     movable && onMove ? onMove : undefined,
     { container: list, grid: true },
   );
@@ -607,9 +607,7 @@ function Section({
                 data-orbit-game={g.id}
                 data-orbit-no-move={readOnlyMoves ? '' : undefined}
                 {...bind(g.id)}
-                className={`group flex items-center gap-3 rounded-xl border bg-panel p-3 transition duration-150 hover:border-muted/50 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${
-                  over === g.id ? 'border-accent ring-2 ring-accent/50 shadow-md' : 'border-line'
-                } ${dragging === g.id ? 'opacity-55 rotate-[0.5deg] scale-[1.015] shadow-xl z-10' : ''}`}
+                className={`group flex items-center gap-3 rounded-xl border border-line bg-panel p-3 transition duration-150 hover:border-muted/50 ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === g.id ? 'opacity-90' : ''}`}
               >
                 {movable ? (
                   <button

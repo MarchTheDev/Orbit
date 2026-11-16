@@ -8,6 +8,9 @@ const librarySrc = readFileSync(new URL('../src/components/LibraryView.tsx', imp
 const statsSrc = readFileSync(new URL('../src/components/StatisticsView.tsx', import.meta.url), 'utf8');
 const logsSrc = readFileSync(new URL('../src/components/LogsView.tsx', import.meta.url), 'utf8');
 const gameLogSrc = readFileSync(new URL('../src/components/detail/GameLogView.tsx', import.meta.url), 'utf8');
+const appSrc = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const dragSrc = readFileSync(new URL('../src/hooks/useDragReorder.ts', import.meta.url), 'utf8');
+const paletteSrc = readFileSync(new URL('../src/components/CommandPalette.tsx', import.meta.url), 'utf8');
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
   url: 'http://localhost:5173/',
@@ -114,11 +117,62 @@ check(
 // 5. Journal left-side game list + redesigned game interior
 check(
   'Journal restores left-hand game list sidebar and redesigned game workspace',
-  logsSrc.includes('lg:grid-cols-[18.5rem_1fr]') &&
+  logsSrc.includes('lg:grid-cols-[20.5rem_1fr]') &&
+    logsSrc.includes('h-14 w-10') &&
+    !logsSrc.includes('New entry') &&
     !logsSrc.includes('orbit-journal-v2') &&
     logsSrc.includes('orbit-jworkspace') &&
     gameLogSrc.includes('orbit-jcard') &&
-    gameLogSrc.includes('orbit-jdraft'),
+    gameLogSrc.includes('orbit-jdraft') &&
+    gameLogSrc.includes('aria-label="Add entry"') &&
+    !gameLogSrc.includes('Add entry\n'),
+);
+
+check(
+  'font and theme selection borders use crisp 1.5px stroke without double outer border',
+  /\.orbit-fontrow\[data-chosen\]\s*\{[^}]*border-color:\s*transparent/s.test(css) &&
+    /\.orbit-fontrow\[data-chosen\]::after\s*\{[^}]*border:\s*1\.5px solid var\(--c-accent\)/s.test(css) &&
+    /\.orbit-themecard\[data-chosen\]\s*\{[^}]*border-color:\s*transparent/s.test(css) &&
+    /\.orbit-themecard\[data-chosen\]::after\s*\{[^}]*border:\s*1\.5px solid var\(--c-accent\)/s.test(css),
+);
+
+check(
+  'Playtime by day supports 7d and 14d periods and enlarged chart/covers',
+  statsSrc.includes("['week', '7 days']") &&
+    statsSrc.includes("['fortnight', '14 days']") &&
+    /\.orbit-activity-miniart\s*\{[^}]*width:\s*22px;[^}]*height:\s*30px;/s.test(css) &&
+    /\.orbit-activity-track\s*\{[^}]*height:\s*244px;/s.test(css),
+);
+
+check(
+  'TopNav sits outside .orbit-scroll so the scrollbar starts below the top bar',
+  appSrc.indexOf('<TopNav') < appSrc.indexOf('className="orbit-scroll'),
+);
+
+check(
+  'useDragReorder animates sibling displacement with translate3d during drag',
+  dragSrc.includes('applyLivePreview') &&
+    dragSrc.includes('translate3d(') &&
+    dragSrc.includes('200ms cubic-bezier(0.2, 0, 0, 1)'),
+);
+
+check(
+  'Album fixes Shown under metadata visibility, removes Which game, enlarges group covers, and portals viewer with scroll lock',
+  !statsSrc.includes("'Which game'") &&
+    statsSrc.includes('createPortal(') &&
+    statsSrc.includes("document.querySelector<HTMLElement>('.orbit-scroll')") &&
+    css.includes('.orbit-album .orbit-gallery > .orbit-album-tile') &&
+    /\.orbit-album-headart\s*\{[^}]*width:\s*42px;[^}]*height:\s*58px;/s.test(css),
+);
+
+check(
+  'Statistics Backlog tab count includes all Backlog page games via onBacklogPage',
+  statsSrc.includes('game.planned || onBacklogPage(game, syncBacklog, backlogOn, backlogOff)'),
+);
+
+check(
+  'CommandPalette GamePreview omits game Status row on the right pane',
+  !paletteSrc.slice(paletteSrc.indexOf('function GamePreview')).includes('>Status<'),
 );
 
 // 6. Playtime by day stacked per-game bar chart

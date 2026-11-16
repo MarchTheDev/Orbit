@@ -671,7 +671,7 @@ export function CloudPanel({
   const gamesList = useRef<HTMLUListElement>(null);
   const orderIds = useRef<string[]>([]);
   orderIds.current = known.map((game) => game.id);
-  const { bind: bindGame, dragging, over } = useDragReorder(
+  const { bind: bindGame, dragging } = useDragReorder(
     (fromId, toId) => {
       const cloudOrder = takePlace(orderIds.current, fromId, toId);
       (setSettings as (patch: (current: Settings) => Partial<Settings>) => void)((current) => ({
@@ -933,9 +933,8 @@ export function CloudPanel({
             {shown.length === 0 && <li className="col-span-full text-[11px] text-muted">No match.</li>}
             {shown.map((game) => {
               const on = !skip.has(game.id);
-              const drop = over === game.id && dragging && dragging !== game.id;
               return (
-                <li key={game.id} className={cn(dragging === game.id && 'opacity-60')}>
+                <li key={game.id} className={cn(dragging === game.id && 'opacity-90')}>
                   <button
                     type="button"
                     draggable={false}
@@ -956,12 +955,7 @@ export function CloudPanel({
                         : 'border-line/70 bg-bg/30 text-muted hover:border-accent/40 hover:text-fg',
                     )}
                   >
-                    <span
-                      className={cn(
-                        'relative block overflow-hidden rounded-lg',
-                        drop && 'ring-2 ring-inset ring-accent',
-                      )}
-                    >
+                    <span className="relative block overflow-hidden rounded-lg">
                       <Cover game={game} className="aspect-[2/3] w-full [clip-path:inset(0_round_0.5rem)]" />
                     </span>
                     <span className="mt-1 block truncate text-xs font-semibold">{game.title}</span>

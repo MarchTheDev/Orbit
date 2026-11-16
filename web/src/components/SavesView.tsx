@@ -109,7 +109,7 @@ export function SavesView({
     [rows, showHidden, hidden],
   );
   const list = useRef<HTMLUListElement>(null);
-  const { bind, dragging, over } = useDragReorder(
+  const { bind, dragging } = useDragReorder(
     (fromId, toId) => {
       const nextVisible = takePlace(listed.map((game) => game.id), fromId, toId);
       const order = showHidden || hidden.size === 0
@@ -574,8 +574,7 @@ export function SavesView({
               onContextMenu={(event) => openMenu(game, event)}
               className={cn(
                 'orbit-row',
-                dragging === game.id && 'opacity-60',
-                over === game.id && dragging && dragging !== game.id && 'orbit-row-drop',
+                dragging === game.id && 'opacity-90',
                 hidden.has(game.id) && 'opacity-70',
               )}
             >

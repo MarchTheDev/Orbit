@@ -64,7 +64,7 @@ export function GameGrid({
   label = 'title-info',
   lift = true,
 }: Props) {
-  const { bind, dragging, over } = useDragReorder(onReorder);
+  const { bind, dragging } = useDragReorder(onReorder);
   const tileWidth = width ?? Math.round(170 * (scale / 100));
 
   return (
@@ -89,7 +89,6 @@ export function GameGrid({
           lift={lift}
           bound={bind(g.id)}
           dragging={dragging === g.id}
-          over={over === g.id && dragging !== null && dragging !== g.id}
         />
       ))}
     </div>
@@ -120,7 +119,6 @@ function Tile({
   lift,
   bound,
   dragging,
-  over,
 }: {
   game: Game;
   selected: boolean;
@@ -138,7 +136,6 @@ function Tile({
   /** The props that make the tile draggable, from `useDragReorder`. */
   bound: DragBinding;
   dragging: boolean;
-  over: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [dismissedUnfilledStar, setDismissedUnfilledStar] = useState(false);
@@ -198,9 +195,6 @@ function Tile({
           'orbit-cover relative overflow-hidden transition duration-150 group-hover:shadow-2xl group-hover:shadow-black/50',
           lift && 'group-hover:-translate-y-0.5',
           selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
-          // The same rounded cover ring as a selected tile. A square ring on the
-          // outer box sat around the title and looked like a stock overlay.
-          over && !selected && 'ring-1 ring-accent ring-offset-[3px] ring-offset-bg',
         )}
       >
         <Cover game={game} className="size-full" fit={fit} />
