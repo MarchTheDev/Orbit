@@ -56,10 +56,18 @@ const steamAsset = (id: number, name: string) => `https://cdn.akamai.steamstatic
 
 export function wideArtCandidates(game: Game): string[] {
   const id = steamAppId(game);
+  const steamHeroes = id ? [
+    `https://cdn.akamai.steamstatic.com/steam/apps/${id}/library_hero_2x.jpg`,
+    `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_hero_2x.jpg`,
+    `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${id}/library_hero_2x.jpg`,
+    `https://cdn.akamai.steamstatic.com/steam/apps/${id}/library_hero.jpg`,
+    `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_hero.jpg`,
+    `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${id}/library_hero.jpg`,
+  ] : [];
   const sources = [
     game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : null,
-    ...(id ? [steamAsset(id, 'library_hero_2x.jpg'), steamAsset(id, 'library_hero.jpg')] : []),
     game.meta?.backgroundUrl,
+    ...steamHeroes,
     ...(id ? [steamAsset(id, 'page_bg_raw.jpg')] : []),
     game.meta?.headerUrl,
   ].filter((url): url is string => Boolean(url));
@@ -86,8 +94,11 @@ export function coverArtCandidates(game: Game): string[] {
   return [...new Set([
     game.coverPath ? fileSrc(game.coverPath) : null,
     (game.meta?.coverUrlCustom || game.meta?.edited) ? game.meta.coverUrl : null,
-    ...(id ? [steamAsset(id, 'library_600x900_2x.jpg'), steamAsset(id, 'library_600x900.jpg')] : []),
+    // A provider's purpose-made cover (IGDB, LaunchBox, Steam metadata, etc.)
+    // is more informative than a store header. Like Heronite, try it before
+    // generated Steam fallbacks, while retaining Steam's large poster assets.
     game.meta?.coverUrl,
+    ...(id ? [steamAsset(id, 'library_600x900_2x.jpg'), steamAsset(id, 'library_600x900.jpg')] : []),
     game.meta?.headerUrl,
     game.meta?.backgroundUrl,
   ].filter((url): url is string => Boolean(url)))];

@@ -1398,11 +1398,9 @@ async fn artwork_candidates(orbit: State<'_, Orbit>, game_id: String, page: Opti
 
 /// Wide art for the TV's backdrop, best-effort.
 ///
-/// The store's own hero is asked for first and needs nothing from anybody, so a
-/// fresh install has a picture on the television. SteamGridDB, when this machine
-/// has a key, is asked afterwards for the community's wider choice. A game with
-/// neither returns nothing at all, which is normal: the deck falls back to the
-/// game's header and then to a wash of its colour.
+/// A user-picked/community hero is tried before the store fallback. SteamGridDB
+/// often has a cleaner, purpose-made console hero than the Steam page header;
+/// the store's 2x library hero remains the no-key fallback.
 #[tauri::command]
 async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<String>, String> {
     let game = match orbit.db.game(&game_id) {
@@ -1414,21 +1412,15 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
         }
     };
     let app_id = steam_app_id(&game);
-    for pick in metadata::wide_art(app_id).await {
-        log::debug!("TV backdrop from {}", pick.label);
-        return Ok(Some(pick.url));
-    }
     let settings = orbit.store.load_settings();
-    let Some(key) = setting_text(&settings, "sgdbApiKey") else {
-        return Ok(None);
-    };
-    match sgdb::hero(app_id, &game.title, &key).await {
-        Ok(url) => Ok(url),
-        Err(error) => {
-            log::debug!("SteamGridDB TV backdrop lookup failed: {error}");
-            Ok(None)
+    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+        match sgdb::hero(app_id, &game.title, &key).await {
+            Ok(Some(url)) => return Ok(Some(url)),
+            Ok(None) => {}
+            Err(error) => log::debug!("SteamGridDB TV backdrop lookup failed: {error}"),
         }
     }
+    Ok(metadata::wide_art(app_id).await.into_iter().next().map(|pick| pick.url))
 }
 
 /// Pictures for a game that has not been saved yet, so Add Game can offer

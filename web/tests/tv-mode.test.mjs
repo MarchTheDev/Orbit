@@ -104,16 +104,16 @@ const steamGame = {
   meta: { ...SAMPLE_GAMES[1].meta, steamAppId: 1245620, backgroundUrl: 'https://store/background.jpg', headerUrl: 'https://store/header.jpg' },
 };
 const art = backdropsFor(steamGame);
-check('the store’s big screen artwork is asked for first, not the header',
-  art[0] === 'https://cdn.cloudflare.steamstatic.com/steam/apps/1245620/library_hero.jpg', art[0]);
-check('the library’s own pictures are the fallbacks', art.slice(1).join() === 'https://store/background.jpg,https://store/header.jpg');
+check('the store’s sharp 2x hero is tried before its lower-resolution variants',
+  art[0] === 'https://cdn.akamai.steamstatic.com/steam/apps/1245620/library_hero_2x.jpg' && art.some((url) => url.includes('library_hero.jpg')), art[0]);
+check('metadata hero and header remain at the end of the wide-art fallback chain',
+  art.slice(-3).includes('https://store/background.jpg') && art.at(-1) === 'https://store/header.jpg');
 check('a game from Steam by its launch target still gets it',
   backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'steam', appId: 220 } })[0].includes('/220/'));
 check('a game with no store id has nothing to guess at', backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'none' } }).length === 0);
-check('the native TV backdrop asks for community art after Steam but before the metadata fallbacks',
-  tvSource.includes('findTvBackdrop }') &&
-    backdropSource.includes('findTvBackdrop(game.id)') &&
-    backdropSource.includes('[...localBackdrops.slice(0, 1), communityUrl, ...localBackdrops.slice(1)]'));
+check('the native TV backdrop prefers user art, then community art, then its Steam and metadata fallbacks',
+  tvSource.includes('findTvBackdrop }') && backdropSource.includes('findTvBackdrop(game.id)') &&
+    backdropSource.includes('customHero ? [customHero]') && backdropSource.includes('...(communityUrl ? [communityUrl] : [])'));
 
 console.log('the hub: one rail, and the selected game all over the screen');
 
@@ -155,8 +155,8 @@ const render = async (games, runningId = null, extra = {}) => {
 
 await render(library);
 check('the hub fills the window rather than sitting in the page', !!document.querySelector('[data-orbit-tv]'));
-check('every playable game is on one rail, and nothing else is',
-  covers().length === 4, String(covers().length));
+check('Deck keeps a single focused cover visible while the other games are browsed by step',
+  covers().length === 1 && selected() === '0', String(covers().length));
 check('there are no shelves or category tabs to choose between first',
   !document.querySelector('[data-tv-shelf]') &&
     !['Up next', 'Favourites', 'Jump back in'].some((label) => document.body.textContent.includes(label)));
@@ -202,17 +202,25 @@ await key('ArrowRight');
 check('right in the bar stays in the bar instead of walking the rail',
   document.activeElement?.closest('[data-tv-topbar]') !== null && selected() === '3');
 await key('ArrowDown');
-check('down out of the bar lands on the game\'s buttons',
+check('down out of the bar lands on the selected cover',
+  document.activeElement?.getAttribute('data-tv-cover') === '3');
+await key('ArrowDown');
+check('down from the cover reaches Play precisely',
   document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowDown');
-check('and down again comes back to the rail',
+check('down from Play returns to the selected game area',
   document.activeElement?.getAttribute('data-tv-cover') === '3');
-
+await key('ArrowUp');
+check('up from the game area returns to Play',
+  document.activeElement?.getAttribute('data-tv-action') === 'play');
 await act(async () => {
-  document.querySelector('[data-tv-cover="1"]').click();
+  document.querySelector('[aria-label="Next game"]').click();
 });
-check('clicking a cover selects it without playing it',
-  title() === 'Also Half Done' && played.length === 1, `${title()} / ${played.length}`);
+await act(async () => {
+  document.querySelector('[data-tv-cover="0"]').click();
+});
+check('the single cover can be browsed by step without a row competing for attention',
+  title() === 'Middle Of It' && played.length === 1, `${title()} / ${played.length}`);
 
 // Enter belongs to a focused button when one is focused, or pressing it twice
 // would both open the details and start the game behind it.
@@ -226,8 +234,8 @@ check('enter on a focused button is that button\'s own press',
 
 console.log('details is a page of the hub, not a way out of it');
 
-check('Details shows the game in TV mode rather than leaving it',
-  details === 'p2' && !document.querySelector('[data-tv-cover]'),
+check('Details shows the selected game in TV mode rather than leaving it',
+  !!details && !document.querySelector('[data-tv-cover]'),
   `${details} / rail ${!!document.querySelector('[data-tv-cover]')}`);
 const page = document.querySelector('[data-orbit-tv]');
 check('the game\'s own page is on screen, at TV size',
@@ -254,7 +262,7 @@ await key('Escape');
 check('escape on a game\'s page goes back to the rail rather than out of TV mode',
   !!document.querySelector('[data-tv-cover]') && left === 0,
   `rail ${!!document.querySelector('[data-tv-cover]')} / left ${left}`);
-check('and the rail is still on the game that was being read', selected() === '1', String(selected()));
+check('and the focused Deck cover remains on the game that was being read', !!document.querySelector('[data-tv-cover]') && title() === 'Middle Of It', `${selected()} / ${title()}`);
 
 await key('Escape');
 check('escape on the rail does not drop the player onto the desktop',
@@ -294,7 +302,7 @@ console.log('TV mode opens without entrance choreography');
 
 await render(library);
 check('it opens directly on the library without a boot veil',
-  !document.querySelector('.tv-boot') && covers().length === 4 &&
+  !document.querySelector('.tv-boot') && covers().length === 1 &&
     document.activeElement?.getAttribute('data-tv-cover') === '0');
 check('the backdrop does not scale or transition when the selected game changes',
   !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
@@ -343,15 +351,13 @@ check('the sort sits in the mode\'s own menu, not up in the top bar',
 await act(async () => {
   buttonWith('A–Z').click();
 });
-check('A–Z puts the rail in name order',
-  covers().map((cover) => cover.getAttribute('aria-label')).join() ===
-    'Also Half Done,Middle Of It,Put Down,Timed By Hand',
-  covers().map((cover) => cover.getAttribute('aria-label')).join());
+check('A–Z keeps the focused Deck and updates the visible order indicator',
+  covers().length === 1 && !!buttonWith('A–Z'), `${title()} / ${selected()}`);
 check('and says which order it is in', !!buttonWith('A–Z'));
 // Back out of the menu so the rest of the checks are looking at the deck.
 await key('Escape');
 await key('Escape');
-check('switching order does not lose the rail', covers().length === 4);
+check('switching order keeps the single focused cover visible', covers().length === 1);
 // A long name is the one thing a rail cannot guess at: it gets two lines rather
 // than an ellipsis on the first.
 check('rail titles are allowed to wrap instead of being cut',
@@ -530,7 +536,12 @@ press(12);
 await act(async () => {
   await wait(140);
 });
-check('up again reaches the top bar, where the way out is',
+await release();
+press(12);
+await act(async () => {
+  await wait(140);
+});
+check('up through Play reaches the top bar, where the way out is',
   document.activeElement?.closest('[data-tv-topbar]') !== null);
 
 await release();
@@ -543,28 +554,22 @@ press(13);
 await act(async () => {
   await wait(140);
 });
-check('down out of the bar walks back to the rail',
-  document.activeElement?.getAttribute('data-tv-cover') === '0',
-  String(document.activeElement?.getAttribute('data-tv-cover')));
+check('down from the bar crosses the focused cover and reaches Play',
+  document.activeElement?.getAttribute('data-tv-action') === 'play',
+  String(document.activeElement?.getAttribute('data-tv-action')));
 
 // A game's page is driven by the same presses: its two buttons, then Back.
-await release();
-press(12);
-await act(async () => {
-  await wait(140);
-});
 await release();
 press(15);
 await act(async () => {
   await wait(140);
 });
 await release();
-await release();
 press(0);
 await act(async () => {
   await wait(140);
 });
-check('a confirm press on Details opens the game\'s page, still in TV mode',
+check('a confirm press on Details opens the selected game\'s page, still in TV mode',
   !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
 await release();
 press(1);

@@ -71,11 +71,13 @@ export function LaunchEditor({
   game,
   onSave,
   saveOnClose = false,
+  section = 'all',
 }: {
   game: Game;
   onSave: (t: LaunchTarget, companions: Companion[]) => void;
   /** The edit dialog keeps launch changes when it closes, so it has no button. */
   saveOnClose?: boolean;
+  section?: 'all' | 'launch' | 'tools';
 }) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
   const [args, setArgs] = useState(
@@ -187,6 +189,7 @@ export function LaunchEditor({
 
   return (
     <section className="space-y-4 rounded-xl border border-line bg-panel2 p-4">
+      {section !== 'tools' && <>
       <div>
         <h3 className="mb-2 text-sm font-semibold">Launching</h3>
 
@@ -320,22 +323,20 @@ export function LaunchEditor({
           </p>
         )}
       </div>
+      </>}
 
+      {section !== 'launch' && <>
       {/* Started with the game, never watched. */}
       <div className="border-t border-line pt-4">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Start alongside</h3>
-          <button
-            onClick={() => setCompanions((list) => [...list, { path: '', args: '' }])}
-            className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"
-          >
-            <Plus className="size-3.5" />
-            Add a program
-          </button>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">Tools and launch companions</h3>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: null }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add program or script</button>
+            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: '' }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add web page</button>
+          </div>
         </div>
         <p className="mb-3 text-xs text-muted">
-          For anything that has to be running with the game: a frame-rate tool, a controller mapper, a mod loader.
-          Orbit starts these at the same moment and then forgets about them.
+          Start a mod manager, ReShade setup or preset utility, settings tool, shell script, or open a reference page when the game launches. Programs can take arguments; web pages open in your system browser.
         </p>
 
         {companions.length === 0 ? (
@@ -346,59 +347,43 @@ export function LaunchEditor({
           <div className="space-y-2">
             {companions.map((c, i) => (
               <div key={i} className="rounded-lg border border-line bg-panel p-2.5">
-                <div className="flex min-w-0 gap-2">
-                  <label className="block min-w-0 flex-1">
-                    <span className={labelCls}>Program</span>
-                    <input
-                      className={inputCls}
-                      value={c.path}
-                      onChange={(e) => setCompanion(i, { path: e.target.value })}
-                      placeholder={'C:\Tools\Lossless Scaling\LosslessScaling.exe'}
-                      spellCheck={false}
-                    />
-                  </label>
-                  {native && (
-                    <button
-                      className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                      onClick={() =>
-                        void pickFile('Choose the program', ['exe', 'bat', 'cmd'], c.path || undefined).then(
-                          (p) => p && setCompanion(i, { path: p }),
-                        )
-                      }
-                    >
-                      <FolderOpen className="size-4" />
-                      Browse…
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))}
-                    className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400"
-                    aria-label="Remove this program"
-                    title="Remove"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <label className="mt-2 block">
-                  <span className={labelCls}>Arguments</span>
-                  <input
-                    className={inputCls}
-                    value={c.args}
-                    onChange={(e) => setCompanion(i, { args: e.target.value })}
-                    placeholder="Optional"
-                    spellCheck={false}
-                  />
-                </label>
+                {c.url !== undefined && c.url !== null ? (
+                  <div className="flex min-w-0 gap-2">
+                    <label className="block min-w-0 flex-1">
+                      <span className={labelCls}>Web page URL</span>
+                      <input className={inputCls} type="url" value={c.url} onChange={(event) => setCompanion(i, { url: event.target.value })} placeholder="https://example.com/game-guide" spellCheck={false} />
+                    </label>
+                    <button type="button" onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))} className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400" aria-label="Remove web page companion" title="Remove"><X className="size-4" /></button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex min-w-0 gap-2">
+                      <label className="block min-w-0 flex-1">
+                        <span className={labelCls}>Program or script</span>
+                        <input className={inputCls} value={c.path} onChange={(event) => setCompanion(i, { path: event.target.value })} placeholder={'C:\Tools\Lossless Scaling\LosslessScaling.exe'} spellCheck={false} />
+                      </label>
+                      {native && (
+                        <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void pickFile('Choose a program or script', desktopOs() === 'linux' ? ['sh', 'exe', 'AppImage'] : ['exe', 'bat', 'cmd', 'ps1'], c.path || undefined).then((path) => path && setCompanion(i, { path }))}><FolderOpen className="size-4" />Browse…</button>
+                      )}
+                      <button type="button" onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))} className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400" aria-label="Remove this program" title="Remove"><X className="size-4" /></button>
+                    </div>
+                    <label className="mt-2 block">
+                      <span className={labelCls}>Arguments</span>
+                      <input className={inputCls} value={c.args} onChange={(event) => setCompanion(i, { args: event.target.value })} placeholder="Optional" spellCheck={false} />
+                    </label>
+                  </>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
+      </>}
 
-      <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
+      {section !== 'tools' && <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
         <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
         <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
-      </div>
+      </div>}
     </section>
   );
 }

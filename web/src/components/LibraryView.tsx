@@ -32,7 +32,7 @@ import type {
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
-import { overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
+import { findTvBackdrop, overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { prewarmLibraryArtwork, resolveWideArt, wideArtImmediateFallback } from '../utils/art';
 import { driveLabel } from '../utils/drive';
@@ -1205,6 +1205,14 @@ function GamePage({
     void resolveWideArt(game).then((src) => {
       if (current) setStageArt({ gameId: game.id, src });
     });
+    // SteamGridDB's console heroes are often cleaner than a store header. Keep
+    // the selected game's own custom background absolute, but upgrade automatic
+    // artwork when an independently curated backdrop is available.
+    if (!game.meta?.backgroundUrlCustom) {
+      void findTvBackdrop(game.id).then((src) => {
+        if (current && src) setStageArt({ gameId: game.id, src });
+      });
+    }
     return () => { current = false; };
   }, [game.id, game.coverPath, game.meta?.steamAppId, game.meta?.backgroundUrl, game.meta?.headerUrl, game.meta?.coverUrl]);
   const main = game.hltb?.main ?? 0;

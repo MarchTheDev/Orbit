@@ -63,8 +63,6 @@ export interface StardeckPrefs {
   clock: boolean;
   /** The store's wordmark instead of the title text, when there is one. */
   logo: boolean;
-  /** The shelf of covers. Off leaves the stage on its own. */
-  cinema: boolean;
   /** The facts under the title: year, developer, the time left in the story. */
   facts: boolean;
   /** The bar of numbers along the bottom of the stage. */
@@ -92,7 +90,6 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   summary: true,
   clock: true,
   logo: true,
-  cinema: false,
   facts: true,
   stats: true,
   scope: 'all',
@@ -137,7 +134,6 @@ function savedStardeck(): StardeckPrefs {
         summary: value.summary !== false,
         clock: value.clock !== false,
         logo: value.logo !== false,
-        cinema: value.cinema === true,
         backdrop: value.backdrop !== false,
       };
     }
@@ -251,10 +247,20 @@ function steamIdOf(game: Game): number | null {
 export function backdropsFor(game: Game): string[] {
   const id = steamIdOf(game);
   const out: string[] = [];
-  if (id) out.push(`https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_hero.jpg`);
-  if (game.meta?.backgroundUrl) out.push(game.meta.backgroundUrl);
+  if (game.meta?.backgroundUrlCustom && game.meta.backgroundUrl) out.push(game.meta.backgroundUrl);
+  if (id) {
+    // Heronite keeps Steam's cached hero, then tries the 2x hero across Steam's
+    // current CDNs before its older 1x asset. Orbit used to ask only one CDN
+    // for the 1x image, which made missing/cropped backdrops needlessly common.
+    const cdns = ['https://cdn.akamai.steamstatic.com', 'https://cdn.cloudflare.steamstatic.com', 'https://shared.akamai.steamstatic.com/store_item_assets'];
+    for (const size of ['library_hero_2x.jpg', 'library_hero.jpg']) {
+      out.push(...cdns.map((host) => `${host}/steam/apps/${id}/${size}`));
+    }
+  }
+  if (game.meta?.backgroundUrl && !game.meta.backgroundUrlCustom) out.push(game.meta.backgroundUrl);
+  if (id) out.push(`https://cdn.akamai.steamstatic.com/steam/apps/${id}/page_bg_raw.jpg`);
   if (game.meta?.headerUrl) out.push(game.meta.headerUrl);
-  return out;
+  return [...new Set(out.filter((url) => !/page_bg_generated/i.test(url)))];
 }
 
 /**
@@ -294,11 +300,14 @@ function Backdrop({
   const shown = useRef<HTMLImageElement>(null);
   const localBackdrops = backdropsFor(game);
   const communityUrl = sgdbBackdrop.gameId === game.id ? sgdbBackdrop.url : null;
-  // Steam's library hero remains first. SteamGridDB's wide hero is tried next,
-  // then the metadata background and header keep their existing fallback order.
-  const list = communityUrl && !localBackdrops.includes(communityUrl)
-    ? [...localBackdrops.slice(0, 1), communityUrl, ...localBackdrops.slice(1)]
-    : localBackdrops;
+  // Like Heronite's art chains, keep user-picked hero art first, then try an
+  // independently curated community hero before Steam's fallback chain.
+  const customHero = game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : null;
+  const list = [
+    ...(customHero ? [customHero] : []),
+    ...(communityUrl ? [communityUrl] : []),
+    ...localBackdrops.filter((url) => url !== customHero && url !== communityUrl),
+  ];
 
   // Asked for whether or not the desktop shell answers: `findTvBackdrop` falls
   // back to nothing in a browser, and a picture it does find is the whole point
@@ -639,15 +648,6 @@ function StardeckMenu({
         {page === 'look' && (
           <>
             <PanelChoice
-              label="Shelf"
-              value={prefs.cinema ? 'cinema' : 'rail'}
-              options={[
-                { id: 'rail', label: 'Covers' },
-                { id: 'cinema', label: 'Stage only' },
-              ]}
-              onChange={(next) => set('cinema', next === 'cinema')}
-            />
-            <PanelChoice
               label="Stage"
               value={prefs.stage}
               options={[
@@ -985,7 +985,13 @@ export function TvMode({
   }, [at, list]);
 
   const rail = useRef<HTMLUListElement>(null);
-  const coverOf = (n: number) => rail.current?.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`) ?? null;
+  const refocusSelectedCover = useRef(false);
+  const coverOf = (n: number) => document.querySelector<HTMLElement>(`[data-tv-cover="${n}"]`);
+  useEffect(() => {
+    if (!refocusSelectedCover.current) return;
+    coverOf(at)?.focus({ preventScroll: true });
+    refocusSelectedCover.current = false;
+  }, [at]);
 
   // Give the window back immediately; no fade or shutdown hold on a slow renderer.
   const exit = useCallback(() => onExit(), [onExit]);
@@ -1023,6 +1029,7 @@ export function TvMode({
     (next: number) => {
       if (list.length === 0) return;
       const wrapped = (next + list.length) % list.length;
+      refocusSelectedCover.current = true;
       setSelectedId(list[wrapped].id);
       const button = coverOf(wrapped);
       if (button && document.activeElement !== button) button.focus({ preventScroll: true });
@@ -1116,6 +1123,29 @@ export function TvMode({
     Array.from(document.querySelectorAll<HTMLElement>('[data-tv-topbar] button:not([data-tv-page-toggle])'));
   const inTopbar = (el: EventTarget | null) =>
     el instanceof HTMLElement && el.closest('[data-tv-topbar]') !== null;
+  const moveLibraryFocus = useCallback((key: string) => {
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[data-tv-library-cover]'));
+    const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (inTopbar(current) || !current?.matches('[data-tv-library-cover]')) {
+      if (key === 'ArrowDown') coverOf(at)?.focus({ preventScroll: true });
+      return;
+    }
+    const source = current.getBoundingClientRect();
+    const sx = source.left + source.width / 2;
+    const sy = source.top + source.height / 2;
+    const candidates = items.flatMap((item) => {
+      if (item === current) return [];
+      const rect = item.getBoundingClientRect();
+      const dx = rect.left + rect.width / 2 - sx;
+      const dy = rect.top + rect.height / 2 - sy;
+      const primary = key === 'ArrowLeft' ? -dx : key === 'ArrowRight' ? dx : key === 'ArrowUp' ? -dy : dy;
+      if (primary <= 0) return [];
+      const secondary = key === 'ArrowLeft' || key === 'ArrowRight' ? Math.abs(dy) : Math.abs(dx);
+      return [{ item, score: primary + secondary * 1.6 }];
+    }).sort((a, b) => a.score - b.score);
+    if (candidates[0]) candidates[0].item.focus({ preventScroll: true });
+    else if (key === 'ArrowUp' && source.top < 120) barButtons()[0]?.focus({ preventScroll: true });
+  }, [at]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1160,6 +1190,10 @@ export function TvMode({
         case 'ArrowLeft':
         case 'ArrowRight': {
           event.preventDefault();
+          if (view === 'library') {
+            moveLibraryFocus(event.key);
+            return;
+          }
           // Up in the bar, sideways is the next control in the bar - the sound,
           // then the way out - rather than the next game behind it.
           if (inBar) {
@@ -1186,11 +1220,18 @@ export function TvMode({
         case 'ArrowUp': {
           if (inBar) return;
           event.preventDefault();
+          if (view === 'library') {
+            moveLibraryFocus('ArrowUp');
+            return;
+          }
           // Up from the rail reaches the game's own buttons; up again leaves
           // the page for the bar at the top, where the sound and the way out
           // are. Without that second step the bar would need a mouse.
           if (inActions) {
-            barButtons()[0]?.focus({ preventScroll: true });
+            const buttons = actionButtons();
+            const here = buttons.indexOf(document.activeElement as HTMLElement);
+            if (here > 0) buttons[here - 1]?.focus({ preventScroll: true });
+            else barButtons()[0]?.focus({ preventScroll: true });
             return;
           }
           (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
@@ -1198,13 +1239,24 @@ export function TvMode({
         }
         case 'ArrowDown': {
           event.preventDefault();
-          // Down out of the bar lands back on the game's buttons, so the way up
-          // into the bar is also the way back down out of it.
-          if (inBar) {
-            (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
+          if (view === 'library') {
+            moveLibraryFocus('ArrowDown');
             return;
           }
-          coverOf(at)?.focus({ preventScroll: true });
+          // From the top bar, enter the selected game; from its cover, move
+          // down into Play. Repeated down presses continue across its actions.
+          if (inBar) {
+            coverOf(at)?.focus({ preventScroll: true });
+            return;
+          }
+          if (inActions) {
+            const buttons = actionButtons();
+            const here = buttons.indexOf(document.activeElement as HTMLElement);
+            if (here === 0) coverOf(at)?.focus({ preventScroll: true });
+            else buttons[Math.max(0, here - 1)]?.focus({ preventScroll: true });
+            return;
+          }
+          (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
           return;
         }
         case 'Enter':
@@ -1234,7 +1286,7 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, detailed, menu, select, start]);
+  }, [at, detailed, menu, moveLibraryFocus, select, start, view]);
 
   /**
    * The controller.
@@ -1340,9 +1392,9 @@ export function TvMode({
           </span>
         )}
 
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-1" role="group" aria-label="Stardeck page">
-          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="rounded-full px-3 py-1.5 text-xs font-semibold text-white/75 hover:bg-white/10 aria-pressed:bg-white/15">Deck</button>
-          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="rounded-full px-3 py-1.5 text-xs font-semibold text-white/75 hover:bg-white/10 aria-pressed:bg-white/15">Library</button>
+        <div className="orbit-deck-pagetabs" role="group" aria-label="Stardeck page">
+          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pagetab">Deck</button>
+          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pagetab">Library</button>
         </div>
 
         <span className="flex-1" />
@@ -1373,8 +1425,7 @@ export function TvMode({
           title="Leave Stardeck"
           aria-label="Leave Stardeck"
           className={cn(
-            'ml-1 flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-[12.5px] font-semibold text-white/80 transition hover:border-white/35 hover:text-white focus-visible:ring-2 focus-visible:ring-accent',
-            lite ? 'bg-white/[0.1]' : 'bg-white/[0.06] backdrop-blur-sm',
+            'orbit-deck-leave ml-1 flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-accent',
           )}
         >
           <Minimize2 className="size-4" />
@@ -1449,11 +1500,11 @@ export function TvMode({
               </div>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-6">
                 {list.map((game, n) => (
-                  <button key={game.id} data-tv-cover={n} type="button" onFocus={() => setSelectedId(game.id)} onClick={() => {
+                  <button key={game.id} data-tv-cover={n} data-tv-library-cover type="button" onFocus={() => setSelectedId(game.id)} onClick={() => {
                     setSelectedId(game.id);
                     if (padJustActivated(400)) onPlay(game);
-                  }} onDoubleClick={() => onPlay(game)} aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title} className={cn('group min-w-0 text-left', game.id === active.id && 'rounded-xl ring-2 ring-accent ring-offset-4 ring-offset-[#05040d]')}>
-                    <span className="block aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-xl transition group-hover:-translate-y-1 group-hover:border-white/30"><Cover game={game} className="size-full" fit="cover" /></span>
+                  }} onDoubleClick={() => onPlay(game)} aria-current={game.id === active.id ? 'true' : undefined} aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title} className="tv-library-game group min-w-0 text-left">
+                    <span className={cn('tv-library-game-art block aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-xl transition group-hover:-translate-y-1 group-hover:border-white/30', game.id === active.id && 'is-current')}><Cover game={game} className="size-full" fit="cover" /></span>
                     {prefs.coverLabel === 'name' && <span className="mt-2 block truncate text-sm font-semibold text-white/85">{game.title}</span>}
                     {prefs.coverLabel === 'info' && <span className="mt-2 block truncate text-xs text-white/60">{game.meta?.releaseYear ?? game.meta?.genres?.[0] ?? game.status}</span>}
                   </button>
@@ -1644,8 +1695,9 @@ export function TvMode({
                 }}
                 className="orbit-deck-cards orbit-scroll"
               >
-                {list.map((game, n) => {
-                  const chosen = n === at;
+                {[active].map((game) => {
+                  const n = at;
+                  const chosen = true;
                   return (
                     <li key={game.id}>
                       <button

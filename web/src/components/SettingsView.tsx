@@ -578,7 +578,7 @@ function NeedsWork({ on = false }: { on?: boolean }) {
 const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
   { label: 'App', ids: ['orbit-appearance', 'orbit-playing', 'orbit-sound'] },
   { label: 'Games', ids: ['orbit-details', 'orbit-achievements', 'orbit-captures', 'orbit-overlay'] },
-  { label: 'Library', ids: ['orbit-library', 'orbit-journal', 'orbit-libraries', 'orbit-backups'] },
+  { label: 'Library', ids: ['orbit-library', 'orbit-backlog', 'orbit-journal', 'orbit-libraries', 'orbit-backups'] },
   { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-updates', 'orbit-about'] },
 ];
 

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Image, Pencil, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
-import { findArtwork, isNative } from '../../services/native';
+import { findArtwork, findSave, isNative, saveHintsOf, suggestSaves } from '../../services/native';
 import { say } from '../../utils/toast';
-import { fileSrc, pickAnyFile } from '../../services/desktop';
+import { fileSrc, pickAnyFile, pickFolder } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { fmtBytes } from '../../utils/format';
+import { cn } from '../../utils/cn';
 import { LaunchEditor } from './LaunchEditor';
 import { Select } from '../ui/Select';
 import { MarkdownEditor } from '../ui/Markdown';
@@ -21,13 +22,21 @@ import { PortraitBrowser, PortraitFrame } from '../ui/PortraitBrowser';
  * who wants to fix one of them should not have to work out which page it lives
  * on. Closing this editor keeps the fields. There is no separate save step.
  */
-export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
+export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDir = '', onSaveDir }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
   hideLaunchSettings?: boolean;
+  saveDir?: string;
+  onSaveDir?: (path: string) => void;
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
+  const [activeTab, setActiveTab] = useState<'details' | 'launch' | 'tools' | 'saves'>('details');
+  const [savePath, setSavePath] = useState(saveDir);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuggestions, setSaveSuggestions] = useState<string[]>([]);
+  const saveAttempted = useRef(false);
 
   const [title, setTitle] = useState(game.title);
   const [summary, setSummary] = useState(meta?.summary ?? '');
@@ -72,6 +81,32 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
     setFavorite(game.favorite);
     setHidden(!!game.hidden);
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => setSavePath(saveDir), [game.id, saveDir]);
+  useEffect(() => {
+    if (activeTab !== 'saves' || saveDir.trim() || saveAttempted.current || !isNative()) return;
+    saveAttempted.current = true;
+    let current = true;
+    setSaveBusy(true);
+    setSaveError(null);
+    void findSave(game.title, saveHintsOf(game))
+      .then((found) => {
+        if (!current) return;
+        if (found) {
+          setSavePath(found);
+          onSaveDir?.(found);
+          return;
+        }
+        return suggestSaves(game.title).then((suggestions) => {
+          if (current) setSaveSuggestions(suggestions);
+        });
+      })
+      .catch((error: unknown) => {
+        if (current) setSaveError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => { if (current) setSaveBusy(false); });
+    return () => { current = false; };
+  }, [activeTab, game, onSaveDir, saveDir]);
 
   /** A number field, where empty means "no value" rather than zero. */
   const hours = (value: string): number | null => {
@@ -195,7 +230,19 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         <p className="orbit-edit-saved">Saved as you type · there is no save button</p>
       </header>
 
-      <section className="orbit-editsection">
+      <div className="orbit-edit-tabs" role="tablist" aria-label="Edit game sections">
+        {([
+          ['details', 'Details'],
+          ...(!hideLaunchSettings ? [['launch', 'Launch'], ['tools', 'Tools']] as const : []),
+          ['saves', 'Saves'],
+        ] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={activeTab === id} onClick={() => setActiveTab(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">What it is</h4>
           <p className="orbit-editsection-note">The facts the library sorts and searches by.</p>
@@ -257,7 +304,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
       </div>
       </section>
 
-      <section className="orbit-editsection">
+      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">
             <Image className="size-3.5" />
@@ -363,7 +410,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         />
       </section>
 
-      <label className="orbit-editrow">
+      <label className="orbit-editrow" hidden={activeTab !== 'details'}>
         <input
           type="checkbox"
           checked={planned}
@@ -379,7 +426,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </span>
       </label>
 
-      <section className="orbit-editsection">
+      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">In the library</h4>
           <p className="orbit-editsection-note">
@@ -418,11 +465,47 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </div>
       </section>
 
-      {!hideLaunchSettings && (
-        <LaunchEditor game={game} saveOnClose onSave={(launch, companions) => onUpdate({ launch, companions })} />
+      {!hideLaunchSettings && (activeTab === 'launch' || activeTab === 'tools') && (
+        <LaunchEditor
+          game={game}
+          saveOnClose
+          section={activeTab === 'tools' ? 'tools' : 'launch'}
+          onSave={(launch, companions) => onUpdate({ launch, companions })}
+        />
       )}
 
-      <section className="orbit-editsection">
+      {activeTab === 'saves' && (
+        <section className="orbit-editsection">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Save location</h4>
+            <p className="orbit-editsection-note">Orbit searches this game’s common folders and Steam or Wine prefixes automatically. PCGamingWiki suggestions are shown when no existing save directory is found.</p>
+          </header>
+          <label className="block">
+            <span className={labelCls}>Detected or chosen folder</span>
+            <div className="flex gap-2">
+              <input className={inputCls} value={savePath} onChange={(event) => setSavePath(event.target.value)} placeholder="No save folder found yet" spellCheck={false} />
+              {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFolder('Choose this game’s save folder', savePath || undefined).then((path) => { if (path) { setSavePath(path); onSaveDir?.(path); } })}>Browse</button>}
+            </div>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={cn(btnBrowse, 'inline-flex items-center gap-2')} disabled={saveBusy} onClick={() => {
+              setSaveBusy(true); setSaveError(null);
+              void findSave(game.title, saveHintsOf(game)).then(async (found) => {
+                if (found) { setSavePath(found); onSaveDir?.(found); setSaveSuggestions([]); }
+                else setSaveSuggestions(await suggestSaves(game.title));
+              }).catch((error: unknown) => setSaveError(error instanceof Error ? error.message : String(error))).finally(() => setSaveBusy(false));
+            }}>
+              <FolderOpen className="size-3.5" /> {saveBusy ? 'Searching…' : 'Find save folder'}
+            </button>
+            {savePath.trim() && <button type="button" className={btnGhost} onClick={() => { setSavePath(''); onSaveDir?.(''); }}>Clear saved location</button>}
+          </div>
+          {savePath.trim() && <p className="text-xs text-emerald-300">Saved folder: <span className="font-mono">{savePath}</span></p>}
+          {saveSuggestions.length > 0 && <div className="space-y-2 rounded-xl border border-line bg-panel p-3"><p className="text-xs font-semibold">PCGamingWiki lists these candidate locations for {game.title}:</p>{saveSuggestions.map((suggestion) => <p key={suggestion} className="break-all font-mono text-xs text-muted" title={suggestion}>{suggestion}</p>)}</div>}
+          {saveError && <p role="alert" className="text-xs text-rose-300">{saveError}</p>}
+        </section>
+      )}
+
+      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">
             <Sparkles className="size-3.5" />
@@ -462,7 +545,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         </button>
       </section>
 
-      <section className="orbit-editsection">
+      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
         <span className={labelCls}>
           Notes
           <span className="ml-2 normal-case tracking-normal text-muted/70">
@@ -477,14 +560,14 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false }: {
         />
       </section>
 
-      {game.installDir && (
+      {activeTab === 'details' && game.installDir && (
         <p className="orbit-edit-path">
           {game.installDir}
           {game.sizeBytes > 0 ? ` · ${fmtBytes(game.sizeBytes)}` : ''}
         </p>
       )}
 
-      <div className="orbit-edit-foot">
+      <div className="orbit-edit-foot" hidden={activeTab !== 'details'}>
         <button
           type="button"
           onClick={() => void fetchHltb(title || game.title).then((h) => h && onUpdate({ hltb: h }))}

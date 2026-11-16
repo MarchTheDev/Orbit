@@ -12,10 +12,14 @@ export function GameEditDialog({
   onClose,
   hideLaunchSettings = false,
   onRemoveFromBacklog,
+  saveDir,
+  onSaveDir,
 }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
   onClose: () => void;
+  saveDir?: string;
+  onSaveDir?: (path: string) => void;
   /** The Backlog edits the game record, not how it is started. */
   hideLaunchSettings?: boolean;
   /** Remove only this game's Backlog membership, preserving its Library record. */
@@ -39,7 +43,7 @@ export function GameEditDialog({
         </div>
       ) : undefined}
     >
-      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} />
+      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} saveDir={saveDir} onSaveDir={onSaveDir} />
     </Modal>
     {confirmRemove && onRemoveFromBacklog && (
       <ConfirmDialog

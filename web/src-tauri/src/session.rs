@@ -141,6 +141,17 @@ impl Runner {
         // never watched, so their exit cannot end the session. One failing is
         // worth a line in the log but not a failed launch.
         for companion in &game.companions {
+            if let Some(url) = companion.url.as_deref() {
+                let url = url.trim();
+                if !url.is_empty() {
+                    if let Err(error) = crate::launch::open_external_url(url) {
+                        log::warn!("web companion {url} did not open: {error}");
+                    } else {
+                        log::info!("opened web companion {url}");
+                    }
+                }
+                continue;
+            }
             let path = std::path::Path::new(&companion.path);
             if let Err(e) = crate::launch::spawn_detached(path, &companion.args) {
                 log::warn!("companion {} did not start: {e}", companion.path);

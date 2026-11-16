@@ -655,7 +655,22 @@ pub fn spawn_detached(path: &Path, args: &str) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("{} is not there any more.", path.display()));
     }
-    let mut cmd = std::process::Command::new(path);
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let mut cmd = if cfg!(windows) && matches!(extension.as_str(), "bat" | "cmd") {
+        let mut shell = std::process::Command::new("cmd.exe");
+        shell.arg("/C").arg(path);
+        shell
+    } else if cfg!(windows) && extension == "ps1" {
+        let mut shell = std::process::Command::new("powershell.exe");
+        shell.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(path);
+        shell
+    } else if cfg!(unix) && extension == "sh" {
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.arg(path);
+        shell
+    } else {
+        std::process::Command::new(path)
+    };
     let args = args.trim();
     if !args.is_empty() {
         cmd.args(parse_args(args));
@@ -669,6 +684,29 @@ pub fn spawn_detached(path: &Path, args: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not start {}: {e}", path.display()))
+}
+
+/// Open an optional web companion in the user's normal browser.
+pub fn open_external_url(url: &str) -> Result<(), String> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Only http and https links can open as a web companion.".into());
+    }
+    let mut command = if cfg!(windows) {
+        let mut opener = std::process::Command::new("rundll32.exe");
+        opener.args(["url.dll,FileProtocolHandler"]).arg(url);
+        opener
+    } else if cfg!(target_os = "macos") {
+        let mut opener = std::process::Command::new("open");
+        opener.arg(url);
+        opener
+    } else {
+        let mut opener = std::process::Command::new("xdg-open");
+        opener.arg(url);
+        opener
+    };
+    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .spawn().map(|_| ()).map_err(|error| format!("Could not open {url}: {error}"))
 }
 
 /// Split a user-typed argument string, honouring double quotes.

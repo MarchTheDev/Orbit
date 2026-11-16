@@ -5921,9 +5921,8 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   box-shadow: none;
   overflow: visible;
 }
-.orbit-deck:not(.is-side) :is(.orbit-deck-stageart, .orbit-deck-stagescrim, .orbit-deck-stagewash, .orbit-deck-art) { display: none; }
 .orbit-deck:not(.is-side) .orbit-deck-stageinner {
-  height: auto;
+  height: 100%;
   align-items: center;
   padding: 4px 10px 8px;
 }
@@ -7122,3 +7121,124 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
   text-align: center;
 }
 
+
+/* Stardeck's Deck shows one game at a time. The arrows change the selected
+   record; the artwork, rather than a procession of neighbouring cards, owns
+   the centre of the screen. */
+.orbit-deck:not(.is-side) .orbit-deck-index { align-items: stretch; flex: 0 0 auto; }
+.orbit-deck:not(.is-side) .orbit-deck-indexhead { justify-content: center; }
+.orbit-deck:not(.is-side) .orbit-deck-stage { flex: 1 1 auto; min-height: 0; }
+.orbit-deck:not(.is-side) .orbit-deck-cards { justify-content: center; align-items: center; padding: 10px 4px 16px; }
+.orbit-deck:not(.is-side) .orbit-deck-stageinner { flex-direction: column; align-items: center; justify-content: center; gap: clamp(14px, 2.5vh, 28px); padding: 18px; text-align: center; }
+.orbit-deck:not(.is-side) .orbit-deck-art { order: 0; align-self: center; }
+.orbit-deck:not(.is-side) .orbit-deck-cover { height: clamp(12rem, 42vh, 22rem); border-radius: 16px; }
+.orbit-deck:not(.is-side) .orbit-deck-cover.is-banner { height: clamp(9rem, 32vh, 18rem); }
+.orbit-deck:not(.is-side) .orbit-deck-copy { order: 1; width: min(100%, 52rem); }
+.orbit-deck:not(.is-side) .orbit-deck-card:focus-visible .orbit-deck-frame { outline: 2px solid color-mix(in srgb, var(--c-accent) 75%, transparent); outline-offset: 4px; }
+.orbit-deck:not(.is-side) .orbit-deck-card[aria-current='true'] .orbit-deck-frame { transform: none; }
+.orbit-deck:not(.is-side) .orbit-deck-card { filter: none; }
+.orbit-deck-pagetabs {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, #fff 14%, transparent);
+  border-radius: 14px;
+  background: #15141d;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 8px 28px #0008, inset 0 1px 0 #ffffff12;
+}
+.orbit-deck-pagetab {
+  min-width: 76px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #aaa8b4;
+  font-size: 12px;
+  font-weight: 650;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.orbit-deck-pagetab:hover { color: #fff; background: #ffffff0c; }
+.orbit-deck-pagetab[aria-pressed='true'] { color: #fff; background: #272531; border-color: #ffffff16; box-shadow: inset 0 1px 0 #ffffff12, 0 3px 10px #0005; }
+.orbit-deck-leave {
+  border: 1px solid #ffffff18;
+  background: #17161f;
+  color: #e4e2ea;
+  box-shadow: inset 0 1px 0 #ffffff0c, 0 6px 20px #0004;
+}
+.orbit-deck-leave:hover { border-color: color-mix(in srgb, var(--c-accent) 45%, #ffffff20); background: #22212b; color: #fff; }
+.tv-library-game { outline: none; }
+.tv-library-game-art.is-current { border-color: var(--c-accent); box-shadow: 0 0 0 1.5px var(--c-accent), 0 16px 38px -18px color-mix(in srgb, var(--c-accent) 65%, transparent); }
+.tv-library-game:focus-visible .tv-library-game-art { outline: 3px solid color-mix(in srgb, var(--c-accent) 80%, transparent); outline-offset: 3px; }
+html.orbit-pad .tv-root .orbit-deck-card.orbit-pad-focus,
+html.orbit-pad .tv-root .orbit-deck-card:focus { outline: none; box-shadow: none; }
+html.orbit-pad .tv-root .orbit-deck-card.orbit-pad-focus .orbit-deck-frame,
+html.orbit-pad .tv-root .orbit-deck-card:focus .orbit-deck-frame { outline: 3px solid color-mix(in srgb, var(--c-accent) 82%, transparent); outline-offset: 3px; }
+html.orbit-pad .tv-root .tv-library-game.orbit-pad-focus,
+html.orbit-pad .tv-root .tv-library-game:focus { outline: none; box-shadow: none; }
+html.orbit-pad .tv-root .tv-library-game.orbit-pad-focus .tv-library-game-art,
+html.orbit-pad .tv-root .tv-library-game:focus .tv-library-game-art { outline: 3px solid color-mix(in srgb, var(--c-accent) 82%, transparent); outline-offset: 3px; }
+html.orbit-pad .tv-root button:not(.tv-cover):not(.orbit-deck-card):not(.tv-library-game):focus,
+html.orbit-pad .tv-root [data-tv-action].orbit-pad-focus { outline: 2px solid color-mix(in srgb, var(--c-accent) 85%, transparent); outline-offset: 2px; }
+
+/* The Glass style is a material treatment, not a see-through mode. Keep each
+   app surface opaque while adding a stronger soft-focus edge and a controlled
+   28px backdrop blur on platforms that can composite it smoothly. */
+html.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themecard, .orbit-topbar, .orbit-modal, .orbit-menu, .orbit-viewmenu, .orbit-deckmenu, .orbit-ovsheet, .orbit-ovbox, [role='dialog'], .orbit-editsection, .orbit-add-face) {
+  background-color: var(--c-panel) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.12) !important;
+  backdrop-filter: blur(28px) saturate(1.12) !important;
+  border-color: color-mix(in srgb, var(--c-text) 14%, var(--c-accent)) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 9%, transparent), 0 16px 44px -28px #000b !important;
+}
+html.orbit-glass .orbit-add-face { background-color: var(--c-panel2) !important; }
+html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themecard, .orbit-topbar, .orbit-modal, .orbit-menu, .orbit-viewmenu, .orbit-deckmenu, .orbit-ovsheet, .orbit-ovbox, [role='dialog'], .orbit-editsection, .orbit-add-face) {
+  -webkit-backdrop-filter: blur(28px) saturate(1.12) !important;
+  backdrop-filter: blur(28px) saturate(1.12) !important;
+}
+
+.orbit-edit [hidden] { display: none !important; }
+.orbit-edit-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-panel);
+  box-shadow: 0 8px 24px -16px #0008;
+}
+.orbit-edit-tabs button {
+  flex: 1 0 auto;
+  min-width: 92px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--c-muted);
+  font-size: 12px;
+  font-weight: 650;
+  transition: color .14s ease, background .14s ease, border-color .14s ease;
+}
+.orbit-edit-tabs button:hover { color: var(--c-text); background: var(--c-panel2); }
+.orbit-edit-tabs button[aria-selected='true'] {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-accent) 40%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 12%, var(--c-panel));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+}
+.orbit-play {
+  position: relative;
+  min-width: 122px;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--c-accent) 92%, #fff 8%), var(--c-accent));
+  color: var(--c-on-accent, var(--c-bg));
+  box-shadow: 0 8px 24px -12px color-mix(in srgb, var(--c-accent) 90%, transparent), inset 0 1px 0 #ffffff50;
+}
+.orbit-play:hover { filter: brightness(1.08); box-shadow: 0 11px 30px -12px color-mix(in srgb, var(--c-accent) 85%, transparent), inset 0 1px 0 #ffffff66; }
+.orbit-play.is-stop { border-color: #ff6872; background: linear-gradient(135deg, #ed626a, #c83543); color: #fff; }

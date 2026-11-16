@@ -219,6 +219,8 @@ export interface ProtonRelease {
 export interface Companion {
   path: string;
   args: string;
+  /** An optional URL opened in the system browser when the game starts. */
+  url?: string | null;
 }
 
 export interface LaunchInfo {

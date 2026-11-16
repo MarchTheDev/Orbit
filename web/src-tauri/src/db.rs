@@ -115,6 +115,9 @@ pub struct Companion {
     pub path: String,
     #[serde(default)]
     pub args: String,
+    /// A web page opened in the system browser when the game starts.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// One play session.

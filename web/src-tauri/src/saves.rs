@@ -446,6 +446,32 @@ fn candidates(title: &str, install_dir: Option<&str>) -> Vec<String> {
         push_name(&mut names, main);
         push_name(&mut names, sub);
     }
+    // Save directories commonly omit store-only edition words, trademark
+    // marks, or spell a sequel with Arabic digits instead of Roman numerals.
+    // Keep these as bounded title variants; do not turn them into fuzzy
+    // substring searches through unrelated AppData folders.
+    let mut variants = names.clone();
+    variants.extend(names.iter().flat_map(|name| {
+        let mut found = Vec::new();
+        let cleaned: String = name.chars().filter(|ch| !matches!(ch, '™' | '®' | '©')).collect();
+        let cleaned = cleaned.replace("(TM)", "");
+        if cleaned != *name { found.push(cleaned); }
+        let lower = name.to_ascii_lowercase();
+        for suffix in ["remastered", "remake", "definitive edition", "complete edition", "director's cut", "director’s cut", "game of the year edition", "goty edition"] {
+            if lower.ends_with(suffix) {
+                let base = name[..name.len() - suffix.len()].trim_end_matches(|ch: char| matches!(ch, ' ' | '-' | ':' | '–' | '—'));
+                if !base.is_empty() { found.push(base.to_string()); }
+            }
+        }
+        for (from, to) in [("Part I", "Part 1"), ("Part II", "Part 2"), ("Part III", "Part 3"), ("Part 1", "Part I"), ("Part 2", "Part II"), ("Part 3", "Part III"), (" III", " 3"), (" II", " 2"), (" IV", " 4")] {
+            if name.contains(from) {
+                let alternate = name.replace(from, to);
+                if alternate != *name { found.push(alternate); }
+            }
+        }
+        found
+    }));
+    for variant in variants { push_name(&mut names, &variant); }
     if let Some(install) = install_dir {
         if let Some(folder) = Path::new(install).file_name().and_then(|n| n.to_str()) {
             push_name(&mut names, folder);
@@ -1199,6 +1225,14 @@ mod tests {
                 "Linux: $HOME/.local/share/Celeste".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn save_search_tries_editionless_and_roman_numeral_title_variants() {
+        let variants = candidates("The Last of Us Part I Remastered", None);
+        assert!(variants.iter().any(|name| normalize(name) == normalize("The Last of Us Part 1")));
+        let sequel = candidates("Hades II", None);
+        assert!(sequel.iter().any(|name| normalize(name) == normalize("Hades 2")));
     }
 
     #[test]

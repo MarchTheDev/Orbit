@@ -2030,6 +2030,8 @@ export default function App() {
         <GameEditDialog
           game={editingGame}
           onUpdate={(patch) => updateGame(editingGame.id, patch)}
+          saveDir={settings?.saves?.dirs?.[editingGame.id] ?? ''}
+          onSaveDir={(path) => setSettings((current) => ({ saves: { ...current.saves, dirs: { ...current.saves?.dirs, [editingGame.id]: path } } }))}
           hideLaunchSettings={editingHideLaunchSettings}
           onRemoveFromBacklog={editingHideLaunchSettings ? () => {
             removeFromBacklog(editingGame, true);
