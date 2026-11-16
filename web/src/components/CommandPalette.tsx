@@ -60,8 +60,10 @@ const GROUP_TITLE: Record<PaletteGroup, string> = {
  */
 function scopeOf(query: string): { scope: 'all' | 'actions' | 'genres'; needle: string } {
   const trimmed = query.trim();
-  if (trimmed.startsWith('>')) return { scope: 'actions', needle: trimmed.slice(1).trim().toLowerCase() };
-  if (trimmed.startsWith('@')) return { scope: 'genres', needle: trimmed.slice(1).trim().toLowerCase() };
+  // No prefix required - typing filters everything naturally, like Heronite
+  // Keep @ and > as optional hints but never require them
+  if (trimmed.startsWith('>')) return { scope: 'all', needle: trimmed.slice(1).trim().toLowerCase() };
+  if (trimmed.startsWith('@')) return { scope: 'all', needle: trimmed.slice(1).trim().toLowerCase() };
   return { scope: 'all', needle: trimmed.toLowerCase() };
 }
 
@@ -158,7 +160,6 @@ export function CommandPalette({
   // Rows render grouped, so the run order has to be grouped too, or the index
   // a click carries points at a different row than the one under it.
   const visibleCommands = commands
-    .filter((command) => (scope === 'actions' ? command.group === 'Actions' : scope === 'genres' ? false : true))
     .filter((command) => matches(command.label, command.hint))
     .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
 
@@ -170,17 +171,14 @@ export function CommandPalette({
    * The game that is running is left out of Play now, since it is offered as
    * Stop below.
    */
-  const visibleGames = scope === 'genres'
-    ? []
-    : (needle
+  const visibleGames = needle
         ? games
             .filter((game) => game.title.toLowerCase().includes(needle) || (game.meta?.developer ?? '').toLowerCase().includes(needle))
             .slice(0, 6)
-        : []);
+        : [];
 
   /** Genres raised from the library itself, so nothing is offered that holds nothing. */
   const visibleGenres = useMemo(() => {
-    if (scope === 'actions') return [];
     const counts = new Map<string, number>();
     for (const game of games) {
       for (const genre of game.meta?.genres ?? []) {
@@ -197,7 +195,6 @@ export function CommandPalette({
 
   /** Play (or Stop) sits above everything, and only once there is something to match. */
   const launchCommands: PaletteCommand[] = useMemo(() => {
-    if (scope === 'genres') return [];
     if (runningId) {
       const running = games.find((game) => game.id === runningId);
       if (!running) return [];
@@ -240,27 +237,42 @@ export function CommandPalette({
 
   if (!open) return null;
 
+  // Run order matches render order: Launch, Games, Genres, then Pages/Actions/Files
+  const flatCommands = visibleCommands;
+  const flatGames = visibleGames;
+  const flatGenres = visibleGenres;
+  const launchLen = launchCommands.length;
+  const gamesLen = flatGames.length;
+  const genresLen = flatGenres.length;
   let runAt = 0;
   const choose = (index: number) => {
-    const command = [...launchCommands, ...visibleCommands][index];
-    if (command) {
+    if (index < launchLen) {
+      const command = launchCommands[index];
       onClose();
       command.run();
       return;
     }
-    const gameIndex = index - launchCommands.length - visibleCommands.length;
-    if (gameIndex < visibleGames.length) {
-      const game = visibleGames[gameIndex];
+    let offset = launchLen;
+    if (index < offset + gamesLen) {
+      const game = flatGames[index - offset];
       onClose();
       onPage('library');
       onGame(game.id);
       return;
     }
-    const genre = visibleGenres[gameIndex - visibleGames.length];
-    if (genre) {
+    offset += gamesLen;
+    if (index < offset + genresLen) {
+      const genre = flatGenres[index - offset];
       onClose();
       onPage('library');
       onGenre(genre.name);
+      return;
+    }
+    offset += genresLen;
+    const command = flatCommands[index - offset];
+    if (command) {
+      onClose();
+      command.run();
     }
   };
 
@@ -416,7 +428,7 @@ export function CommandPalette({
           {total === 0 && (
             <p className="px-4 py-8 text-center text-sm text-muted">
               Nothing matches “{query.trim()}”.
-              <span className="mt-1 block text-[11px]">Start with <b>&gt;</b> for actions, or <b>@</b> for genres.</span>
+              <span className="mt-1 block text-[11px]">Type a game, genre, or page name.</span>
             </p>
           )}
         </div>

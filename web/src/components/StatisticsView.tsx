@@ -552,35 +552,44 @@ export function StatisticsView({
             title={period === 'month' ? 'Playtime by day' : period === 'year' ? 'Playtime by month' : 'Playtime by year'}
             note={
               busiest && busiest.total > 0
-                ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)}`
+                ? `Busiest ${busiest.label} · ${fmtMinutes(busiest.total / 60)} · precise to the minute`
                 : loaded ? 'Nothing tracked yet' : 'Reading sessions…'
             }
           >
-            <div className={`orbit-chart${hasData ? '' : ' orbit-chart-quiet'}`} role="img" aria-label={`Playtime ${PERIOD_LABEL[period]}, ${fmtMinutes(totalSecs / 60)}`}>
-              {!hasData ? (
-                <p>{loaded ? 'Nothing tracked in this period. Play something, or widen the period.' : 'Reading sessions…'}</p>
-              ) : (
-                bins.map((bin) => {
-                  const title = `${bin.label}: ${fmtMinutes(bin.total / 60)}`;
-                  return (
-                    <div key={bin.key} className="orbit-chart-col" title={title}>
-                      {bin.parts.map((part) => (
-                        <i
-                          key={part.id}
-                          style={{ height: `${(part.secs / maxTotal) * 100}%`, background: gameColour(byGame.get(part.id)) }}
-                          title={`${byGame.get(part.id)?.title ?? 'Other'} · ${fmtMinutes(part.secs / 60)}`}
-                        />
-                      ))}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            {hasData && (
-              <div className="orbit-chart-axis">
-                {axis.map((index) => (
-                  <span key={bins[index].key}>{bins[index].label}</span>
-                ))}
+            {!hasData ? (
+              <p className="orbit-chart-empty">{loaded ? 'Nothing tracked in this period. Play something, or widen the period.' : 'Reading sessions…'}</p>
+            ) : (
+              <div className="orbit-playtime">
+                <div className="orbit-playtime-summary">
+                  <span><b>{fmtMinutes(totalSecs / 60)}</b> total</span>
+                  <span><b>{bins.filter(b => b.total>0).length}</b> active {period==='month'?'days':period==='year'?'months':'years'}</span>
+                  <span><b>{fmtMinutes((totalSecs / Math.max(1, bins.filter(b=>b.total>0).length))/60)}</b> avg per active {period==='month'?'day':period==='year'?'month':'year'}</span>
+                </div>
+                <div className="orbit-playtime-grid" role="table" aria-label={`Playtime ${PERIOD_LABEL[period]}`}>
+                  <div className="orbit-playtime-head" role="row">
+                    <span role="columnheader">{period==='month'?'Day':period==='year'?'Month':'Year'}</span>
+                    <span role="columnheader">Played</span>
+                    <span role="columnheader">Top game</span>
+                    <span role="columnheader" className="orbit-playtime-barcol">Distribution</span>
+                  </div>
+                  {bins.map((bin) => {
+                    const topPart = bin.parts[0];
+                    const topGame = topPart ? byGame.get(topPart.id) : null;
+                    const pct = bin.total > 0 ? (bin.total / maxTotal) * 100 : 0;
+                    const isEmpty = bin.total === 0;
+                    return (
+                      <div key={bin.key} className={`orbit-playtime-row ${isEmpty ? 'is-empty' : ''}`} role="row" title={`${bin.label}: ${fmtMinutes(bin.total/60)}`}>
+                        <span className="orbit-playtime-when" role="cell">{bin.label}</span>
+                        <span className="orbit-playtime-mins" role="cell">{bin.total > 0 ? fmtMinutes(bin.total/60) : '—'}</span>
+                        <span className="orbit-playtime-game" role="cell">{topGame ? topGame.title : bin.total>0 ? 'Multiple' : '—'}</span>
+                        <span className="orbit-playtime-barcol" role="cell">
+                          <span className="orbit-playtime-track"><span className="orbit-playtime-fill" style={{ width: `${pct}%` }} /></span>
+                          {bin.total>0 && <span className="orbit-playtime-pct">{Math.round(pct)}%</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {topIds.length > 0 && (

@@ -51,6 +51,7 @@ export type LibraryMode = 'details' | 'grid';
 /** How the left shelf is drawn in Details: artwork, or a compact list. */
 export type ShelfLayout = 'covers' | 'list';
 
+import * as React from 'react';
 const COVER_SHAPES: { value: CoverShape; label: string }[] = [
   { value: '2:3', label: '2:3' },
   { value: '3:4', label: '3:4' },
@@ -833,189 +834,68 @@ export function LibraryView({
             </button>
 
             {viewMenu === 'details' && (
-              <div className="orbit-viewmenu" role="dialog" aria-label="Observatory settings">
-                <span className="orbit-viewmenu-label">Shelf</span>
-                <div className="orbit-seg" role="group" aria-label="How the shelf is drawn">
-                  <button type="button" aria-pressed={rail === 'covers'} onClick={() => setRail('covers')}>Covers</button>
-                  <button type="button" aria-pressed={rail === 'list'} onClick={() => setRail('list')}>List</button>
-                </div>
-
-                {rail === 'covers' && (
-                  <>
-                    <div className="orbit-viewmenu-block">
-                      <span className="orbit-viewmenu-sublabel">Covers in a row</span>
-                      <div className="orbit-seg" role="group" aria-label="Covers in a row">
-                        {SHELF_ROWS.map((count) => (
-                          <button
-                            key={count}
-                            type="button"
-                            aria-pressed={shelfRows === count}
-                            onClick={() => setShelfRows(count)}
-                          >
-                            {count}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="orbit-viewmenu-row">
-                      <span>Cover size</span>
-                      <span className="orbit-viewmenu-value">{shelfWidth} px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={MIN_SHELF_WIDTH}
-                      max={MAX_SHELF_WIDTH}
-                      step={4}
-                      value={shelfWidth}
-                      onChange={(event) => setShelfWidth(Number(event.target.value))}
-                      className="orbit-range w-full cursor-pointer"
-                      aria-label="Shelf cover size"
-                    />
-
-                    <div className="orbit-viewmenu-block">
-                      <span className="orbit-viewmenu-sublabel">Cover shape</span>
-                      <ShapeRow value={shelfShape} onChange={setShelfShape} />
-                    </div>
-
-                    <div className="orbit-viewmenu-block">
-                      <span className="orbit-viewmenu-sublabel">Cover fit</span>
-                      <div className="orbit-seg" role="group" aria-label="How artwork fills its frame">
-                        <button type="button" aria-pressed={shelfFit === 'auto'} onClick={() => setShelfFit('auto')}>Auto</button>
-                        <button type="button" aria-pressed={shelfFit === 'cover'} onClick={() => setShelfFit('cover')}>Fill</button>
-                        <button type="button" aria-pressed={shelfFit === 'contain'} onClick={() => setShelfFit('contain')}>Fit whole</button>
-                      </div>
-                    </div>
-
-                    <div className="orbit-viewmenu-row">
-                      <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Fill the row</p></div><button type="button" role="switch" aria-checked={shelfFill} onClick={() => setShelfFill(!shelfFill)} className="orbit-switch" data-on={shelfFill || undefined}><i /></button></div>
-                    </div>
-                  </>
-                )}
-
-                <div className="orbit-viewmenu-block">
-                  <span className="orbit-viewmenu-sublabel">Game page sections</span>
-                  <div className="orbit-minichips" role="group" aria-label="Game page sections">
-                    {SECTIONS.map((section) => (
-                      <button
-                        key={section.value}
-                        type="button"
-                        aria-pressed={sections.includes(section.value)}
-                        onClick={() => toggleSection(section.value)}
-                      >
-                        {section.label}
-                      </button>
-                    ))}
+              <div className="orbit-viewmenu orbit-viewmenu-wide" role="dialog" aria-label="Observatory settings">
+                <CollapsibleGroup title="Shelf layout" defaultOpen>
+                  <div className="orbit-seg" role="group" aria-label="How the shelf is drawn">
+                    <button type="button" aria-pressed={rail === 'covers'} onClick={() => setRail('covers')}>Covers</button>
+                    <button type="button" aria-pressed={rail === 'list'} onClick={() => setRail('list')}>List</button>
                   </div>
-                </div>
-
-                <span className="orbit-viewmenu-label">Shape</span>
-                <CornersRow value={corners} onChange={setCorners} />
-
-                <span className="orbit-viewmenu-label">Behaviour</span>
-                <div className="orbit-viewmenu-row">
-                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div>
-                </div>
-                <div className="orbit-viewmenu-row">
-                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div>
-                </div>
-                <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>
-                  Reset to defaults
-                </button>
-
-                {rail === 'list' && (
-                  <div className="orbit-viewmenu-block">
-                    <div className="orbit-viewmenu-row">
-                      <span>Row size</span>
-                      <span className="orbit-viewmenu-value">{listSize} px</span>
+                  {rail === 'covers' ? (
+                    <>
+                      <div className="orbit-viewmenu-block">
+                        <span className="orbit-viewmenu-sublabel">Covers in a row</span>
+                        <div className="orbit-seg" role="group" aria-label="Covers in a row">
+                          {SHELF_ROWS.map((count) => (
+                            <button key={count} type="button" aria-pressed={shelfRows === count} onClick={() => setShelfRows(count)}>{count}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="orbit-viewmenu-row"><span>Cover size</span><span className="orbit-viewmenu-value">{shelfWidth} px</span></div>
+                      <input type="range" min={MIN_SHELF_WIDTH} max={MAX_SHELF_WIDTH} step={4} value={shelfWidth} onChange={(event) => setShelfWidth(Number(event.target.value))} className="orbit-range w-full cursor-pointer" aria-label="Shelf cover size" />
+                      <label className="orbit-viewmenu-check"><input type="checkbox" checked={shelfFill} onChange={() => setShelfFill(!shelfFill)} /> Fill the row</label>
+                    </>
+                  ) : (
+                    <div className="orbit-viewmenu-block">
+                      <div className="orbit-viewmenu-row"><span>Row size</span><span className="orbit-viewmenu-value">{listSize} px</span></div>
+                      <input type="range" min={LIST_MIN} max={LIST_MAX} step={2} value={listSize} onChange={(event) => setListSize(Number(event.target.value))} className="orbit-range w-full cursor-pointer" aria-label="Row size" />
                     </div>
-                    <input
-                      type="range"
-                      min={LIST_MIN}
-                      max={LIST_MAX}
-                      step={2}
-                      value={listSize}
-                      onChange={(event) => setListSize(Number(event.target.value))}
-                      className="orbit-range w-full cursor-pointer"
-                      aria-label="Row size"
-                    />
-                  </div>
-                )}
-
+                  )}
+                </CollapsibleGroup>
+                <CollapsibleGroup title="Covers">
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Cover shape</span><ShapeRow value={shelfShape} onChange={setShelfShape} /></div>
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Cover fit</span><div className="orbit-seg" role="group" aria-label="How artwork fills its frame"><button type="button" aria-pressed={shelfFit === 'auto'} onClick={() => setShelfFit('auto')}>Auto</button><button type="button" aria-pressed={shelfFit === 'cover'} onClick={() => setShelfFit('cover')}>Fill</button><button type="button" aria-pressed={shelfFit === 'contain'} onClick={() => setShelfFit('contain')}>Fit whole</button></div></div>
+                  <CornersRow value={corners} onChange={setCorners} />
+                </CollapsibleGroup>
+                <CollapsibleGroup title="Game page">
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Sections</span><div className="orbit-minichips" role="group" aria-label="Game page sections">{SECTIONS.map((section) => (<button key={section.value} type="button" aria-pressed={sections.includes(section.value)} onClick={() => toggleSection(section.value)}>{section.label}</button>))}</div></div>
+                </CollapsibleGroup>
+                <CollapsibleGroup title="Behaviour">
+                  <div className="orbit-viewmenu-row"><div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div></div>
+                  <div className="orbit-viewmenu-row"><div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div></div>
+                </CollapsibleGroup>
+                <button type="button" className="orbit-viewmenu-reset" onClick={resetDetails}>Reset to defaults</button>
               </div>
             )}
 
             {viewMenu === 'grid' && (
-              <div className="orbit-viewmenu" role="dialog" aria-label="Grid settings">
-                <div className="orbit-viewmenu-row">
-                  <span>Cover size</span>
-                  <span className="orbit-viewmenu-value">{gridWidth} px</span>
-                </div>
-                <input
-                  type="range"
-                  min={MIN_COVER_WIDTH}
-                  max={MAX_COVER_WIDTH}
-                  step={5}
-                  value={gridWidth}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setGridWidth(next);
-                    setCoverWidth(next);
-                  }}
-                  className="orbit-range w-full cursor-pointer"
-                  aria-label="Cover size"
-                />
-
-                <div className="orbit-viewmenu-block">
-                  <span className="orbit-viewmenu-sublabel">Under the cover</span>
-                  <div className="orbit-seg" role="group" aria-label="Under the cover">
-                    {GRID_LABELS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        title={option.title}
-                        aria-pressed={gridLabel === option.value}
-                        onClick={() => setGridLabel(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="orbit-viewmenu-block">
-                  <span className="orbit-viewmenu-sublabel">Cover shape</span>
-                  <ShapeRow value={gridShape} onChange={setGridShape} />
-                </div>
-
-                <div className="orbit-viewmenu-block">
-                  <span className="orbit-viewmenu-sublabel">Cover fit</span>
-                  <div className="orbit-seg" role="group" aria-label="How artwork fills its frame">
-                    <button type="button" aria-pressed={gridFit === 'auto'} onClick={() => setGridFit('auto')}>Auto</button>
-                    <button type="button" aria-pressed={gridFit === 'cover'} onClick={() => setGridFit('cover')}>Fill</button>
-                    <button type="button" aria-pressed={gridFit === 'contain'} onClick={() => setGridFit('contain')}>Fit whole</button>
-                  </div>
-                </div>
-
-                <span className="orbit-viewmenu-label">Shape</span>
-                <CornersRow value={corners} onChange={setCorners} />
-
-                <span className="orbit-viewmenu-label">Behaviour</span>
-                <div className="orbit-viewmenu-row">
-                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div>
-                </div>
-                <div className="orbit-viewmenu-row">
-                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div>
-                </div>
-                <div className="orbit-viewmenu-row">
-                  <div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Open details on select</p></div><button type="button" role="switch" aria-checked={gridOpen} onClick={() => setGridOpen(!gridOpen)} className="orbit-switch" data-on={gridOpen || undefined}><i /></button></div>
-                </div>
-                {sort === 'manual' && (
-                  <p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>
-                )}
-                <button type="button" className="orbit-viewmenu-reset" onClick={resetGrid}>
-                  Reset to defaults
-                </button>
+              <div className="orbit-viewmenu orbit-viewmenu-wide" role="dialog" aria-label="Grid settings">
+                <CollapsibleGroup title="Sizing" defaultOpen>
+                  <div className="orbit-viewmenu-row"><span>Cover size</span><span className="orbit-viewmenu-value">{gridWidth} px</span></div>
+                  <input type="range" min={MIN_COVER_WIDTH} max={MAX_COVER_WIDTH} step={5} value={gridWidth} onChange={(event) => { const next = Number(event.target.value); setGridWidth(next); setCoverWidth(next); }} className="orbit-range w-full cursor-pointer" aria-label="Cover size" />
+                </CollapsibleGroup>
+                <CollapsibleGroup title="Covers">
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Under the cover</span><div className="orbit-seg" role="group" aria-label="Under the cover">{GRID_LABELS.map((option) => (<button key={option.value} type="button" title={option.title} aria-pressed={gridLabel === option.value} onClick={() => setGridLabel(option.value)}>{option.label}</button>))}</div></div>
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Cover shape</span><ShapeRow value={gridShape} onChange={setGridShape} /></div>
+                  <div className="orbit-viewmenu-block"><span className="orbit-viewmenu-sublabel">Cover fit</span><div className="orbit-seg" role="group" aria-label="How artwork fills its frame"><button type="button" aria-pressed={gridFit === 'auto'} onClick={() => setGridFit('auto')}>Auto</button><button type="button" aria-pressed={gridFit === 'cover'} onClick={() => setGridFit('cover')}>Fill</button><button type="button" aria-pressed={gridFit === 'contain'} onClick={() => setGridFit('contain')}>Fit whole</button></div></div>
+                  <CornersRow value={corners} onChange={setCorners} />
+                </CollapsibleGroup>
+                <CollapsibleGroup title="Behaviour">
+                  <div className="orbit-viewmenu-row"><div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Lift on hover</p></div><button type="button" role="switch" aria-checked={lift} onClick={() => setLift(!lift)} className="orbit-switch" data-on={lift || undefined}><i /></button></div></div>
+                  <div className="orbit-viewmenu-row"><div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Tint on hover</p></div><button type="button" role="switch" aria-checked={coverTint} onClick={() => setCoverTint(!coverTint)} className="orbit-switch" data-on={coverTint || undefined}><i /></button></div></div>
+                  <div className="orbit-viewmenu-row"><div className="orbit-setrow !border-0 !p-0"><div className="orbit-setrow-copy"><p className="orbit-setrow-label">Open details on select</p></div><button type="button" role="switch" aria-checked={gridOpen} onClick={() => setGridOpen(!gridOpen)} className="orbit-switch" data-on={gridOpen || undefined}><i /></button></div></div>
+                  {sort === 'manual' && (<p className="orbit-viewmenu-note">Drag one cover onto another to put it in your order.</p>)}
+                </CollapsibleGroup>
+                <button type="button" className="orbit-viewmenu-reset" onClick={resetGrid}>Reset to defaults</button>
               </div>
             )}
           </div>
@@ -1197,6 +1077,19 @@ export function LibraryView({
 }
 
 /** Four sketches, in the shapes covers come in. */
+function CollapsibleGroup({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className="orbit-viewgroup">
+      <button type="button" className="orbit-viewgroup-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span>{title}</span>
+        <ChevronDown className={`size-3.5 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="orbit-viewgroup-body">{children}</div>}
+    </div>
+  );
+}
+
 function ShapeRow({ value, onChange }: { value: CoverShape; onChange: (next: CoverShape) => void }) {
   return (
     <div className="orbit-shapes" role="group" aria-label="Cover shape">

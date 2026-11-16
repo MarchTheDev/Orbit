@@ -264,10 +264,10 @@ export function SessionsView({
                     className="flex min-w-0 items-center gap-3 rounded-xl text-left"
                     title={`Open ${row.gameTitle}`}
                   >
-                    {game ? <Cover game={game} className="h-24 w-16 shrink-0 rounded-lg shadow-md" /> : <span className="grid h-24 w-16 shrink-0 place-items-center rounded-lg bg-panel2 text-accent"><Clock className="size-5" /></span>}
+                    {game ? <Cover game={game} className="h-32 w-24 shrink-0 rounded-lg shadow-md" /> : <span className="grid h-32 w-24 shrink-0 place-items-center rounded-lg bg-panel2 text-accent"><Clock className="size-5" /></span>}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-semibold">{row.gameTitle}</span>
-                      <span className="mt-1 block text-xs text-muted">
+                      <span className="block truncate text-[15px] font-semibold leading-tight">{row.gameTitle}</span>
+                      <span className="mt-1 block text-[13px] leading-snug text-muted">
                         {fmtDateTime(row.startedAt)}
                         {row.playthroughName ? ` · ${row.playthroughName}` : ''}
                       </span>
@@ -341,7 +341,7 @@ export function SessionsView({
                   className="orbit-row cursor-pointer"
                 >
                   <span className="w-5 shrink-0 text-center font-mono text-xs text-muted">{String(index + 1).padStart(2, '0')}</span>
-                  <Cover game={game} className="size-14 shrink-0 rounded-xl" />
+                  <Cover game={game} className="size-16 shrink-0 rounded-xl" />
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5">
                       <span className="truncate text-sm font-medium">{game.title}</span>

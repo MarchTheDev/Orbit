@@ -170,27 +170,21 @@ function MetadataSources({ settings, setSettings }: { settings: Settings; setSet
   const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
 
 function SourceIcon({ id }: { id: string }) {
-  const map: Record<string, string> = {
-    steam: "S",
-    steamgriddb: "G",
-    hltb: "H",
-    lutris: "L",
-    libretro: "R",
-    protondb: "P",
-    web: "W",
+  const icons: Record<string, { bg: string; fg: string; label: string; svg: string }> = {
+    steam: { bg: "#1b2838", fg: "#fff", label: "Steam", svg: '<path d="M11.5 3a8.5 8.5 0 1 0 5.2 15.2L15 16.4a6.5 6.5 0 1 1 1.8-5.2H11.5V3z" fill="currentColor"/>' },
+    steamgriddb: { bg: "#0f172a", fg: "#ff4a4a", label: "SGDB", svg: '<rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M8 9h8M8 12h6M8 15h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+    hltb: { bg: "#0e2a3a", fg: "#3ad2c4", label: "HLTB", svg: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>' },
+    lutris: { bg: "#ff6d00", fg: "#fff", label: "Lutris", svg: '<path d="M5 8l7-3 7 3-7 3-7-3zm0 5l7 3 7-3M5 13l7 3 7-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
+    libretro: { bg: "#1e1b4b", fg: "#a5b4fc", label: "Retro", svg: '<rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 5v3M12 16v3M5 12h3M16 12h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
+    protondb: { bg: "#3b0764", fg: "#c4b5fd", label: "Proton", svg: '<path d="M12 4L4 8v8l8 4 8-4V8l-8-4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M4 8l8 4 8-4M12 12v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+    web: { bg: "#0f172a", fg: "#60a5fa", label: "Web", svg: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
   };
-  const colors: Record<string, string> = {
-    steam: "#1b2838",
-    steamgriddb: "#ff4a4a",
-    hltb: "#3a9ad9",
-    lutris: "#ff6d00",
-    libretro: "#1e3a8a",
-    protondb: "#8b5cf6",
-    web: "#0f172a",
-  };
-  const letter = map[id] ?? id.slice(0,1).toUpperCase();
-  const bg = colors[id] ?? "var(--c-panel2)";
-  return <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-[11px] font-bold text-white" style={{ background: bg }}>{letter}</span>;
+  const entry = icons[id] ?? { bg: "var(--c-panel2)", fg: "var(--c-text)", label: id.slice(0,2).toUpperCase(), svg: "" };
+  return (
+    <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-line text-white" style={{ background: entry.bg, color: entry.fg }} aria-label={entry.label} title={entry.label}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden dangerouslySetInnerHTML={{ __html: entry.svg }} />
+    </span>
+  );
 }
 
 
@@ -486,7 +480,7 @@ const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
 
 const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
-  { label: 'Fonts and typeface', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
+  { label: 'Fonts', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
@@ -1382,7 +1376,7 @@ export function SettingsView({
               </span>
               <span className="orbit-themecard-name">
                 {t.name}
-                {settings.theme === t.id && <Check className="size-3.5 text-accent" />}
+                
               </span>
             </button>
           ))}
@@ -1391,7 +1385,7 @@ export function SettingsView({
               type="button"
               onClick={() => onOpenThemeManager?.()}
               className="orbit-themecard"
-              data-chosen
+              data-chosen={settings.theme === featuredCustomTheme.id || undefined}
               aria-label={`Edit custom themes. Featured theme: ${featuredCustomTheme.name}`}
             >
               <span className="orbit-themecard-stage" style={{ background: featuredCustomTheme.bg }}>
@@ -1415,10 +1409,10 @@ export function SettingsView({
             </button>
           )}
         </div>
-        <SubHead>Typeface</SubHead>
+        <SubHead>Fonts</SubHead>
         {/* Each face is shown by writing in it, at the size the app writes at,
             rather than by a swatch card with two letters on it. */}
-        <div className="orbit-fontlist" role="radiogroup" aria-label="Typeface">
+        <div className="orbit-fontlist" role="radiogroup" aria-label="Fonts">
           {FONTS.map((font) => {
             const chosen = (settings.fontFamily ?? 'system') === font.id;
             return (
@@ -1434,9 +1428,7 @@ export function SettingsView({
               >
                 <span className="orbit-fontrow-name">{font.name}</span>
                 <span className="orbit-fontrow-sample">{font.sample}</span>
-                <span className="orbit-fontrow-tick" aria-hidden>
-                  {chosen ? '✓' : ''}
-                </span>
+                <span className="orbit-fontrow-tick" aria-hidden style={{ display: 'none' }} />
               </button>
             );
           })}

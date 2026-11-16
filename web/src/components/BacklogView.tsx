@@ -627,22 +627,22 @@ function Section({
                   </span>
                 )}
                 <button onClick={() => onSelect(g.id, readOnlyMoves === true)} className="shrink-0 rounded-xl" title={`Open ${g.title}`}>
-                  <Cover game={g} fit="cover" className="h-20 w-[3.2rem] shrink-0 rounded-lg transition group-hover:scale-105 [&_span]:text-sm" />
+                  <Cover game={g} fit="cover" className="h-28 w-[4.5rem] shrink-0 rounded-lg transition group-hover:scale-105 [&_span]:text-sm" />
                 </button>
                 <div className="min-w-0 flex-1">
                   <button
                     onClick={() => onSelect(g.id, readOnlyMoves === true)}
-                    className="block max-w-full truncate rounded-lg text-left text-sm font-semibold hover:text-accent"
+                    className="block max-w-full truncate rounded-lg text-left text-[14px] font-semibold leading-tight hover:text-accent"
                   >
                     {g.title}
                   </button>
                   {isNotOwned ? (
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12.5px] leading-snug text-muted">
                       <span>{g.planned ? 'not owned yet' : 'not installed here'}</span>
                       {g.planPlatform && <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px]">{g.planPlatform}</span>}
                     </p>
                   ) : (
-                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12.5px] leading-snug text-muted">
                       <span>{fmtMinutes(g.playSecs / 60)} played</span>
                       {/* Owned, but nowhere on the machine: it belongs to this
                           page until it has a folder, not to the library. */}
