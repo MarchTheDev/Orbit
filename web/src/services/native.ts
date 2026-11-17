@@ -92,37 +92,60 @@ export function saveGame(game: Game): Promise<void> {
   return call('db_upsert_game', { game }, () => undefined);
 }
 
-export interface ReshadeStatus {
-  installDir: string | null;
-  api: string | null;
-  detected: boolean;
+/**
+ * ReShade, as one switch.
+ *
+ * The page only ever needs to know whether it is on, where it went, and why it
+ * cannot be switched if it cannot - so that is the whole shape. There is no
+ * "managed" state to adopt, no API to choose and no preset to pair: Orbit reads
+ * the API from the executable, keeps whatever it replaces, and turns the switch
+ * back into exactly the folder the game had.
+ */
+export interface ReshadeState {
+  folder: string | null;
+  state: 'on' | 'off' | 'missing';
+  proxy: string | null;
+  file: string | null;
   managed: boolean;
-  enabled: boolean;
+  backup: boolean;
   preset: boolean;
-  originalBackup: boolean;
+  supported: boolean;
+  reason: string | null;
 }
 
-const EMPTY_RESHADE: ReshadeStatus = { installDir: null, api: null, detected: false, managed: false, enabled: false, preset: false, originalBackup: false };
+const EMPTY_RESHADE: ReshadeState = {
+  folder: null,
+  state: 'missing',
+  proxy: null,
+  file: null,
+  managed: false,
+  backup: false,
+  preset: false,
+  supported: true,
+  reason: null,
+};
 
-/** Inspect, install, adopt and manage the ReShade files beside a game. */
-export function getReshadeStatus(gameId: string): Promise<ReshadeStatus> {
-  return call('reshade_status', { gameId }, () => EMPTY_RESHADE);
+/** What ReShade is doing for this game right now. Never changes anything. */
+export function getReshadeState(gameId: string): Promise<ReshadeState> {
+  return call('reshade_state', { gameId }, async () => EMPTY_RESHADE);
 }
-export function applyReshade(gameId: string, dllPath: string, presetPath: string, api: string): Promise<string> {
-  return call('apply_reshade', { gameId, dllPath, presetPath: presetPath || null, api }, () => {
-    throw new Error('Applying ReShade needs the Orbit desktop app.');
+
+/** The switch: on puts ReShade into the game's folder, off takes it back out. */
+export function setReshade(gameId: string, on: boolean): Promise<ReshadeState> {
+  return call('reshade_set', { gameId, on }, async () => {
+    if (!on) return EMPTY_RESHADE;
+    throw new Error('Turning ReShade on needs the Orbit desktop app.');
   });
 }
-export function adoptReshade(gameId: string, api: string): Promise<ReshadeStatus> {
-  return call('adopt_reshade', { gameId, api }, () => EMPTY_RESHADE);
-}
-export function setReshadeEnabled(gameId: string, enabled: boolean): Promise<ReshadeStatus> {
-  return call('set_reshade_enabled', { gameId, enabled }, () => EMPTY_RESHADE);
-}
-export function removeReshade(gameId: string): Promise<ReshadeStatus> {
-  return call('remove_reshade', { gameId }, () => EMPTY_RESHADE);
+
+/** The same switch, using a ReShade DLL the player already has. */
+export function useReshadeFile(gameId: string, dll: string): Promise<ReshadeState> {
+  return call('reshade_use_file', { gameId, dll }, async () => {
+    throw new Error('Using your own ReShade DLL needs the Orbit desktop app.');
+  });
 }
 
+/** Start the game through one of its named alternative launch profiles. */
 export function deleteGame(id: string): Promise<void> {
   return call('db_delete_game', { id }, () => undefined);
 }
@@ -355,6 +378,17 @@ export function startSession(gameId: string, category = 'Main story'): Promise<A
 /** Launch a saved tool from the game's Play arrow, optionally with its own timer. */
 export function startGameCompanion(gameId: string, index: number): Promise<ActiveSession | null> {
   return call('start_game_companion', { gameId, index }, async () => null);
+}
+
+/**
+ * Start a game through one of its named alternative launches.
+ *
+ * A profile changes how the game starts, not what is started, so this opens a
+ * real session for the same game - the difference is the arguments, the
+ * working directory and the programs that come with it.
+ */
+export function startGameAlternative(gameId: string, index: number): Promise<ActiveSession | null> {
+  return call('start_game_alternative', { gameId, index }, async () => null);
 }
 
 /** Stop the running session and write the time into the library. */

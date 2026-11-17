@@ -298,6 +298,10 @@ function SourceIcon({ id, label, url }: { id: string; label?: string; url?: stri
     <div className="space-y-2">
       <div className="space-y-1">
         {sources.map((src) => {
+          // A line written by an older build about needing a key is not shown
+          // and is not carried forward: the source below says what it does,
+          // and a key it may want is the row further down this page.
+          const note = src.note && /needs?\s+key/i.test(src.note) ? null : src.note;
           return (
           <div
             key={src.id}
@@ -306,7 +310,7 @@ function SourceIcon({ id, label, url }: { id: string; label?: string; url?: stri
             <SourceIcon id={src.id} label={src.label} url={src.url} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-fg">{src.label}</span>
-              {src.note && <span className="block truncate text-[11px] text-muted">{src.note}</span>}
+              {note && <span className="block truncate text-[11px] text-muted">{note}</span>}
               {src.url && <span className="block truncate font-mono text-[10px] text-muted">{src.url}</span>}
             </span>
             {src.kind === "custom" ? (

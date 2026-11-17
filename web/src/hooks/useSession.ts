@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActiveSession } from '../types';
-import { activeSession, startGameCompanion as runGameCompanion, startSession, stopSession } from '../services/native';
+import { activeSession, startGameAlternative, startGameCompanion as runGameCompanion, startSession, stopSession } from '../services/native';
 import { isNative } from '../services/native';
 
 interface TauriEvent {
@@ -117,6 +117,29 @@ export function useSession(onEnded: (gameId: string) => void) {
     }
   }, []);
 
+  /**
+   * Start the game through one of its saved launch profiles.
+   *
+   * It opens a session like Play does, because it *is* the game - just with
+   * another save folder or another set of arguments. Tools are the other
+   * command, and they only open a session when the player asked them to.
+   */
+  const runAlternative = useCallback(async (gameId: string, index: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const started = await startGameAlternative(gameId, index);
+      if (started) setSession(started);
+      return started;
+    } catch (e) {
+      setError(String(e));
+      return null;
+    } finally {
+      setBusy(false);
+      setNotice(null);
+    }
+  }, []);
+
   const stop = useCallback(async () => {
     const current = session;
     if (!current) return;
@@ -131,5 +154,5 @@ export function useSession(onEnded: (gameId: string) => void) {
     }
   }, [session]);
 
-  return { session, busy, notice, error, play, stop, runCompanion, native: isNative() };
+  return { session, busy, notice, error, play, stop, runCompanion, runAlternative, native: isNative() };
 }

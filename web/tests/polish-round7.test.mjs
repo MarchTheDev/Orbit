@@ -44,9 +44,11 @@ check('Export selection uses an outline-only state rather than a filled accent o
 check('The Saves tab automatically searches and exposes the existing PCGamingWiki path suggestions',
   edit.includes('findSave(game.title, saveHintsOf(game))') && edit.includes('suggestSaves(game.title)') && app.includes('onSaveDir={(path)'));
 check('Launch companions include programs, shell scripts, browser pages, and separate arguments',
-  launch.includes('Add program / script') && launch.includes('Add web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
-check('Tools manage ReShade installs, presets, API proxies, adoption, toggling, and backups',
-  edit.includes('Install and manage') && edit.includes('Adopt existing') && edit.includes('Remove / restore') && edit.includes('Graphics API') && edit.includes('setReshadeEnabled') && nativeLib.includes('fn apply_reshade(') && nativeLib.includes('fn adopt_reshade(') && nativeLib.includes('fn set_reshade_enabled(') && nativeLib.includes('backup_reshade_original(&destination)'));
+  launch.includes('Program or script') && launch.includes('Web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
+check('Tools are one ReShade switch: on, off, or your own DLL, with nothing to configure first',
+  edit.includes('Use ReShade with this game') && edit.includes('setReshade(game.id, next)') && edit.includes('Use a ReShade DLL I already have') &&
+    !edit.includes('Graphics API') && !edit.includes('Adopt existing') &&
+    nativeLib.includes('fn reshade_state(') && nativeLib.includes('fn reshade_set(') && nativeLib.includes('fn reshade_use_file('));
 check('Save discovery tries editionless and Roman-numeral title variants like GhostHunterPro',
   native.includes('definitive edition') && native.includes('Part I') && native.includes('save_search_tries_editionless_and_roman_numeral_title_variants'));
 (globalThis).__orbitFailures = ((globalThis.__orbitFailures ?? 0) + failures);

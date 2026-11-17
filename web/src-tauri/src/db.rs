@@ -121,6 +121,32 @@ pub struct Companion {
     /// If run from the Play dropdown, count it as a session for this game.
     #[serde(default)]
     pub counts_as_playing: bool,
+    /// What the player called this profile. Empty for a plain program.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `alongside` rides with every launch; `alternative` is picked from Play.
+    #[serde(default)]
+    pub when: Option<String>,
+    /// Programs (or a `http` page) started when this profile is chosen.
+    #[serde(default)]
+    pub starts: Vec<String>,
+    /// Arguments added to the game's own for this profile.
+    #[serde(default)]
+    pub extra_args: Option<String>,
+    /// A different working directory, such as a different mod set.
+    #[serde(default)]
+    pub working_dir: Option<String>,
+}
+
+impl Companion {
+    /// Whether this entry rides along with every launch.
+    ///
+    /// Everything saved before profiles existed is a program started with the
+    /// game, and `when` did not exist to say so - so a missing value means
+    /// alongside, not a thing to be offered and ignored.
+    pub fn is_alongside(&self) -> bool {
+        !matches!(self.when.as_deref(), Some("alternative"))
+    }
 }
 
 /// One play session.

@@ -1398,12 +1398,16 @@ export function TvMode({
           </span>
         )}
 
+        {/* The page switch sits in the middle of the bar, which is where a
+            console puts the thing that changes the page: the left end is who
+            you are and what is playing, the right end is the room's own
+            controls. */}
         <div className="orbit-deck-pagetabs" role="group" aria-label="Stardeck page">
           <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pagetab">Deck</button>
           <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pagetab">Library</button>
         </div>
 
-        <span className="flex-1" />
+        <span className="orbit-deck-barspacer" aria-hidden />
 
         {prefs.clock && (
           <span className="hidden flex-col items-end leading-tight sm:flex">
@@ -1499,20 +1503,65 @@ export function TvMode({
           </div>
         ) : (
           view === 'library' ? (
-            <section className="mx-auto w-full max-w-[1500px] flex-1 overflow-y-auto px-6 pb-10 pt-4 sm:px-10" aria-label="Stardeck library">
-              <div className="mb-6 flex items-end justify-between gap-4">
-                <div><p className="text-xs font-bold uppercase tracking-[.28em] text-white/40">Your collection</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-5xl">Library</h1></div>
-                <p className="text-sm text-white/45">{list.length} games · choose one to play</p>
-              </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-6">
+            <section className="orbit-tv-library" aria-label="Stardeck library">
+              <header className="orbit-tv-library-head">
+                <div className="min-w-0">
+                  <p className="orbit-tv-library-kicker">Your collection</p>
+                  <h1>Library</h1>
+                </div>
+                <div className="orbit-tv-library-facts">
+                  <p>
+                    <b>{list.length}</b>
+                    {list.length === 1 ? ' game' : ' games'}
+                  </p>
+                  <p className="orbit-tv-library-hint">Pick one to look at, press it again to play.</p>
+                </div>
+              </header>
+              <div className="orbit-tv-library-grid">
                 {list.map((game, n) => (
-                  <button key={game.id} data-tv-cover={n} data-tv-library-cover type="button" onFocus={() => setSelectedId(game.id)} onClick={() => {
-                    setSelectedId(game.id);
-                    if (padJustActivated(400)) onPlay(game);
-                  }} onDoubleClick={() => onPlay(game)} aria-current={game.id === active.id ? 'true' : undefined} aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title} className="tv-library-game group min-w-0 text-left">
-                    <span className={cn('tv-library-game-art block aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-xl transition group-hover:-translate-y-1 group-hover:border-white/30', game.id === active.id && 'is-current')}><Cover game={game} className="size-full" fit="cover" /></span>
-                    {prefs.coverLabel === 'name' && <span className="mt-2 block truncate text-sm font-semibold text-white/85">{game.title}</span>}
-                    {prefs.coverLabel === 'info' && <span className="mt-2 block truncate text-xs text-white/60">{game.meta?.releaseYear ?? game.meta?.genres?.[0] ?? game.status}</span>}
+                  <button
+                    key={game.id}
+                    data-tv-cover={n}
+                    data-tv-library-cover
+                    type="button"
+                    onFocus={() => setSelectedId(game.id)}
+                    onClick={() => {
+                      // A mouse is looking; a pad is choosing. The same press,
+                      // told apart by where it came from.
+                      setSelectedId(game.id);
+                      if (padJustActivated(400)) onPlay(game);
+                    }}
+                    onDoubleClick={() => onPlay(game)}
+                    aria-current={game.id === active.id ? 'true' : undefined}
+                    aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title}
+                    className="tv-library-game group min-w-0 text-left"
+                  >
+                    <span
+                      className={cn(
+                        'tv-library-game-art block overflow-hidden bg-white/5 shadow-xl transition',
+                        game.id === active.id && 'is-current',
+                      )}
+                    >
+                      <Cover game={game} className="size-full" fit="cover" />
+                      {game.id === runningId && (
+                        <span className="tv-library-game-live">
+                          <i aria-hidden />
+                          Playing
+                        </span>
+                      )}
+                    </span>
+                    {prefs.coverLabel !== 'none' && (
+                      <span className="tv-library-game-name">
+                        {game.title}
+                      </span>
+                    )}
+                    {prefs.coverLabel === 'info' && (
+                      <span className="tv-library-game-info">
+                        {[game.meta?.releaseYear ?? null, game.meta?.genres?.[0] ?? null, fmtMinutes(game.playSecs / 60)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1540,6 +1589,10 @@ export function TvMode({
                 />
               )}
               <div aria-hidden className="orbit-deck-stagescrim" />
+              {/* The last line of the stage is not a rule: the artwork fades
+                  into the colour of the shelf under it, so the two halves of
+                  the deck meet without a border between them. */}
+              <div aria-hidden className="orbit-deck-stagefade" />
               <div
                 aria-hidden
                 className="orbit-deck-stagewash"
@@ -1672,16 +1725,34 @@ export function TvMode({
               />
               <div className="orbit-deck-indexhead">
                 <h2>Deck</h2>
-                <span className="orbit-num">
-                  {at + 1} / {list.length}
+                {/* The games either side of the one on the stage, named. The
+                    three covers say what they look like; this says what they
+                    are, which is the thing a person reading a shelf from a
+                    sofa cannot do at a glance. */}
+                <span className="orbit-deck-neighbour" aria-hidden>
+                  {list.length > 1
+                    ? list[(at - 1 + list.length) % list.length].title
+                    : ''}
+                </span>
+                <span className="orbit-deck-counter">
+                  <b>{at + 1}</b>
+                  <i aria-hidden>/</i>
+                  {list.length}
+                </span>
+                <span className="orbit-deck-neighbour is-next" aria-hidden>
+                  {list.length > 1 ? list[(at + 1) % list.length].title : ''}
                 </span>
 
-                <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
-                  <ChevronLeft className="size-4" />
-                </button>
-                <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game" className="orbit-deck-step">
-                  <ChevronRight className="size-4" />
-                </button>
+                <span className="orbit-deck-indexspacer" aria-hidden />
+
+                <div className="orbit-deck-steps">
+                  <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
+                    <ChevronLeft className="size-4" />
+                  </button>
+                  <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game" className="orbit-deck-step">
+                    <ChevronRight className="size-4" />
+                  </button>
+                </div>
 
                 <button
                   onClick={() => {

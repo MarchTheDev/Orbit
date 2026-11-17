@@ -807,7 +807,7 @@ export default function App() {
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);
 
-  const { session, play, stop, runCompanion, busy, notice, error } = useSession(onSessionEnded);
+  const { session, play, stop, runCompanion, runAlternative, busy, notice, error } = useSession(onSessionEnded);
 
   // A controller moves the real focus. It only polls after one is connected.
   useGamepad();
@@ -1219,6 +1219,23 @@ export default function App() {
     if (session) return;
     await flush();
     const started = await runCompanion(g.id, index);
+    if (!started) return;
+    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
+      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
+      .catch(() => toast({ text: `Could not save the Journal entry for ${g.title}.` }));
+    updateGame(g.id, { lastPlayed: new Date().toISOString(), status: g.status === 'backlog' ? 'playing' : g.status });
+  };
+
+  /**
+   * Start the game through one of its named launch profiles.
+   *
+   * The profile is another way to start the same game, so it counts as playing
+   * it: same session, same Journal line, same last-played date as Play.
+   */
+  const runGameAlternative = async (g: Game, index: number) => {
+    if (session) return;
+    await flush();
+    const started = await runAlternative(g.id, index);
     if (!started) return;
     void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
       .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
@@ -2015,6 +2032,7 @@ export default function App() {
           }}
           onPlay={() => void startGame(selected)}
           onRunCompanion={(index) => void runGameCompanion(selected, index)}
+          onRunLaunch={(index) => void runGameAlternative(selected, index)}
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
           onLeaveBacklog={

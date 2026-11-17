@@ -215,7 +215,18 @@ export interface ProtonRelease {
   installed: boolean;
 }
 
-/** A program Orbit starts at the same time as the game. */
+/**
+ * A program Orbit starts at the same time as the game.
+ *
+ * The same list does two jobs, which is why it is one list rather than two
+ * concepts: a tool that has to be running with the game (Losless Scaling, a
+ * frame-rate limiter, a mod manager) is started alongside every time, and a
+ * profile launch that only applies to one way of starting the game — a
+ * different save directory, a different mod set — is named and picked from the
+ * Play arrow instead. `when` is the difference, and a tool that has always been
+ * started with the game stays "alongside" without anyone having to think about
+ * it.
+ */
 export interface Companion {
   path: string;
   args: string;
@@ -223,6 +234,28 @@ export interface Companion {
   url?: string | null;
   /** When launched from the Play menu, open a tracked session for the game. */
   countsAsPlaying?: boolean;
+  /**
+   * What the player called this profile, when it is one.
+   *
+   * Empty for a program: a program's name is its file. A named profile is
+   * offered by name in the Play arrow and is never started on its own, because
+   * "start Lossless Scaling" is not a way to play the game.
+   */
+  name?: string;
+  /**
+   * `alongside` starts with every launch and is never offered on its own;
+   * `alternative` is another way to start the game, offered from Play.
+   *
+   * The field arrived after the list did, so a companion without one is an
+   * `alongside` one — which is every program saved by an older build.
+   */
+  when?: 'alongside' | 'alternative';
+  /** Programs or a web page started when this profile is chosen. */
+  starts?: string[];
+  /** Extra arguments added to the game's own for this profile. */
+  extraArgs?: string;
+  /** A different working directory, such as a different mod set. */
+  workingDir?: string | null;
 }
 
 export interface LaunchInfo {

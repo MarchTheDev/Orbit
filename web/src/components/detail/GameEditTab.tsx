@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Image, RotateCcw, Sparkles } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
-import { adoptReshade, applyReshade, findArtwork, findBackdropArtwork, findSave, getReshadeStatus, isNative, removeReshade, revealInExplorer, saveHintsOf, setReshadeEnabled, suggestSaves, type ReshadeStatus } from '../../services/native';
+import { findArtwork, findBackdropArtwork, findSave, getReshadeState, isNative, revealInExplorer, saveHintsOf, setReshade, suggestSaves, useReshadeFile, type ReshadeState } from '../../services/native';
 import { say } from '../../utils/toast';
 import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
@@ -23,26 +23,25 @@ import { desktopOs } from '../../utils/platform';
  * who wants to fix one of them should not have to work out which page it lives
  * on. Closing this editor keeps the fields. There is no separate save step.
  */
-export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDir = '', onSaveDir }: {
+export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDir = '', onSaveDir, startOn }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
   hideLaunchSettings?: boolean;
   saveDir?: string;
   onSaveDir?: (path: string) => void;
+  /** The page to open on, for a preview that wants to look at one directly. */
+  startOn?: 'details' | 'launch' | 'tools' | 'saves' | 'proton';
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
   const wineTarget = game.launch.kind === 'wine' ? game.launch : null;
-  const [activeTab, setActiveTab] = useState<'details' | 'launch' | 'tools' | 'saves' | 'proton'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'launch' | 'tools' | 'saves' | 'proton'>(startOn ?? 'details');
   const [savePath, setSavePath] = useState(saveDir);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuggestions, setSaveSuggestions] = useState<string[]>([]);
-  const [reshadeDll, setReshadeDll] = useState('');
-  const [reshadePreset, setReshadePreset] = useState('');
-  const [reshadeApi, setReshadeApi] = useState('dxgi');
   const [reshadeBusy, setReshadeBusy] = useState(false);
-  const [reshadeStatus, setReshadeStatus] = useState<ReshadeStatus | null>(null);
+  const [reshade, setReshadeState] = useState<ReshadeState | null>(null);
   const saveAttempted = useRef(false);
 
   const [title, setTitle] = useState(game.title);
@@ -86,15 +85,16 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setSavePath(saveDir), [game.id, saveDir]);
+  // Opening Tools looks at the folder, so the switch is drawn in whatever state
+  // the game is actually in rather than the one Orbit last remembered.
   useEffect(() => {
-    if (activeTab !== 'tools' || !isNative()) return;
+    if (activeTab !== 'tools') return;
     let current = true;
     setReshadeBusy(true);
-    void getReshadeStatus(game.id).then((next) => {
-      if (!current) return;
-      setReshadeStatus(next);
-      if (next.api) setReshadeApi(next.api);
-    }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => { if (current) setReshadeBusy(false); });
+    void getReshadeState(game.id)
+      .then((next) => { if (current) setReshadeState(next); })
+      .catch((error: unknown) => say(error instanceof Error ? error.message : String(error)))
+      .finally(() => { if (current) setReshadeBusy(false); });
     return () => { current = false; };
   }, [activeTab, game.id]);
   useEffect(() => {
@@ -362,59 +362,102 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
       {activeTab === 'tools' && !hideLaunchSettings && (
         <section className="orbit-editsection orbit-reshade-panel">
           <header className="orbit-editsection-head">
-            <h4 className="orbit-editsection-title"><Sparkles className="size-3.5" />ReShade manager</h4>
-            <p className="orbit-editsection-note">Orbit checks the game folder when you open this page, keeps the original proxy and config as restore points, and can switch the managed loader off without deleting it.</p>
+            <h4 className="orbit-editsection-title">
+              <Sparkles className="size-3.5" />
+              ReShade
+            </h4>
+            <p className="orbit-editsection-note">
+              One switch. Orbit reads the game's own program to know which file it loads, keeps whatever was there
+              first, and puts it back when the switch goes off.
+            </p>
           </header>
-          {reshadeStatus && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold">{reshadeStatus.managed ? (reshadeStatus.detected ? (reshadeStatus.enabled ? 'Managed · enabled' : 'Managed · disabled') : 'Managed · loader missing') : reshadeStatus.detected ? 'Existing proxy detected · not yet managed' : 'No ReShade loader detected'}</p>
-                <p className="mt-0.5 truncate text-[11px] text-muted">{reshadeStatus.installDir ?? game.installDir ?? 'Choose this game’s install folder'}{reshadeStatus.api ? ` · ${reshadeStatus.api}.dll` : ''}{reshadeStatus.originalBackup ? ' · original backed up' : ''}</p>
+
+          {reshade ? (
+            <div className="orbit-reshade" data-state={reshade.state}>
+              <div className="orbit-reshade-row">
+                <div className="orbit-reshade-copy">
+                  <p className="orbit-reshade-label">
+                    {reshade.state === 'on' ? 'ReShade is on' : reshade.state === 'off' ? 'ReShade is off' : 'No ReShade here'}
+                    {reshade.proxy ? <span className="orbit-reshade-file">{reshade.proxy}.dll</span> : null}
+                  </p>
+                  <p className="orbit-reshade-hint">
+                    {!reshade.supported
+                      ? reshade.reason ?? 'ReShade is a Windows graphics tool, so this needs a Windows or Wine game.'
+                      : !reshade.folder
+                        ? reshade.reason ?? 'Orbit cannot see a folder for this game yet.'
+                        : reshade.state === 'on'
+                          ? `In ${reshade.folder}${reshade.backup ? ' · the original file is kept beside it' : ''}`
+                          : reshade.state === 'off'
+                            ? 'Turned off: the game starts exactly as it did before.'
+                            : `Ready to go into ${reshade.folder}. Home opens ReShade in game.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={reshade.state === 'on'}
+                  aria-label="Use ReShade with this game"
+                  disabled={reshadeBusy || !reshade.supported || !reshade.folder}
+                  onClick={() => {
+                    const next = reshade.state !== 'on';
+                    setReshadeBusy(true);
+                    void setReshade(game.id, next)
+                      .then((state) => {
+                        setReshadeState(state);
+                        say(next ? 'ReShade is on. Press Home in game to open it.' : 'ReShade is off. The game is as it was.');
+                      })
+                      .catch((error: unknown) => say(error instanceof Error ? error.message : String(error)))
+                      .finally(() => setReshadeBusy(false));
+                  }}
+                  className="orbit-switch"
+                  data-on={reshade.state === 'on' || undefined}
+                >
+                  <i />
+                </button>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {reshadeStatus.managed && reshadeStatus.detected && <button type="button" className={btnGhost} disabled={reshadeBusy} onClick={() => {
-                  setReshadeBusy(true);
-                  void setReshadeEnabled(game.id, !reshadeStatus.enabled).then(setReshadeStatus).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
-                }}>{reshadeStatus.enabled ? 'Disable' : 'Enable'}</button>}
-                {!reshadeStatus.managed && reshadeStatus.detected && <button type="button" className={btnGhost} disabled={reshadeBusy} onClick={() => {
-                  setReshadeBusy(true);
-                  void adoptReshade(game.id, reshadeApi).then((next) => { setReshadeStatus(next); say('Existing ReShade install is now managed by Orbit.'); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
-                }}>Adopt existing</button>}
-                {reshadeStatus.managed && <button type="button" className={`${btnGhost} text-rose-400`} disabled={reshadeBusy} onClick={() => {
-                  if (!window.confirm('Remove Orbit-managed ReShade files and restore the original game files when available?')) return;
-                  setReshadeBusy(true);
-                  void removeReshade(game.id).then((next) => { setReshadeStatus(next); say('ReShade removed; original files restored when available.'); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
-                }}>Remove / restore</button>}
-              </div>
+
+              {reshade.supported && reshade.folder && (
+                <div className="orbit-reshade-foot">
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    disabled={reshadeBusy}
+                    onClick={() =>
+                      void pickFile('Choose a ReShade DLL you already have', ['dll'], undefined).then((path) => {
+                        if (!path) return;
+                        setReshadeBusy(true);
+                        void useReshadeFile(game.id, path)
+                          .then((state) => {
+                            setReshadeState(state);
+                            say('ReShade is on, using your own DLL.');
+                          })
+                          .catch((error: unknown) => say(error instanceof Error ? error.message : String(error)))
+                          .finally(() => setReshadeBusy(false));
+                      })
+                    }
+                  >
+                    Use a ReShade DLL I already have
+                  </button>
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    onClick={() => void revealInExplorer(reshade.folder ?? '')}
+                  >
+                    <FolderOpen className="size-3.5" />
+                    Open the game's folder
+                  </button>
+                </div>
+              )}
+
+              <p className="orbit-reshade-caution">
+                Turning it on downloads ReShade once and installs it into the game's own folder. ReShade
+                draws over the game, so some anti-cheat systems read it as tampering — worth checking the game's rules
+                before using it online.
+              </p>
             </div>
+          ) : (
+            <p className="orbit-reshade-hint">{reshadeBusy ? 'Looking at the game folder…' : 'ReShade was not checked.'}</p>
           )}
-          <div className="orbit-edit-facts">
-            <label className="block sm:col-span-2">
-              <span className={labelCls}>ReShade DLL package</span>
-              <div className="flex gap-2">
-                <input className={inputCls} value={reshadeDll} onChange={(event) => setReshadeDll(event.target.value)} placeholder="Choose the ReShade DLL from its installer folder" spellCheck={false} />
-                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFile('Choose ReShade DLL', ['dll']).then((path) => path && setReshadeDll(path))}><FolderOpen className="size-3.5" />Browse</button>}
-              </div>
-            </label>
-            <label className="block">
-              <span className={labelCls}>Graphics API</span>
-              <Select value={reshadeApi} onChange={setReshadeApi} ariaLabel="ReShade graphics API" options={[{ value: 'dxgi', label: 'DirectX 10 / 11 / 12 (dxgi.dll)' }, { value: 'd3d11', label: 'Direct3D 11 (d3d11.dll)' }, { value: 'd3d9', label: 'Direct3D 9 (d3d9.dll)' }, { value: 'opengl32', label: 'OpenGL (opengl32.dll)' }]} />
-            </label>
-            <label className="block">
-              <span className={labelCls}>Preset (optional)</span>
-              <div className="flex gap-2">
-                <input className={inputCls} value={reshadePreset} onChange={(event) => setReshadePreset(event.target.value)} placeholder="Choose a .ini preset" spellCheck={false} />
-                {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFile('Choose ReShade preset', ['ini']).then((path) => path && setReshadePreset(path))}><FolderOpen className="size-3.5" />Browse</button>}
-              </div>
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className={cn(btnBrowse, 'font-semibold')} disabled={!isNative() || !reshadeDll.trim() || reshadeBusy} onClick={() => {
-              setReshadeBusy(true);
-              void applyReshade(game.id, reshadeDll, reshadePreset, reshadeApi).then(async (message) => { say(message); setReshadeStatus(await getReshadeStatus(game.id)); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
-            }}>{reshadeBusy ? 'Working…' : reshadeStatus?.managed ? 'Update managed install' : 'Install and manage'}</button>
-            <span className="text-xs text-muted">Windows or Wine games · preserve original files · disable, update or restore from here. Check anti-cheat rules before using visual mods online.</span>
-          </div>
         </section>
       )}
 

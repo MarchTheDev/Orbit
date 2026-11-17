@@ -5147,6 +5147,23 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   mix-blend-mode: screen;
   pointer-events: none;
 }
+/* The stage and the shelf meet through the picture, not through a hairline:
+   the artwork's bottom edge dissolves into the shelf's own colour, so the
+   deck reads as one screen cut in two rather than two panels stacked. */
+.orbit-deck-stagefade {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 2;
+  height: clamp(56px, 12vh, 140px);
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, #08070d 42%, transparent) 52%,
+    #08070df7 100%
+  );
+}
 .orbit-deck-stageinner {
   position: relative;
   z-index: 3;
@@ -5342,9 +5359,13 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
 .orbit-deck-indexhead {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 2px;
-  flex-wrap: wrap;
+  /* One line, always: the two neighbour names are what the row is for, and a
+     wrapped row would put one of them on a line of its own, which reads as a
+     title rather than as the shelf either side. They ellipsise instead. */
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 .orbit-deck-indexhead h2 {
   font-size: 10.5px;
@@ -5357,6 +5378,45 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   font-size: 11px;
   color: color-mix(in srgb, var(--c-text) 34%, transparent);
 }
+/* The shelf's own line of type: where you are in the deck, and the names of
+   the two games either side. The counter is the only piece that is allowed to
+   be loud, because it is the one that answers "how many are left". */
+.orbit-deck-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: color-mix(in srgb, var(--c-bg) 45%, transparent);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--c-text) 42%, transparent);
+  white-space: nowrap;
+}
+.orbit-deck-counter b {
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--c-text);
+}
+.orbit-deck-counter i {
+  font-style: normal;
+  opacity: .5;
+}
+.orbit-deck-neighbour {
+  min-width: 0;
+  max-width: min(18ch, 22vw);
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--c-text) 32%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.orbit-deck-neighbour.is-next { text-align: left; }
+.orbit-deck-indexspacer { flex: 1 1 auto; }
 .orbit-deck-indexhead > .orbit-deck-order { margin-left: auto; }
 .orbit-deck-order {
   display: flex;
@@ -5498,14 +5558,15 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  margin-top: 6px;
+  margin-top: 8px;
   min-height: 2.1rem;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 550;
-  line-height: 1.15;
+  line-height: 1.25;
   text-align: center;
+  text-wrap: balance;
   color: color-mix(in srgb, var(--c-text) 45%, transparent);
-  transition: color .12s var(--ease-snap);
+  transition: color .2s var(--ease-snap), opacity .2s var(--ease-snap);
 }
 .orbit-deck-card[aria-current='true'] .orbit-deck-name { color: var(--c-text); }
 .orbit-deck-card:hover .orbit-deck-name { color: var(--c-accent); }
@@ -5888,7 +5949,10 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
 .orbit-deckmenu-body .orbit-panelchoice-label,
 .orbit-deckmenu-body > div > p:first-child { color: var(--c-muted); }
 
-/* The mode is a cut, in and out, on a slow renderer and a fast one alike. */
+/* The mode is a cut, in and out, on a slow renderer and a fast one alike -
+   except for the index, which is given its own, slower timing further down.
+   A shelf that snaps between cards reads as a jump cut rather than as the
+   deck being walked, and that is the one motion in here worth paying for. */
 .orbit-deck,
 .orbit-deck * { transition-duration: .16s; }
 @media (prefers-reduced-motion: reduce) {
@@ -5909,6 +5973,11 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   align-items: center;
   gap: clamp(12px, 1.8vw, 24px);
   padding: 20px 12px;
+  /* The chosen card is what moves here; the row itself stays put, so walking
+     the deck is one card turning under the light rather than a page sliding.
+     The timing is stated here rather than inherited from the blanket rule
+     above, which is there for the chrome. */
+  transition: gap .32s var(--ease-out);
 }
 .orbit-deck:not(.is-side) .orbit-deck-card[aria-current='true'] { transform: translateY(-4px) scale(1.04); }
 .orbit-deck:not(.is-side) .orbit-deck-stage {
@@ -7173,8 +7242,137 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
 }
 .orbit-deck-leave:hover { border-color: color-mix(in srgb, var(--c-accent) 45%, #ffffff20); background: #22212b; color: #fff; }
 .tv-library-game { outline: none; }
-.tv-library-game-art.is-current { border-color: var(--c-accent); box-shadow: 0 0 0 1.5px var(--c-accent), 0 16px 38px -18px color-mix(in srgb, var(--c-accent) 65%, transparent); }
+
+/* --------------------------------------------------- the Stardeck's library */
+
+/* The wall of covers. It is the same library as the app's own, read from a
+   sofa: bigger covers, fewer words, and a header that says how many are in
+   here rather than how they are sorted. Nothing is scrolled behind it, so the
+   page owns the whole window and the covers start at the top of it. */
+.orbit-tv-library {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: clamp(14px, 2.4vh, 26px);
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: clamp(12px, 2.2vh, 26px) clamp(16px, 3.4vw, 42px) max(18px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.orbit-tv-library::-webkit-scrollbar { width: 10px; }
+.orbit-tv-library::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, #fff 14%, transparent);
+}
+.orbit-tv-library-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding-bottom: clamp(10px, 1.6vh, 16px);
+  border-bottom: 1px solid #ffffff10;
+}
+.orbit-tv-library-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .28em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-accent) 85%, #fff);
+}
+.orbit-tv-library-head h1 {
+  margin-top: 6px;
+  font-size: clamp(1.6rem, 3.4vh + 1vw, 2.6rem);
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1;
+  color: #fff;
+}
+.orbit-tv-library-facts { text-align: right; }
+.orbit-tv-library-facts p {
+  font-size: 12px;
+  color: color-mix(in srgb, #fff 48%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-tv-library-facts b {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+}
+.orbit-tv-library-hint { margin-top: 3px; font-size: 11px; color: color-mix(in srgb, #fff 34%, transparent); }
+.orbit-tv-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(104px, 11vh, 168px), 1fr));
+  gap: clamp(10px, 1.6vw, 22px);
+  align-content: start;
+  padding-bottom: 8px;
+}
+.tv-library-game-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  border: 1px solid color-mix(in srgb, #fff 10%, transparent);
+  border-radius: 12px;
+  transition: transform .24s var(--ease-out), border-color .24s var(--ease-out), box-shadow .24s var(--ease-out);
+}
+.tv-library-game:hover .tv-library-game-art {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, #fff 28%, transparent);
+}
+.tv-library-game-art.is-current {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent), 0 20px 44px -22px color-mix(in srgb, var(--c-accent) 70%, transparent);
+}
 .tv-library-game:focus-visible .tv-library-game-art { outline: 3px solid color-mix(in srgb, var(--c-accent) 80%, transparent); outline-offset: 3px; }
+.tv-library-game-live {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, .92);
+  color: #04120c;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.tv-library-game-live > i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: orbit-pulse 1.8s ease-in-out infinite;
+}
+.tv-library-game-name {
+  display: block;
+  overflow: hidden;
+  margin-top: 7px;
+  font-size: clamp(11px, 1.1vw, 13px);
+  font-weight: 600;
+  line-height: 1.25;
+  color: color-mix(in srgb, #fff 82%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tv-library-game[aria-current='true'] .tv-library-game-name { color: #fff; }
+.tv-library-game-info {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: color-mix(in srgb, #fff 42%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 html.orbit-pad .tv-root .orbit-deck-card.orbit-pad-focus,
 html.orbit-pad .tv-root .orbit-deck-card:focus { outline: none; box-shadow: none; }
 html.orbit-pad .tv-root .orbit-deck-card.orbit-pad-focus .orbit-deck-frame,
@@ -7280,15 +7478,35 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-art-fit[aria-pressed='true'] { background: var(--c-panel); color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-border); }
 .orbit-reshade-panel { border-color: color-mix(in srgb, var(--c-accent) 35%, var(--c-border)); }
 .orbit-deck:not(.is-side) .orbit-deck-index { flex: 1 1 auto; min-height: 0; justify-content: center; }
-.orbit-deck:not(.is-side) .orbit-deck-cards { width: 100%; justify-content: center; align-items: center; gap: clamp(2px, 1.1vw, 18px); overflow: visible; padding: 20px 0 18px; perspective: 1100px; -webkit-mask-image: none; mask-image: none; }
-.orbit-deck:not(.is-side) .orbit-deck-cards > li { position: relative; z-index: 1; transform-style: preserve-3d; transition: transform .38s cubic-bezier(.2,.8,.2,1), opacity .28s ease, filter .28s ease; }
+.orbit-deck:not(.is-side) .orbit-deck-cards { width: 100%; justify-content: center; align-items: center; gap: clamp(2px, 1.1vw, 18px); overflow: visible; padding: 20px 0 18px; perspective: 1400px; -webkit-mask-image: none; mask-image: none; }
+/* Walking the deck is a movement, not a re-render.
+   The three cards sit in a row - back, chosen, back - and moving between them
+   hands the middle to a different game. Each position therefore has its own
+   resting place, and every card travels between those places rather than being
+   redrawn there: the one leaving the middle turns away and shrinks, the one
+   arriving turns in and grows. That is the whole of the animation, it runs on
+   the compositor, and it is slow enough to read (a third of a second, on the
+   app's own ease) that the shelf feels walked rather than jumped along. */
+.orbit-deck:not(.is-side) .orbit-deck-cards > li {
+  position: relative;
+  z-index: 1;
+  transform-style: preserve-3d;
+  transition: transform .42s cubic-bezier(.22,1,.36,1), opacity .34s ease, filter .34s ease;
+}
 .orbit-deck:not(.is-side) .orbit-deck-cards > li:has([data-deck-position='0']) { z-index: 3; }
-.orbit-deck:not(.is-side) .orbit-deck-card { transform-origin: center center; transition: transform .38s cubic-bezier(.2,.8,.2,1), filter .28s ease, opacity .28s ease; }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='0'] { transform: translateY(-4px) scale(1.04); filter: none; }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1'] { transform: perspective(900px) rotateY(24deg) translateX(16px) scale(.82); filter: brightness(.58) saturate(.72); opacity: .78; }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1'] { transform: perspective(900px) rotateY(-24deg) translateX(-16px) scale(.82); filter: brightness(.58) saturate(.72); opacity: .78; }
+.orbit-deck:not(.is-side) .orbit-deck-card {
+  transform-origin: center center;
+  transition: transform .42s cubic-bezier(.22,1,.36,1), filter .34s ease, opacity .34s ease;
+  will-change: transform, opacity;
+}
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='0'] { transform: translateY(-6px) scale(1.06); filter: none; opacity: 1; }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1'] { transform: perspective(1200px) rotateY(18deg) translateX(22px) scale(.84); filter: brightness(.62) saturate(.78); opacity: .82; }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1'] { transform: perspective(1200px) rotateY(-18deg) translateX(-22px) scale(.84); filter: brightness(.62) saturate(.78); opacity: .82; }
+/* A neighbour the pointer is over brightens where it stands. It is not pulled
+   into the middle: the middle belongs to one game at a time, and a card that
+   slides there on hover would be saying it had been chosen. */
 .orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1']:hover,
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1']:hover { filter: brightness(.78) saturate(.9); opacity: .95; }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1']:hover { filter: brightness(.86) saturate(.96); opacity: .97; }
 .orbit-deck:not(.is-side) .orbit-deck-stageinner { height: auto; max-width: 68rem; margin: 0 auto; align-items: stretch; justify-content: flex-start; padding: 8px 24px 18px; text-align: left; }
 .orbit-deck:not(.is-side) .orbit-deck-art { display: none; }
 .orbit-deck:not(.is-side) .orbit-deck-copy { width: 100%; max-width: 100%; text-align: left; }
@@ -7305,12 +7523,17 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 /* Stardeck's fixed chrome: a compact, full-width control shelf rather than a
    floating toolbar that collides with the centered page switch. */
 .orbit-deck-topbar {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: clamp(8px, 1.4vw, 18px);
   min-height: 62px;
-  padding: 8px clamp(14px, 3.4vw, 42px);
+  /* The safe-area insets are part of the bar. On a phone-shaped or rounded
+     window Stardeck is the whole screen, and a bar that ignores the notch
+     leaves a strip of nothing above it. */
+  padding: max(8px, env(safe-area-inset-top)) clamp(14px, 3.4vw, 42px) 8px;
+  padding-inline: max(clamp(14px, 3.4vw, 42px), env(safe-area-inset-left)) max(clamp(14px, 3.4vw, 42px), env(safe-area-inset-right));
   border-bottom: 1px solid #ffffff12;
   background: linear-gradient(180deg, #08070de8, #08070db5);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
@@ -7318,13 +7541,19 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   box-shadow: 0 10px 30px #0002;
 }
 .orbit-deck-brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 9px; }
+/* The deck / library switch is centred on the bar itself rather than on what
+   is left of it, so it does not slide about when the playing chip appears or
+   the clock's minute changes width. The bar is a relative box, so the tabs are
+   taken out of the flow and pinned to its middle; the spacer is what keeps the
+   right-hand controls at the right-hand end. */
+.orbit-deck-barspacer { flex: 1 1 auto; }
 .orbit-deck-topbar .orbit-deck-pagetabs {
-  position: static;
-  left: auto;
-  top: auto;
-  transform: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   flex: 0 0 auto;
-  margin-inline: auto;
+  margin-inline: 0;
   padding: 3px;
   border-radius: 11px;
   background: #ffffff0b;
@@ -7336,26 +7565,46 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 
 /* The deck is split into two clear, edge-to-edge surfaces. Its lower shelf
    borrows only the selected banner's colour and blur, so it feels connected
-   without competing with the artwork above it. */
+   without competing with the artwork above it.
+
+   Both halves reach the window's own edges. A shelf drawn as a rounded card
+   inside the page left a strip of the room's black under it, and on a window
+   that had just come back out of fullscreen that strip was where the layout
+   visibly stopped short of the bottom of the screen. Nothing here is inset
+   any more: the stage is the top of the window, the shelf is the bottom of
+   it, and the only rule between them is the artwork's own fade. */
+.orbit-deck:not(.is-side) {
+  /* The deck is the whole of what is left under the bar, and it says so, so
+     that its two halves split every pixel of it. */
+  width: 100%;
+  padding: 0;
+  gap: 0;
+}
 .orbit-deck:not(.is-side) .orbit-deck-stage {
   flex: 1 1 58%;
   border-radius: 0;
   border-inline: 0;
+  border-top: 0;
   box-shadow: none;
 }
 .orbit-deck:not(.is-side) .orbit-deck-index {
   position: relative;
   isolation: isolate;
   flex: 1 1 42%;
-  width: calc(100% + 40px);
+  width: 100%;
   min-height: 0;
-  margin: 0 -20px -14px;
+  margin: 0;
   overflow: hidden;
   justify-content: center;
   gap: clamp(8px, 1.5vh, 16px);
-  padding: 12px 20px max(14px, env(safe-area-inset-bottom));
-  border-top: 1px solid #ffffff20;
-  background: linear-gradient(110deg, hsl(var(--deck-hue, 250) 36% 15% / .96), #08070df0 62%);
+  /* Nothing is held back at the bottom: the cards sit on the last row of
+     pixels the window has, with only the safe area's own inset honoured. */
+  padding: clamp(10px, 1.6vh, 16px) clamp(16px, 3.4vw, 42px) max(10px, env(safe-area-inset-bottom));
+  /* No hairline across the join. The stage fades into the shelf through the
+     artwork itself, which is softer than a line and never reads as a border. */
+  border-top: 0;
+  background: linear-gradient(110deg, hsl(var(--deck-hue, 250) 36% 15% / .96), #08070df7 62%);
+  box-shadow: 0 -1px 0 #ffffff10, 0 -30px 60px -40px #000;
 }
 .orbit-deck-index-art {
   position: absolute;
@@ -7389,14 +7638,13 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 }
 .orbit-deck:not(.is-side) .orbit-deck-stageart { animation-duration: .42s; }
 @media (min-width: 640px) {
-  .orbit-deck:not(.is-side) .orbit-deck-index { width: calc(100% + 68px); margin-inline: -34px; margin-bottom: -18px; padding-inline: 34px; }
+  .orbit-deck:not(.is-side) .orbit-deck-index { padding-inline: clamp(16px, 3.4vw, 42px); }
 }
 @media (max-width: 640px) {
   .orbit-deck-topbar { min-height: 54px; padding-inline: 12px; }
-  .orbit-deck-topbar .orbit-deck-pagetabs { margin-inline: auto 0; }
   .orbit-deck-topbar .orbit-deck-leave { width: 36px; padding: 0; justify-content: center; font-size: 0; }
   .orbit-deck-topbar .orbit-deck-leave svg { margin: 0; }
-  .orbit-deck:not(.is-side) .orbit-deck-index { width: calc(100% + 40px); margin-inline: -20px; padding-inline: 14px; }
+  .orbit-deck:not(.is-side) .orbit-deck-index { padding-inline: 14px; }
 }
 @media (max-height: 680px) {
   .orbit-deck:not(.is-side) .orbit-deck-stage { flex-basis: 54%; }
@@ -7410,4 +7658,290 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-editsection-centered > button { align-self: center; }
 @media (max-width: 560px) {
   .orbit-editsection-centered .orbit-edit-times { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------ the edit page's two flows */
+
+/* Launch settings are three cards, read top to bottom in the order they
+   matter: what Play starts, what else comes with it, and the other ways the
+   same game can start. They used to be one long form, which made "also start
+   my mod manager" and "start the game with different arguments" look like the
+   same question. They are not, and now they are not near each other either. */
+.orbit-launchpage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.orbit-launchcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-panel2);
+}
+.orbit-launchcard-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.orbit-launchcard-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.orbit-launchcard-head > p {
+  max-width: 60ch;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.orbit-launchcard-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orbit-launchcount {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-accent) 18%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 90%, var(--c-text));
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.orbit-launchcount:empty { display: none; }
+.orbit-launchkinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.orbit-launchkind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-panel);
+  color: var(--c-muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.orbit-launchkind:hover { border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); color: var(--c-text); }
+.orbit-launchkind.is-on {
+  border-color: color-mix(in srgb, var(--c-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-panel));
+  color: var(--c-text);
+}
+.orbit-launchkind.is-on svg { color: var(--c-accent); }
+.orbit-launchfields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.orbit-launchfield {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.orbit-launchfield.is-wide { grid-column: 1 / -1; }
+.orbit-launchfield-row {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+}
+.orbit-launchfield-row > input { min-width: 0; flex: 1; }
+.orbit-launchnote {
+  padding: 9px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-panel);
+  color: var(--c-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.orbit-launchadd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.orbit-launchaddbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px dashed color-mix(in srgb, var(--c-border) 90%, var(--c-muted));
+  border-radius: 9px;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.orbit-launchaddbtn:hover {
+  border-color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
+  color: var(--c-accent);
+}
+.orbit-launchempty {
+  padding: 12px;
+  border: 1px dashed var(--c-border);
+  border-radius: 10px;
+  color: var(--c-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.orbit-launchlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.orbit-launchentry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 11px;
+  background: var(--c-panel);
+}
+/* A launch profile is a named thing the player made, so it is drawn like one:
+   a stripe down the side says it is another way in, not another program. */
+.orbit-launchentry.is-profile {
+  border-left: 2px solid color-mix(in srgb, var(--c-accent) 65%, transparent);
+}
+.orbit-launchentry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orbit-launchentry-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+  color: var(--c-muted);
+}
+.orbit-launchentry-head h4 {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orbit-launchentry-name { min-width: 0; flex: 1; }
+.orbit-launchentry-nameinput {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.orbit-launchentry-nameinput:hover { border-color: var(--c-border); }
+.orbit-launchentry-nameinput:focus {
+  border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border));
+  background: var(--c-panel2);
+  outline: none;
+}
+.orbit-launchentry-remove {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--c-muted);
+}
+.orbit-launchentry-remove:hover {
+  border-color: color-mix(in srgb, #fb7185 55%, transparent);
+  color: #fb7185;
+}
+.orbit-launchfooter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+/* ------------------------------------------------------------ ReShade */
+
+/* The whole of ReShade is one row: what it is doing, and a switch. Everything
+   below it - where the file went, the folder, the warning - is there for the
+   player who wants to look, and takes no decision away from the switch. */
+.orbit-reshade {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 13px;
+  border: 1px solid var(--c-border);
+  border-radius: 13px;
+  background: var(--c-panel2);
+}
+.orbit-reshade-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.orbit-reshade-copy { min-width: 0; flex: 1; }
+.orbit-reshade-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--c-text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.orbit-reshade-file {
+  padding: 1px 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  color: var(--c-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 500;
+}
+.orbit-reshade-hint {
+  margin-top: 2px;
+  color: var(--c-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.orbit-reshade[data-state='on'] { border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border)); }
+.orbit-reshade-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.orbit-reshade-foot > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.orbit-reshade-caution {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--c-border) 70%, transparent);
+  color: color-mix(in srgb, var(--c-muted) 88%, transparent);
+  font-size: 10.5px;
+  line-height: 1.5;
 }

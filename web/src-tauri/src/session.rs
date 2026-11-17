@@ -161,8 +161,13 @@ impl Runner {
         // Companion programs ride along with the game: started after it, and
         // never watched, so their exit cannot end the session. One failing is
         // worth a line in the log but not a failed launch.
+        //
+        // Named profiles are not in this list. An alternative launch is a
+        // different way to start the same game, chosen from the Play arrow, so
+        // starting one unasked would start the wrong game - or start the same
+        // game twice, in two different configurations.
         if start_companions {
-            for companion in &game.companions {
+            for companion in game.companions.iter().filter(|companion| companion.is_alongside()) {
                 if let Some(url) = companion.url.as_deref() {
                     let url = url.trim();
                     if !url.is_empty() {

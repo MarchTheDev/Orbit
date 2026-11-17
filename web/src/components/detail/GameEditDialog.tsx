@@ -14,6 +14,7 @@ export function GameEditDialog({
   onRemoveFromBacklog,
   saveDir,
   onSaveDir,
+  startOn,
 }: {
   game: Game;
   onUpdate: (patch: Partial<Game>) => void;
@@ -24,6 +25,8 @@ export function GameEditDialog({
   hideLaunchSettings?: boolean;
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
+  /** Open on one page, for the development preview. */
+  startOn?: 'details' | 'launch' | 'tools' | 'saves' | 'proton';
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   return (
@@ -43,7 +46,7 @@ export function GameEditDialog({
         </div>
       ) : undefined}
     >
-      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} saveDir={saveDir} onSaveDir={onSaveDir} />
+      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} saveDir={saveDir} onSaveDir={onSaveDir} startOn={startOn} />
     </Modal>
     {confirmRemove && onRemoveFromBacklog && (
       <ConfirmDialog

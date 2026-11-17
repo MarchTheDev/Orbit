@@ -57,6 +57,8 @@ interface Props {
   onSetPlaytime: (totalSecs: number) => Promise<void>;
   onPlay: () => void;
   onRunCompanion?: (index: number) => void;
+  /** Start the game through one of its saved alternative launches. */
+  onRunLaunch?: (index: number) => void;
   onStop: () => void;
   onRemove: () => void;
   /** Take this game off the Backlog only. It stays in the Library. */
@@ -78,6 +80,7 @@ export function GameDetail({
   onSetPlaytime,
   onPlay,
   onRunCompanion,
+  onRunLaunch,
   onStop,
   onRemove,
   onLeaveBacklog,
@@ -308,9 +311,18 @@ export function GameDetail({
   // are read from.
   const onSteam = isSteamGame(game);
   const steamAppId = storeAppId(game);
-  const launchOptions = game.companions
-    .map((companion, index) => ({ companion, index }))
-    .filter(({ companion }) => Boolean((companion.url ?? '').trim() || companion.path.trim()));
+  // Two different things reach the arrow beside Play, and they read differently
+  // there: a saved launch is shown by the name it was given, because it is a way
+  // to start the game; a tool is shown by its file, because it is a program.
+  const allCompanions = game.companions.map((companion, index) => ({ companion, index }));
+  const launchProfiles = allCompanions.filter(
+    ({ companion }) => companion.when === 'alternative' && Boolean((companion.name ?? '').trim()),
+  );
+  const launchOptions = allCompanions.filter(
+    ({ companion }) =>
+      companion.when !== 'alternative' && Boolean((companion.url ?? '').trim() || companion.path.trim()),
+  );
+  const moreWays = launchProfiles.length + launchOptions.length;
 
   return (
     <>
@@ -455,25 +467,41 @@ export function GameDetail({
                   <Play className="size-4" fill="currentColor" strokeWidth={0} />
                   Play
                 </button>
-                {launchOptions.length > 0 && (
-                  <button type="button" aria-label="More launch options" aria-haspopup="menu" aria-expanded={launchMenuOpen} onClick={() => setLaunchMenuOpen((open) => !open)} className="btn-accent grid w-10 shrink-0 place-items-center rounded-l-none rounded-r-lg border-l border-white/20" title="Start a companion tool">
+                {moreWays > 0 && (
+                  <button type="button" aria-label="More launch options" aria-haspopup="menu" aria-expanded={launchMenuOpen} onClick={() => setLaunchMenuOpen((open) => !open)} className="btn-accent grid w-10 shrink-0 place-items-center rounded-l-none rounded-r-lg border-l border-white/20" title="Other ways to start this game">
                     <ChevronDown className="size-4" />
                   </button>
                 )}
-                {launchMenuOpen && launchOptions.length > 0 && (
+                {launchMenuOpen && moreWays > 0 && (
                   <div role="menu" aria-label={`More ways to start ${game.title}`} className="absolute bottom-full right-0 z-30 mb-2 min-w-64 overflow-hidden rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
-                    <p className="px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.16em] text-muted">Launch options</p>
-                    {launchOptions.map(({ companion, index }) => {
-                      const label = companion.url
-                        ? `Open ${(() => { try { return new URL(companion.url!).hostname; } catch { return companion.url; } })()}`
-                        : (companion.path.split(/[\\/]/).pop() || 'Program');
-                      return (
-                        <button key={`${index}-${companion.path}-${companion.url ?? ''}`} type="button" role="menuitem" onClick={() => { setLaunchMenuOpen(false); onRunCompanion?.(index); }} className="flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-2 text-left text-xs text-fg hover:bg-panel2">
-                          <span className="min-w-0 truncate">{label}</span>
-                          <span className="shrink-0 text-[10px] text-muted">{companion.countsAsPlaying ? 'Start & track' : 'Open'}</span>
-                        </button>
-                      );
-                    })}
+                    {launchProfiles.length > 0 && (
+                      <>
+                        <p className="px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.16em] text-muted">Start it another way</p>
+                        {launchProfiles.map(({ companion, index }) => (
+                          <button key={`profile-${index}`} type="button" role="menuitem" onClick={() => { setLaunchMenuOpen(false); onRunLaunch?.(index); }} className="flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-2 text-left text-xs text-fg hover:bg-panel2">
+                            <span className="min-w-0 truncate">{companion.name}</span>
+                            <span className="shrink-0 text-[10px] text-muted">{companion.extraArgs?.trim() ? companion.extraArgs.trim() : 'Start'}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    {launchOptions.length > 0 && (
+                      <>
+                        {launchProfiles.length > 0 && <div className="my-1 border-t border-line/70" />}
+                        <p className="px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.16em] text-muted">{launchProfiles.length > 0 ? 'Tools' : 'Launch options'}</p>
+                        {launchOptions.map(({ companion, index }) => {
+                          const label = companion.url
+                            ? `Open ${(() => { try { return new URL(companion.url!).hostname; } catch { return companion.url; } })()}`
+                            : (companion.path.split(/[\\/]/).pop() || 'Program');
+                          return (
+                            <button key={`${index}-${companion.path}-${companion.url ?? ''}`} type="button" role="menuitem" onClick={() => { setLaunchMenuOpen(false); onRunCompanion?.(index); }} className="flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-2 text-left text-xs text-fg hover:bg-panel2">
+                              <span className="min-w-0 truncate">{label}</span>
+                              <span className="shrink-0 text-[10px] text-muted">{companion.countsAsPlaying ? 'Start & track' : 'Open'}</span>
+                            </button>
+                          );
+                        })}
+                      </>
+                    )}
                   </div>
                 )}
               </div>

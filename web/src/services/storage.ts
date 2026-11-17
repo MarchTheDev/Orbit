@@ -30,12 +30,52 @@ export async function loadSettings(): Promise<Settings> {
   }
 }
 
-/** Retired providers and launch-time scans are removed so later saves cannot revive them. */
+/**
+ * The metadata source list, rebuilt around the built-in sources Orbit ships.
+ *
+ * What a source *is* - its name, and the line under it - belongs to this build,
+ * not to the copy that was saved months ago. Those two fields have changed
+ * wording several times, and one of the old lines ("— needs key above") was a
+ * leftover from a version that read its key from somewhere else entirely: it
+ * was never true, and no amount of new releases cleared it, because the saved
+ * copy of the list was being trusted. So a built-in source keeps the two things
+ * that are the player's - whether it is on, and any URL they gave it - and
+ * takes its label and note from the defaults above. Custom sources, which are
+ * entirely the player's, are left exactly as they are.
+ */
 function ensureMetadataSources(settings: Settings): Settings {
   const fallback = (DEFAULT_SETTINGS as Settings).metadataSources ?? [];
-  if (!Array.isArray(settings.metadataSources) || settings.metadataSources.length === 0) {
-    settings.metadataSources = [...fallback];
+  const stored = Array.isArray(settings.metadataSources) ? settings.metadataSources : [];
+  if (stored.length === 0) {
+    settings.metadataSources = fallback.map((source) => ({ ...source }));
+    return settings;
   }
+  const kept = stored
+    .filter((source) => source && typeof source.id === 'string' && source.id.trim() !== '')
+    .map((source) => {
+      const builtin = fallback.find((candidate) => candidate.id === source.id);
+      if (!builtin) {
+        // A source the player added keeps everything they typed, except the
+        // one housekeeping line an old build wrote into the note field.
+        if (source.note && /needs?\s+key/i.test(source.note)) {
+          const { note, ...rest } = source;
+          return note === 'Custom' ? source : rest;
+        }
+        return source;
+      }
+      return {
+        ...builtin,
+        // The player's decisions survive; the wording does not.
+        enabled: source.enabled !== false,
+        ...(source.url ? { url: source.url } : {}),
+      };
+    });
+  // A built-in the saved list predates is added rather than left out, so a
+  // source Orbit has always had cannot go missing because of an old save.
+  for (const source of fallback) {
+    if (!kept.some((candidate) => candidate.id === source.id)) kept.push({ ...source });
+  }
+  settings.metadataSources = kept;
   return settings;
 }
 function dropRetired(settings: Settings): Settings {

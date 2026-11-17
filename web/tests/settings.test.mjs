@@ -83,4 +83,28 @@ check('Journal and Backlog sync snapshot prior memberships and apply to new Libr
   libraryHook.includes('syncMembershipSeeded !== true') && libraryHook.includes('const syncNewEntries') &&
     libraryHook.includes('next.syncJournal !== false') && libraryHook.includes('next.syncBacklog === true'));
 
+console.log('the metadata source list is rebuilt rather than trusted');
+const staleSources = normalizeSettings({
+  theme: 'nebula',
+  metadataSources: [
+    { id: 'steam', label: 'Steam catalogue', enabled: false, kind: 'builtin', note: 'Summary, genres, year, header' },
+    // The line an older build wrote into the note. It described a key the
+    // player never had to supply, and it stayed on screen for ever because the
+    // saved list was drawn as it was saved.
+    { id: 'steamgriddb', label: 'SteamGridDB', enabled: true, kind: 'builtin', note: 'Alternate covers — needs key above' },
+    { id: 'mine', label: 'My own thing', enabled: true, kind: 'custom', url: 'https://example.com/api', note: 'Custom' },
+  ],
+});
+const sourceOf = (id) => staleSources.metadataSources.find((source) => source.id === id);
+check('a stale note about needing a key is gone for good', !sourceOf('steamgriddb').note.includes('needs key'));
+check('the built-in line now says what the source actually does',
+  sourceOf('steamgriddb').note === 'Optional alternate covers and heroes');
+check('what the player decided about a source survives the rebuild', sourceOf('steam').enabled === false && sourceOf('steamgriddb').enabled === true);
+check('a built-in source an old save had forgotten is added back',
+  staleSources.metadataSources.filter((source) => source.kind === 'builtin').length ===
+    (DEFAULT_SETTINGS.metadataSources ?? []).length);
+check('a source the player added is left alone, URL and all',
+  sourceOf('mine').label === 'My own thing' && sourceOf('mine').url === 'https://example.com/api');
+check('the same list read twice does not grow', normalizeSettings(staleSources).metadataSources.length === staleSources.metadataSources.length);
+
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppWindow, FolderOpen, Plus, Timer, Wine, X } from 'lucide-react';
+import { AppWindow, FolderOpen, Layers, Plus, Timer, Wine, X } from 'lucide-react';
 import type { Companion, Game, LaunchTarget } from '../../types';
 import { isNative } from '../../services/native';
-import { pickFile } from '../../services/desktop';
+import { pickFile, pickFolder } from '../../services/desktop';
 import { desktopOs } from '../../utils/platform';
-import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
+import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 import { say } from '../../utils/toast';
+import { cn } from '../../utils/cn';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
 // a program with a ROM as an argument, and Steam is not something the player
 // should have to type an app id for, games imported from a Steam library carry
 // that with them.
 const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
-  { kind: 'executable', label: 'Program', hint: 'The game is a program on this machine.', icon: AppWindow },
+  { kind: 'executable', label: 'A program', hint: 'Orbit starts this program.', icon: AppWindow },
   {
     kind: 'wine',
-    label: 'Wine',
-    hint: 'A Windows .exe, through Wine or a Proton build. Name a prefix if the game has one.',
+    label: 'A Windows program',
+    hint: 'An .exe, run through Wine or a Proton build.',
     icon: Wine,
   },
-  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
+  { kind: 'none', label: 'Nothing, just time it', hint: 'You start the game; Orbit keeps the clock.', icon: Timer },
 ];
 
 /** Windows starts a program. Linux can start a native program, or a Windows .exe through Wine. */
@@ -34,13 +35,27 @@ function parentOf(path: string): string | null {
   return cut > 0 ? path.slice(0, cut) : null;
 }
 
+const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
+const isProfile = (companion: Companion) => companion.when === 'alternative';
+
 /**
- * How Orbit starts this game, and what it runs when the clock starts.
+ * How Orbit starts this game, and every other way it can be started.
  *
- * "Alongside" is the point of the second half: a game and the tool that has to
- * be running with it, such as Assetto Corsa and Lossless Scaling. Those programs
- * are started with the game and never watched, so closing one does not end the
- * session.
+ * There are two kinds of "and something else", and they are not the same thing,
+ * so they are not in the same list:
+ *
+ * - **Starting alongside.** A tool that has to be running with the game -
+ *   Lossless Scaling, a frame-rate cap, a mod manager, a wiki in the browser.
+ *   It comes with every launch and is never a way to play on its own.
+ * - **As an alternative launch.** The same game started differently: another
+ *   save folder, other arguments, a mod loader in front of it. It is named, and
+ *   it is picked from the arrow beside Play instead of the plain one.
+ *
+ * Both are one entry in the same saved list, told apart by `when`, because they
+ * are the same shape underneath - a program, its arguments and whether it rides
+ * along. Keeping them apart in the page is the whole point: a player who wants
+ * "also start my mod manager" should never be asked to name a launch profile.
  */
 export function LaunchEditor({
   game,
@@ -49,7 +64,7 @@ export function LaunchEditor({
   section = 'all',
 }: {
   game: Game;
-  onSave: (t: LaunchTarget, companions: Companion[]) => void;
+  onSave: (launch: LaunchTarget, companions: Companion[]) => void;
   /** The edit dialog keeps launch changes when it closes, so it has no button. */
   saveOnClose?: boolean;
   section?: 'all' | 'launch' | 'tools';
@@ -69,9 +84,9 @@ export function LaunchEditor({
    * Pick a way to start the game, and save it straight away.
    *
    * Choosing a kind and then having to press Save was a trap: the chip looked
-   * applied, so "Timer only" followed by Play still started the game, because
-   * nothing had been written down. A choice from this row is a decision, and it
-   * is kept the moment it is made.
+   * applied, so "Nothing, just time it" followed by Play still started the game,
+   * because nothing had been written down. A choice from this row is a decision,
+   * and it is kept the moment it is made.
    */
   const switchKind = (kind: LaunchTarget['kind']) => {
     if (kind === 'none') {
@@ -88,14 +103,12 @@ export function LaunchEditor({
         workingDir: game.installDir,
       };
       setTarget(picked);
-      // Without a program there is nothing to save yet: the Browse button and
-      // the Save button below are the way through.
       if (picked.path.trim()) {
         onSave(
           { kind: 'executable', path: picked.path, args, workingDir: parentOf(picked.path) },
           companions,
         );
-        say(`${game.title} starts ${picked.path.split(/[\\/]/).pop()}`);
+        say(`${game.title} starts ${baseName(picked.path)}`);
       }
       return;
     }
@@ -137,6 +150,23 @@ export function LaunchEditor({
   const setCompanion = (i: number, patch: Partial<Companion>) => {
     setCompanions((list) => list.map((c, n) => (n === i ? { ...c, ...patch } : c)));
   };
+  const removeCompanion = (i: number) => setCompanions((list) => list.filter((_, n) => n !== i));
+
+  /** An entry that rides with the game: a program, a script, or a web page. */
+  const addAlongside = (web: boolean) =>
+    setCompanions((list) => [...list, { path: '', args: '', url: web ? '' : null, when: 'alongside' }]);
+
+  /**
+   * Another way to start the same game.
+   *
+   * It starts life with a name and nothing else, which is already useful - "no
+   * intro videos" is only arguments - and everything else is optional.
+   */
+  const addProfile = () =>
+    setCompanions((list) => [
+      ...list,
+      { path: '', args: '', url: null, when: 'alternative', name: '', starts: [], extraArgs: '', workingDir: null },
+    ]);
 
   const savedArgs = game.launch && (game.launch.kind === 'executable' || game.launch.kind === 'wine') ? game.launch.args ?? '' : '';
   const dirty =
@@ -162,200 +192,396 @@ export function LaunchEditor({
     };
   }, [saveOnClose]);
 
+  const alongside = companions.map((companion, index) => ({ companion, index })).filter(({ companion }) => !isProfile(companion));
+  const profiles = companions.map((companion, index) => ({ companion, index })).filter(({ companion }) => isProfile(companion));
+
   return (
-    <section className="space-y-4 rounded-xl border border-line bg-panel2 p-4">
-      {section !== 'tools' && <>
-      <div>
-        <h3 className="mb-2 text-sm font-semibold">Launching</h3>
+    <div className="orbit-launchpage">
+      {section !== 'tools' && (
+        <>
+          <section className="orbit-launchcard">
+            <header className="orbit-launchcard-head">
+              <h3>When you press Play</h3>
+              <p>
+                {target.kind === 'none'
+                  ? 'Orbit keeps the time and starts nothing. You launch the game yourself.'
+                  : `Orbit starts the ${target.kind === 'wine' ? 'Windows program' : 'program'} below, and the clock starts with it.`}
+              </p>
+            </header>
 
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {kinds.map((k) => (
-            <button
-              key={k.kind}
-              onClick={() => switchKind(k.kind)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
-                target.kind === k.kind ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-accent/60'
-              }`}
-            >
-              <k.icon className="size-3.5" />
-              {k.label}
-            </button>
-          ))}
-        </div>
-
-        <p className="mb-3 text-xs text-muted">{kinds.find((k) => k.kind === target.kind)?.hint}</p>
-
-        {target.kind === 'executable' && (
-          <div className="space-y-3">
-            <div className="flex min-w-0 gap-2">
-              <label className="block min-w-0 flex-1">
-                <span className={labelCls}>Program</span>
-                <input
-                  className={inputCls}
-                  value={target.path}
-                  onChange={(e) => setTarget({ ...target, path: e.target.value })}
-                  spellCheck={false}
-                />
-              </label>
-              {native && (
+            <div className="orbit-launchkinds" role="radiogroup" aria-label="How Orbit starts this game">
+              {kinds.map((k) => (
                 <button
-                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                  onClick={() =>
-                    void pickFile('Choose the program or script', ['exe', 'bat', 'cmd', 'ps1', 'sh'], target.path || undefined).then(
-                      (p) => p && setTarget({ ...target, path: p }),
-                    )
-                  }
+                  key={k.kind}
+                  type="button"
+                  role="radio"
+                  aria-checked={target.kind === k.kind}
+                  onClick={() => switchKind(k.kind)}
+                  className={cn('orbit-launchkind', target.kind === k.kind && 'is-on')}
+                  title={k.hint}
                 >
-                  <FolderOpen className="size-4" />
-                  Browse…
+                  <k.icon className="size-4" />
+                  <span>{k.label}</span>
                 </button>
-              )}
+              ))}
             </div>
-            <label className="block">
-              <span className={labelCls}>Arguments</span>
-              <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="-windowed" spellCheck={false} />
-            </label>
-          </div>
-        )}
 
-        {target.kind === 'wine' && (
-          <div className="space-y-3">
-            <div className="flex min-w-0 gap-2">
-              <label className="block min-w-0 flex-1">
-                <span className={labelCls}>Windows program</span>
-                <input
-                  className={inputCls}
-                  value={target.path}
-                  onChange={(e) => setTarget({ ...target, path: e.target.value })}
-                  spellCheck={false}
-                />
-              </label>
-              {native && (
-                <button
-                  className={`${btnBrowse} mt-5 flex items-center gap-2`}
-                  onClick={() =>
-                    void pickFile('Choose the .exe', ['exe', 'bat'], target.path || undefined).then(
-                      (p) => p && setTarget({ ...target, path: p }),
-                    )
-                  }
-                >
-                  <FolderOpen className="size-4" />
-                  Browse…
-                </button>
-              )}
-            </div>
-            <label className="block">
-              <span className={labelCls}>Wine prefix</span>
-              <input
-                className={inputCls}
-                value={target.prefix ?? ''}
-                onChange={(e) => setTarget({ ...target, prefix: e.target.value || null })}
-                placeholder="Leave empty for Wine's default prefix, or this game's own Proton bottle"
-                spellCheck={false}
-              />
-            </label>
-            <label className="block">
-              <span className={labelCls}>Wine program for this game</span>
-              <input
-                className={inputCls}
-                value={target.wine ?? ''}
-                onChange={(e) => setTarget({ ...target, wine: e.target.value || null })}
-                placeholder="Leave blank. Orbit finds Wine, or gets a copy if it is missing"
-                spellCheck={false}
-              />
-            </label>
-            <label className="block">
-              <span className={labelCls}>Arguments</span>
-              <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
-            </label>
-          </div>
-        )}
+            {(target.kind === 'executable' || target.kind === 'wine') && (
+              <div className="orbit-launchfields">
+                <label className="orbit-launchfield is-wide">
+                  <span className={labelCls}>{target.kind === 'wine' ? 'Windows program' : 'Program'}</span>
+                  <span className="orbit-launchfield-row">
+                    <input
+                      className={inputCls}
+                      value={target.path}
+                      onChange={(e) => setTarget({ ...target, path: e.target.value })}
+                      spellCheck={false}
+                      placeholder="The .exe or script Orbit should start"
+                    />
+                    {native && (
+                      <button
+                        type="button"
+                        className={btnBrowse}
+                        onClick={() =>
+                          void pickFile(
+                            'Choose the program or script',
+                            target.kind === 'wine' ? ['exe', 'bat'] : ['exe', 'bat', 'cmd', 'ps1', 'sh', 'AppImage'],
+                            target.path || undefined,
+                          ).then((p) => p && setTarget({ ...target, path: p }))
+                        }
+                      >
+                        <FolderOpen className="size-4" />
+                        Browse
+                      </button>
+                    )}
+                  </span>
+                </label>
 
-        {target.kind === 'lutris' && (
-          <p className="rounded-lg border border-line bg-panel px-3 py-2 text-xs text-muted">
-            Imported from Lutris{target.slug ? ` (${target.slug})` : ''}. Play asks Lutris to start it, and uses Wine
-            directly when the install recorded a program and a prefix. Pick{' '}
-            <button className="text-accent hover:underline" onClick={() => switchKind('wine')}>
-              Wine
-            </button>{' '}
-            to choose those yourself.
-          </p>
-        )}
+                <label className="orbit-launchfield is-wide">
+                  <span className={labelCls}>Arguments</span>
+                  <input
+                    className={inputCls}
+                    value={args}
+                    onChange={(e) => setArgs(e.target.value)}
+                    placeholder="Leave empty for none, such as -windowed"
+                    spellCheck={false}
+                  />
+                </label>
 
-        {target.kind === 'steam' && (
-          <p className="rounded-lg border border-line bg-panel px-3 py-2 text-xs text-muted">
-            This game was imported from Steam, so Orbit starts it through Steam (app {target.appId}). Pick{' '}
-            <button className="text-accent hover:underline" onClick={() => switchKind('executable')}>
-              Program
-            </button>{' '}
-            to point at an .exe instead.
-          </p>
-        )}
-      </div>
-      </>}
-
-      {section !== 'tools' && <>
-      {/* Started with the game, never watched. */}
-      <div className="border-t border-line pt-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Start alongside</h3>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: null }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add program / script</button>
-            <button type="button" onClick={() => setCompanions((list) => [...list, { path: '', args: '', url: '' }])} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-accent"><Plus className="size-3.5" />Add web page</button>
-          </div>
-        </div>
-        <p className="mb-3 text-xs text-muted">
-          Start a mod manager, settings tool, script, or another utility with the game, or open a web page. Each program or script has its own arguments; web pages open in your system browser.
-        </p>
-
-        {companions.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
-            Nothing yet, add here something to start together with {game.title}.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {companions.map((c, i) => (
-              <div key={i} className="rounded-lg border border-line bg-panel p-2.5">
-                {c.url !== undefined && c.url !== null ? (
-                  <div className="flex min-w-0 gap-2">
-                    <label className="block min-w-0 flex-1">
-                      <span className={labelCls}>Web page URL</span>
-                      <input className={inputCls} type="url" value={c.url} onChange={(event) => setCompanion(i, { url: event.target.value })} placeholder="https://example.com/game-guide" spellCheck={false} />
-                    </label>
-                    <button type="button" onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))} className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400" aria-label="Remove web page companion" title="Remove"><X className="size-4" /></button>
-                  </div>
-                ) : (
+                {target.kind === 'wine' && (
                   <>
-                    <div className="flex min-w-0 gap-2">
-                      <label className="block min-w-0 flex-1">
-                        <span className={labelCls}>Program or script</span>
-                        <input className={inputCls} value={c.path} onChange={(event) => setCompanion(i, { path: event.target.value })} placeholder={'C:\Tools\Lossless Scaling\LosslessScaling.exe'} spellCheck={false} />
-                      </label>
-                      {native && (
-                        <button type="button" className={`${btnBrowse} mt-5 flex items-center gap-2`} onClick={() => void pickFile('Choose a program or script', desktopOs() === 'linux' ? ['sh', 'exe', 'AppImage'] : ['exe', 'bat', 'cmd', 'ps1'], c.path || undefined).then((path) => path && setCompanion(i, { path }))}><FolderOpen className="size-4" />Browse…</button>
-                      )}
-                      <button type="button" onClick={() => setCompanions((list) => list.filter((_, n) => n !== i))} className="mt-5 rounded-lg border border-line px-2 text-muted hover:border-rose-400 hover:text-rose-400" aria-label="Remove this program" title="Remove"><X className="size-4" /></button>
-                    </div>
-                    <label className="mt-2 block">
-                      <span className={labelCls}>Arguments</span>
-                      <input className={inputCls} value={c.args} onChange={(event) => setCompanion(i, { args: event.target.value })} placeholder="Optional" spellCheck={false} />
+                    <label className="orbit-launchfield is-wide">
+                      <span className={labelCls}>Wine prefix</span>
+                      <input
+                        className={inputCls}
+                        value={target.prefix ?? ''}
+                        onChange={(e) => setTarget({ ...target, prefix: e.target.value || null })}
+                        placeholder="Leave empty for Wine's own, or this game's Proton bottle"
+                        spellCheck={false}
+                      />
                     </label>
-                    <div className="orbit-setrow mt-2 rounded-lg border border-line bg-panel px-3 py-2">
-                      <div className="orbit-setrow-copy"><p className="orbit-setrow-label">Count this launch as playtime</p><p className="orbit-setrow-hint">When chosen from the Play arrow, track this tool as a session for the game.</p></div>
-                      <button type="button" role="switch" aria-label={`Count ${c.path || 'this program'} as playtime`} aria-checked={!!c.countsAsPlaying} onClick={() => setCompanion(i, { countsAsPlaying: !c.countsAsPlaying })} className="orbit-switch" data-on={c.countsAsPlaying || undefined}><i /></button>
-                    </div>
+                    <label className="orbit-launchfield is-wide">
+                      <span className={labelCls}>Wine program for this game</span>
+                      <input
+                        className={inputCls}
+                        value={target.wine ?? ''}
+                        onChange={(e) => setTarget({ ...target, wine: e.target.value || null })}
+                        placeholder="Leave empty. Orbit finds Wine, or gets a copy if it is missing"
+                        spellCheck={false}
+                      />
+                    </label>
                   </>
                 )}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-      </>}
+            )}
 
-      {section !== 'tools' && <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
-        <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
-      </div>}
-    </section>
+            {target.kind === 'lutris' && (
+              <p className="orbit-launchnote">
+                Came in from Lutris{target.slug ? ` (${target.slug})` : ''}. Play asks Lutris to start it, and uses Wine
+                directly when the install recorded a program and a prefix. Pick{' '}
+                <button type="button" className="text-accent hover:underline" onClick={() => switchKind('wine')}>
+                  a Windows program
+                </button>{' '}
+                to choose those yourself.
+              </p>
+            )}
+
+            {target.kind === 'steam' && (
+              <p className="orbit-launchnote">
+                This came in from Steam, so Play hands it back to Steam (app {target.appId}). Pick{' '}
+                <button type="button" className="text-accent hover:underline" onClick={() => switchKind('executable')}>
+                  a program
+                </button>{' '}
+                to point Orbit at an .exe instead.
+              </p>
+            )}
+          </section>
+
+          {/* --------------------------------------------------- alongside */}
+          <section className="orbit-launchcard">
+            <header className="orbit-launchcard-head">
+              <div className="orbit-launchcard-title">
+                <h3>Start alongside</h3>
+                <span className="orbit-launchcount">{alongside.length}</span>
+              </div>
+              <p>
+                Things that need to be running with the game: a mod manager, a frame-rate tool, a script, or a page you
+                keep open. They start every time, and closing one never ends the session.
+              </p>
+              <div className="orbit-launchadd">
+                <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
+                  <Plus className="size-3.5" /> Program or script
+                </button>
+                <button type="button" onClick={() => addAlongside(true)} className="orbit-launchaddbtn">
+                  <Plus className="size-3.5" /> Web page
+                </button>
+              </div>
+            </header>
+
+            {alongside.length === 0 ? (
+              <p className="orbit-launchempty">
+                Nothing yet. Add a tool here if {game.title} needs something else running beside it.
+              </p>
+            ) : (
+              <div className="orbit-launchlist">
+                {alongside.map(({ companion: c, index: i }) => (
+                  <article key={`along-${i}`} className="orbit-launchentry">
+                    <div className="orbit-launchentry-head">
+                      <span className="orbit-launchentry-icon" aria-hidden>
+                        {c.url !== undefined && c.url !== null ? (
+                          <Layers className="size-3.5" />
+                        ) : (
+                          <AppWindow className="size-3.5" />
+                        )}
+                      </span>
+                      <h4>{c.url !== undefined && c.url !== null ? 'Web page' : baseName(c.path) || 'Program'}</h4>
+                      <button
+                        type="button"
+                        onClick={() => removeCompanion(i)}
+                        className="orbit-launchentry-remove"
+                        aria-label={`Remove ${c.url || c.path || 'this entry'}`}
+                        title="Remove"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    {c.url !== undefined && c.url !== null ? (
+                      <label className="orbit-launchfield">
+                        <span className={labelCls}>Web address</span>
+                        <input
+                          className={inputCls}
+                          type="url"
+                          value={c.url ?? ''}
+                          onChange={(event) => setCompanion(i, { url: event.target.value })}
+                          placeholder="https://example.com/this-game"
+                          spellCheck={false}
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        <label className="orbit-launchfield is-wide">
+                          <span className={labelCls}>Program or script</span>
+                          <span className="orbit-launchfield-row">
+                            <input
+                              className={inputCls}
+                              value={c.path}
+                              onChange={(event) => setCompanion(i, { path: event.target.value })}
+                              placeholder={desktopOs() === 'linux' ? '/home/you/Tools/tool.AppImage' : 'C:\\Tools\\LosslessScaling\\LosslessScaling.exe'}
+                              spellCheck={false}
+                            />
+                            {native && (
+                              <button
+                                type="button"
+                                className={btnBrowse}
+                                onClick={() =>
+                                  void pickFile(
+                                    'Choose a program or script',
+                                    desktopOs() === 'linux' ? ['sh', 'exe', 'AppImage'] : ['exe', 'bat', 'cmd', 'ps1'],
+                                    c.path || undefined,
+                                  ).then((path) => path && setCompanion(i, { path }))
+                                }
+                              >
+                                <FolderOpen className="size-4" />
+                                Browse
+                              </button>
+                            )}
+                          </span>
+                        </label>
+                        <label className="orbit-launchfield is-wide">
+                          <span className={labelCls}>Arguments</span>
+                          <input
+                            className={inputCls}
+                            value={c.args}
+                            onChange={(event) => setCompanion(i, { args: event.target.value })}
+                            placeholder="Optional"
+                            spellCheck={false}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* ----------------------------------------------- alternative */}
+          <section className="orbit-launchcard">
+            <header className="orbit-launchcard-head">
+              <div className="orbit-launchcard-title">
+                <h3>Another way to launch it</h3>
+                <span className="orbit-launchcount">{profiles.length}</span>
+              </div>
+              <p>
+                The same game started differently: another save folder, other arguments, a mod loader in front. Each one
+                gets a name and appears in the arrow beside Play, so nothing about it has to be remembered later.
+              </p>
+              <div className="orbit-launchadd">
+                <button type="button" onClick={addProfile} className="orbit-launchaddbtn">
+                  <Plus className="size-3.5" /> Add a launch
+                </button>
+              </div>
+            </header>
+
+            {profiles.length === 0 ? (
+              <p className="orbit-launchempty">
+                No other launches. One is worth adding if you sometimes start {game.title} with a different setup — a
+                second install, a mod manager, or a set of arguments for testing.
+              </p>
+            ) : (
+              <div className="orbit-launchlist">
+                {profiles.map(({ companion: c, index: i }) => (
+                  <article key={`profile-${i}`} className="orbit-launchentry is-profile">
+                    <div className="orbit-launchentry-head">
+                      <span className="orbit-launchentry-icon" aria-hidden>
+                        <Layers className="size-3.5" />
+                      </span>
+                      <label className="orbit-launchentry-name">
+                        <span className="sr-only">Name shown in the Play arrow</span>
+                        <input
+                          className="orbit-launchentry-nameinput"
+                          value={c.name ?? ''}
+                          onChange={(event) => setCompanion(i, { name: event.target.value })}
+                          placeholder="Name it, such as Modded"
+                          spellCheck={false}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeCompanion(i)}
+                        className="orbit-launchentry-remove"
+                        aria-label={`Remove the ${c.name || 'unnamed'} launch`}
+                        title="Remove"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+
+                    <label className="orbit-launchfield is-wide">
+                      <span className={labelCls}>Extra arguments, added to the game's own</span>
+                      <input
+                        className={inputCls}
+                        value={c.extraArgs ?? ''}
+                        onChange={(event) => setCompanion(i, { extraArgs: event.target.value })}
+                        placeholder="Leave empty to start with the same arguments"
+                        spellCheck={false}
+                      />
+                    </label>
+
+                    <label className="orbit-launchfield is-wide">
+                      <span className={labelCls}>Start in a different folder</span>
+                      <span className="orbit-launchfield-row">
+                        <input
+                          className={inputCls}
+                          value={c.workingDir ?? ''}
+                          onChange={(event) => setCompanion(i, { workingDir: event.target.value || null })}
+                          placeholder="Leave empty for the game's own folder"
+                          spellCheck={false}
+                        />
+                        {native && (
+                          <button
+                            type="button"
+                            className={btnBrowse}
+                            onClick={() =>
+                              void pickFolder('Choose the folder this launch starts in', c.workingDir || undefined).then(
+                                (path) => path && setCompanion(i, { workingDir: path }),
+                              )
+                            }
+                          >
+                            <FolderOpen className="size-4" />
+                            Browse
+                          </button>
+                        )}
+                      </span>
+                    </label>
+
+                    <div className="orbit-launchfield is-wide">
+                      <span className={labelCls}>Also start these, before the game</span>
+                      {(c.starts ?? []).map((entry, n) => (
+                        <span key={n} className="orbit-launchfield-row">
+                          <input
+                            className={inputCls}
+                            value={entry}
+                            onChange={(event) =>
+                              setCompanion(i, {
+                                starts: (c.starts ?? []).map((value, at) => (at === n ? event.target.value : value)),
+                              })
+                            }
+                            placeholder="A program, or a https:// page"
+                            spellCheck={false}
+                          />
+                          <button
+                            type="button"
+                            className={`${btnGhost} shrink-0`}
+                            aria-label="Remove this program from the launch"
+                            onClick={() =>
+                              setCompanion(i, { starts: (c.starts ?? []).filter((_, at) => at !== n) })
+                            }
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="orbit-launchaddbtn"
+                          onClick={() => setCompanion(i, { starts: [...(c.starts ?? []), ''] })}
+                        >
+                          <Plus className="size-3.5" /> Add a program
+                        </button>
+                        {native && (
+                          <button
+                            type="button"
+                            className="orbit-launchaddbtn"
+                            onClick={() =>
+                              void pickFile('Choose a program to start with this launch', ['exe', 'bat', 'sh', 'AppImage'], undefined).then(
+                                (path) => path && setCompanion(i, { starts: [...(c.starts ?? []), path] }),
+                              )
+                            }
+                          >
+                            <FolderOpen className="size-3.5" /> Browse
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="orbit-launchfooter">
+            <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
+          </div>
+        </>
+      )}
+
+      {section === 'tools' && (
+        <p className="orbit-launchempty">
+          Tools that start with the game are on the Launch page, under “Start alongside”.
+        </p>
+      )}
+    </div>
   );
 }

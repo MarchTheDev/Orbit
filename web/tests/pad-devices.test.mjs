@@ -258,6 +258,7 @@ check('an environment row shares its width instead of overflowing',
     (wine.match(/min-w-0 flex-1/g) ?? []).length >= 2 &&
     wine.includes('shrink-0 px-2 py-1.5'));
 check('the path fields in the launch editor can shrink too',
-  editor.includes('flex min-w-0 gap-2') && editor.includes('block min-w-0 flex-1'));
+  editor.includes('orbit-launchfield-row') &&
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-launchfield-row {\n  display: flex;\n  min-width: 0;'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

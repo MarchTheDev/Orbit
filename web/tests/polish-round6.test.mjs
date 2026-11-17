@@ -28,9 +28,11 @@ check('Settings Open the album selects the Album tab directly',
 check('All games Album art previews a small set of game covers',
   stats.includes('orbit-album-all-covers') && stats.includes('albumGames.slice(0, 4)') && css.includes('.orbit-album-all-cover'));
 check('Stardeck has a persisted Deck / Library page switch, controller page event, and a library grid',
-  tv.includes('orbit.stardeck.lastPage') && tv.includes('orbit-pad-page') && tv.includes('aria-label="Stardeck library"') && tv.includes('grid-cols-[repeat(auto-fill'));
+  tv.includes('orbit.stardeck.lastPage') && tv.includes('orbit-pad-page') && tv.includes('aria-label="Stardeck library"') && tv.includes('orbit-tv-library-grid') && css.includes('.orbit-tv-library-grid'));
 check('Stardeck settings choose what appears below Library covers',
   tv.includes("coverLabel: 'name' | 'info' | 'none'") && tv.includes('Under library covers') && tv.includes("prefs.coverLabel === 'none'"));
 check('Fullscreen exit restores a maximized window only after fullscreen has ended',
-  tvService.includes('previousNativeBounds') && tvService.includes('window.isMaximized()') && tvService.includes('else {\n          await window.maximize()') && tvService.includes('await window.maximize()') && tvService.includes('await window.setFullscreen(false)') && tvService.includes('await window.isFullscreen()') && !tvService.includes('w?.setFullscreen(false)'));
+  tvService.includes('previousNativeBounds') && tvService.includes('window.isMaximized()') && tvService.includes('await window.maximize()') && tvService.includes('await window.setFullscreen(false)') && tvService.includes('await window.isFullscreen()') && !tvService.includes('w?.setFullscreen(false)'));
+check('And it puts the window back inside the monitor work area, so the bottom edge stays above the taskbar',
+  tvService.includes('workArea()') && tvService.includes('monitor.workArea') && tvService.includes('area.y + area.height') && tvService.includes('Math.min(bounds.height, area.height)'));
 (globalThis).__orbitFailures = ((globalThis.__orbitFailures ?? 0) + failures);
