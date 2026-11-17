@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActiveSession } from '../types';
-import { activeSession, startSession, stopSession } from '../services/native';
+import { activeSession, startGameCompanion as runGameCompanion, startSession, stopSession } from '../services/native';
 import { isNative } from '../services/native';
 
 interface TauriEvent {
@@ -102,6 +102,21 @@ export function useSession(onEnded: (gameId: string) => void) {
     }
   }, []);
 
+  const runCompanion = useCallback(async (gameId: string, index: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const started = await runGameCompanion(gameId, index);
+      if (started) setSession(started);
+      return started;
+    } catch (e) {
+      setError(String(e));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const stop = useCallback(async () => {
     const current = session;
     if (!current) return;
@@ -116,5 +131,5 @@ export function useSession(onEnded: (gameId: string) => void) {
     }
   }, [session]);
 
-  return { session, busy, notice, error, play, stop, native: isNative() };
+  return { session, busy, notice, error, play, stop, runCompanion, native: isNative() };
 }

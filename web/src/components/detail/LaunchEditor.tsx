@@ -5,8 +5,6 @@ import { isNative } from '../../services/native';
 import { pickFile } from '../../services/desktop';
 import { desktopOs } from '../../utils/platform';
 import { btnBrowse, inputCls, labelCls } from '../ui/Modal';
-import { WineSettings } from './WineSettings';
-import { buildName } from '../../utils/proton';
 import { say } from '../../utils/toast';
 
 // Emulator and Steam used to be choices here. Both are gone: an emulator is just
@@ -34,29 +32,6 @@ function kindsForThisMachine() {
 function parentOf(path: string): string | null {
   const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
   return cut > 0 ? path.slice(0, cut) : null;
-}
-
-/** The one path each kind needs, so it can be summarised in one line. */
-function summarise(t: LaunchTarget, companions: Companion[]): string {
-  const extra = companions.length ? ` + ${companions.length} alongside` : '';
-  switch (t.kind) {
-    case 'executable':
-      // Chosen but not yet pointed at anything: say so rather than show a
-      // blank line where the program should be.
-      return t.path.trim() ? `${t.path}${extra}` : `No program chosen yet${extra}`;
-    case 'wine': {
-      // Which build it runs on matters as much as which program it is.
-      const build = buildName(t.proton);
-      const through = build ? `Proton ${build}` : 'Wine';
-      return t.path.trim() ? `${through} · ${t.path}${extra}` : `${through}, no program chosen yet${extra}`;
-    }
-    case 'steam':
-      return `Steam app ${t.appId}${extra}`;
-    case 'lutris':
-      return t.slug ? `Lutris · ${t.slug}${extra}` : `Lutris${extra}`;
-    default:
-      return `Timer only, nothing is launched${extra}`;
-  }
 }
 
 /**
@@ -293,12 +268,6 @@ export function LaunchEditor({
               <span className={labelCls}>Arguments</span>
               <input className={inputCls} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
             </label>
-            <WineSettings
-              proton={target.proton ?? null}
-              tweaks={target.tweaks}
-              onProton={(path) => setTarget({ ...target, proton: path })}
-              onTweaks={(next) => setTarget({ ...target, tweaks: next })}
-            />
           </div>
         )}
 
@@ -325,7 +294,7 @@ export function LaunchEditor({
       </div>
       </>}
 
-      {section !== 'launch' && <>
+      {section !== 'tools' && <>
       {/* Started with the game, never watched. */}
       <div className="border-t border-line pt-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -371,6 +340,10 @@ export function LaunchEditor({
                       <span className={labelCls}>Arguments</span>
                       <input className={inputCls} value={c.args} onChange={(event) => setCompanion(i, { args: event.target.value })} placeholder="Optional" spellCheck={false} />
                     </label>
+                    <div className="orbit-setrow mt-2 rounded-lg border border-line bg-panel px-3 py-2">
+                      <div className="orbit-setrow-copy"><p className="orbit-setrow-label">Count this launch as playtime</p><p className="orbit-setrow-hint">When chosen from the Play arrow, track this tool as a session for the game.</p></div>
+                      <button type="button" role="switch" aria-label={`Count ${c.path || 'this program'} as playtime`} aria-checked={!!c.countsAsPlaying} onClick={() => setCompanion(i, { countsAsPlaying: !c.countsAsPlaying })} className="orbit-switch" data-on={c.countsAsPlaying || undefined}><i /></button>
+                    </div>
                   </>
                 )}
               </div>
@@ -382,7 +355,6 @@ export function LaunchEditor({
 
       {section !== 'tools' && <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
         <span className="text-[11px] text-muted">{dirty ? 'Saving…' : 'Saved'}</span>
-        <span className="truncate font-mono text-[11px] text-muted">{summarise(target, companions)}</span>
       </div>}
     </section>
   );

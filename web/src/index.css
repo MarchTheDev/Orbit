@@ -5952,15 +5952,18 @@ html.orbit-tv body, html.orbit-tv #root { background: #05040d; }
     #05040d;
 }
 
-/* TV mode is an instant cut in and out. Keep every child still too: the
-   changing game artwork is swapped at a fixed size, never zoomed or faded. */
+/* The deck keeps its deliberate, compositor-friendly slide between games.
+   Only native scrolling is immediate; reduced-motion preferences are respected
+   by the focused transition rules below. */
 .tv-root,
-.tv-root *,
-.tv-root *::before,
-.tv-root *::after {
-  animation: none !important;
-  transition: none !important;
+.tv-root * {
   scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-root .orbit-deck-stageinner,
+  .tv-root .orbit-deck-stageart,
+  .tv-root .orbit-deck-card,
+  .tv-root .orbit-deck-cards > li { animation: none !important; transition: none !important; }
 }
 
 /* The rail scrolls sideways, and a scrollbar under a row of covers is a line
@@ -7297,4 +7300,114 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   .orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1'],
   .orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1'] { transform: scale(.72); }
   .orbit-deck:not(.is-side) .orbit-deck-name { font-size: 10px; }
+}
+
+/* Stardeck's fixed chrome: a compact, full-width control shelf rather than a
+   floating toolbar that collides with the centered page switch. */
+.orbit-deck-topbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: clamp(8px, 1.4vw, 18px);
+  min-height: 62px;
+  padding: 8px clamp(14px, 3.4vw, 42px);
+  border-bottom: 1px solid #ffffff12;
+  background: linear-gradient(180deg, #08070de8, #08070db5);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow: 0 10px 30px #0002;
+}
+.orbit-deck-brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 9px; }
+.orbit-deck-topbar .orbit-deck-pagetabs {
+  position: static;
+  left: auto;
+  top: auto;
+  transform: none;
+  flex: 0 0 auto;
+  margin-inline: auto;
+  padding: 3px;
+  border-radius: 11px;
+  background: #ffffff0b;
+  box-shadow: inset 0 1px 0 #ffffff0c;
+}
+.orbit-deck-topbar .orbit-deck-pagetab { min-width: 68px; padding: 6px 12px; border-radius: 8px; font-size: 11px; }
+.orbit-deck-topbar .orbit-deck-leave { height: 36px; padding: 0 12px; border-radius: 10px; }
+.orbit-deck-topbar [data-tv-topbar-session] { max-width: min(24vw, 18rem); }
+
+/* The deck is split into two clear, edge-to-edge surfaces. Its lower shelf
+   borrows only the selected banner's colour and blur, so it feels connected
+   without competing with the artwork above it. */
+.orbit-deck:not(.is-side) .orbit-deck-stage {
+  flex: 1 1 58%;
+  border-radius: 0;
+  border-inline: 0;
+  box-shadow: none;
+}
+.orbit-deck:not(.is-side) .orbit-deck-index {
+  position: relative;
+  isolation: isolate;
+  flex: 1 1 42%;
+  width: calc(100% + 40px);
+  min-height: 0;
+  margin: 0 -20px -14px;
+  overflow: hidden;
+  justify-content: center;
+  gap: clamp(8px, 1.5vh, 16px);
+  padding: 12px 20px max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid #ffffff20;
+  background: linear-gradient(110deg, hsl(var(--deck-hue, 250) 36% 15% / .96), #08070df0 62%);
+}
+.orbit-deck-index-art {
+  position: absolute;
+  z-index: -1;
+  inset: -24px;
+  background-position: center 58%;
+  background-size: cover;
+  filter: blur(25px) saturate(.8);
+  opacity: .56;
+  transform: scale(1.08);
+  pointer-events: none;
+}
+.orbit-deck:not(.is-side) .orbit-deck-indexhead,
+.orbit-deck:not(.is-side) .orbit-deck-cards { position: relative; z-index: 1; }
+.orbit-deck:not(.is-side) .orbit-deck-indexhead { width: min(100%, 82rem); margin: 0 auto; }
+.orbit-deck:not(.is-side) .orbit-deck-cards {
+  flex: 1 1 auto;
+  width: min(100%, 92rem);
+  max-height: 100%;
+  margin: 0 auto;
+  gap: clamp(2px, 1.1vw, 18px);
+  padding: 8px 6px 14px;
+}
+.orbit-deck:not(.is-side) .orbit-deck-stageinner {
+  animation: deck-game-in .32s cubic-bezier(.2,.8,.2,1) both;
+  will-change: opacity, transform;
+}
+@keyframes deck-game-in {
+  from { opacity: .45; transform: translate3d(0, 14px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.orbit-deck:not(.is-side) .orbit-deck-stageart { animation-duration: .42s; }
+@media (min-width: 640px) {
+  .orbit-deck:not(.is-side) .orbit-deck-index { width: calc(100% + 68px); margin-inline: -34px; margin-bottom: -18px; padding-inline: 34px; }
+}
+@media (max-width: 640px) {
+  .orbit-deck-topbar { min-height: 54px; padding-inline: 12px; }
+  .orbit-deck-topbar .orbit-deck-pagetabs { margin-inline: auto 0; }
+  .orbit-deck-topbar .orbit-deck-leave { width: 36px; padding: 0; justify-content: center; font-size: 0; }
+  .orbit-deck-topbar .orbit-deck-leave svg { margin: 0; }
+  .orbit-deck:not(.is-side) .orbit-deck-index { width: calc(100% + 40px); margin-inline: -20px; padding-inline: 14px; }
+}
+@media (max-height: 680px) {
+  .orbit-deck:not(.is-side) .orbit-deck-stage { flex-basis: 54%; }
+  .orbit-deck:not(.is-side) .orbit-deck-index { flex-basis: 46%; padding-block: 7px; }
+  .orbit-deck:not(.is-side) .orbit-deck-stageinner { padding-block: 4px 8px; }
+}
+.orbit-editsection-centered .orbit-editsection-head { align-items: center; text-align: center; }
+.orbit-editsection-centered .orbit-edit-times,
+.orbit-editsection-centered .orbit-edit-choices { width: min(100%, 44rem); align-self: center; }
+.orbit-editsection-centered > label { width: min(100%, 30rem); align-self: center; }
+.orbit-editsection-centered > button { align-self: center; }
+@media (max-width: 560px) {
+  .orbit-editsection-centered .orbit-edit-times { grid-template-columns: 1fr; }
 }

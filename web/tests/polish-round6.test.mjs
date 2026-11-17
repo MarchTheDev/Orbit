@@ -31,6 +31,6 @@ check('Stardeck has a persisted Deck / Library page switch, controller page even
   tv.includes('orbit.stardeck.lastPage') && tv.includes('orbit-pad-page') && tv.includes('aria-label="Stardeck library"') && tv.includes('grid-cols-[repeat(auto-fill'));
 check('Stardeck settings choose what appears below Library covers',
   tv.includes("coverLabel: 'name' | 'info' | 'none'") && tv.includes('Under library covers') && tv.includes("prefs.coverLabel === 'none'"));
-check('Fullscreen exit restores a maximized window without racing a second unfullscreen call',
-  tvService.includes('previousNativeBounds') && tvService.includes('window.isMaximized()') && tvService.includes('if (bounds.maximized)') && tvService.includes('await window.maximize()') && tv.includes('restores the desktop window once') && !tv.includes('w?.setFullscreen(false)'));
+check('Fullscreen exit restores a maximized window only after fullscreen has ended',
+  tvService.includes('previousNativeBounds') && tvService.includes('window.isMaximized()') && tvService.includes('else {\n          await window.maximize()') && tvService.includes('await window.maximize()') && tvService.includes('await window.setFullscreen(false)') && tvService.includes('await window.isFullscreen()') && !tvService.includes('w?.setFullscreen(false)'));
 (globalThis).__orbitFailures = ((globalThis.__orbitFailures ?? 0) + failures);

@@ -92,11 +92,35 @@ export function saveGame(game: Game): Promise<void> {
   return call('db_upsert_game', { game }, () => undefined);
 }
 
-/** Install a chosen ReShade DLL and optional preset beside the selected game. */
+export interface ReshadeStatus {
+  installDir: string | null;
+  api: string | null;
+  detected: boolean;
+  managed: boolean;
+  enabled: boolean;
+  preset: boolean;
+  originalBackup: boolean;
+}
+
+const EMPTY_RESHADE: ReshadeStatus = { installDir: null, api: null, detected: false, managed: false, enabled: false, preset: false, originalBackup: false };
+
+/** Inspect, install, adopt and manage the ReShade files beside a game. */
+export function getReshadeStatus(gameId: string): Promise<ReshadeStatus> {
+  return call('reshade_status', { gameId }, () => EMPTY_RESHADE);
+}
 export function applyReshade(gameId: string, dllPath: string, presetPath: string, api: string): Promise<string> {
   return call('apply_reshade', { gameId, dllPath, presetPath: presetPath || null, api }, () => {
     throw new Error('Applying ReShade needs the Orbit desktop app.');
   });
+}
+export function adoptReshade(gameId: string, api: string): Promise<ReshadeStatus> {
+  return call('adopt_reshade', { gameId, api }, () => EMPTY_RESHADE);
+}
+export function setReshadeEnabled(gameId: string, enabled: boolean): Promise<ReshadeStatus> {
+  return call('set_reshade_enabled', { gameId, enabled }, () => EMPTY_RESHADE);
+}
+export function removeReshade(gameId: string): Promise<ReshadeStatus> {
+  return call('remove_reshade', { gameId }, () => EMPTY_RESHADE);
 }
 
 export function deleteGame(id: string): Promise<void> {
@@ -326,6 +350,11 @@ export function startSession(gameId: string, category = 'Main story'): Promise<A
       manual: true,
     };
   });
+}
+
+/** Launch a saved tool from the game's Play arrow, optionally with its own timer. */
+export function startGameCompanion(gameId: string, index: number): Promise<ActiveSession | null> {
+  return call('start_game_companion', { gameId, index }, async () => null);
 }
 
 /** Stop the running session and write the time into the library. */
@@ -644,6 +673,11 @@ export function findArtwork(gameId: string, page = 0): Promise<ArtworkFound> {
       return { appId: null, picks: [] } satisfies ArtworkFound;
     },
   );
+}
+
+/** User-selectable wide art from SteamGridDB and Steam's own store images. */
+export function findBackdropArtwork(gameId: string): Promise<ArtworkFound> {
+  return call('artwork_backdrops', { gameId }, async () => ({ appId: null, picks: [] }));
 }
 
 /** Best-effort wide SteamGridDB art for a TV backdrop, when a key is configured. */

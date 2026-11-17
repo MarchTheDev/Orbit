@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Image, RotateCcw, Sparkles } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
-import { applyReshade, findArtwork, findSave, isNative, revealInExplorer, saveHintsOf, suggestSaves } from '../../services/native';
+import { adoptReshade, applyReshade, findArtwork, findBackdropArtwork, findSave, getReshadeStatus, isNative, removeReshade, revealInExplorer, saveHintsOf, setReshadeEnabled, suggestSaves, type ReshadeStatus } from '../../services/native';
 import { say } from '../../utils/toast';
 import { fileSrc, pickAnyFile, pickFile, pickFolder } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
@@ -11,6 +11,8 @@ import { LaunchEditor } from './LaunchEditor';
 import { Select } from '../ui/Select';
 import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
 import { PortraitBrowser } from '../ui/PortraitBrowser';
+import { WineSettings } from './WineSettings';
+import { desktopOs } from '../../utils/platform';
 
 /**
  * Everything about a game, in one place.
@@ -30,7 +32,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
-  const [activeTab, setActiveTab] = useState<'details' | 'launch' | 'tools' | 'saves'>('details');
+  const wineTarget = game.launch.kind === 'wine' ? game.launch : null;
+  const [activeTab, setActiveTab] = useState<'details' | 'launch' | 'tools' | 'saves' | 'proton'>('details');
   const [savePath, setSavePath] = useState(saveDir);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -39,6 +42,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [reshadePreset, setReshadePreset] = useState('');
   const [reshadeApi, setReshadeApi] = useState('dxgi');
   const [reshadeBusy, setReshadeBusy] = useState(false);
+  const [reshadeStatus, setReshadeStatus] = useState<ReshadeStatus | null>(null);
   const saveAttempted = useRef(false);
 
   const [title, setTitle] = useState(game.title);
@@ -82,6 +86,17 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setSavePath(saveDir), [game.id, saveDir]);
+  useEffect(() => {
+    if (activeTab !== 'tools' || !isNative()) return;
+    let current = true;
+    setReshadeBusy(true);
+    void getReshadeStatus(game.id).then((next) => {
+      if (!current) return;
+      setReshadeStatus(next);
+      if (next.api) setReshadeApi(next.api);
+    }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => { if (current) setReshadeBusy(false); });
+    return () => { current = false; };
+  }, [activeTab, game.id]);
   useEffect(() => {
     if (activeTab !== 'saves' || saveDir.trim() || saveAttempted.current || !isNative()) return;
     saveAttempted.current = true;
@@ -199,6 +214,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
         {([
           ['details', 'Details'],
           ...(!hideLaunchSettings ? [['launch', 'Launch'], ['tools', 'Tools']] as const : []),
+          ...(desktopOs() === 'linux' && !hideLaunchSettings ? [['proton', 'Proton']] as const : []),
           ['saves', 'Saves'],
         ] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={activeTab === id} onClick={() => setActiveTab(id)}>
@@ -308,6 +324,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
               <h5>Wide backdrop</h5><p>The atmospheric image behind the selected game in Stardeck.</p>
               <div className="flex flex-wrap gap-2">
                 {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickAnyFile('Choose a wide backdrop').then((path) => path && setBackdropUrl(fileSrc(path)))}><FolderOpen className="size-3.5" />Choose file</button>}
+                <PortraitBrowser shape="wide" actionLabel="Browse backdrops" emptyLabel="No wide artwork was found." resetKey={`${game.id}:backdrop`} selected={backdropUrl} load={() => findBackdropArtwork(game.id)} onChoose={(pick) => { setBackdropUrl(pick.url); say(`Backdrop selected · ${pick.label}`); }} />
                 {backdropUrl && <button type="button" className={btnGhost} onClick={() => setBackdropUrl('')}>Use automatic art</button>}
               </div>
               <details className="orbit-art-url"><summary>Enter a backdrop URL</summary><input className={inputCls} type="url" value={backdropUrl} onChange={(event) => setBackdropUrl(event.target.value)} placeholder="https://…" spellCheck={false} /></details>
@@ -315,7 +332,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
           </article>
         </div>
       </section>
-      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
+      <section className="orbit-editsection orbit-editsection-centered" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">In the library</h4>
           <p className="orbit-editsection-note">
@@ -345,19 +362,42 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
       {activeTab === 'tools' && !hideLaunchSettings && (
         <section className="orbit-editsection orbit-reshade-panel">
           <header className="orbit-editsection-head">
-            <h4 className="orbit-editsection-title"><Sparkles className="size-3.5" />ReShade</h4>
-            <p className="orbit-editsection-note">Apply an existing ReShade DLL and optional preset directly to this game. Any DLL or preset already in the game folder is backed up first.</p>
+            <h4 className="orbit-editsection-title"><Sparkles className="size-3.5" />ReShade manager</h4>
+            <p className="orbit-editsection-note">Orbit checks the game folder when you open this page, keeps the original proxy and config as restore points, and can switch the managed loader off without deleting it.</p>
           </header>
+          {reshadeStatus && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold">{reshadeStatus.managed ? (reshadeStatus.detected ? (reshadeStatus.enabled ? 'Managed · enabled' : 'Managed · disabled') : 'Managed · loader missing') : reshadeStatus.detected ? 'Existing proxy detected · not yet managed' : 'No ReShade loader detected'}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted">{reshadeStatus.installDir ?? game.installDir ?? 'Choose this game’s install folder'}{reshadeStatus.api ? ` · ${reshadeStatus.api}.dll` : ''}{reshadeStatus.originalBackup ? ' · original backed up' : ''}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {reshadeStatus.managed && reshadeStatus.detected && <button type="button" className={btnGhost} disabled={reshadeBusy} onClick={() => {
+                  setReshadeBusy(true);
+                  void setReshadeEnabled(game.id, !reshadeStatus.enabled).then(setReshadeStatus).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
+                }}>{reshadeStatus.enabled ? 'Disable' : 'Enable'}</button>}
+                {!reshadeStatus.managed && reshadeStatus.detected && <button type="button" className={btnGhost} disabled={reshadeBusy} onClick={() => {
+                  setReshadeBusy(true);
+                  void adoptReshade(game.id, reshadeApi).then((next) => { setReshadeStatus(next); say('Existing ReShade install is now managed by Orbit.'); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
+                }}>Adopt existing</button>}
+                {reshadeStatus.managed && <button type="button" className={`${btnGhost} text-rose-400`} disabled={reshadeBusy} onClick={() => {
+                  if (!window.confirm('Remove Orbit-managed ReShade files and restore the original game files when available?')) return;
+                  setReshadeBusy(true);
+                  void removeReshade(game.id).then((next) => { setReshadeStatus(next); say('ReShade removed; original files restored when available.'); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
+                }}>Remove / restore</button>}
+              </div>
+            </div>
+          )}
           <div className="orbit-edit-facts">
             <label className="block sm:col-span-2">
-              <span className={labelCls}>ReShade DLL</span>
+              <span className={labelCls}>ReShade DLL package</span>
               <div className="flex gap-2">
-                <input className={inputCls} value={reshadeDll} onChange={(event) => setReshadeDll(event.target.value)} placeholder="Choose a ReShade .dll" spellCheck={false} />
+                <input className={inputCls} value={reshadeDll} onChange={(event) => setReshadeDll(event.target.value)} placeholder="Choose the ReShade DLL from its installer folder" spellCheck={false} />
                 {isNative() && <button type="button" className={btnBrowse} onClick={() => void pickFile('Choose ReShade DLL', ['dll']).then((path) => path && setReshadeDll(path))}><FolderOpen className="size-3.5" />Browse</button>}
               </div>
             </label>
             <label className="block">
-              <span className={labelCls}>Graphics API proxy</span>
+              <span className={labelCls}>Graphics API</span>
               <Select value={reshadeApi} onChange={setReshadeApi} ariaLabel="ReShade graphics API" options={[{ value: 'dxgi', label: 'DirectX 10 / 11 / 12 (dxgi.dll)' }, { value: 'd3d11', label: 'Direct3D 11 (d3d11.dll)' }, { value: 'd3d9', label: 'Direct3D 9 (d3d9.dll)' }, { value: 'opengl32', label: 'OpenGL (opengl32.dll)' }]} />
             </label>
             <label className="block">
@@ -371,18 +411,41 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className={cn(btnBrowse, 'font-semibold')} disabled={!isNative() || !reshadeDll.trim() || reshadeBusy} onClick={() => {
               setReshadeBusy(true);
-              void applyReshade(game.id, reshadeDll, reshadePreset, reshadeApi).then((message) => say(message)).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
-            }}>{reshadeBusy ? 'Applying…' : 'Apply ReShade to game'}</button>
-            <span className="text-xs text-muted">Windows or Wine games · files are kept beside the game executable.</span>
+              void applyReshade(game.id, reshadeDll, reshadePreset, reshadeApi).then(async (message) => { say(message); setReshadeStatus(await getReshadeStatus(game.id)); }).catch((error: unknown) => say(error instanceof Error ? error.message : String(error))).finally(() => setReshadeBusy(false));
+            }}>{reshadeBusy ? 'Working…' : reshadeStatus?.managed ? 'Update managed install' : 'Install and manage'}</button>
+            <span className="text-xs text-muted">Windows or Wine games · preserve original files · disable, update or restore from here. Check anti-cheat rules before using visual mods online.</span>
           </div>
         </section>
       )}
 
-      {!hideLaunchSettings && (activeTab === 'launch' || activeTab === 'tools') && (
+      {activeTab === 'proton' && !hideLaunchSettings && (
+        <section className="orbit-editsection orbit-proton-page">
+          <header className="orbit-editsection-head">
+            <h4 className="orbit-editsection-title">Proton for this game</h4>
+            <p className="orbit-editsection-note">Choose a compatibility build and tune the environment this Windows game uses on Linux.</p>
+          </header>
+          {wineTarget ? (
+            <WineSettings
+              proton={wineTarget.proton ?? null}
+              tweaks={wineTarget.tweaks}
+              onProton={(proton) => onUpdate({ launch: { ...wineTarget, proton } })}
+              onTweaks={(tweaks) => onUpdate({ launch: { ...wineTarget, tweaks } })}
+            />
+          ) : (
+            <div className="mx-auto max-w-xl rounded-xl border border-line bg-panel2 p-4 text-center">
+              <p className="text-sm font-semibold">Set the launch type to Wine first</p>
+              <p className="mt-1 text-xs text-muted">Proton builds and compatibility options become available when this game launches through Wine.</p>
+              <button type="button" className={`${btnBrowse} mt-3`} onClick={() => setActiveTab('launch')}>Open Launch settings</button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {!hideLaunchSettings && activeTab === 'launch' && (
         <LaunchEditor
           game={game}
           saveOnClose
-          section={activeTab === 'tools' ? 'tools' : 'launch'}
+          section="launch"
           onSave={(launch, companions) => onUpdate({ launch, companions })}
         />
       )}
@@ -416,7 +479,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
         </section>
       )}
 
-      <section className="orbit-editsection" hidden={activeTab !== 'details'}>
+      <section className="orbit-editsection orbit-editsection-centered" hidden={activeTab !== 'details'}>
         <header className="orbit-editsection-head">
           <h4 className="orbit-editsection-title">
             <Sparkles className="size-3.5" />

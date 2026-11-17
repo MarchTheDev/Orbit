@@ -314,26 +314,22 @@ function Backdrop({
   // of the stage.
   useEffect(() => {
     let current = true;
-    // Moving quickly along the rail should not turn each transient selection
-    // into a separate community-art request.
-    const timer = window.setTimeout(() => {
-      void findTvBackdrop(game.id).then((url) => {
-        if (!current) return;
-        setSgdbBackdrop({ gameId: game.id, url });
-        onFound?.(url);
-        // If a local fallback already failed while SGDB was answering, step
-        // back to its newly inserted slot instead of accidentally skipping it.
-        if (url && !backdropsFor(game).includes(url)) {
-          setFailure((failed) => failed.gameId === game.id && failed.step > 0
-            ? { gameId: game.id, step: 1 }
-            : failed);
-        }
-      });
-    }, 100);
-    return () => {
-      current = false;
-      window.clearTimeout(timer);
-    };
+    // Start the community-art request as soon as a game becomes active. The
+    // request is memoized by game id, so quick rail movement joins an in-flight
+    // lookup rather than multiplying calls, and the next game is warmed below.
+    void findTvBackdrop(game.id).then((url) => {
+      if (!current) return;
+      setSgdbBackdrop({ gameId: game.id, url });
+      onFound?.(url);
+      // If a local fallback already failed while SGDB was answering, step
+      // back to its newly inserted slot instead of accidentally skipping it.
+      if (url && !backdropsFor(game).includes(url)) {
+        setFailure((failed) => failed.gameId === game.id && failed.step > 0
+          ? { gameId: game.id, step: 1 }
+          : failed);
+      }
+    });
+    return () => { current = false; };
   }, [game.id]);
   // A selection change takes the first attempt synchronously. Waiting for an
   // effect to reset `step` showed the previous game's lower-quality fallback
@@ -1375,16 +1371,14 @@ export function TvMode({
 
       {/* The top panel: where you are, and the room's small facts. It floats on
           the artwork rather than sitting in a bar of its own. */}
-      <header data-tv-topbar className="relative z-20 flex shrink-0 items-center gap-3 px-5 pb-4 pt-4 sm:px-9 sm:pt-5">
-        <span className="flex items-center gap-3">
-          <Logo className="size-7 drop-shadow-[0_2px_10px_var(--c-accent)]" />
-          <span className="hidden flex-col leading-none sm:flex">
-            <span className="text-lg font-bold tracking-tight text-white/95">Orbit</span>
-            <span className="mt-1 text-[9px] font-bold uppercase tracking-[0.34em] text-white/35">
-              Stardeck
+      <header data-tv-topbar className="orbit-deck-topbar relative z-20">
+          <span className="orbit-deck-brand">
+            <Logo className="size-6 drop-shadow-[0_2px_10px_var(--c-accent)]" />
+            <span className="hidden flex-col leading-none sm:flex">
+              <span className="text-sm font-bold tracking-tight text-white/95">Orbit</span>
+              <span className="mt-1 text-[8px] font-bold uppercase tracking-[0.28em] text-white/45">Stardeck</span>
             </span>
           </span>
-        </span>
 
         {playingNow && (
           <span className={cn(
@@ -1552,7 +1546,7 @@ export function TvMode({
                 style={{ background: `radial-gradient(90% 120% at 12% 8%, hsl(${active.hue} 60% 42% / .3), transparent 62%)` }}
               />
 
-              <div className="orbit-deck-stageinner">
+              <div key={active.id} className="orbit-deck-stageinner">
                 <div className="orbit-deck-copy">
                   <p className="orbit-deck-kicker">
                     {running ? (
@@ -1668,6 +1662,14 @@ export function TvMode({
                 This is what makes the mode a deck rather than a carousel - the
                 stage never moves, the row of banners moves under the light. */}
             <section className="orbit-deck-index">
+              <div
+                aria-hidden
+                className="orbit-deck-index-art"
+                style={{
+                  backgroundImage: `linear-gradient(180deg, rgba(5,4,13,.34), rgba(5,4,13,.76)), url("${heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active) || ''}")`,
+                  backgroundColor: `hsl(${active.hue} 35% 16%)`,
+                }}
+              />
               <div className="orbit-deck-indexhead">
                 <h2>Deck</h2>
                 <span className="orbit-num">

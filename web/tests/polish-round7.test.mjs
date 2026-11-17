@@ -13,6 +13,7 @@ const tvService = read('../src/services/tv.ts');
 const app = read('../src/App.tsx');
 const native = read('../src-tauri/src/saves.rs');
 const nativeLaunch = read('../src-tauri/src/launch.rs');
+const nativeLib = read('../src-tauri/src/lib.rs');
 const session = read('../src-tauri/src/session.rs');
 
 console.log('polish round 7 checks');
@@ -44,8 +45,8 @@ check('The Saves tab automatically searches and exposes the existing PCGamingWik
   edit.includes('findSave(game.title, saveHintsOf(game))') && edit.includes('suggestSaves(game.title)') && app.includes('onSaveDir={(path)'));
 check('Launch companions include programs, shell scripts, browser pages, and separate arguments',
   launch.includes('Add program / script') && launch.includes('Add web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
-check('Tools can apply a ReShade DLL and optional preset safely to the selected game',
-  edit.includes('Apply ReShade to game') && edit.includes('ReShade graphics API') && nativeLaunch.includes('open_external_url') && read('../src-tauri/src/lib.rs').includes('fn apply_reshade(') && read('../src-tauri/src/lib.rs').includes('backup_reshade_file(&destination)'));
+check('Tools manage ReShade installs, presets, API proxies, adoption, toggling, and backups',
+  edit.includes('Install and manage') && edit.includes('Adopt existing') && edit.includes('Remove / restore') && edit.includes('Graphics API') && edit.includes('setReshadeEnabled') && nativeLib.includes('fn apply_reshade(') && nativeLib.includes('fn adopt_reshade(') && nativeLib.includes('fn set_reshade_enabled(') && nativeLib.includes('backup_reshade_original(&destination)'));
 check('Save discovery tries editionless and Roman-numeral title variants like GhostHunterPro',
   native.includes('definitive edition') && native.includes('Part I') && native.includes('save_search_tries_editionless_and_roman_numeral_title_variants'));
 (globalThis).__orbitFailures = ((globalThis.__orbitFailures ?? 0) + failures);

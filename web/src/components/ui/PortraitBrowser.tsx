@@ -40,6 +40,9 @@ export function PortraitBrowser({
   load,
   onFound,
   onChoose,
+  shape = 'portrait',
+  actionLabel = 'Browse covers',
+  emptyLabel = 'No covers found for this game.',
 }: {
   resetKey: string;
   disabled?: boolean;
@@ -47,6 +50,9 @@ export function PortraitBrowser({
   load: (page: number) => Promise<ArtworkFound>;
   onFound?: (found: ArtworkFound) => void;
   onChoose: (pick: ArtworkPick) => void;
+  shape?: 'portrait' | 'wide';
+  actionLabel?: string;
+  emptyLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -79,7 +85,7 @@ export function PortraitBrowser({
       setPage(found.page ?? next);
       setHasMore(Boolean(found.hasMore));
       if (found.picks.length === 0) {
-        setError(next === 0 ? 'No portrait covers for this game. A file can still be chosen.' : 'No more covers on this page.');
+        setError(next === 0 ? `${emptyLabel} A file can still be chosen.` : `No more ${shape === 'wide' ? 'backdrops' : 'covers'} on this page.`);
       }
     } catch (e) {
       if (id !== gen.current) return;
@@ -100,13 +106,13 @@ export function PortraitBrowser({
         className={`${btnGhost} flex items-center gap-2 text-xs disabled:opacity-50`}
       >
         {finding ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-        {finding ? 'Looking…' : 'Browse covers'}
+        {finding ? 'Looking…' : actionLabel}
       </button>
       {error && <p className="mt-2 text-[11px] text-rose-300">{error}</p>}
       {open && picks.length > 0 && (
         <ul
           className="mt-3 grid gap-2"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(7.5rem, 1fr))' }}
+          style={{ gridTemplateColumns: shape === 'wide' ? 'repeat(auto-fill, minmax(9rem, 1fr))' : 'repeat(auto-fill, minmax(7.5rem, 1fr))' }}
         >
           {picks.map((pick) => (
             <li key={pick.url}>
@@ -115,11 +121,11 @@ export function PortraitBrowser({
                 title={pick.label}
                 onClick={() => onChoose(pick)}
                 className={cn(
-                  'aspect-[2/3] w-full overflow-hidden rounded-lg border-2 bg-black',
+                  shape === 'wide' ? 'aspect-[16/9] w-full overflow-hidden rounded-lg border-2 bg-black' : 'aspect-[2/3] w-full overflow-hidden rounded-lg border-2 bg-black',
                   selected === pick.url ? 'border-accent' : 'border-transparent hover:border-muted',
                 )}
               >
-                <img src={pick.url} alt="" className="aspect-[2/3] w-full object-cover" />
+                <img src={pick.url} alt={pick.label} loading="lazy" className={cn('w-full object-cover', shape === 'wide' ? 'aspect-[16/9]' : 'aspect-[2/3]')} />
               </button>
             </li>
           ))}

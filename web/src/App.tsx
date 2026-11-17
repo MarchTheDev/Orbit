@@ -807,7 +807,7 @@ export default function App() {
       .catch((e) => toast({ text: String(e).replace(/^Error:\s*/, ''), tone: 'error' }));
   }, [reload, settings, games, toast]);
 
-  const { session, play, stop, busy, notice, error } = useSession(onSessionEnded);
+  const { session, play, stop, runCompanion, busy, notice, error } = useSession(onSessionEnded);
 
   // A controller moves the real focus. It only polls after one is connected.
   useGamepad();
@@ -1213,6 +1213,17 @@ export default function App() {
       lastPlayed: new Date().toISOString(),
       status: g.status === 'backlog' ? 'playing' : g.status,
     });
+  };
+
+  const runGameCompanion = async (g: Game, index: number) => {
+    if (session) return;
+    await flush();
+    const started = await runCompanion(g.id, index);
+    if (!started) return;
+    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
+      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
+      .catch(() => toast({ text: `Could not save the Journal entry for ${g.title}.` }));
+    updateGame(g.id, { lastPlayed: new Date().toISOString(), status: g.status === 'backlog' ? 'playing' : g.status });
   };
 
   /**
@@ -2003,6 +2014,7 @@ export default function App() {
             await reload();
           }}
           onPlay={() => void startGame(selected)}
+          onRunCompanion={(index) => void runGameCompanion(selected, index)}
           onStop={() => void stop()}
           onRemove={() => setRemoveConfirmId(selected.id)}
           onLeaveBacklog={

@@ -104,6 +104,27 @@ impl Runner {
         category: &str,
         target: &LaunchTarget,
     ) -> Result<ActiveView, String> {
+        self.start_inner(game_id, category, target, true)
+    }
+
+    /// Starts one companion as the tracked game activity, without also starting
+    /// the main executable or the rest of the game's companion list.
+    pub fn start_action(
+        &self,
+        game_id: &str,
+        category: &str,
+        target: &LaunchTarget,
+    ) -> Result<ActiveView, String> {
+        self.start_inner(game_id, category, target, false)
+    }
+
+    fn start_inner(
+        &self,
+        game_id: &str,
+        category: &str,
+        target: &LaunchTarget,
+        start_companions: bool,
+    ) -> Result<ActiveView, String> {
         let game = self
             .db
             .game(game_id)?
@@ -140,23 +161,25 @@ impl Runner {
         // Companion programs ride along with the game: started after it, and
         // never watched, so their exit cannot end the session. One failing is
         // worth a line in the log but not a failed launch.
-        for companion in &game.companions {
-            if let Some(url) = companion.url.as_deref() {
-                let url = url.trim();
-                if !url.is_empty() {
-                    if let Err(error) = crate::launch::open_external_url(url) {
-                        log::warn!("web companion {url} did not open: {error}");
-                    } else {
-                        log::info!("opened web companion {url}");
+        if start_companions {
+            for companion in &game.companions {
+                if let Some(url) = companion.url.as_deref() {
+                    let url = url.trim();
+                    if !url.is_empty() {
+                        if let Err(error) = crate::launch::open_external_url(url) {
+                            log::warn!("web companion {url} did not open: {error}");
+                        } else {
+                            log::info!("opened web companion {url}");
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
-            let path = std::path::Path::new(&companion.path);
-            if let Err(e) = crate::launch::spawn_detached(path, &companion.args) {
-                log::warn!("companion {} did not start: {e}", companion.path);
-            } else {
-                log::info!("started companion {}", companion.path);
+                let path = std::path::Path::new(&companion.path);
+                if let Err(e) = crate::launch::spawn_detached(path, &companion.args) {
+                    log::warn!("companion {} did not start: {e}", companion.path);
+                } else {
+                    log::info!("started companion {}", companion.path);
+                }
             }
         }
 

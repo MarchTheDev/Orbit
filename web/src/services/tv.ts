@@ -82,15 +82,23 @@ export async function leaveFullscreen(): Promise<void> {
     try { await window.setFullscreen(false); } catch { /* Still try to restore the saved window state. */ }
     if (bounds) {
       try {
-        // Let the compositor finish leaving fullscreen before restoring the
-        // previous state. Maximized windows need their maximized state restored,
-        // not the work-area rectangle captured while they filled the desktop.
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 180));
-        if (bounds.maximized) {
-          await window.maximize();
-        } else {
-          await window.setSize(new PhysicalSize(bounds.width, bounds.height));
+        // Fullscreen exits asynchronously on Windows and some Linux compositors.
+        // Restore only after Tauri reports the fullscreen state has actually
+        // gone away; otherwise maximize can preserve the fullscreen frame and
+        // put the bottom edge behind the taskbar.
+        for (let attempt = 0; attempt < 16; attempt += 1) {
+          if (!(await window.isFullscreen())) break;
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 50));
+        }
+        await window.unmaximize().catch(() => undefined);
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 80));
+        if (!bounds.maximized) {
+          // Position first, then size: on Windows the requested size is clamped
+          // to the monitor work area after the compositor has restored chrome.
           await window.setPosition(new PhysicalPosition(bounds.x, bounds.y));
+          await window.setSize(new PhysicalSize(bounds.width, bounds.height));
+        } else {
+          await window.maximize();
         }
       } catch {
         /* The window was closed, or is not ours to resize any more. */

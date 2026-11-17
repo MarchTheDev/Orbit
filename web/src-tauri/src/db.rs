@@ -118,6 +118,9 @@ pub struct Companion {
     /// A web page opened in the system browser when the game starts.
     #[serde(default)]
     pub url: Option<String>,
+    /// If run from the Play dropdown, count it as a session for this game.
+    #[serde(default)]
+    pub counts_as_playing: bool,
 }
 
 /// One play session.

@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   metadataSources: [
     { id: 'steam', label: 'Steam catalogue', enabled: true, kind: 'builtin', note: 'Summary, genres, year, header' },
-    { id: 'steamgriddb', label: 'SteamGridDB', enabled: true, kind: 'builtin', note: 'Alt covers & heroes — needs key above' },
+    { id: 'steamgriddb', label: 'SteamGridDB', enabled: true, kind: 'builtin', note: 'Optional alternate covers and heroes' },
     { id: 'hltb', label: 'HowLongToBeat', enabled: true, kind: 'builtin', note: 'Playtime estimates' },
     { id: 'lutris', label: 'Lutris', enabled: true, kind: 'builtin', note: 'Linux install scripts & icons' },
     { id: 'libretro', label: 'Libretro Thumbnails', enabled: true, kind: 'builtin', note: 'Emulated box art (LaunchBox via Libretro)' },

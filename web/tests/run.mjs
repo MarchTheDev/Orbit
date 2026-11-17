@@ -73,6 +73,7 @@ const checks = [
   'tests/polish-round5.test.mjs',
   'tests/polish-round6.test.mjs',
   'tests/polish-round7.test.mjs',
+  'tests/polish-round8.test.mjs',
 ];
 
 try {

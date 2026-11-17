@@ -372,6 +372,136 @@ fn db_upsert_game(orbit: State<'_, Orbit>, game: GameWrite) -> Result<(), String
     orbit.db.upsert_game(&game)
 }
 
+/// State of the game's ReShade loader and Orbit's management marker.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReshadeStatus {
+    install_dir: Option<String>,
+    api: Option<String>,
+    detected: bool,
+    managed: bool,
+    enabled: bool,
+    preset: bool,
+    original_backup: bool,
+}
+
+const RESHADE_APIS: [(&str, &str); 4] = [
+    ("dxgi", "dxgi.dll"),
+    ("d3d11", "d3d11.dll"),
+    ("d3d9", "d3d9.dll"),
+    ("opengl32", "opengl32.dll"),
+];
+
+fn reshade_install_dir(orbit: &Orbit, game_id: &str) -> Result<PathBuf, String> {
+    let game = orbit.db.game(game_id)?.ok_or_else(|| "This game is no longer in the library.".to_string())?;
+    let launch_json = game.launch.to_string();
+    let launch_path = crate::launch_target::LaunchTarget::parse(Some(&launch_json)).primary_path().map(Path::to_path_buf);
+    game.install_dir.as_deref().map(PathBuf::from).filter(|path| path.is_dir())
+        .or_else(|| game.exe_path.as_deref().and_then(|path| Path::new(path).parent()).filter(|path| path.is_dir()).map(Path::to_path_buf))
+        .or_else(|| launch_path.as_deref().and_then(Path::parent).filter(|path| path.is_dir()).map(Path::to_path_buf))
+        .ok_or_else(|| "Orbit needs the game's install folder or executable path before ReShade can be managed.".to_string())
+}
+
+fn reshade_marker(install: &Path) -> PathBuf { install.join(".orbit-reshade-managed.json") }
+
+fn reshade_status_at(install: &Path) -> ReshadeStatus {
+    let marker_path = reshade_marker(install);
+    let marker = std::fs::read_to_string(&marker_path).ok().and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok());
+    let marked_api = marker.as_ref().and_then(|value| value.get("api")).and_then(serde_json::Value::as_str);
+    let found = RESHADE_APIS.iter().find(|(_, name)| install.join(name).is_file() || install.join(format!("{name}.orbit-disabled")).is_file());
+    let selected = marked_api.and_then(|api| RESHADE_APIS.iter().find(|(candidate, _)| *candidate == api)).or(found);
+    let detected = selected.is_some_and(|(_, name)| install.join(name).is_file() || install.join(format!("{name}.orbit-disabled")).is_file());
+    let enabled = selected.is_some_and(|(_, name)| install.join(name).is_file());
+    let api = selected.map(|(api, _)| (*api).to_string());
+    let original_backup = selected.is_some_and(|(_, name)| install.join(format!("{name}.orbit-original")).is_file());
+    ReshadeStatus {
+        install_dir: Some(install.to_string_lossy().into_owned()),
+        detected,
+        managed: marker.is_some(),
+        enabled,
+        preset: install.join("Orbit-ReShade-Preset.ini").is_file() || install.join("ReShade.ini").is_file(),
+        original_backup,
+        api,
+    }
+}
+
+#[tauri::command]
+fn reshade_status(orbit: State<'_, Orbit>, game_id: String) -> Result<ReshadeStatus, String> {
+    let install = reshade_install_dir(&orbit, &game_id)?;
+    Ok(reshade_status_at(&install))
+}
+
+#[tauri::command]
+fn adopt_reshade(orbit: State<'_, Orbit>, game_id: String, api: String) -> Result<ReshadeStatus, String> {
+    let (_, filename) = RESHADE_APIS.iter().find(|(candidate, _)| *candidate == api).ok_or_else(|| "Choose a supported ReShade graphics API.".to_string())?;
+    let install = reshade_install_dir(&orbit, &game_id)?;
+    if !install.join(filename).is_file() && !install.join(format!("{filename}.orbit-disabled")).is_file() {
+        return Err(format!("No {} proxy was found in the game's install folder.", filename));
+    }
+    std::fs::write(reshade_marker(&install), serde_json::json!({ "api": api, "managedBy": "Orbit" }).to_string())
+        .map_err(|error| format!("Could not record the managed ReShade install: {error}"))?;
+    Ok(reshade_status_at(&install))
+}
+
+#[tauri::command]
+fn set_reshade_enabled(orbit: State<'_, Orbit>, game_id: String, enabled: bool) -> Result<ReshadeStatus, String> {
+    let install = reshade_install_dir(&orbit, &game_id)?;
+    let status = reshade_status_at(&install);
+    if !status.managed { return Err("Adopt this existing ReShade install before managing it.".into()); }
+    let api = status.api.ok_or_else(|| "No ReShade loader was found.".to_string())?;
+    let filename = RESHADE_APIS.iter().find(|(candidate, _)| *candidate == api).map(|(_, name)| *name).ok_or_else(|| "Unsupported ReShade graphics API.".to_string())?;
+    let active = install.join(filename);
+    let disabled = install.join(format!("{filename}.orbit-disabled"));
+    if !active.is_file() && !disabled.is_file() {
+        return Err("The managed ReShade loader is missing from the game folder.".into());
+    }
+    if enabled && disabled.is_file() {
+        std::fs::rename(&disabled, &active).map_err(|error| format!("Could not enable ReShade: {error}"))?;
+    } else if !enabled && active.is_file() {
+        std::fs::rename(&active, &disabled).map_err(|error| format!("Could not disable ReShade: {error}"))?;
+    }
+    Ok(reshade_status_at(&install))
+}
+
+#[tauri::command]
+fn remove_reshade(orbit: State<'_, Orbit>, game_id: String) -> Result<ReshadeStatus, String> {
+    let install = reshade_install_dir(&orbit, &game_id)?;
+    let status = reshade_status_at(&install);
+    if !status.managed { return Err("Adopt this existing ReShade install before removing it.".into()); }
+    if let Some(api) = status.api.as_deref() {
+        if let Some((_, filename)) = RESHADE_APIS.iter().find(|(candidate, _)| *candidate == api) {
+            for current in [install.join(filename), install.join(format!("{filename}.orbit-disabled"))] {
+                if current.is_file() {
+                    backup_reshade_file(&current)?;
+                    std::fs::remove_file(&current).map_err(|error| format!("Could not remove {}: {error}", current.display()))?;
+                }
+                let original = install.join(format!("{filename}.orbit-original"));
+                if original.is_file() { std::fs::copy(&original, install.join(filename)).map_err(|error| format!("Could not restore the original {}: {error}", filename))?; }
+            }
+        }
+    }
+    let preset = install.join("Orbit-ReShade-Preset.ini");
+    if preset.is_file() { backup_reshade_file(&preset)?; std::fs::remove_file(&preset).map_err(|error| format!("Could not remove the ReShade preset: {error}"))?; }
+    let preset_original = install.join("Orbit-ReShade-Preset.ini.orbit-original");
+    if preset_original.is_file() { std::fs::copy(&preset_original, &preset).map_err(|error| format!("Could not restore the original preset: {error}"))?; }
+    let config = install.join("ReShade.ini");
+    let original_config = install.join("ReShade.ini.orbit-original");
+    if original_config.is_file() { std::fs::copy(&original_config, &config).map_err(|error| format!("Could not restore ReShade.ini: {error}"))?; }
+    else if config.is_file() { backup_reshade_file(&config)?; std::fs::remove_file(&config).map_err(|error| format!("Could not remove ReShade.ini: {error}"))?; }
+    let _ = std::fs::remove_file(reshade_marker(&install));
+    Ok(reshade_status_at(&install))
+}
+
+fn backup_reshade_original(path: &Path) -> Result<(), String> {
+    if !path.exists() { return Ok(()); }
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let backup = path.with_file_name(format!("{name}.orbit-original"));
+    if !backup.exists() {
+        std::fs::copy(path, &backup).map_err(|error| format!("Could not preserve the original {}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Apply a locally supplied ReShade DLL and optional preset to this game's install directory.
 #[tauri::command]
 fn apply_reshade(
@@ -400,29 +530,30 @@ fn apply_reshade(
             return Err("Choose an existing ReShade .ini preset, or leave it empty.".into());
         }
     }
-    let game = orbit.db.game(&game_id)?.ok_or_else(|| "This game is no longer in the library.".to_string())?;
-    let launch_json = game.launch.to_string();
-    let launch_path = crate::launch_target::LaunchTarget::parse(Some(&launch_json)).primary_path().map(Path::to_path_buf);
-    let install = game.install_dir.as_deref().map(PathBuf::from).filter(|path| path.is_dir())
-        .or_else(|| game.exe_path.as_deref().and_then(|path| Path::new(path).parent()).filter(|path| path.is_dir()).map(Path::to_path_buf))
-        .or_else(|| launch_path.as_deref().and_then(Path::parent).filter(|path| path.is_dir()).map(Path::to_path_buf))
-        .ok_or_else(|| "Orbit needs the game's install folder or executable path before ReShade can be applied.".to_string())?;
+    let install = reshade_install_dir(&orbit, &game_id)?;
     let destination = install.join(target_name);
     let source_canonical = source.canonicalize().ok();
     let destination_canonical = destination.canonicalize().ok();
     if source_canonical != destination_canonical {
-        backup_reshade_file(&destination)?;
+        backup_reshade_original(&destination)?;
         std::fs::copy(&source, &destination).map_err(|error| format!("Could not install ReShade at {}: {error}", destination.display()))?;
     }
     if let Some(preset) = preset {
         let preset_destination = install.join("Orbit-ReShade-Preset.ini");
-        backup_reshade_file(&preset_destination)?;
+        backup_reshade_original(&preset_destination)?;
         std::fs::copy(&preset, &preset_destination).map_err(|error| format!("Could not copy the preset: {error}"))?;
         let config = install.join("ReShade.ini");
-        backup_reshade_file(&config)?;
+        backup_reshade_original(&config)?;
         std::fs::write(&config, "[GENERAL]\nPresetPath=Orbit-ReShade-Preset.ini\n")
             .map_err(|error| format!("Could not configure the ReShade preset: {error}"))?;
     }
+    let disabled = install.join(format!("{target_name}.orbit-disabled"));
+    if disabled.is_file() {
+        backup_reshade_file(&disabled)?;
+        std::fs::remove_file(&disabled).map_err(|error| format!("Could not replace the disabled loader: {error}"))?;
+    }
+    std::fs::write(reshade_marker(&install), serde_json::json!({ "api": api, "managedBy": "Orbit" }).to_string())
+        .map_err(|error| format!("ReShade was copied but Orbit could not save its management record: {error}"))?;
     Ok(format!("ReShade was applied to {}.", install.display()))
 }
 
@@ -723,6 +854,40 @@ fn start_session(
         overlay::game_started(&game.title);
     }
     Ok(started)
+}
+
+/// Runs one saved program from the Play arrow menu. When it is marked as
+/// playtime, its process owns the session; otherwise it is simply opened.
+#[tauri::command]
+fn start_game_companion(orbit: State<'_, Orbit>, game_id: String, index: usize) -> Result<Option<ActiveView>, String> {
+    let game = orbit.db.game(&game_id)?.ok_or_else(|| "That game is no longer in the library.".to_string())?;
+    let companion = game.companions.get(index).ok_or_else(|| "That launch option no longer exists.".to_string())?;
+    if let Some(url) = companion.url.as_deref().map(str::trim).filter(|url| !url.is_empty()) {
+        crate::launch::open_external_url(url)?;
+        return Ok(None);
+    }
+    let path = std::path::PathBuf::from(companion.path.trim());
+    if path.as_os_str().is_empty() {
+        return Err("Choose a program in Edit Game → Launch first.".into());
+    }
+    let args = companion.args.clone();
+    let main_target = LaunchTarget::parse(Some(&game.launch.to_string()));
+    let target = match (&main_target, path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str()) {
+        (LaunchTarget::Wine { prefix, wine, proton, tweaks, .. }, "exe") => LaunchTarget::Wine {
+            path: path.clone(), args: args.clone(), prefix: prefix.clone(), wine: wine.clone(), proton: proton.clone(), tweaks: tweaks.clone(),
+        },
+        _ => LaunchTarget::Executable {
+            working_dir: path.parent().map(std::path::Path::to_path_buf), path: path.clone(), args,
+        },
+    };
+    if companion.counts_as_playing {
+        let started = orbit.runner.start_action(&game.id, "Main story", &target)?;
+        overlay::game_started(&game.title);
+        Ok(Some(started))
+    } else {
+        crate::launch_target::spawn(&target)?;
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -1489,6 +1654,35 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
         }
     }
     Ok(metadata::wide_art(app_id).await.into_iter().next().map(|pick| pick.url))
+}
+
+/// Wide artwork options for the Edit Game backdrop picker. Follows the same
+/// source order as Stardeck but returns choices instead of auto-applying one.
+#[tauri::command]
+async fn artwork_backdrops(orbit: State<'_, Orbit>, game_id: String) -> Result<Artwork, String> {
+    let game = orbit.db.game(&game_id)?.ok_or_else(|| "That game is no longer in the library.".to_string())?;
+    let app_id = steam_app_id(&game);
+    let settings = orbit.store.load_settings();
+    let mut picks = Vec::new();
+    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+        match sgdb::hero(app_id, &game.title, &key).await {
+            Ok(Some(url)) => picks.push(metadata::ArtworkPick { url, kind: "hero".into(), label: "SteamGridDB hero".into() }),
+            Ok(None) => {}
+            Err(error) => log::debug!("SteamGridDB backdrop picker: {error}"),
+        }
+    }
+    for pick in metadata::wide_art(app_id).await {
+        if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+    }
+    if let Some(id) = app_id {
+        if let Ok(found) = metadata::artwork(id).await {
+            for pick in found.into_iter().filter(|pick| matches!(pick.kind.as_str(), "hero" | "screenshot" | "header")) {
+                if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+            }
+        }
+    }
+    if picks.is_empty() { return Err("No wide artwork was found. Try SteamGridDB or choose an image file.".into()); }
+    Ok(Artwork { app_id, picks, page: 0, has_more: false })
 }
 
 /// Pictures for a game that has not been saved yet, so Add Game can offer
@@ -2758,6 +2952,10 @@ pub fn run() {
             db_list_games,
             db_upsert_game,
             apply_reshade,
+            reshade_status,
+            adopt_reshade,
+            set_reshade_enabled,
+            remove_reshade,
             db_delete_game,
             db_clear_library,
             db_known_exe_paths,
@@ -2783,6 +2981,7 @@ pub fn run() {
             find_cover,
             resolve_game_folder,
             start_session,
+            start_game_companion,
             stop_session,
             active_session,
             list_sessions,
@@ -2819,6 +3018,7 @@ pub fn run() {
             artwork_candidates,
             artwork_choices,
             tv_backdrop,
+            artwork_backdrops,
             reorder_game_logs,
             steam_library,
             launcher_games,

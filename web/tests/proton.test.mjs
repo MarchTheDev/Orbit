@@ -26,6 +26,10 @@ const launchRs = readFileSync(new URL('../src-tauri/src/launch_target.rs', impor
 const libRs = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
 const typesTs = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
 const editorTs = readFileSync(
+  new URL('../src/components/detail/GameEditTab.tsx', import.meta.url),
+  'utf8',
+);
+const launchEditorTs = readFileSync(
   new URL('../src/components/detail/LaunchEditor.tsx', import.meta.url),
   'utf8',
 );
@@ -96,12 +100,12 @@ check('the wine section draws the builds as a list, with a way out of it',
     wineTs.includes('Wine on this machine'));
 check('a build that has been deleted stays visible instead of blank',
   wineTs.includes('A build that is gone'));
-check('the editor puts the build and the switches under the wine fields',
-  editorTs.includes('<WineSettings') &&
-    editorTs.includes('onProton=') &&
-    editorTs.includes('onTweaks='));
-check('the saved line says which build it runs on',
-  editorTs.includes('`Proton ${build}`') && editorTs.includes('buildName(t.proton)'));
+check('the separate Proton page exposes the build and compatibility switches for Wine games',
+  editorTs.includes("['proton', 'Proton']") && editorTs.includes('<WineSettings') &&
+    editorTs.includes('onProton=') && editorTs.includes('onTweaks='));
+check('Launch stays focused on the executable while Proton has its own edit page',
+  !launchEditorTs.includes('buildName(t.proton)') && !launchEditorTs.includes('WineSettings') &&
+    editorTs.includes('Proton for this game'));
 check('the folder name is what a path means, on either slash',
   buildName('/home/me/.local/share/Steam/compatibilitytools.d/GE-Proton9-20') ===
     'GE-Proton9-20' && buildName('C:\\Orbit\\runners\\proton\\GE-Proton10-3') === 'GE-Proton10-3');

@@ -221,6 +221,8 @@ export interface Companion {
   args: string;
   /** An optional URL opened in the system browser when the game starts. */
   url?: string | null;
+  /** When launched from the Play menu, open a tracked session for the game. */
+  countsAsPlaying?: boolean;
 }
 
 export interface LaunchInfo {

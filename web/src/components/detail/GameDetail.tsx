@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronDown,
   Clock,
   Eye,
   EyeOff,
@@ -55,6 +56,7 @@ interface Props {
   /** Write the playtime the player wants to see, keeping the sessions. */
   onSetPlaytime: (totalSecs: number) => Promise<void>;
   onPlay: () => void;
+  onRunCompanion?: (index: number) => void;
   onStop: () => void;
   onRemove: () => void;
   /** Take this game off the Backlog only. It stays in the Library. */
@@ -75,6 +77,7 @@ export function GameDetail({
   onUpdate,
   onSetPlaytime,
   onPlay,
+  onRunCompanion,
   onStop,
   onRemove,
   onLeaveBacklog,
@@ -98,6 +101,8 @@ export function GameDetail({
   const [sessionVersion, setSessionVersion] = useState(0);
   const running = session?.gameId === game.id;
   const playRef = useRef<HTMLButtonElement>(null);
+  const launchMenuRef = useRef<HTMLDivElement>(null);
+  const [launchMenuOpen, setLaunchMenuOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const leavingRef = useRef(false);
   // Lay the drawer out off-screen, then slide. Starting the animation on the
@@ -124,6 +129,20 @@ export function GameDetail({
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!launchMenuOpen) return;
+    const closeAway = (event: PointerEvent) => {
+      if (event.target instanceof Node && !launchMenuRef.current?.contains(event.target)) setLaunchMenuOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setLaunchMenuOpen(false); };
+    window.addEventListener('pointerdown', closeAway);
+    window.addEventListener('keydown', closeEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeAway);
+      window.removeEventListener('keydown', closeEscape);
+    };
+  }, [launchMenuOpen]);
 
   useEffect(() => {
     if (slideIn) return;
@@ -289,6 +308,9 @@ export function GameDetail({
   // are read from.
   const onSteam = isSteamGame(game);
   const steamAppId = storeAppId(game);
+  const launchOptions = game.companions
+    .map((companion, index) => ({ companion, index }))
+    .filter(({ companion }) => Boolean((companion.url ?? '').trim() || companion.path.trim()));
 
   return (
     <>
@@ -428,10 +450,33 @@ export function GameDetail({
                 Stop session
               </button>
             ) : (
-              <button ref={playRef} onClick={onPlay} className="btn-accent flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5">
-                <Play className="size-4" fill="currentColor" strokeWidth={0} />
-                Play
-              </button>
+              <div className="relative flex flex-1" ref={launchMenuRef}>
+                <button ref={playRef} onClick={onPlay} className="btn-accent flex min-w-0 flex-1 items-center justify-center gap-2 rounded-l-lg rounded-r-none py-2.5">
+                  <Play className="size-4" fill="currentColor" strokeWidth={0} />
+                  Play
+                </button>
+                {launchOptions.length > 0 && (
+                  <button type="button" aria-label="More launch options" aria-haspopup="menu" aria-expanded={launchMenuOpen} onClick={() => setLaunchMenuOpen((open) => !open)} className="btn-accent grid w-10 shrink-0 place-items-center rounded-l-none rounded-r-lg border-l border-white/20" title="Start a companion tool">
+                    <ChevronDown className="size-4" />
+                  </button>
+                )}
+                {launchMenuOpen && launchOptions.length > 0 && (
+                  <div role="menu" aria-label={`More ways to start ${game.title}`} className="absolute bottom-full right-0 z-30 mb-2 min-w-64 overflow-hidden rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
+                    <p className="px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.16em] text-muted">Launch options</p>
+                    {launchOptions.map(({ companion, index }) => {
+                      const label = companion.url
+                        ? `Open ${(() => { try { return new URL(companion.url!).hostname; } catch { return companion.url; } })()}`
+                        : (companion.path.split(/[\\/]/).pop() || 'Program');
+                      return (
+                        <button key={`${index}-${companion.path}-${companion.url ?? ''}`} type="button" role="menuitem" onClick={() => { setLaunchMenuOpen(false); onRunCompanion?.(index); }} className="flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-2 text-left text-xs text-fg hover:bg-panel2">
+                          <span className="min-w-0 truncate">{label}</span>
+                          <span className="shrink-0 text-[10px] text-muted">{companion.countsAsPlaying ? 'Start & track' : 'Open'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
             <button
               onClick={() => onUpdate({ favorite: !game.favorite })}
