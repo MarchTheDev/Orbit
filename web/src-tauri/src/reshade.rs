@@ -276,24 +276,23 @@ fn setup_file() -> String {
 /// Whether an executable is 64-bit, from its own header.
 ///
 /// ReShade's setup tool picks the architecture itself, so this is not used to
-/// choose a DLL - it is read by the tests, and it is the one fact about a game's
-/// executable that Orbit can answer without the game running.
+/// choose a file - it is here because it is the one fact about a game's
+/// executable Orbit can answer without the game running, and the tests read it.
 #[cfg_attr(not(test), allow(dead_code))]
 fn is_64(exe: &Path) -> bool {
     let Ok(bytes) = std::fs::read(exe) else { return true };
     let at = |offset: usize| -> Option<u16> { Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?)) };
     let Some(0x5a4d) = at(0) else { return true };
-    let Some(pe_at) = leaves_pe(&bytes) else { return true };
-    matches!(at(pe_at + 24), Some(0x20b))
+    let Some(optional) = optional_header_at(&bytes) else { return true };
+    // 0x20b is PE32+, which is what a 64-bit program is.
+    matches!(at(optional), Some(0x20b))
 }
 
-fn leaves_pe(bytes: &[u8]) -> Option<usize> {
+/// Where the optional header begins: past the DOS stub, the `PE\0\0` signature
+/// and the 20-byte COFF header.
+fn optional_header_at(bytes: &[u8]) -> Option<usize> {
     let pe = u32::from_le_bytes(bytes.get(0x3c..0x40)?.try_into().ok()?) as usize;
-    if bytes.get(pe..pe + 4)? == b"PE\0\0" {
-        Some(pe + 4)
-    } else {
-        None
-    }
+    (bytes.get(pe..pe + 4)? == b"PE\0\0").then_some(pe + 4 + 20)
 }
 
 /// The setup program, when it has already been downloaded.
@@ -595,10 +594,9 @@ mod tests {
 
     /// A tiny, valid PE32+ file with one import: the named DLL.
     ///
-    /// The directory sits where a real linker puts it, 0x98 + 0xF0, and the
-    /// single section is laid over the whole file - so the reader is walked
-    /// through the same offsets a real executable has rather than a layout
-    /// invented to make the test pass.
+    /// The optional header is 0xF0 bytes, as a PE32+ one is, and the single
+    /// section is laid over the whole file at RVA 0 - so every RVA in here is
+    /// its own file offset, and the reader is walked through real ones.
     fn fake_pe(import: &str) -> Vec<u8> {
         let mut bytes = vec![0u8; 0x400];
         bytes[0..2].copy_from_slice(b"MZ");
@@ -611,17 +609,18 @@ mod tests {
         bytes[optional..optional + 2].copy_from_slice(&0x20bu16.to_le_bytes());
         // Data directory 1 (the imports) at optional + 112.
         let directory = optional + 112;
-        bytes[directory + 8..directory + 12].copy_from_slice(&0x1200u32.to_le_bytes());
+        bytes[directory + 8..directory + 12].copy_from_slice(&0x220u32.to_le_bytes());
         // One section covering the whole file: RVA 0 = file offset 0.
         let section = optional + 0xF0;
         bytes[section + 8..section + 12].copy_from_slice(&0x400u32.to_le_bytes());
         bytes[section + 12..section + 16].copy_from_slice(&0u32.to_le_bytes());
         bytes[section + 16..section + 20].copy_from_slice(&0x400u32.to_le_bytes());
         bytes[section + 20..section + 24].copy_from_slice(&0u32.to_le_bytes());
-        // Descriptor at RVA 0x220: OriginalFirstThunk, Name = RVA 0x240.
-        bytes[0x220 + 12..0x220 + 16].copy_from_slice(&0x240u32.to_le_bytes());
+        // One import descriptor at RVA 0x220, naming the DLL at RVA 0x300 -
+        // clear of the descriptor's own 20 bytes.
+        bytes[0x220 + 12..0x220 + 16].copy_from_slice(&0x300u32.to_le_bytes());
         let name = import.as_bytes();
-        bytes[0x240..0x240 + name.len()].copy_from_slice(name);
+        bytes[0x300..0x300 + name.len()].copy_from_slice(name);
         bytes
     }
 
