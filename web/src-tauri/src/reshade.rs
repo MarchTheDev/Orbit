@@ -537,7 +537,17 @@ pub async fn set(
             let app = app.ok_or_else(|| "Orbit cannot fetch ReShade without its own data folder.".to_string())?;
             let setup = fetch(app, |_| {}).await?;
             let fresh = !active.is_file();
-            install_into(&setup, &exe, proxy, fresh)?;
+            // Blocking on a child process is not something to do on the async
+            // reactor: the setup tool can take a second or two, and everything
+            // else on that thread waits with it.
+            {
+                let setup = setup.clone();
+                let exe = exe.clone();
+                let proxy = proxy.to_string();
+                tauri::async_runtime::spawn_blocking(move || install_into(&setup, &exe, &proxy, fresh))
+                .await
+                .map_err(|error| format!("ReShade's setup could not be waited on: {error}"))??;
+            }
             if !active.is_file() {
                 return Err(format!(
                     "ReShade's setup finished, but {file} is not in the game's folder. Running the game once may be what ReShade needs before it can see it."

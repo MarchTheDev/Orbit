@@ -739,7 +739,8 @@ fn start_game_alternative(orbit: State<'_, Orbit>, game_id: String, index: usize
     // the game's own, and its folder replaces the working directory. Everything
     // else - the Wine bottle, the Proton build, the tweaks - is left as saved,
     // and the session is the same session Play would have opened.
-    let mut launch_json = serde_json::from_str::<Value>(&game.launch.to_string()).unwrap_or(Value::Null);
+    let mut launch_json = serde_json::from_str::<serde_json::Value>(&game.launch.to_string())
+        .unwrap_or(serde_json::Value::Null);
     let extra = profile.extra_args.as_deref().map(str::trim).filter(|args| !args.is_empty());
     let working = profile.working_dir.as_deref().map(str::trim).filter(|dir| !dir.is_empty());
     if extra.is_some() || working.is_some() {
@@ -750,18 +751,18 @@ fn start_game_alternative(orbit: State<'_, Orbit>, game_id: String, index: usize
             if let Some(slot) = launch.get_mut("args") {
                 if let Some(extra) = extra {
                     let existing = slot.as_str().unwrap_or("").trim();
-                    *slot = Value::String(format!("{existing} {extra}").trim().to_string());
+                    *slot = serde_json::Value::String(format!("{existing} {extra}").trim().to_string());
                 }
             }
-            let kind = launch.get("kind").and_then(Value::as_str).unwrap_or("");
+            let kind = launch.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
             if (kind == "executable" || kind == "wine") && launch.get("args").is_none() {
                 // A launch that never had arguments still takes the profile's.
                 if let Some(extra) = extra {
-                    launch["args"] = Value::String(extra.to_string());
+                    launch["args"] = serde_json::Value::String(extra.to_string());
                 }
             }
             if let (Some(dir), true) = (working, kind == "executable") {
-                launch["workingDir"] = Value::String(dir.to_string());
+                launch["workingDir"] = serde_json::Value::String(dir.to_string());
             }
         }
     }
