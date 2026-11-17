@@ -76,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sortOrder: [],
   coverScale: 100,
   coverTint: true,
+  adaptiveBackground: true,
   coverFit: 'smart',
   glass: true,
   tabOrder: [],

@@ -23,7 +23,7 @@ check('Backlog release calendar only appears in All lanes; wishlist naming and s
 check('Calendar surface is flat and non-sticky',
   /\.orbit-release-bar\s*\{[^}]*position:\s*relative/s.test(css) && !/\.orbit-release-bar\s*\{[^}]*backdrop-filter:\s*blur/s.test(css));
 check('Journal sync settings have their own Settings section',
-  settings.includes("{ id: 'orbit-journal', label: 'Journal' }") && settings.includes('id="orbit-journal"') && settings.includes('Add new games to Journal'));
+  settings.includes("id: 'orbit-journal', label: 'Journal', icon: BookOpen") && settings.includes('id="orbit-journal"') && settings.includes('Add new games to Journal'));
 check('Captures for a selected game render once and are separated by capture day',
   !stats.includes('Captures for {byFolder.get(albumGame)') && stats.includes('dayLabelOf(item)') && stats.includes('orbit-album-day-label'));
 check('Observatory game info no longer shows a Steam app ID',

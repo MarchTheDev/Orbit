@@ -24,12 +24,12 @@ check('Stardeck settings no longer offer the ineffective Covers / Stage only she
   !tv.includes('label="Shelf"') && !tv.includes("cinema: value.cinema"));
 check('Stardeck keeps the focused cover central with book-roll neighbors and precise arrow focus',
   tv.includes('deckCards.map(({ game, index: n, position })') && tv.includes('data-deck-position={position}') && css.includes("[data-deck-position='-1']") && css.includes("[data-deck-position='1']") && tv.includes('refocusSelectedCover.current = true') && tv.includes('coverOf(at)?.focus'));
-check('Known artwork renders immediately while nearby and high-resolution sources are warmed',
-  tv.includes('wideArtImmediateFallback(active)') && tv.includes('warmImage(wideArtImmediateFallback(game) ?? first)') && cover.includes('setDisplaySrc(src)') && cover.includes("fetchPriority={loading === 'eager' ? 'high' : 'auto'}"));
+check('Known artwork renders immediately while nearby covers are warmed',
+  tv.includes('warmCover(game)') && cover.includes('setDisplaySrc(src)') && cover.includes("fetchPriority={loading === 'eager' ? 'high' : 'auto'}"));
 check('Library controller focus is spatial and the title remains outside the cover focus outline',
   tv.includes('moveLibraryFocus') && tv.includes('data-tv-library-cover') && css.includes('.tv-library-game:focus-visible .tv-library-game-art'));
-check('Deck and Library controls are centered and use the app-styled tab treatment',
-  css.includes('.orbit-deck-pagetabs') && css.includes('left: 50%') && css.includes('.orbit-deck-pagetab[aria-pressed'));
+check('Deck and Library are two floating pills, centred on the picture',
+  css.includes('.orbit-deck-pills') && css.includes('left: 50%') && css.includes('.orbit-deck-pillbtn[aria-pressed'));
 check('Liquid Glass uses opaque app-colored panels across platforms',
   css.includes('html.orbit-glass :is(') && css.includes('background-color: var(--c-panel) !important') && css.includes('blur(28px) saturate(1.12)'));
 check('Game settings opens in the middle, artwork first, with four pages and no numbered sections',

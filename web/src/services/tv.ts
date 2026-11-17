@@ -26,7 +26,50 @@ export const tvLite = navigator.userAgent.includes('Linux');
 
 /** Whether the document itself is the thing that was made fullscreen. */
 let askedTheDocument = false;
-let previousNativeBounds: { x: number; y: number; width: number; height: number; maximized: boolean } | null = null;
+type Bounds = { x: number; y: number; width: number; height: number; maximized: boolean };
+
+let previousNativeBounds: Bounds | null = null;
+
+/**
+ * The window's placement, kept across restarts.
+ *
+ * Heronite writes where its window is whenever a move or resize comes to rest,
+ * and never writes the fullscreen rectangle: a window that reopens fullscreen is
+ * how a launcher ends up oversized under the taskbar. Orbit's restore already
+ * clamps into the desk area, but the rectangle it clamps was only held in
+ * memory, so a crash or an update while Stardeck was on discarded it. This is
+ * the same placement, written to storage the moment the screen is taken over.
+ */
+const BOUNDS_KEY = 'orbit.window.bounds';
+
+function savedBounds(): Bounds | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(BOUNDS_KEY) ?? 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    const value = raw as Record<string, unknown>;
+    const numbers = ['x', 'y', 'width', 'height'].map((key) => value[key]);
+    if (numbers.some((n) => typeof n !== 'number' || !Number.isFinite(n))) return null;
+    if ((value.width as number) < 320 || (value.height as number) < 240) return null;
+    return {
+      x: value.x as number,
+      y: value.y as number,
+      width: value.width as number,
+      height: value.height as number,
+      maximized: value.maximized === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rememberBounds(bounds: Bounds | null) {
+  try {
+    if (bounds) localStorage.setItem(BOUNDS_KEY, JSON.stringify(bounds));
+    else localStorage.removeItem(BOUNDS_KEY);
+  } catch {
+    /* Storage may be unavailable; the in-memory copy still holds. */
+  }
+}
 
 /** The last thing to go wrong, for a caller that wants to say so. */
 let lastError: string | null = null;
@@ -61,6 +104,7 @@ export async function enterFullscreen(): Promise<boolean> {
       previousNativeBounds = area
         ? { ...area, maximized: true }
         : { x: position.x, y: position.y, width: size.width, height: size.height, maximized };
+      rememberBounds(previousNativeBounds);
       await window.setFullscreen(true);
       return true;
     } catch (error) {
@@ -178,8 +222,11 @@ async function settleInside(
 export async function leaveFullscreen(): Promise<void> {
   if (isNative()) {
     const window = getCurrentWindow();
-    const bounds = previousNativeBounds;
+    // The copy in storage is the one that survives a crash mid-session; the one
+    // in memory is fresher when both exist, so it wins.
+    const bounds = previousNativeBounds ?? savedBounds();
     previousNativeBounds = null;
+    rememberBounds(null);
     try { await window.setFullscreen(false); } catch { /* Still try to restore the saved window state. */ }
 
     try {

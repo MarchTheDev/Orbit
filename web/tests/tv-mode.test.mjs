@@ -111,9 +111,10 @@ check('metadata hero and header remain at the end of the wide-art fallback chain
 check('a game from Steam by its launch target still gets it',
   backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'steam', appId: 220 } })[0].includes('/220/'));
 check('a game with no store id has nothing to guess at', backdropsFor({ ...steamGame, meta: { summary: '' }, launch: { kind: 'none' } }).length === 0);
-check('the native TV backdrop prefers user art, then community art, then its Steam and metadata fallbacks',
-  tvSource.includes('findTvBackdrop }') && backdropSource.includes('findTvBackdrop(game.id)') &&
-    backdropSource.includes('customHero ? [customHero]') && backdropSource.includes('...(communityUrl ? [communityUrl] : [])'));
+check('the room is lit by the selected game’s own cover, blurred',
+  tvSource.includes('<DeckBackdrop game={active ?? null} />') &&
+    tvSource.includes('coverArtCandidates(game)[0]') &&
+    /function DeckBackdrop/.test(tvSource));
 
 console.log('the hub: one rail, and the selected game all over the screen');
 
@@ -146,6 +147,10 @@ const render = async (games, runningId = null, extra = {}) => {
           left += 1;
         },
         onOpenSettings: () => {},
+        onAddGame: () => {},
+        onEditGame: () => {},
+        onToggleFavorite: () => {},
+        onPower: () => {},
         ...extra,
       }),
     );
@@ -182,27 +187,23 @@ await key('Enter');
 check('enter plays the game the hub is about', played.join() === 'hand', JSON.stringify(played));
 
 await key('ArrowUp');
-check('up reaches the buttons', document.activeElement?.getAttribute('data-tv-action') === 'play');
+check('up reaches the game’s own panel, on Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowRight');
-check('right in the buttons goes to the next button, not the next game',
-  document.activeElement?.getAttribute('data-tv-action') === 'details' &&
+check('right in the panel goes to the next button, not the next game',
+  document.activeElement?.getAttribute('data-tv-action') === 'favourite' &&
     document.activeElement?.getAttribute('data-tv-cover') === null,
   String(document.activeElement?.getAttribute('data-tv-action')));
 check('and the game on screen did not change', selected() === '3', String(selected()));
 await key('ArrowLeft');
 check('left comes back to Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowUp');
-check('up from the buttons reaches the top bar, where the way out is',
-  document.activeElement?.closest('[data-tv-topbar]') !== null);
-check('and there is a button there that leaves TV mode',
-  [...document.querySelectorAll('[data-tv-topbar] button')].some(
-    (button) => button.getAttribute('aria-label') === 'Leave Stardeck',
-  ));
+check('up from the panel reaches the pills, where the two pages are',
+  document.activeElement?.closest('[data-tv-pills]') !== null);
 await key('ArrowRight');
-check('right in the bar stays in the bar instead of walking the rail',
-  document.activeElement?.closest('[data-tv-topbar]') !== null && selected() === '3');
+check('right in the pills stays in the pills instead of walking the rail',
+  document.activeElement?.closest('[data-tv-pills]') !== null && selected() === '3');
 await key('ArrowDown');
-check('down out of the bar lands on the selected cover',
+check('down out of the pills lands on the selected cover',
   document.activeElement?.getAttribute('data-tv-cover') === '3');
 await key('ArrowDown');
 check('down from the cover reaches Play precisely',
@@ -227,14 +228,16 @@ check('the single cover can be browsed by step without a row competing for atten
 played.length = 0;
 await key('ArrowUp');
 await key('ArrowRight');
+await key('ArrowRight');
+await key('ArrowRight');
 await key('Enter');
 check('enter on a focused button is that button\'s own press',
   played.length === 0 && !document.querySelector('[data-tv-cover]'),
   `played ${played.length}`);
 
-console.log('details is a page of the hub, not a way out of it');
+console.log('full page is a page of the hub, not a way out of it');
 
-check('Details shows the selected game in TV mode rather than leaving it',
+check('Full page shows the selected game in TV mode rather than leaving it',
   !!details && !document.querySelector('[data-tv-cover]'),
   `${details} / rail ${!!document.querySelector('[data-tv-cover]')}`);
 const page = document.querySelector('[data-orbit-tv]');
@@ -292,7 +295,7 @@ check('Back on the controller from the rail stays in TV mode', left === 0, Strin
 // From a game's page the same press steps back to the rail, not out of the mode.
 await render(library);
 await act(async () => {
-  buttonWith('Details').click();
+  buttonWith('Full page').click();
 });
 pad('orbit-pad-back');
 await act(async () => wait(20));
@@ -308,18 +311,16 @@ check('the backdrop does not scale or transition when the selected game changes'
   !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
     !tvSource.includes('duration-700'));
 check('TV artwork keeps a stable fit and warms nearby images before selection changes',
-  !tvSource.includes('key={src}') && !tvSource.includes('key={`soft-${game.id}`}') &&
-    tvSource.includes('warmCover(game)') && tvSource.includes('warmImage(first)') &&
+  !tvSource.includes('key={src}') &&
+    tvSource.includes('warmCover(game)') &&
     coverSource.includes('const current = failures.identity === identity'));
-check('the backdrop stays on a colour wash until its wide artwork is loaded',
-  backdropSource.includes('data-tv-backdrop-placeholder') &&
-    !backdropSource.includes('<Cover') &&
-    !backdropSource.includes('const soft') &&
-    backdropSource.includes('const loaded = loadedSrc === src'));
-check('switching games cannot flash a failed or loaded image from the previous selection',
-  backdropSource.includes('failure.gameId === game.id ? failure.step : 0') &&
-    backdropSource.includes('image.getAttribute(\'src\') === src') &&
-    backdropSource.includes('setLoadedSrc(event.currentTarget.getAttribute(\'src\'))'));
+check('the room’s own light keeps the old picture while the next one fades in',
+  /function DeckBackdrop/.test(tvSource) &&
+    tvSource.includes('setLayers((have) => [...have.slice(-1), layer])') &&
+    tvSource.includes('deck-backdrop-in'));
+check('a late picture from the previous game cannot replace the current one',
+  tvSource.includes('if (!wanted || (last && last.url === wanted)) return;') &&
+    tvSource.includes('layers[layers.length - 1]'));
 check('TV covers cannot be dragged and keep one crop while images load',
   tvSource.includes('draggable={false}') &&
     tvSource.includes('onDragStart={(event) => event.preventDefault()}') &&
@@ -328,7 +329,7 @@ check('TV mode has no entrance, exit, or child transitions',
   !tvCss.includes('@keyframes tv-in') && !tvCss.includes('@keyframes tv-out') &&
     /\.tv-root,\s*\n\.tv-root \*/.test(tvCss) &&
     /animation: none !important;[\s\S]*?transition: none !important;/.test(tvCss));
-check('the fullscreen backdrop has a fixed transform-free frame', tvSource.includes('data-tv-backdrop') && tvCss.includes('.tv-root [data-tv-backdrop] .tv-backdrop-image') && tvCss.includes('transform: none !important;'));
+check('the room’s backdrop is one fixed, transform-free frame', tvSource.includes('data-tv-deckbackdrop') && tvCss.includes('.orbit-deckbackdrop-layer') && tvCss.includes('filter: blur(64px)'));
 check('TV mode preserves the animated top-bar music visualizer', /prefers-reduced-motion: no-preference[\s\S]{0,900}orbit-bars-active i:nth-child\(1\)[\s\S]{0,220}animation: orbit-bar-1/.test(tvCss));
 
 console.log('the rail can be read by name instead of by memory');
@@ -409,30 +410,29 @@ await act(async () => {
 });
 check('and stopping it is one press away', stopped === 1);
 
-console.log('the bar along the top is a place you can walk to and leave from');
+console.log('there is no bar across the top, and leaving is a choice in the sidebar');
 
 await render(library, null, { showMusic: true });
-await key('ArrowUp');
-await key('ArrowUp');
-const inBar = () => document.activeElement?.closest('[data-tv-topbar]') !== null;
-check('up twice from the rail reaches the bar', inBar());
-const sound = document.activeElement;
-check('the bar holds the sound as well as the way out',
-  document.querySelectorAll('[data-tv-topbar] button').length >= 2);
-await key('ArrowRight');
-check('right moves along the bar rather than into the rail',
-  inBar() && document.activeElement !== sound && selected() === '0');
-check('and the way out is one of the stops on it',
-  document.activeElement?.getAttribute('aria-label') === 'Leave Stardeck',
-  String(document.activeElement?.getAttribute('aria-label')));
+check('nothing draws a top bar on the deck',
+  !document.querySelector('[data-tv-topbar]') && !document.querySelector('[data-orbit-tv] header'));
+check('Deck and Library float on the picture instead',
+  document.querySelectorAll('[data-tv-page-toggle]').length === 2 &&
+    document.querySelector('[data-tv-pills]')?.contains(document.querySelector('[data-tv-page-toggle]')) === true);
 
-played.length = 0;
-const leftBeforeTopBar = left;
-await key('Enter');
+const leftBeforeSidebar = left;
+await key('Escape');
+const sidebar = document.querySelector('[data-orbit-tv] [role="dialog"]');
+check('escape opens the sidebar down the right-hand edge', !!sidebar);
+check('and it is where leaving, adding a game and Orbit’s settings live',
+  ['Back to desktop', 'Add a game', 'Orbit settings'].every((label) =>
+    [...sidebar.querySelectorAll('button')].some((button) => button.textContent?.includes(label)),
+  ));
+await act(async () => {
+  [...sidebar.querySelectorAll('button')].find((button) => button.textContent?.includes('Back to desktop'))?.click();
+});
 await act(async () => wait(320));
-check('enter there is a click, not a game starting behind it',
-  left === leftBeforeTopBar + 1 && played.length === 0,
-  `left ${left} / played ${played.length}`);
+check('and leaving is one press there, not a key on the deck',
+  left === leftBeforeSidebar + 1, `left ${left}`);
 
 console.log('leaving fullscreen gives the window back');
 
@@ -528,7 +528,7 @@ await act(async () => {
   await wait(140);
 });
 check('and right moves between those buttons rather than off the rail',
-  document.activeElement?.getAttribute('data-tv-action') === 'details',
+  document.activeElement?.getAttribute('data-tv-action') === 'favourite',
   String(document.activeElement?.getAttribute('data-tv-action')));
 
 await release();
@@ -541,8 +541,8 @@ press(12);
 await act(async () => {
   await wait(140);
 });
-check('up through Play reaches the top bar, where the way out is',
-  document.activeElement?.closest('[data-tv-topbar]') !== null);
+check('up through Play reaches the pills, where the two pages are',
+  document.activeElement?.closest('[data-tv-pills]') !== null);
 
 await release();
 press(13);
@@ -558,18 +558,21 @@ check('down from the bar crosses the focused cover and reaches Play',
   document.activeElement?.getAttribute('data-tv-action') === 'play',
   String(document.activeElement?.getAttribute('data-tv-action')));
 
-// A game's page is driven by the same presses: its two buttons, then Back.
-await release();
-press(15);
-await act(async () => {
-  await wait(140);
-});
+// Full page is driven by the same presses: across the panel's buttons to the
+// last of them, then a confirm press on it.
+for (let step = 0; step < 3; step += 1) {
+  await release();
+  press(15);
+  await act(async () => {
+    await wait(140);
+  });
+}
 await release();
 press(0);
 await act(async () => {
   await wait(140);
 });
-check('a confirm press on Details opens the selected game\'s page, still in TV mode',
+check('a confirm press on Full page opens the selected game\'s page, still in TV mode',
   !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
 await release();
 press(1);

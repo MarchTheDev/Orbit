@@ -22,7 +22,7 @@ check('right-click palette menu is narrower and uses larger text',
 check('Backlog has no rank numbers on cards',
   !backlog.includes('orbit-num absolute left-1 top-1') && !backlog.includes('`#${index + 1}`'));
 check('Backlog is its own Settings category and carries its own controls',
-  settings.includes("{ id: 'orbit-backlog', label: 'Backlog' }") && settings.includes('id="orbit-backlog"') && settings.includes('showBacklogCalendar'));
+  settings.includes("id: 'orbit-backlog', label: 'Backlog', icon: ListChecks") && settings.includes('id="orbit-backlog"') && settings.includes('showBacklogCalendar'));
 check('Settings Open the album selects the Album tab directly',
   app.includes("setStatsTab('album'); setPage('statistics')"));
 check('All games Album art previews a small set of game covers',

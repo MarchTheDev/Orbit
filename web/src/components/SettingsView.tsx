@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import {
@@ -15,6 +15,7 @@ import {
   GripVertical,
   Heart,
   Images,
+  Info,
   ListChecks,
   Monitor,
   MonitorPlay,
@@ -540,25 +541,25 @@ function LibraryFilterOrder({
 }
 
 /** Every card, in order, so the row at the top can point at them. */
-const SECTIONS = [
-  { id: 'orbit-appearance', label: 'Appearance' },
-  { id: 'orbit-library', label: 'Library' },
-  { id: 'orbit-backlog', label: 'Backlog' },
-  { id: 'orbit-journal', label: 'Journal' },
-  { id: 'orbit-playing', label: 'Playing' },
-  { id: 'orbit-overlay', label: 'Overlay' },
-  { id: 'orbit-captures', label: 'Captures' },
-  { id: 'orbit-backups', label: 'Backups' },
-  { id: 'orbit-libraries', label: 'Libraries' },
-  { id: 'orbit-details', label: 'Metadata' },
-  { id: 'orbit-achievements', label: 'Achievements' },
-  { id: 'orbit-integrations', label: 'Integrations' },
-  { id: 'orbit-sound', label: 'Sound' },
-  { id: 'orbit-copy', label: 'Export' },
-  { id: 'orbit-advanced', label: 'Advanced' },
-  { id: 'orbit-logs', label: 'Logs' },
-  { id: 'orbit-updates', label: 'Updates' },
-  { id: 'orbit-about', label: 'About' },
+const SECTIONS: { id: string; label: string; icon: typeof Palette }[] = [
+  { id: 'orbit-appearance', label: 'Appearance', icon: Palette },
+  { id: 'orbit-library', label: 'Library', icon: LibraryIcon },
+  { id: 'orbit-backlog', label: 'Backlog', icon: ListChecks },
+  { id: 'orbit-journal', label: 'Journal', icon: BookOpen },
+  { id: 'orbit-playing', label: 'Playing', icon: Monitor },
+  { id: 'orbit-overlay', label: 'Overlay', icon: MonitorPlay },
+  { id: 'orbit-captures', label: 'Captures', icon: Images },
+  { id: 'orbit-backups', label: 'Backups', icon: Save },
+  { id: 'orbit-libraries', label: 'Libraries', icon: Globe },
+  { id: 'orbit-details', label: 'Metadata', icon: Sparkles },
+  { id: 'orbit-achievements', label: 'Achievements', icon: Trophy },
+  { id: 'orbit-integrations', label: 'Integrations', icon: Plug },
+  { id: 'orbit-sound', label: 'Sound', icon: Piano },
+  { id: 'orbit-copy', label: 'Export', icon: ArrowLeftRight },
+  { id: 'orbit-advanced', label: 'Advanced', icon: HardDrive },
+  { id: 'orbit-logs', label: 'Logs', icon: ScrollText },
+  { id: 'orbit-updates', label: 'Updates', icon: Download },
+  { id: 'orbit-about', label: 'About', icon: Info },
 ];
 
 /** Every card grouped into the rooms the page is read in. */
@@ -590,6 +591,7 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
   { label: 'Fonts', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
   { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
+  { label: 'Background follows the game', section: 'orbit-appearance', keywords: 'adaptive background blur cover art colour color ambience game selected' },
   { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-backlog', keywords: 'backlog sync add new games' },
@@ -1334,13 +1336,33 @@ export function SettingsView({
 
   const featuredCustomTheme = settings.customThemes?.find((theme) => theme.id === settings.theme) ?? settings.customThemes?.[0] ?? null;
 
-  const searchResults = settingsQuery.trim()
-    ? searchItems.filter(
-        (item) =>
-          (desktopOs() === 'windows' || desktopOs() === 'linux' || item.label !== 'Open in Orbit') &&
-          `${item.label} ${item.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
-      )
-    : [];
+  /**
+   * What the search is doing: filtering the sections themselves.
+   *
+   * It used to open a list of matching settings under the field, which meant a
+   * search answered a question nobody had asked - here is a menu of the words
+   * you might have meant - instead of simply leaving the sections that match.
+   * The rail narrows as the words are typed, and the page shows the first
+   * section still standing, so a search is one glance rather than a choice.
+   */
+  const query = settingsQuery.trim().toLowerCase();
+  const matchingSections = useMemo(() => {
+    if (!query) return null;
+    const hits = new Set<string>();
+    for (const item of searchItems) {
+      if (desktopOs() !== 'windows' && desktopOs() !== 'linux' && item.label === 'Open in Orbit') continue;
+      if (item.label.toLowerCase().includes(query) || item.keywords.toLowerCase().includes(query)) hits.add(item.section);
+    }
+    for (const section of SECTIONS) {
+      if (section.label.toLowerCase().includes(query)) hits.add(section.id);
+    }
+    return hits;
+  }, [query, searchItems]);
+  const shownSections = matchingSections ? SECTIONS.filter((section) => matchingSections.has(section.id)) : SECTIONS;
+  /** The card on screen: the chosen one, or the first the search left standing. */
+  const shownSection = matchingSections
+    ? (matchingSections.has(activeSection) ? activeSection : shownSections[0]?.id ?? activeSection)
+    : activeSection;
 
   const settingsSearch = (
     <div className="relative z-20">
@@ -1350,35 +1372,22 @@ export function SettingsView({
         onChange={(event) => setSettingsQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') setSettingsQuery('');
-          if (event.key === 'Enter' && searchResults[0]) {
-            jump(searchResults[0].section);
-            setSettingsQuery('');
+          // Enter takes the keyboard into the section the search left on
+          // screen, which is the one the words were about.
+          if (event.key === 'Enter' && shownSections[0] && !matchingSections?.has(activeSection)) {
+            jump(shownSections[0].id);
           }
         }}
         placeholder="Search settings…"
         aria-label="Search settings"
         className="orbit-setsearch"
       />
-      {settingsQuery.trim() && (
-        <div className="absolute inset-x-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
-          {searchResults.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-muted">No matching settings. Try a shorter search.</p>
-          ) : (
-            searchResults.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => {
-                  jump(item.section);
-                  setSettingsQuery('');
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-panel2"
-              >
-                <span className="font-medium text-fg">{item.label}</span>
-                <span className="shrink-0 text-xs text-muted">{SECTIONS.find((section) => section.id === item.section)?.label}</span>
-              </button>
-            ))
-          )}
-        </div>
+      {query && (
+        <p className="orbit-setsearch-note" role="status">
+          {shownSections.length === 0
+            ? 'Nothing matches those words.'
+            : `${shownSections.length} ${shownSections.length === 1 ? 'section' : 'sections'} match.`}
+        </p>
       )}
     </div>
   );
@@ -1397,7 +1406,12 @@ export function SettingsView({
       className={compact ? 'flex gap-1 overflow-x-auto pb-1' : 'orbit-setnav'}
       aria-label="Settings sections"
     >
-      {SETTINGS_GROUPS.map((group) => (
+      {SETTINGS_GROUPS.map((group) => {
+        const ids = group.ids.filter((id) => !matchingSections || matchingSections.has(id));
+        // A group whose every section the search ruled out is not a group: an
+        // empty heading in the rail says nothing and takes a line to say it.
+        if (ids.length === 0) return null;
+        return (
         <div key={group.label} className={compact ? 'contents' : 'orbit-setnav-group'}>
           {!compact && (
             <p className="orbit-setnav-label">
@@ -1406,10 +1420,11 @@ export function SettingsView({
             </p>
           )}
           <div className={compact ? 'flex gap-1' : 'orbit-setnav-rows'} role={compact ? 'group' : undefined} aria-label={compact ? group.label : undefined}>
-            {group.ids.map((id) => {
+            {ids.map((id) => {
               const section = SECTIONS.find((item) => item.id === id);
               if (!section) return null;
-              const chosen = activeSection === id;
+              const chosen = shownSection === id;
+              const Icon = section.icon;
               return (
                 <button
                   key={id}
@@ -1424,6 +1439,7 @@ export function SettingsView({
                       )
                     : 'orbit-setnav-row'}
                 >
+                  <Icon className="orbit-setnav-icon" strokeWidth={1.9} aria-hidden />
                   {compact ? section.label : <span className="min-w-0 flex-1 truncate">{section.label}</span>}
                   {NEEDS_WORK.has(id) && <span className="orbit-setnav-needs" title="Need work" />}
                 </button>
@@ -1431,7 +1447,8 @@ export function SettingsView({
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </nav>
   );
 
@@ -1458,7 +1475,7 @@ export function SettingsView({
 
       <Section
         id="orbit-appearance"
-        active={activeSection === 'orbit-appearance'}
+        active={shownSection === 'orbit-appearance'}
         icon={Palette}
         title="Appearance"
 
@@ -1544,6 +1561,13 @@ export function SettingsView({
           })}
         </div>
 
+        <SwitchRow
+          checked={settings.adaptiveBackground !== false}
+          onChange={(v) => setSettings({ adaptiveBackground: v })}
+          label="Background follows the game"
+          hint="The selected game's cover, blurred, behind the library."
+        />
+
         <div className="orbit-setrow">
           <div className="orbit-setrow-copy">
             <p className="orbit-setrow-label">Liquid glass</p>
@@ -1604,7 +1628,7 @@ export function SettingsView({
 
       <Section
         id="orbit-library"
-        active={activeSection === 'orbit-library'}
+        active={shownSection === 'orbit-library'}
         icon={LibraryIcon}
         title="Library"
 
@@ -1684,7 +1708,7 @@ export function SettingsView({
 
       <Section
         id="orbit-backlog"
-        active={activeSection === 'orbit-backlog'}
+        active={shownSection === 'orbit-backlog'}
         icon={LibraryIcon}
         title="Backlog"
       >
@@ -1706,7 +1730,7 @@ export function SettingsView({
 
       <Section
         id="orbit-journal"
-        active={activeSection === 'orbit-journal'}
+        active={shownSection === 'orbit-journal'}
         icon={BookOpen}
         title="Journal"
       >
@@ -1724,7 +1748,7 @@ export function SettingsView({
 
       <Section
         id="orbit-playing"
-        active={activeSection === 'orbit-playing'}
+        active={shownSection === 'orbit-playing'}
         icon={Monitor}
         title="Playing"
 
@@ -1798,7 +1822,7 @@ export function SettingsView({
 
       <Section
         id="orbit-overlay"
-        active={activeSection === 'orbit-overlay'}
+        active={shownSection === 'orbit-overlay'}
         icon={MonitorPlay}
         title="Overlay"
 
@@ -1819,7 +1843,7 @@ export function SettingsView({
 
       <Section
         id="orbit-captures"
-        active={activeSection === 'orbit-captures'}
+        active={shownSection === 'orbit-captures'}
         note="Need work"
         icon={Images}
         title="Captures"
@@ -1901,7 +1925,7 @@ export function SettingsView({
 
       <Section
         id="orbit-backups"
-        active={activeSection === 'orbit-backups'}
+        active={shownSection === 'orbit-backups'}
         note="Need work"
         icon={Save}
         title="Backups"
@@ -1920,7 +1944,7 @@ export function SettingsView({
 
       <Section
         id="orbit-libraries"
-        active={activeSection === 'orbit-libraries'}
+        active={shownSection === 'orbit-libraries'}
         note="Need work"
         icon={LibraryIcon}
         title="Libraries"
@@ -1995,7 +2019,7 @@ export function SettingsView({
 
       <Section
         id="orbit-integrations"
-        active={activeSection === 'orbit-integrations'}
+        active={shownSection === 'orbit-integrations'}
         icon={Plug}
         title="Integrations"
         note="Need work"
@@ -2016,7 +2040,7 @@ export function SettingsView({
 
       <Section
         id="orbit-achievements"
-        active={activeSection === 'orbit-achievements'}
+        active={shownSection === 'orbit-achievements'}
         icon={Trophy}
         title="Achievements"
         note="Need work"
@@ -2032,7 +2056,7 @@ export function SettingsView({
 
       <Section
         id="orbit-details"
-        active={activeSection === 'orbit-details'}
+        active={shownSection === 'orbit-details'}
         icon={Sparkles}
         title="Metadata"
 
@@ -2071,7 +2095,7 @@ export function SettingsView({
 
       <Section
         id="orbit-sound"
-        active={activeSection === 'orbit-sound'}
+        active={shownSection === 'orbit-sound'}
         icon={Piano}
         title="Sound"
 
@@ -2168,7 +2192,7 @@ export function SettingsView({
 
       <Section
         id="orbit-copy"
-        active={activeSection === 'orbit-copy'}
+        active={shownSection === 'orbit-copy'}
         icon={ArrowLeftRight}
         title="Export and import"
 
@@ -2178,7 +2202,7 @@ export function SettingsView({
 
       <Section
         id="orbit-advanced"
-        active={activeSection === 'orbit-advanced'}
+        active={shownSection === 'orbit-advanced'}
         icon={HardDrive}
         title="Advanced"
 
@@ -2252,7 +2276,7 @@ export function SettingsView({
 
       <Section
         id="orbit-logs"
-        active={activeSection === 'orbit-logs'}
+        active={shownSection === 'orbit-logs'}
         icon={ScrollText}
         title="Logs"
 
@@ -2304,7 +2328,7 @@ export function SettingsView({
 
       <Section
         id="orbit-updates"
-        active={activeSection === 'orbit-updates'}
+        active={shownSection === 'orbit-updates'}
         icon={Download}
         title="Updates"
 
@@ -2371,7 +2395,7 @@ export function SettingsView({
 
       <Section
         id="orbit-about"
-        active={activeSection === 'orbit-about'}
+        active={shownSection === 'orbit-about'}
         icon={Database}
         title="About"
 

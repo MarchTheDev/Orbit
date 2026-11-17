@@ -43,6 +43,23 @@ export async function closeWindow(): Promise<void> {
   }
 }
 
+/**
+ * Close the window the way its own frame button does.
+ *
+ * Not gated on `customTitleBar`: a Linux window still has a close path, and the
+ * shell behind it decides whether closing means quitting or going to the tray,
+ * and asks about a cloud copy that is still running. Stardeck's power switch is
+ * that same asks-nothing path, so the two can never disagree.
+ */
+export async function closeApp(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    await getCurrentWindow().close();
+  } catch {
+    /* Already on its way out. */
+  }
+}
+
 /** Watch whether the window is maximized, for the restore glyph. */
 export async function watchMaximized(onChange: (maximized: boolean) => void): Promise<() => void> {
   if (!customTitleBar) return () => {};

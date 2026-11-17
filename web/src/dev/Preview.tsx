@@ -79,6 +79,10 @@ function Preview() {
             showMusic={false}
             showBars={false}
             onOpenSettings={() => setSurface('settings')}
+            onAddGame={() => setSurface('add')}
+            onEditGame={() => setSurface('editor')}
+            onToggleFavorite={() => undefined}
+            onPower={() => undefined}
           />
         </div>
       )}

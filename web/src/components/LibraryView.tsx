@@ -37,6 +37,7 @@ import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { prewarmLibraryArtwork, resolveWideArt, wideArtImmediateFallback } from '../utils/art';
 import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
+import { useHoverTint } from '../utils/palette';
 import { Cover } from './ui/Cover';
 import { useDragReorder } from '../hooks/useDragReorder';
 import { CaptureViewerModal } from './ui/CaptureViewerModal';
@@ -974,23 +975,18 @@ export function LibraryView({
               {rail === 'covers' ? (
                 <div ref={shelfListRef} className="orbit-shelf-grid">
                   {shown.map((game) => (
-                    <button
+                    <ShelfTile
                       key={game.id}
-                      className={cn('orbit-shelf-tile', shelfDrag.dragging === game.id && 'opacity-90')}
-                      {...shelfDrag.bind(game.id)}
-                      data-orbit-game={game.id}
-                      aria-current={game.id === focusId ? 'true' : undefined}
-                      onClick={() => choose(game.id)}
-                      title={game.title}
-                    >
-                      <span className="relative block" style={{ aspectRatio: shelfShape.replace(':', ' / ') }}>
-                        <Cover game={game} className="orbit-cover size-full" loading="lazy" />
-                        {game.id === runningId && (
-                          <span className="orbit-pulse absolute right-1.5 top-1.5 z-10 size-1.5 rounded-full bg-emerald-400" />
-                        )}
-                      </span>
-                      <p>{game.title}</p>
-                    </button>
+                      game={game}
+                      shape={shelfShape}
+                      running={game.id === runningId}
+                      current={game.id === focusId}
+                      dragging={shelfDrag.dragging === game.id}
+                      tint={coverTint}
+                      bind={shelfDrag.bind(game.id)}
+                      onChoose={() => choose(game.id)}
+                      onToggleFavorite={() => onToggleFavorite(game.id)}
+                    />
                   ))}
                 </div>
               ) : (
@@ -1003,8 +999,8 @@ export function LibraryView({
                       data-orbit-game={game.id}
                       data-size={listSize}
                       aria-current={game.id === focusId ? 'true' : undefined}
+                      aria-label={`${game.title}${game.favorite ? ', favorite' : ''}`}
                       onClick={() => choose(game.id)}
-                      title={game.title}
                     >
                       <span className="orbit-shelf-rowart">
                         <Cover
@@ -1084,6 +1080,79 @@ export function LibraryView({
 }
 
 /** Four sketches, in the shapes covers come in. */
+/**
+ * One cover on the Observatory's shelf.
+ *
+ * The shelf and the grid are the same library, so they answer the pointer the
+ * same way: the picture is tinted with its own dominant colour while it is
+ * hovered, and the star sits in its corner for anyone who wants to mark a game
+ * without opening it. What the tile does not carry is a native `title`: a
+ * tooltip drawn by the system over a cover reads as a browser page's caption in
+ * the middle of what is meant to be a game shelf, and the name is already under
+ * the picture.
+ */
+function ShelfTile({
+  game,
+  shape,
+  running,
+  current,
+  dragging,
+  tint: tintOn,
+  bind,
+  onChoose,
+  onToggleFavorite,
+}: {
+  game: Game;
+  shape: CoverShape;
+  running: boolean;
+  current: boolean;
+  dragging: boolean;
+  tint: boolean;
+  bind: Record<string, unknown>;
+  onChoose: () => void;
+  onToggleFavorite: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const tint = useHoverTint(game, tintOn, hovered);
+  return (
+    <button
+      type="button"
+      className={cn('orbit-shelf-tile group', dragging && 'opacity-90')}
+      {...bind}
+      data-orbit-game={game.id}
+      aria-current={current ? 'true' : undefined}
+      aria-label={game.title}
+      onClick={onChoose}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+    >
+      <span className="orbit-shelf-tileart" style={{ aspectRatio: shape.replace(':', ' / ') }}>
+        <Cover game={game} className="orbit-cover size-full" loading="lazy" />
+        <span className="orbit-shelf-tint" style={{ background: tint }} aria-hidden />
+        {running && <span className="orbit-pulse orbit-shelf-live" />}
+        <span
+          role="button"
+          tabIndex={-1}
+          aria-label={game.favorite ? `Remove ${game.title} from favorites` : `Add ${game.title} to favorites`}
+          aria-pressed={game.favorite}
+          data-orbit-pad-skip=""
+          className="orbit-shelf-star"
+          data-on={game.favorite || undefined}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavorite();
+          }}
+        >
+          <Star className="size-3.5" fill={game.favorite ? 'currentColor' : 'none'} />
+        </span>
+      </span>
+      <p>{game.title}</p>
+    </button>
+  );
+}
+
 function CollapsibleGroup({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = React.useState(defaultOpen);
   return (

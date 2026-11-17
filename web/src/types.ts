@@ -689,6 +689,16 @@ export interface Settings {
    */
   glass?: boolean;
   /**
+   * The room takes its colour from the game in hand.
+   *
+   * On by default: the selected game's cover is thrown a long way out of focus
+   * behind the page, and its own hue is washed over the shell, so moving
+   * through the library changes the light in the room. Off is Orbit's flat
+   * look, unchanged, for anyone who wants the app to stay the colour of its
+   * theme.
+   */
+  adaptiveBackground?: boolean;
+  /**
    * Where the tint behind a hovered cover comes from.
    *
    * On by default: the picture's own colours, so the tile reads as one thing.

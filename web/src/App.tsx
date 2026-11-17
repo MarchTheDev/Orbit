@@ -76,9 +76,11 @@ import { revealInExplorer } from './services/native';
 import { fetchMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
+import { AdaptiveBackdrop } from './components/AdaptiveBackdrop';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
+import { closeApp } from './services/windowChrome';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Logo } from './components/ui/Logo';
@@ -908,6 +910,26 @@ export default function App() {
     [games, session, liveSecs],
   );
 
+  /**
+   * The game the room is lit by.
+   *
+   * The one being looked at, when there is one; otherwise the one that was
+   * played last, so a fresh start is lit by whatever is on the player's mind.
+   * Only the Library, Statistics and Backlog pages take the light - Settings,
+   * Journal and the rest are read for their words, and a picture behind them
+   * would be a picture behind a form.
+   */
+  const adaptivePage = page === 'library' || page === 'statistics' || page === 'backlog';
+  const adaptiveGame = useMemo(() => {
+    if (settings?.adaptiveBackground === false || !adaptivePage) return null;
+    const chosen = (selectedId && played.find((game) => game.id === selectedId)) || null;
+    if (chosen) return chosen;
+    return [...played]
+      .filter((game) => !game.planned && !game.hidden)
+      .sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''))
+      .at(0) ?? null;
+  }, [adaptivePage, played, selectedId, settings?.adaptiveBackground]);
+
   const hiddenLibraryFilters = settings?.hiddenLibraryFilters ?? [];
   // If a selected chip is hidden in Settings, fall back to All immediately.
   const activeFilter: Filter = hiddenLibraryFilters.includes(filter) ? 'all' : filter;
@@ -1671,6 +1693,22 @@ export default function App() {
           leaveTv();
           openSettings('orbit-sound');
         }}
+        // The sidebar's other three: the Add game form, a game's own settings
+        // and the power switch. The first two give the window back first, so
+        // the dialog opens over the desktop shell rather than over Stardeck.
+        onAddGame={() => {
+          leaveTv();
+          setShowAdd(true);
+        }}
+        onEditGame={(game) => {
+          leaveTv();
+          openGameEditor(game.id);
+        }}
+        onToggleFavorite={toggleFavorite}
+        onPower={() => {
+          leaveTv();
+          void closeApp();
+        }}
       />
     );
   }
@@ -1692,6 +1730,7 @@ export default function App() {
           `${opening ? 'orbit-enter ' : ''}orbit-app flex h-full flex-col overflow-hidden text-fg${focused ? '' : ' orbit-idle'}`
         }
       >
+      {adaptiveGame && <AdaptiveBackdrop game={adaptiveGame} />}
       <TopNav
         page={page}
         onNavigate={(next) => {

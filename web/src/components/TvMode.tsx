@@ -8,28 +8,28 @@ import {
   Layers,
   LayoutGrid,
   ListOrdered,
-  Menu,
   Minimize2,
   Play,
+  Plus,
+  Power,
   RotateCcw,
+  Settings2,
   SlidersHorizontal,
   Square,
+  Star,
   X,
 } from 'lucide-react';
 import type { Game, Settings } from '../types';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { inLibraryShelf } from '../utils/library';
 import { cn } from '../utils/cn';
-import { wideArt, wideArtImmediateFallback } from '../utils/art';
-import { Cover, warmCover, warmImage } from './ui/Cover';
+import { coverArtCandidates } from '../utils/art';
+import { Cover, warmCover } from './ui/Cover';
 import { Logo } from './ui/Logo';
 import { TvDetails } from './TvDetails';
-import { MusicButton } from './MusicButton';
 import { padJustActivated } from '../hooks/useGamepad';
 import { tvLite } from '../services/tv';
-import { findTvBackdrop } from '../services/native';
 
-const lite = tvLite;
 
 /** How the one list on the page is ordered. */
 export type TvOrder = 'recent' | 'az';
@@ -39,6 +39,9 @@ export type DeckArt = 'poster' | 'banner';
 
 /** How wide the covers on the rail are drawn. */
 export type StardeckCover = 'compact' | 'standard' | 'large';
+
+/** The menu's own pages: the hub of them, and the three it opens. */
+export type StardeckPage = 'home' | 'look' | 'library' | 'about';
 
 /** How far the artwork is pushed back behind the stage. */
 export type StardeckDim = 'soft' | 'balanced' | 'deep';
@@ -55,14 +58,10 @@ export interface StardeckPrefs {
   order: TvOrder;
   cover: StardeckCover;
   dim: StardeckDim;
-  /** The stage: the game across the top of the screen, or down its right side. */
-  stage: 'top' | 'side';
   /** Posters, which are what a library looks like, or the wide banners a store uses. */
   art: DeckArt;
   /** The game's own description under its facts. */
   summary: boolean;
-  /** The time in the corner, the way a console has one. */
-  clock: boolean;
   /** The store's wordmark instead of the title text, when there is one. */
   logo: boolean;
   /** The facts under the title: year, developer, the time left in the story. */
@@ -75,8 +74,6 @@ export interface StardeckPrefs {
   coverLabel: 'name' | 'info' | 'none';
   /** A subtle grain over the artwork, so a flat cover does not look like a hole. */
   grain: boolean;
-  /** The clock's seconds, for anyone who sits there watching one. */
-  seconds: boolean;
   /** The game's own wide art behind the stage, rather than a wash of its colour. */
   backdrop: boolean;
 }
@@ -87,17 +84,14 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   order: 'recent',
   cover: 'standard',
   dim: 'balanced',
-  stage: 'top',
   art: 'poster',
   summary: true,
-  clock: true,
   logo: true,
   facts: true,
   stats: true,
   scope: 'all',
   coverLabel: 'name',
   grain: true,
-  seconds: false,
   backdrop: true,
 };
 
@@ -125,16 +119,13 @@ function savedStardeck(): StardeckPrefs {
         order: value.order === 'az' ? 'az' : 'recent',
         cover: value.cover === 'compact' || value.cover === 'large' ? value.cover : 'standard',
         dim: value.dim === 'soft' || value.dim === 'deep' ? value.dim : 'balanced',
-        stage: value.stage === 'side' ? 'side' : 'top',
         art: value.art === 'banner' ? 'banner' : 'poster',
         facts: value.facts !== false,
         stats: value.stats !== false,
         scope: value.scope === 'startable' ? 'startable' : 'all',
         coverLabel: value.coverLabel === 'none' || value.coverLabel === 'info' ? value.coverLabel : 'name',
         grain: value.grain !== false,
-        seconds: value.seconds === true,
         summary: value.summary !== false,
-        clock: value.clock !== false,
         logo: value.logo !== false,
         backdrop: value.backdrop !== false,
       };
@@ -170,28 +161,6 @@ const BANNER_WIDTH: Record<StardeckCover, string> = {
   compact: 'w-[clamp(8rem,20vh,11.8rem)]',
   standard: 'w-[clamp(10rem,26vh,16.4rem)]',
   large: 'w-[clamp(12.4rem,32vh,19.8rem)]',
-};
-
-/**
- * The two scrims over the artwork, in three strengths.
- *
- * The picture is the lighting of the room, so how much of it survives under
- * the words is a taste, not a fixed rule: a darker backdrop makes a bright
- * game readable, and a lighter one lets the art do more of the talking.
- */
-const SCRIMS: Record<StardeckDim, [string, string]> = {
-  soft: [
-    'from-[#05040d]/70 via-[#05040d]/25 to-transparent',
-    'from-[#05040d]/60 via-transparent to-transparent',
-  ],
-  balanced: [
-    'from-[#05040d] via-[#05040d]/55 to-[#05040d]/10',
-    'from-[#05040d] via-[#05040d]/45 to-transparent',
-  ],
-  deep: [
-    'from-[#05040d] via-[#05040d]/80 to-[#05040d]/30',
-    'from-[#05040d] via-[#05040d]/65 to-transparent',
-  ],
 };
 
 /**
@@ -275,141 +244,6 @@ export function backdropsFor(game: Game): string[] {
 function logoFor(game: Game): string | null {
   const id = steamIdOf(game);
   return id ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/logo.png` : null;
-}
-
-/**
- * The artwork behind the hub, swapped as the selection moves.
- *
- * Only a wide store background is allowed in this frame. Until one has loaded,
- * the frame stays a colour wash: a cover or header is never stretched here as
- * temporary art. Attempt and load state are tied to the selected game and URL,
- * so a late state update from the previous selection cannot flash its picture.
- * A failed picture steps down the list rather than leaving a hole.
- */
-function Backdrop({
-  game,
-  dim,
-  onFound,
-}: {
-  game: Game;
-  dim: StardeckDim;
-  /** The picture the catalogues answered with, for the stage to draw too. */
-  onFound?: (url: string | null) => void;
-}) {
-  const [failure, setFailure] = useState<{ gameId: string; step: number }>({ gameId: game.id, step: 0 });
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-  const [sgdbBackdrop, setSgdbBackdrop] = useState<{ gameId: string; url: string | null }>({ gameId: '', url: null });
-  const shown = useRef<HTMLImageElement>(null);
-  const localBackdrops = backdropsFor(game);
-  const communityUrl = sgdbBackdrop.gameId === game.id ? sgdbBackdrop.url : null;
-  // Like Heronite's art chains, keep user-picked hero art first, then try an
-  // independently curated community hero before Steam's fallback chain.
-  const customHero = game.meta?.backgroundUrlCustom ? game.meta.backgroundUrl : null;
-  const list = [
-    ...(customHero ? [customHero] : []),
-    ...(communityUrl ? [communityUrl] : []),
-    ...localBackdrops.filter((url) => url !== customHero && url !== communityUrl),
-  ];
-
-  // Asked for whether or not the desktop shell answers: `findTvBackdrop` falls
-  // back to nothing in a browser, and a picture it does find is the whole point
-  // of the stage.
-  useEffect(() => {
-    let current = true;
-    // Start the community-art request as soon as a game becomes active. The
-    // request is memoized by game id, so quick rail movement joins an in-flight
-    // lookup rather than multiplying calls, and the next game is warmed below.
-    void findTvBackdrop(game.id).then((url) => {
-      if (!current) return;
-      setSgdbBackdrop({ gameId: game.id, url });
-      onFound?.(url);
-      // If a local fallback already failed while SGDB was answering, step
-      // back to its newly inserted slot instead of accidentally skipping it.
-      if (url && !backdropsFor(game).includes(url)) {
-        setFailure((failed) => failed.gameId === game.id && failed.step > 0
-          ? { gameId: game.id, step: 1 }
-          : failed);
-      }
-    });
-    return () => { current = false; };
-  }, [game.id]);
-  // A selection change takes the first attempt synchronously. Waiting for an
-  // effect to reset `step` showed the previous game's lower-quality fallback
-  // for one frame when that image had failed.
-  const step = failure.gameId === game.id ? failure.step : 0;
-  const src = list[step] ?? null;
-  const loaded = loadedSrc === src;
-  const [bottom, side] = SCRIMS[dim];
-
-  // A picture already in the cache can finish before React's load listener is
-  // attached. Only trust the element if it is still the source being drawn.
-  useEffect(() => {
-    const image = shown.current;
-    if (src && image?.complete && image.naturalWidth > 0 && image.getAttribute('src') === src) {
-      setLoadedSrc(src);
-    }
-  }, [src]);
-
-  return (
-    <div data-tv-backdrop className="pointer-events-none absolute inset-0 overflow-hidden">
-      {src ? (
-        <img
-          ref={shown}
-          src={src}
-          alt=""
-          aria-hidden
-          loading="eager"
-          decoding="async"
-          draggable={false}
-          onLoad={(event) => setLoadedSrc(event.currentTarget.getAttribute('src'))}
-          onError={() => {
-            setFailure((current) => ({
-              gameId: game.id,
-              step: (current.gameId === game.id ? current.step : 0) + 1,
-            }));
-          }}
-          className={cn(
-            'tv-backdrop-image absolute inset-0 h-full w-full object-cover',
-            loaded ? 'opacity-100' : 'opacity-0',
-          )}
-        />
-      ) : (
-        <div
-          data-tv-backdrop-placeholder
-          aria-hidden="true"
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(circle at 28% 28%, hsl(${game.hue} 55% 24%), #05040d 72%)`,
-          }}
-        />
-      )}
-      {/* The scrims. Everything over the picture is read against the darkest
-          corner of it, and the picture fades into the rail rather than ending
-          at a line above it. */}
-      <div className={cn('absolute inset-0 bg-gradient-to-t', bottom)} />
-      <div className={cn('absolute inset-0 bg-gradient-to-r', side)} />
-      <div
-        aria-hidden
-        className="absolute inset-0"
-        style={{ background: 'radial-gradient(ellipse at 50% 125%, transparent 38%, rgba(5,4,13,.5) 100%)' }}
-      />
-    </div>
-  );
-}
-
-/** A small fact about the game, in the row under its name. */
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="text-[13px] font-semibold text-white/85">{children}</span>
-      <span className="text-[10px] uppercase tracking-[0.16em] text-white/35">{label}</span>
-    </span>
-  );
-}
-
-/** The dot between two facts in the row under the title. */
-function Dot() {
-  return <span aria-hidden className="text-white/20">·</span>;
 }
 
 /**
@@ -547,6 +381,16 @@ function PanelToggle({
  * step in from it. Every choice is applied the moment it is made, so the menu
  * can be closed while looking at the thing it changed.
  */
+/**
+ * The sidebar.
+ *
+ * Heronite's console menu is a full-height panel down the right edge over the
+ * dimmed screen, and it is where everything that is not browsing the collection
+ * lives: the look of the room, what the deck holds, adding a game, Orbit's own
+ * settings, the way back to the desktop and the power switch. Escape opens it
+ * and Escape closes it, which is the one rule Escape has here - it never drops
+ * somebody onto the desktop without asking.
+ */
 function StardeckMenu({
   prefs,
   onChange,
@@ -555,105 +399,106 @@ function StardeckMenu({
   onClose,
   onReset,
   onExit,
+  onAddGame,
+  onOpenSettings,
+  onPower,
+  sound,
+  onSound,
   running,
   library,
-  onPlay,
   onStop,
 }: {
   prefs: StardeckPrefs;
   onChange: (next: StardeckPrefs) => void;
-  page: 'home' | 'look' | 'library' | 'about';
-  onPage: (next: 'home' | 'look' | 'library' | 'about') => void;
+  page: StardeckPage;
+  onPage: (next: StardeckPage) => void;
   onClose: () => void;
   onReset: () => void;
   onExit: () => void;
+  onAddGame: () => void;
+  onOpenSettings: () => void;
+  onPower: () => void;
+  sound: Settings['sound'];
+  onSound: (next: Settings['sound']) => void;
   running: Game | null;
   library: Game[];
-  onPlay: (game: Game) => void;
   onStop: () => void;
 }) {
   const set = <K extends keyof StardeckPrefs>(key: K, value: StardeckPrefs[K]) =>
     onChange({ ...prefs, [key]: value });
 
-  const titles = {
+  const titles: Record<StardeckPage, string> = {
     home: 'Stardeck',
     look: 'Look',
     library: 'Library',
     about: 'About',
-  } as const;
+  };
 
   return (
-    <div
-      ref={undefined}
-      role="dialog"
-      aria-label="Stardeck menu"
-      className="orbit-deckmenu orbit-scroll"
-    >
-      <div className="orbit-deckmenu-head">
+    <div role="dialog" aria-label="Stardeck menu" className="orbit-deckside orbit-scroll">
+      <div className="orbit-deckside-head">
         {page === 'home' ? (
-          <span className="orbit-deckmenu-mark">
+          <span className="orbit-deckside-mark">
             <Logo className="size-5" animated={false} />
             {titles[page]}
           </span>
         ) : (
-          <button type="button" onClick={() => onPage('home')} className="orbit-deckmenu-back">
+          <button type="button" onClick={() => onPage('home')} className="orbit-deckside-back">
             <ArrowLeft className="size-3.5" />
             {titles[page]}
           </button>
         )}
-        <button type="button" onClick={onClose} aria-label="Close menu" className="orbit-deckmenu-close">
+        <button type="button" onClick={onClose} aria-label="Close menu" className="orbit-deckside-close">
           <X className="size-4" />
         </button>
       </div>
 
-      <div className="orbit-deckmenu-body">
+      <div className="orbit-deckside-body">
         {page === 'home' && (
           <>
-            <MenuButton
-              icon={SlidersHorizontal}
-              label="Look"
-              hint="Artwork, stage, backdrop"
-              onClick={() => onPage('look')}
-            />
-            <MenuButton
-              icon={ListOrdered}
-              label="Library"
-              hint="What the deck holds and how it is ordered"
-              onClick={() => onPage('library')}
-            />
-            <MenuButton icon={Info} label="About" hint="What Stardeck is" onClick={() => onPage('about')} />
-
             {running && (
-              <MenuButton
-                icon={Square}
-                label="Stop this session"
-                hint={running.title}
-                onClick={() => {
-                  onStop();
-                  onClose();
-                }}
-              />
+              <div className="orbit-deckside-running">
+                <Cover game={running} className="h-11 w-9 shrink-0 overflow-hidden rounded" fit="cover" />
+                <span className="min-w-0 flex-1">
+                  <span className="orbit-deckside-running-kicker">
+                    <span className="orbit-deck-live" aria-hidden />
+                    Playing now
+                  </span>
+                  <span className="orbit-deckside-running-name">{running.title}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStop();
+                    onClose();
+                  }}
+                  className="orbit-deckside-chip"
+                >
+                  Stop
+                </button>
+              </div>
             )}
 
-            <div className="orbit-deckmenu-sep" />
-            <button type="button" onClick={onExit} className="orbit-deckmenu-leave">
+            <MenuButton icon={SlidersHorizontal} label="Look" hint="Artwork, covers, backdrop" onClick={() => onPage('look')} />
+            <MenuButton icon={ListOrdered} label="Library" hint="Order and what the deck holds" onClick={() => onPage('library')} />
+            <MenuButton icon={Plus} label="Add a game" hint="A program, or a launcher's library" onClick={onAddGame} />
+            <MenuButton icon={Settings2} label="Orbit settings" hint="Every setting in the app" onClick={onOpenSettings} />
+
+            <div className="orbit-deckside-sep" />
+            <button type="button" onClick={onExit} className="orbit-deckside-exit">
               <Minimize2 className="size-4" />
-              Leave Stardeck
+              Back to desktop
             </button>
+            <button type="button" onClick={onPower} className="orbit-deckside-power">
+              <Power className="size-4" />
+              Quit Orbit
+            </button>
+            <MenuButton icon={Info} label="About Stardeck" hint="What the mode is, and the keys" onClick={() => onPage('about')} />
           </>
         )}
 
         {page === 'look' && (
           <>
-            <PanelChoice
-              label="Stage"
-              value={prefs.stage}
-              options={[
-                { id: 'top', label: 'Above' },
-                { id: 'side', label: 'Beside' },
-              ]}
-              onChange={(next) => set('stage', next as StardeckPrefs['stage'])}
-            />
             <PanelChoice
               label="Artwork"
               value={prefs.art}
@@ -683,22 +528,28 @@ function StardeckMenu({
               ]}
               onChange={(next) => set('dim', next as StardeckDim)}
             />
-            <div className="orbit-deckmenu-toggles">
+            <div className="orbit-deckside-toggles">
+              <PanelToggle
+                label="Cover backdrop"
+                hint="The selected game's cover, blurred, behind everything."
+                on={prefs.backdrop}
+                onChange={(next) => set('backdrop', next)}
+              />
               <PanelToggle
                 label="Facts"
-                hint="Year, developer and the time left, under the title."
+                hint="Year and developer under the title."
                 on={prefs.facts}
                 onChange={(next) => set('facts', next)}
               />
               <PanelToggle
                 label="Numbers"
-                hint="The bar of readings along the bottom of the stage."
+                hint="Played, last played and the story left, on the game's panel."
                 on={prefs.stats}
                 onChange={(next) => set('stats', next)}
               />
               <PanelToggle
                 label="Description"
-                hint="A couple of lines about the game, under its facts."
+                hint="A couple of lines about the game, under its numbers."
                 on={prefs.summary}
                 onChange={(next) => set('summary', next)}
               />
@@ -715,16 +566,10 @@ function StardeckMenu({
                 onChange={(next) => set('grain', next)}
               />
               <PanelToggle
-                label="Clock"
-                hint="The time in the corner of the top bar."
-                on={prefs.clock}
-                onChange={(next) => set('clock', next)}
-              />
-              <PanelToggle
-                label="Seconds"
-                hint="The clock counts seconds as well as minutes."
-                on={prefs.seconds}
-                onChange={(next) => set('seconds', next)}
+                label="Music"
+                hint="Orbit's own music, while you browse."
+                on={sound?.enabled !== false}
+                onChange={(next) => onSound({ ...(sound ?? { volume: 0.35, unfocused: false }), enabled: next })}
               />
             </div>
           </>
@@ -760,69 +605,28 @@ function StardeckMenu({
               ]}
               onChange={(next) => set('coverLabel', next as StardeckPrefs['coverLabel'])}
             />
-            <p className="orbit-deckmenu-note">
+            <p className="orbit-deckside-note">
               {library.length} {library.length === 1 ? 'game' : 'games'} on the deck.
             </p>
-            <div className="orbit-deckmenu-sep" />
-            <p className="orbit-deckmenu-label">Playing now</p>
-            {running ? (
-              <div className="orbit-deckmenu-running">
-                <Cover game={running} className="h-10 w-8 shrink-0 overflow-hidden rounded" fit="cover" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{running.title}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onStop();
-                    onClose();
-                  }}
-                  className="orbit-deckmenu-chip"
-                >
-                  Stop
-                </button>
-              </div>
-            ) : (
-              <p className="orbit-deckmenu-note">Nothing is running.</p>
-            )}
-            <p className="orbit-deckmenu-label">Start something</p>
-            <ul className="orbit-deckmenu-list">
-              {library.slice(0, 8).map((game) => (
-                <li key={game.id}>
-                  <button
-                    type="button"
-                    disabled={game.id === running?.id}
-                    onClick={() => {
-                      onPlay(game);
-                      onClose();
-                    }}
-                    className="orbit-deckmenu-row"
-                  >
-                    <Cover game={game} className="h-7 w-6 shrink-0 overflow-hidden rounded" fit="cover" />
-                    <span className="min-w-0 flex-1 truncate">{game.title}</span>
-                    <Play className="size-3 shrink-0 opacity-50" />
-                  </button>
-                </li>
-              ))}
-            </ul>
           </>
         )}
 
         {page === 'about' && (
           <>
-            <p className="orbit-deckmenu-note">
-              Stardeck is Orbit read from a couch: one game at a time, on its own artwork, with the
-              rest of the library one press away. Left and right walk the deck, Enter plays what is
-              on screen, and Escape brings this menu back.
+            <p className="orbit-deckside-note">
+              Stardeck is Orbit read from a couch: one game at a time, on its own cover, with the rest
+              of the library one press away. Left and right walk the deck, Enter plays what is on
+              screen, and Escape brings this menu back.
             </p>
-            <p className="orbit-deckmenu-label">Controls</p>
-            <dl className="orbit-deckmenu-keys">
+            <dl className="orbit-deckside-keys">
               <div><dt>← →</dt><dd>Another game</dd></div>
-              <div><dt>↑ ↓</dt><dd>Play, details, the bar</dd></div>
+              <div><dt>↑ ↓</dt><dd>The game's panel, then the covers</dd></div>
               <div><dt>Enter</dt><dd>Play what is on screen</dd></div>
+              <div><dt>L</dt><dd>Deck or library</dd></div>
               <div><dt>Escape</dt><dd>This menu</dd></div>
-              <div><dt>C</dt><dd>Look, directly</dd></div>
             </dl>
-            <div className="orbit-deckmenu-sep" />
-            <button type="button" onClick={onReset} className="orbit-deckmenu-chip w-full justify-center">
+            <div className="orbit-deckside-sep" />
+            <button type="button" onClick={onReset} className="orbit-deckside-chip w-full justify-center">
               <RotateCcw className="size-3.5" />
               Reset Stardeck to its defaults
             </button>
@@ -830,6 +634,210 @@ function StardeckMenu({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The light in the room: the selected game's own cover, blurred hard.
+ *
+ * Heronite points its whole screen at one picture - the focused game's art -
+ * and cross-fades to the next when the focus moves, 520 ms of one game
+ * dissolving into another. This is the same idea with the asset a library here
+ * always has: the cover. Two layers are kept, the one that has settled and the
+ * one arriving, and the arriving copy fades up over the settled one; nothing
+ * ever goes through the colour of the shell in between, which is what a single
+ * element swapping its `background-image` does on WebKit.
+ */
+function DeckBackdrop({ game }: { game: Game | null }) {
+  const [layers, setLayers] = useState<{ key: number; url: string }[]>([]);
+  const nextKey = useRef(1);
+  const last = layers[layers.length - 1] ?? null;
+  const wanted = game ? coverArtCandidates(game)[0] ?? null : null;
+
+  useEffect(() => {
+    if (!wanted || (last && last.url === wanted)) return;
+    const layer = { key: nextKey.current, url: wanted };
+    nextKey.current += 1;
+    // Two layers is enough: the one being covered and the one covering it.
+    setLayers((have) => [...have.slice(-1), layer]);
+    const timer = window.setTimeout(() => {
+      setLayers((have) => (have.length > 1 ? have.slice(-1) : have));
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [wanted]);
+
+  return (
+    <div data-tv-deckbackdrop aria-hidden className="orbit-deckbackdrop">
+      {layers.map((layer, index) => (
+        <div
+          key={layer.key}
+          className="orbit-deckbackdrop-layer"
+          style={{
+            backgroundImage: `url("${layer.url}")`,
+            // The layer that has just arrived is the only one that animates;
+            // an older one simply stays where it was beneath it.
+            animation: index === layers.length - 1 ? 'deck-backdrop-in .6s var(--ease-out) both' : undefined,
+          }}
+        />
+      ))}
+      <div className="orbit-deckbackdrop-tint" style={{ background: game ? `hsl(${game.hue} 45% 12% / .62)` : undefined }} />
+      <div className="orbit-deckbackdrop-shade" />
+    </div>
+  );
+}
+
+/**
+ * The game the shelf is about, as a panel down the left edge.
+ *
+ * A console puts the thing you are looking at in front of you: the poster, the
+ * name, what has been played of it and the one button that starts it. Heronite
+ * calls this a sheet and floats it over the collection rather than making a page
+ * of it, and that is the shape here too - 27rem wide with a margin off the edge,
+ * so the covers are still visible to the right of it and the shelf behind it
+ * still reads as the thing being browsed.
+ */
+function GameSheet({
+  game,
+  running,
+  left,
+  progress,
+  prefs,
+  onPlay,
+  onStop,
+  onDetails,
+  onEdit,
+  onFavourite,
+}: {
+  game: Game;
+  running: boolean;
+  left: number | null;
+  progress: number | null;
+  prefs: StardeckPrefs;
+  onPlay: () => void;
+  onStop: () => void;
+  onDetails: () => void;
+  onEdit: () => void;
+  onFavourite: () => void;
+}) {
+  const facts = [
+    game.meta?.releaseYear ? String(game.meta.releaseYear) : null,
+    game.meta?.developer || null,
+    game.meta?.genres?.slice(0, 2).join(' · ') || null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <aside className="orbit-decksheet" data-deck-sheet>
+      <div key={game.id} className="orbit-decksheet-inner">
+        <div className="orbit-decksheet-art">
+          <Cover game={game} className="orbit-decksheet-cover" fit="cover" loading="eager" />
+          <div className="orbit-decksheet-glow" style={{ background: `hsl(${game.hue} 65% 46% / .28)` }} aria-hidden />
+          {game.favorite && (
+            <span className="orbit-decksheet-star" aria-hidden>
+              <Star className="size-3" fill="currentColor" strokeWidth={0} />
+            </span>
+          )}
+        </div>
+
+        <div className="orbit-decksheet-head">
+          <p className="orbit-decksheet-kicker">
+            {running ? (
+              <>
+                <span className="orbit-deck-live" aria-hidden />
+                Playing now
+              </>
+            ) : game.status === 'playing' ? (
+              'In progress'
+            ) : game.status === 'completed' ? (
+              'Finished'
+            ) : (
+              'Ready to play'
+            )}
+          </p>
+          <GameTitle game={game} logo={prefs.logo} />
+          {prefs.facts && facts.length > 0 && <p className="orbit-decksheet-facts">{facts.join('  ·  ')}</p>}
+        </div>
+
+        {prefs.stats && (
+          <dl className="orbit-decksheet-stats">
+            <div>
+              <dt>Played</dt>
+              <dd>{fmtMinutes(game.playSecs / 60)}</dd>
+            </div>
+            {game.lastPlayed && (
+              <div>
+                <dt>Last played</dt>
+                <dd>{fmtDate(game.lastPlayed)}</dd>
+              </div>
+            )}
+            {left !== null && (
+              <div>
+                <dt>Story left</dt>
+                <dd>{left > 0 ? `${left}h` : 'Almost done'}</dd>
+              </div>
+            )}
+            {game.sizeBytes > 0 && (
+              <div>
+                <dt>On disk</dt>
+                <dd>{fmtBytes(game.sizeBytes)}</dd>
+              </div>
+            )}
+          </dl>
+        )}
+
+        {progress !== null && (
+          <div className="orbit-decksheet-progress">
+            <div className="orbit-deck-progresshead">
+              <span>Main story</span>
+              <b>{progress}%</b>
+            </div>
+            <div className="orbit-deck-rail" aria-hidden>
+              <i style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+        )}
+
+        {prefs.summary && game.meta?.summary && <p className="orbit-decksheet-summary">{game.meta.summary}</p>}
+
+        <div data-tv-actions className="orbit-decksheet-actions">
+          {running ? (
+            <button data-tv-action="stop" onClick={onStop} className="orbit-decksheet-play is-stop">
+              <Square className="size-4" fill="currentColor" strokeWidth={0} />
+              Stop
+            </button>
+          ) : (
+            <button data-tv-action="play" onClick={onPlay} className="orbit-decksheet-play">
+              <Play className="size-4" fill="currentColor" strokeWidth={0} />
+              Play
+            </button>
+          )}
+          <button
+            type="button"
+            data-tv-action="favourite"
+            onClick={onFavourite}
+            aria-pressed={game.favorite}
+            aria-label={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            title={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            className="orbit-decksheet-iconbtn"
+          >
+            <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
+          </button>
+          <button
+            type="button"
+            data-tv-action="edit"
+            onClick={onEdit}
+            aria-label="Game settings"
+            title="Game settings"
+            className="orbit-decksheet-iconbtn"
+          >
+            <Settings2 className="size-4" />
+          </button>
+          <button type="button" data-tv-action="details" onClick={onDetails} className="orbit-decksheet-more">
+            <Info className="size-3.5" />
+            Full page
+          </button>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -846,13 +854,13 @@ function MenuButton({
   onClick: () => void;
 }) {
   return (
-    <button type="button" onClick={onClick} className="orbit-deckmenu-item">
-      <span className="orbit-deckmenu-itemicon">
+    <button type="button" onClick={onClick} className="orbit-deckside-item">
+      <span className="orbit-deckside-itemicon">
         <Icon className="size-4" strokeWidth={1.9} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="orbit-deckmenu-itemlabel">{label}</span>
-        <span className="orbit-deckmenu-itemhint">{hint}</span>
+        <span className="orbit-deckside-itemlabel">{label}</span>
+        <span className="orbit-deckside-itemhint">{hint}</span>
       </span>
       <ChevronRight className="size-4 shrink-0 opacity-40" />
     </button>
@@ -883,13 +891,17 @@ export function TvMode({
   runningId,
   sound,
   setSound,
-  showMusic,
-  showBars,
+  showMusic: _showMusic,
+  showBars: _showBars,
   onPlay,
   onStop,
   onDetails,
   onExit,
   onOpenSettings,
+  onAddGame,
+  onEditGame,
+  onToggleFavorite,
+  onPower,
 }: {
   games: Game[];
   /** The game with the clock running, if there is one. */
@@ -904,6 +916,14 @@ export function TvMode({
   onExit: () => void;
   /** Out of the hub and into the page that holds the sound controls. */
   onOpenSettings: () => void;
+  /** The Add game form, which is Orbit's own and not a page of the hub. */
+  onAddGame: () => void;
+  /** A game's settings: the same centred editor the library opens. */
+  onEditGame: (game: Game) => void;
+  /** The star, so a favourite can be made one from the couch. */
+  onToggleFavorite: (id: string) => void;
+  /** Quit Orbit, having asked the shell to do it the usual way. */
+  onPower: () => void;
 }) {
   const [prefs, setPrefs] = useState<StardeckPrefs>(savedStardeck);
   /**
@@ -923,8 +943,7 @@ export function TvMode({
    * everything; the stage asks for the same game's picture to fill itself. They
    * share this, so a game is asked about once.
    */
-  const [heroes, setHeroes] = useState<Record<string, string | null>>({});
-  const [menuPage, setMenuPage] = useState<'home' | 'look' | 'library' | 'about'>('home');
+  const [menuPage, setMenuPage] = useState<StardeckPage>('home');
   const closeMenu = () => {
     setMenuExiting(true);
     window.setTimeout(() => {
@@ -983,14 +1002,10 @@ export function TvMode({
     for (const n of [at, (at + 1) % list.length, (at + list.length - 1) % list.length]) {
       const game = list[n];
       if (!game) continue;
+      // The cover is the only picture the deck draws now: the row shows it and
+      // the room's own light is a blurred copy of the same file, so warming one
+      // warms both.
       warmCover(game);
-      const candidates = backdropsFor(game);
-      const first = candidates[0];
-      // Warm a known provider hero before asking the network for any speculative
-      // 2x Steam CDN variant, then keep the sharp candidate decoding in parallel.
-      warmImage(wideArtImmediateFallback(game) ?? first);
-      if (first && first !== wideArtImmediateFallback(game)) warmImage(first);
-      warmImage(game.meta?.headerUrl ?? game.meta?.backgroundUrl);
     }
   }, [at, list]);
 
@@ -1005,13 +1020,6 @@ export function TvMode({
 
   // Give the window back immediately; no fade or shutdown hold on a slow renderer.
   const exit = useCallback(() => onExit(), [onExit]);
-
-  /** The clock, the way a console has one. */
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 20_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   // The document is told it is in TV mode for as long as this is on screen, so
   // no window background shows through anywhere the hub does not paint.
@@ -1118,21 +1126,22 @@ export function TvMode({
   }, [active, onPlay, onStop, running]);
 
   /**
-   * The buttons of the game on screen, in the order the eye reads them.
-   *
-   * Only the row under the game's name: the sound and the way out are up in
-   * the top bar, and a sideways press at the bottom of the screen should never
-   * quietly move focus into it.
+   * The buttons on the game's own panel: Play, the star, the settings and the
+   * full page, in the order the eye reads them.
    */
   const actionButtons = () =>
     Array.from(document.querySelectorAll<HTMLElement>('[data-tv-actions] [data-tv-action]'));
   const onAction = (el: EventTarget | null) =>
     el instanceof HTMLElement && el.closest('[data-tv-action]') !== null;
-  /** The controls in the bar along the top: the sound and the way out. */
+  /**
+   * The floating pills: Deck, Library and - when something is running - the
+   * one that stops it. There is no bar any more, so this is where a sideways
+   * press at the top of the screen goes.
+   */
   const barButtons = () =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-topbar] button:not([data-tv-page-toggle])'));
+    Array.from(document.querySelectorAll<HTMLElement>('[data-tv-pills] button'));
   const inTopbar = (el: EventTarget | null) =>
-    el instanceof HTMLElement && el.closest('[data-tv-topbar]') !== null;
+    el instanceof HTMLElement && el.closest('[data-tv-pills]') !== null;
   const moveLibraryFocus = useCallback((key: string) => {
     const items = Array.from(document.querySelectorAll<HTMLElement>('[data-tv-library-cover]'));
     const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1365,91 +1374,33 @@ export function TvMode({
         prefs.grain && !tvLite && 'tv-grain',
       )}
     >
-      {active && <Backdrop game={active} dim={prefs.dim} onFound={(url) => setHeroes((have) => (have[active.id] ? have : { ...have, [active.id]: url }))} />}
+      {/* The room is lit by the game in the middle of it: its own cover, blurred
+          hard, cross-fading whenever the selection changes. There is no bar
+          across the top any more - the two pages are pills floating on this
+          picture, and everything else is one Escape away in the sidebar. */}
+      <DeckBackdrop game={active ?? null} />
 
-      {/* A wash under the top bar, so its few words stay readable over a game
-          whose artwork happens to be bright exactly there. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
-
-      {/* The top panel: where you are, and the room's small facts. It floats on
-          the artwork rather than sitting in a bar of its own. */}
-      <header data-tv-topbar className="orbit-deck-topbar relative z-20">
-          <span className="orbit-deck-brand">
-            <Logo className="size-6 drop-shadow-[0_2px_10px_var(--c-accent)]" />
-            <span className="hidden flex-col leading-none sm:flex">
-              <span className="text-sm font-bold tracking-tight text-white/95">Orbit</span>
-              <span className="mt-1 text-[8px] font-bold uppercase tracking-[0.28em] text-white/45">Stardeck</span>
-            </span>
-          </span>
-
-        {playingNow && (
-          <span className={cn(
-              'ml-1 flex min-w-0 items-center gap-2 rounded-full border border-emerald-400/30 px-3 py-1 text-xs font-semibold text-emerald-300',
-              lite ? 'bg-emerald-400/15' : 'bg-emerald-400/10 backdrop-blur-sm',
-            )}>
-            <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
-            <span className="truncate">{playingNow.title}</span>
-            <button
-              onClick={onStop}
-              className="ml-0.5 rounded-full p-0.5 text-emerald-200/80 transition hover:bg-emerald-400/20 hover:text-white focus-visible:ring-2 focus-visible:ring-emerald-300"
-              title="Stop the session"
-              aria-label="Stop the session"
-            >
-              <Square className="size-3" fill="currentColor" strokeWidth={0} />
-            </button>
-          </span>
-        )}
-
-        {/* The page switch sits in the middle of the bar, which is where a
-            console puts the thing that changes the page: the left end is who
-            you are and what is playing, the right end is the room's own
-            controls. */}
-        <div className="orbit-deck-pagetabs" role="group" aria-label="Stardeck page">
-          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pagetab">
+      <div data-tv-pills className="orbit-deck-pills">
+        <div role="group" aria-label="Stardeck page" className="orbit-deck-pillgroup">
+          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pillbtn">
             <Layers className="size-3.5" />
             Deck
           </button>
-          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pagetab">
+          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pillbtn">
             <LayoutGrid className="size-3.5" />
             Library
           </button>
         </div>
-
-        <span className="orbit-deck-barspacer" aria-hidden />
-
-        {prefs.clock && (
-          <span className="hidden flex-col items-end leading-tight sm:flex">
-            <span className="font-mono text-sm text-white/85">
-              {now.toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-                ...(prefs.seconds ? { second: '2-digit' as const } : {}),
-              })}
-            </span>
-            <span className="text-[10px] uppercase tracking-[0.16em] text-white/40">
-              {now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
-            </span>
+        {playingNow && (
+          <span className="orbit-deck-playing" role="status">
+            <span className="orbit-deck-playing-dot" aria-hidden />
+            <span className="truncate">{playingNow.title}</span>
+            <button type="button" onClick={onStop} title="Stop the session" aria-label="Stop the session">
+              <Square className="size-3" fill="currentColor" strokeWidth={0} />
+            </button>
           </span>
         )}
-
-        {showMusic && (
-          <MusicButton sound={sound} onChange={setSound} showBars={showBars} onOpenSettings={onOpenSettings} />
-        )}
-
-        {/* The only way out, and it says so on its face: Escape is not a way
-            out of Stardeck, so a lone icon in the corner would be a trick. */}
-        <button
-          onClick={exit}
-          title="Leave Stardeck"
-          aria-label="Leave Stardeck"
-          className={cn(
-            'orbit-deck-leave ml-1 focus-visible:ring-2 focus-visible:ring-accent',
-          )}
-        >
-          <Minimize2 className="size-4" />
-          Leave Stardeck
-        </button>
-      </header>
+      </div>
 
       {(menu || menuExiting) && (
         <div ref={menuBox} className={`orbit-deckmenu-wrap ${menuExiting ? 'is-exiting' : ''}`}>
@@ -1468,9 +1419,16 @@ export function TvMode({
             onClose={closeMenu}
             onReset={() => setPrefs(STARDECK_DEFAULT)}
             onExit={exit}
+            onAddGame={() => {
+              closeMenu();
+              window.setTimeout(onAddGame, 220);
+            }}
+            onOpenSettings={onOpenSettings}
+            onPower={onPower}
+            sound={sound}
+            onSound={setSound}
             running={playingNow}
             library={list}
-            onPlay={onPlay}
             onStop={onStop}
           />
         </div>
@@ -1494,9 +1452,9 @@ export function TvMode({
               <span aria-hidden className="absolute inset-3 rounded-full border border-white/[0.06]" />
               <Gamepad2 className="size-9" />
             </span>
-            <div>
+            <div className="orbit-deck-plate">
               <p className="text-2xl font-bold text-white">Nothing to play yet</p>
-              <p className="mt-1.5 max-w-md text-sm text-white/45">
+              <p className="mt-1.5 max-w-md text-sm text-white/60">
                 Stardeck shows the games Orbit can start. Add one - or mark a plan as owned - and it
                 turns up here.
               </p>
@@ -1509,262 +1467,90 @@ export function TvMode({
               Back to Orbit
             </button>
           </div>
-        ) : (
-          view === 'library' ? (
-            <section className="orbit-tv-library" aria-label="Stardeck library">
-              <header className="orbit-tv-library-head">
-                <div className="min-w-0">
-                  <p className="orbit-tv-library-kicker">Your collection</p>
-                  <h1>Library</h1>
-                </div>
-                <p className="orbit-tv-library-count">
-                  <b>{list.length}</b>
-                  {list.length === 1 ? ' game' : ' games'}
-                </p>
-              </header>
-              <div className="orbit-tv-library-grid">
-                {list.map((game, n) => (
-                  <button
-                    key={game.id}
-                    data-tv-cover={n}
-                    data-tv-library-cover
-                    type="button"
-                    onFocus={() => setSelectedId(game.id)}
-                    onClick={() => {
-                      // A mouse is looking; a pad is choosing. The same press,
-                      // told apart by where it came from.
-                      setSelectedId(game.id);
-                      if (padJustActivated(400)) onPlay(game);
-                    }}
-                    onDoubleClick={() => onPlay(game)}
-                    aria-current={game.id === active.id ? 'true' : undefined}
-                    aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title}
-                    className="tv-library-game group min-w-0 text-left"
-                  >
-                    <span
-                      className={cn(
-                        'tv-library-game-art block overflow-hidden bg-white/5 shadow-xl transition',
-                        game.id === active.id && 'is-current',
-                      )}
-                    >
-                      <Cover game={game} className="size-full" fit="cover" />
-                      {game.id === runningId && (
-                        <span className="tv-library-game-live">
-                          <i aria-hidden />
-                          Playing
-                        </span>
-                      )}
-                    </span>
-                    {prefs.coverLabel !== 'none' && (
-                      <span className="tv-library-game-name">
-                        {game.title}
-                      </span>
-                    )}
-                    {prefs.coverLabel === 'info' && (
-                      <span className="tv-library-game-info">
-                        {[game.meta?.releaseYear ?? null, game.meta?.genres?.[0] ?? null, fmtMinutes(game.playSecs / 60)]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    )}
-                  </button>
-                ))}
+        ) : view === 'library' ? (
+          <section className="orbit-tv-library" aria-label="Stardeck library">
+            <header className="orbit-tv-library-head">
+              <div className="orbit-deck-plate min-w-0">
+                <p className="orbit-tv-library-kicker">Your collection</p>
+                <h1>Library</h1>
               </div>
-            </section>
-          ) : (
-          <div className={cn('orbit-deck', prefs.stage === 'side' && 'is-side')}>
-            {/* The stage: the chosen game, filling the screen on its own wide
-                art. A television is watched from across a room, so the game is
-                the picture and the words sit on it - not a card with the game
-                drawn in it. The art is the backdrop, dimmed and vignetted at the
-                bottom and left so the type has somewhere to live. */}
-            <section className="orbit-deck-stage" data-deck-stage>
-              {prefs.backdrop !== false && (heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active)) ? (
-                <div
-                  aria-hidden
-                  key={`${active.id}-art`}
-                  className="orbit-deck-stageart"
-                  style={{ backgroundImage: `url("${heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active)}")` }}
-                />
-              ) : (
-                <div
-                  aria-hidden
-                  className="orbit-deck-stageart is-quiet"
-                  style={{ background: `radial-gradient(120% 130% at 24% 0%, hsl(${active.hue} 52% 34% / .55), transparent 66%)` }}
-                />
-              )}
-              <div aria-hidden className="orbit-deck-stagescrim" />
-              {/* The last line of the stage is not a rule: the artwork fades
-                  into the colour of the shelf under it, so the two halves of
-                  the deck meet without a border between them. */}
-              <div aria-hidden className="orbit-deck-stagefade" />
-              <div
-                aria-hidden
-                className="orbit-deck-stagewash"
-                style={{ background: `radial-gradient(90% 120% at 12% 8%, hsl(${active.hue} 60% 42% / .3), transparent 62%)` }}
-              />
-
-              <div key={active.id} className="orbit-deck-stageinner">
-                <div className="orbit-deck-copy">
-                  <p className="orbit-deck-kicker">
-                    {running ? (
-                      <>
-                        <span className="orbit-deck-live" aria-hidden />
-                        Playing now
-                      </>
-                    ) : active.status === 'playing' ? (
-                      'In progress'
-                    ) : active.status === 'completed' ? (
-                      'Finished'
-                    ) : (
-                      'Ready to play'
-                    )}
-                  </p>
-
-                  <GameTitle game={active} logo={prefs.logo} />
-
-                  {prefs.facts && (
-                    <p className="orbit-deck-facts">
-                      {[
-                        active.meta?.releaseYear ? String(active.meta.releaseYear) : null,
-                        active.meta?.developer || null,
-                        active.meta?.genres?.slice(0, 2).join(' · ') || null,
-                        left !== null ? (left > 0 ? `${left}h of story left` : 'story almost done') : null,
-                      ]
-                        .filter(Boolean)
-                        .join('  ·  ')}
-                    </p>
-                  )}
-
-                  <div className="orbit-deck-stats" hidden={!prefs.stats}>
-                    <Stat label="played">{fmtMinutes(active.playSecs / 60)}</Stat>
-                    {active.lastPlayed && (
-                      <>
-                        <Dot />
-                        <Stat label="last played">{fmtDate(active.lastPlayed)}</Stat>
-                      </>
-                    )}
-                    {left !== null && (
-                      <>
-                        <Dot />
-                        <Stat label="of the story left">{left > 0 ? `${left}h` : 'almost done'}</Stat>
-                      </>
-                    )}
-                    {active.sizeBytes > 0 && (
-                      <>
-                        <Dot />
-                        <Stat label="on disk">{fmtBytes(active.sizeBytes)}</Stat>
-                      </>
-                    )}
-                  </div>
-
-                  {prefs.summary && active.meta?.summary && (
-                    <p className="orbit-deck-summary">{active.meta.summary}</p>
-                  )}
-
-                  {progress !== null && (
-                    <div className="orbit-deck-progress">
-                      <div className="orbit-deck-progresshead">
-                        <span>Main story</span>
-                        <b>{progress}%</b>
-                      </div>
-                      <div className="orbit-deck-rail" aria-hidden>
-                        <i style={{ width: `${progress}%` }} />
-                      </div>
-                    </div>
-                  )}
-
-                  <div data-tv-actions className="orbit-deck-actions">
-                    {running ? (
-                      <button data-tv-action="stop" onClick={onStop} className="orbit-deck-play is-stop">
-                        <Square className="size-4" fill="currentColor" strokeWidth={0} />
-                        Stop session
-                      </button>
-                    ) : (
-                      <button data-tv-action="play" onClick={start} className="orbit-deck-play">
-                        <Play className="size-4" fill="currentColor" strokeWidth={0} />
-                        Play
-                      </button>
-                    )}
-                    <button
-                      data-tv-action="details"
-                      onClick={() => {
-                        setDetailId(active.id);
-                        onDetails(active);
-                      }}
-                      className="orbit-deck-secondary"
-                    >
-                      <Info className="size-4" />
-                      Details
-                    </button>
-                  </div>
-                </div>
-
-                {/* The art again, small, as a card: on a wide screen the game is
-                    recognised by its poster, and the wide art behind it is the
-                    mood rather than the label. Hidden when the deck is beside
-                    the stage, where there is no room. */}
-                <div className="orbit-deck-art" aria-hidden={prefs.art !== 'poster'}>
-                  <Cover
-                    game={active}
-                    className={cn('orbit-deck-cover', prefs.art === 'banner' && 'is-banner')}
-                    fit="cover"
-                    loading="eager"
-                  />
-                  <div className="orbit-deck-artglow" style={{ background: `hsl(${active.hue} 65% 46% / .35)` }} aria-hidden />
-                </div>
-              </div>
-            </section>
-
-            {/* The index: every game that can be started, in one ordered list.
-                This is what makes the mode a deck rather than a carousel - the
-                stage never moves, the row of banners moves under the light. */}
-            <section className="orbit-deck-index">
-              <div
-                aria-hidden
-                className="orbit-deck-index-art"
-                style={{
-                  backgroundImage: `linear-gradient(180deg, rgba(5,4,13,.34), rgba(5,4,13,.76)), url("${heroes[active.id] || wideArtImmediateFallback(active) || wideArt(active) || ''}")`,
-                  backgroundColor: `hsl(${active.hue} 35% 16%)`,
-                }}
-              />
-              {/* One row, three parts, each where a thumb expects it: the
-                  count at the left end, the two arrows either side of the
-                  shelf's middle, and the menu at the right end. They used to
-                  be pushed about by two different order rules and a spacer,
-                  which made them sit a few pixels differently on every window;
-                  a three-column grid with equal outer tracks cannot. */}
-              <div className="orbit-deck-indexhead">
-                <span className="orbit-deck-counter">
-                  <b>{at + 1}</b>
-                  <i aria-hidden>/</i>
-                  {list.length}
-                </span>
-
-                <div className="orbit-deck-steps">
-                  <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
-                    <ChevronLeft className="size-4" />
-                  </button>
-                  <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game" className="orbit-deck-step">
-                    <ChevronRight className="size-4" />
-                  </button>
-                </div>
-
+              <p className="orbit-tv-library-count orbit-deck-plate">
+                <b>{list.length}</b>
+                {list.length === 1 ? ' game' : ' games'}
+              </p>
+            </header>
+            <div className="orbit-tv-library-grid">
+              {list.map((game, n) => (
                 <button
+                  key={game.id}
+                  data-tv-cover={n}
+                  data-tv-library-cover
+                  type="button"
+                  onFocus={() => setSelectedId(game.id)}
                   onClick={() => {
-                    setMenuPage('home');
-                    setMenu(true);
+                    // A mouse is looking; a pad is choosing. The same press,
+                    // told apart by where it came from.
+                    setSelectedId(game.id);
+                    if (padJustActivated(400)) onPlay(game);
                   }}
-                  aria-expanded={menu}
-                  title="Menu (Escape)"
-                  className="orbit-deck-customise"
-                  data-open={menu || undefined}
+                  onDoubleClick={() => onPlay(game)}
+                  aria-current={game.id === active.id ? 'true' : undefined}
+                  aria-label={prefs.coverLabel === 'none' ? `Play ${game.title}` : game.title}
+                  className="tv-library-game group min-w-0 text-left"
                 >
-                  <Menu className="size-3.5" />
-                  Menu
+                  <span
+                    className={cn(
+                      'tv-library-game-art block overflow-hidden bg-white/5 shadow-xl transition',
+                      game.id === active.id && 'is-current',
+                    )}
+                  >
+                    <Cover game={game} className="size-full" fit="cover" />
+                    {game.id === runningId && (
+                      <span className="tv-library-game-live">
+                        <i aria-hidden />
+                        Playing
+                      </span>
+                    )}
+                  </span>
+                  {prefs.coverLabel !== 'none' && (
+                    <span className="tv-library-game-name">{game.title}</span>
+                  )}
+                  {prefs.coverLabel === 'info' && (
+                    <span className="tv-library-game-info">
+                      {[game.meta?.releaseYear ?? null, game.meta?.genres?.[0] ?? null, fmtMinutes(game.playSecs / 60)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  )}
                 </button>
-              </div>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <div className="orbit-deck">
+            {/* The game the shelf is about, on the left, the way a console draws
+                it: a floating panel over the covers with the poster, the name,
+                the numbers and the buttons that start it - rather than a strip
+                along the bottom competing with the row for the same space. */}
+            <GameSheet
+              game={active}
+              running={running}
+              left={left}
+              progress={progress}
+              prefs={prefs}
+              onPlay={() => onPlay(active)}
+              onStop={onStop}
+              onDetails={() => {
+                setDetailId(active.id);
+                onDetails(active);
+              }}
+              onEdit={() => onEditGame(active)}
+              onFavourite={() => onToggleFavorite(active.id)}
+            />
 
+            {/* The shelf: one row of covers across the middle of the screen,
+                nothing above it and nothing under it. */}
+            <section className="orbit-deck-index">
               <ul
                 ref={rail}
                 // A wheel over the index is meant for the index: nothing behind
@@ -1828,8 +1614,26 @@ export function TvMode({
                 })}
               </ul>
             </section>
+
+            {/* The count and the two steps sit under the row, on nothing at
+                all: the covers are the screen, and a bar around them would be
+                the top bar this page deliberately does not have. */}
+            <div className="orbit-deck-stepsline">
+              <span className="orbit-deck-counter">
+                <b>{at + 1}</b>
+                <i aria-hidden>/</i>
+                {list.length}
+              </span>
+              <div className="orbit-deck-steps">
+                <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
+                  <ChevronLeft className="size-4" />
+                </button>
+                <button onClick={() => select(at + 1)} aria-label="Next game" title="Next game" className="orbit-deck-step">
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+            </div>
           </div>
-          )
         )}
       </main>
 

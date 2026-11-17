@@ -15,16 +15,15 @@ const portrait = read('../src/components/ui/PortraitBrowser.tsx');
 const picker = read('../src/components/detail/ArtworkPicker.tsx');
 const reshadeMod = read('../src-tauri/src/reshade.rs');
 
-check('Stardeck is the stage and an edge-to-edge shelf that takes the rest of the window',
-  css.includes('flex: 1 1 58%') && css.includes('orbit-deck-index-art') && css.includes('filter: blur(25px)') &&
-    // The shelf reaches the window's own edges, and grows into whatever the
-    // stage leaves: a fixed share left the bottom of a taller window to the
-    // shell, which read as a black strip under the cards.
-    !/\.orbit-deck:not\(\.is-side\) \.orbit-deck-index \{[^}]*width: calc\(100% \+/.test(css) &&
-    /\.orbit-deck:not\(\.is-side\) \.orbit-deck-index \{[^}]*flex: 1 1 auto/.test(css) &&
-    css.includes('orbit-deck-stagefade'));
-check('Stardeck game changes animate with reduced-motion support and no stale backdrop lookup delay',
-  css.includes('@keyframes deck-game-in') && css.includes('prefers-reduced-motion: reduce') && tv.includes('key={active.id}') && !tv.includes('setTimeout(() => {\n      void findTvBackdrop'));
+check('Stardeck is one row of covers over the selected game\'s own blurred cover',
+  css.includes('.orbit-deckbackdrop-layer') && css.includes('filter: blur(64px)') &&
+    // The row takes everything the window has: a fixed share left a strip of
+    // the shell's own colour under the covers.
+    /\.orbit-deck \.orbit-deck-index \{[^}]*flex: 1 1 auto/.test(css) &&
+    css.includes('.orbit-decksheet'));
+check('Stardeck game changes fade the room and cross-fade the panel, with reduced-motion support',
+  css.includes('@keyframes deck-game-in') && css.includes('@keyframes deck-backdrop-in') &&
+    css.includes('prefers-reduced-motion: reduce') && tv.includes('key={game.id}') && !tv.includes('findTvBackdrop'));
 check('Launch settings separate what starts with the game from another way to start it',
   edit.includes("page === 'launch'") && launchEditor.includes('Start alongside') && launchEditor.includes('Another way to launch it') &&
     launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") && types.includes("when?: 'alongside' | 'alternative'"));

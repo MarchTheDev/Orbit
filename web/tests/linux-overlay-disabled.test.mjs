@@ -24,7 +24,7 @@ check('native Linux Settings replaces controls with an unavailable notice',
     /overlayUnavailable \? \([\s\S]{0,500}OverlaySettings settings=\{settings\}/.test(settings));
 check('overlay-specific search controls are hidden on native Linux',
   /const searchItems = overlayUnavailable[\s\S]{0,180}item\.section !== 'orbit-overlay' \|\| item\.label === 'Overlay'/.test(settings) &&
-    settings.includes('? searchItems.filter('));
+    settings.includes('for (const item of searchItems)'));
 check('the app does not configure, pin, or announce the overlay on Linux',
   /const overlayAvailable = !isNative\(\) \|\| desktopOs\(\) !== 'linux'/.test(app) &&
     app.includes('if (!isNative() || !overlayAvailable || !settings) return;') &&
