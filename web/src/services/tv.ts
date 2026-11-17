@@ -50,7 +50,17 @@ export async function enterFullscreen(): Promise<boolean> {
     try {
       const window = getCurrentWindow();
       const [position, size, maximized] = await Promise.all([window.outerPosition(), window.outerSize(), window.isMaximized()]);
-      previousNativeBounds = { x: position.x, y: position.y, width: size.width, height: size.height, maximized };
+      // A maximized window's own rectangle is not a good thing to remember.
+      // Windows reports a maximized frame as the screen plus the invisible
+      // resize border - and for a window with no titlebar that frame can be
+      // the whole screen rather than the desk area, which is how a restored
+      // window ends up with its bottom edge under the taskbar. What is worth
+      // remembering is the desk area itself, because that is where a maximized
+      // window belongs.
+      const area = maximized ? await workArea() : null;
+      previousNativeBounds = area
+        ? { ...area, maximized: true }
+        : { x: position.x, y: position.y, width: size.width, height: size.height, maximized };
       await window.setFullscreen(true);
       return true;
     } catch (error) {
@@ -119,12 +129,15 @@ export async function leaveFullscreen(): Promise<void> {
 
       if (!bounds) {
         // Nothing was saved - an older session, or a window that grew into
-        // fullscreen some other way. A maximized window is still the right
-        // answer here, and it is the one that cannot leave the frame behind a
-        // taskbar once the work area is known.
-        await window.unmaximize().catch(() => undefined);
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 60));
-        await window.maximize();
+        // fullscreen some other way. Covering the desk area is the right answer
+        // here too, and unlike a plain maximize it cannot leave the frame
+        // behind a taskbar.
+        const area = await workArea();
+        if (area) {
+          await window.unmaximize().catch(() => undefined);
+          await window.setPosition(new PhysicalPosition(area.x, area.y));
+          await window.setSize(new PhysicalSize(area.width, area.height));
+        }
         return;
       }
 
@@ -134,7 +147,12 @@ export async function leaveFullscreen(): Promise<void> {
       await new Promise((resolve) => globalThis.setTimeout(resolve, 90));
 
       if (bounds.maximized) {
-        await window.maximize();
+        // Straight to the saved desk area rather than through maximize(): a
+        // frameless maximized window is the one the desktop may place over the
+        // whole screen, taskbar included, and that is the strip of black under
+        // Stardeck and the window that comes back behind the taskbar.
+        await window.setPosition(new PhysicalPosition(bounds.x, bounds.y));
+        await window.setSize(new PhysicalSize(bounds.width, bounds.height));
       } else {
         // Position first, then size: on Windows the requested size is clamped
         // to the monitor work area after the compositor has restored chrome.
@@ -147,32 +165,35 @@ export async function leaveFullscreen(): Promise<void> {
       // under the taskbar - is put back exactly, or maximized when it cannot
       // be put back exactly. This is the step that keeps the bottom of the
       // window, and so the bottom of the deck, on the screen.
-      const [size, position, area, maximized] = await Promise.all([
+      const [size, position, area] = await Promise.all([
         window.outerSize().catch(() => null),
         window.outerPosition().catch(() => null),
         workArea(),
-        window.isMaximized().catch(() => bounds.maximized),
       ]);
       if (!size || !area) return;
       const overflows = size.height > area.height + 2 || size.width > area.width + 2;
       const below = position ? position.y + size.height > area.y + area.height + 2 : false;
       const outside = position ? position.y < area.y - 2 : false;
       if (overflows || below || outside) {
-        if (maximized) {
-          // Maximized but measured too big: the compositor is still holding the
-          // fullscreen frame. Putting the window back and maximizing again asks
-          // it for a fresh frame instead of reusing that one.
-          await window.unmaximize().catch(() => undefined);
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 60));
-          await window.maximize();
-        } else {
-          const width = Math.min(bounds.width, area.width);
-          const height = Math.min(bounds.height, area.height);
-          const x = Math.max(area.x, Math.min(bounds.x, area.x + area.width - width));
-          const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - height));
-          await window.setPosition(new PhysicalPosition(x, y));
-          await window.setSize(new PhysicalSize(width, height));
-        }
+        // The window is bigger than the space the desktop leaves for it, or it
+        // is sitting past the bottom of it. Whatever state it is in, the answer
+        // is the same: put it exactly inside the desk area.
+        //
+        // Maximizing again was the old answer here, and it is what caused the
+        // strip: a maximized window with no titlebar can be placed over the
+        // whole screen rather than over the desk, so asking for a second
+        // maximize asked for the same wrong frame twice. Laying the window out
+        // by hand is one frame that is right, and it reads as maximized because
+        // it covers everything the desktop offers.
+        const width = Math.min(bounds.width, area.width);
+        const height = Math.min(bounds.height, area.height);
+        const x = Math.max(area.x, Math.min(bounds.x, area.x + area.width - width));
+        const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - height));
+        // Setting a size is what takes a window out of the maximized state, so
+        // this is the same call whether it was maximized or not.
+        await window.unmaximize().catch(() => undefined);
+        await window.setPosition(new PhysicalPosition(x, y));
+        await window.setSize(new PhysicalSize(width, height));
       }
     } catch {
       /* The window was closed, or is not ours to resize any more. */

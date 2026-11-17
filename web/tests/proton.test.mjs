@@ -101,7 +101,7 @@ check('the wine section draws the builds as a list, with a way out of it',
 check('a build that has been deleted stays visible instead of blank',
   wineTs.includes('A build that is gone'));
 check('the separate Proton page exposes the build and compatibility switches for Wine games',
-  editorTs.includes("['proton', 'Proton']") && editorTs.includes('<WineSettings') &&
+  editorTs.includes("id: 'proton' as const, label: 'Proton'") && editorTs.includes('<WineSettings') &&
     editorTs.includes('onProton=') && editorTs.includes('onTweaks='));
 check('Launch stays focused on the executable while Proton has its own edit page',
   !launchEditorTs.includes('buildName(t.proton)') && !launchEditorTs.includes('WineSettings') &&

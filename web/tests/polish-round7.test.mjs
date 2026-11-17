@@ -6,6 +6,7 @@ const settings = read('../src/components/SettingsView.tsx');
 const tv = read('../src/components/TvMode.tsx');
 const css = read('../src/index.css');
 const edit = read('../src/components/detail/GameEditTab.tsx');
+const picker = read('../src/components/detail/ArtworkPicker.tsx');
 const launch = read('../src/components/detail/LaunchEditor.tsx');
 const cover = read('../src/components/ui/Cover.tsx');
 const copy = read('../src/components/CopySettings.tsx');
@@ -31,12 +32,13 @@ check('Deck and Library controls are centered and use the app-styled tab treatme
   css.includes('.orbit-deck-pagetabs') && css.includes('left: 50%') && css.includes('.orbit-deck-pagetab[aria-pressed'));
 check('Liquid Glass uses opaque app-colored panels across platforms',
   css.includes('html.orbit-glass :is(') && css.includes('background-color: var(--c-panel) !important') && css.includes('blur(28px) saturate(1.12)'));
-check('Edit Game is divided into Details, Launch, Tools and Saves tabs without the old title hero or numbered sections',
-  ['Details', 'Launch', 'Tools', 'Saves'].every((tab) => edit.includes(`'${tab.toLowerCase()}', '${tab}'`)) && edit.includes('role="tablist"') && !edit.includes('orbit-edit-face') && css.includes('.orbit-editsection-title::before { content: none; }'));
+check('Edit Game is divided into Details, Launch, Artwork, Tools and Saves tabs without the old title hero or numbered sections',
+  ['Details', 'Launch', 'Artwork', 'Tools', 'Saves'].every((tab) => edit.includes(`label: '${tab}'`)) && edit.includes('role="tablist"') && !edit.includes('orbit-edit-face') && css.includes('.orbit-editsection-title::before { content: none; }'));
 check('The editor no longer exposes the Not owned yet option or Notes field and uses Settings-style switches',
   !edit.includes('Not owned yet') && !edit.includes('<MarkdownEditor') && edit.includes('role="switch"') && edit.includes('className="orbit-switch"'));
-check('Artwork uses paired cover/backdrop previews with simpler file, online, and URL controls',
-  edit.includes('orbit-art-workbench') && edit.includes('<PortraitBrowser') && edit.includes('Enter a backdrop URL') && css.includes('.orbit-art-choice-preview.is-cover'));
+check('Artwork is a slot per shape: what the game shows now, then the pictures found for that shape',
+  edit.includes('<ArtSlot') && edit.includes('load={(query, page) =>') && css.includes('.orbit-artslot-now.is-portrait') &&
+    css.includes('.orbit-arttile.is-wide') && picker.includes('orbit-artpicker-grid') && picker.includes('Show more'));
 check('Saves opens its folder and removes the redundant status line and help paragraph',
   edit.includes('Open folder') && edit.includes('revealInExplorer(savePath)') && !edit.includes('Saved folder:') && !edit.includes('Orbit searches this game’s common folders'));
 check('Export selection uses an outline-only state rather than a filled accent overlay',

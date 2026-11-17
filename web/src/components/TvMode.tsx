@@ -5,6 +5,8 @@ import {
   ChevronRight,
   Gamepad2,
   Info,
+  Layers,
+  LayoutGrid,
   ListOrdered,
   Menu,
   Minimize2,
@@ -1403,8 +1405,14 @@ export function TvMode({
             you are and what is playing, the right end is the room's own
             controls. */}
         <div className="orbit-deck-pagetabs" role="group" aria-label="Stardeck page">
-          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pagetab">Deck</button>
-          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pagetab">Library</button>
+          <button data-tv-page-toggle type="button" onClick={() => setView('deck')} aria-pressed={view === 'deck'} className="orbit-deck-pagetab">
+            <Layers className="size-3.5" />
+            Deck
+          </button>
+          <button data-tv-page-toggle type="button" onClick={() => setView('library')} aria-pressed={view === 'library'} className="orbit-deck-pagetab">
+            <LayoutGrid className="size-3.5" />
+            Library
+          </button>
         </div>
 
         <span className="orbit-deck-barspacer" aria-hidden />
@@ -1435,7 +1443,7 @@ export function TvMode({
           title="Leave Stardeck"
           aria-label="Leave Stardeck"
           className={cn(
-            'orbit-deck-leave ml-1 flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-accent',
+            'orbit-deck-leave ml-1 focus-visible:ring-2 focus-visible:ring-accent',
           )}
         >
           <Minimize2 className="size-4" />
@@ -1724,23 +1732,16 @@ export function TvMode({
                 }}
               />
               <div className="orbit-deck-indexhead">
-                <h2>Deck</h2>
-                {/* The games either side of the one on the stage, named. The
-                    three covers say what they look like; this says what they
-                    are, which is the thing a person reading a shelf from a
-                    sofa cannot do at a glance. */}
-                <span className="orbit-deck-neighbour" aria-hidden>
-                  {list.length > 1
-                    ? list[(at - 1 + list.length) % list.length].title
-                    : ''}
-                </span>
+                {/* Where you are in the deck, and nothing else. The names of
+                    the games either side were here for a while, and they were
+                    read as a title bar rather than as a shelf: the three covers
+                    already say what is there, and each one is named under
+                    itself. What they cannot say is how far into the deck this
+                    is, which is what the counter is for. */}
                 <span className="orbit-deck-counter">
                   <b>{at + 1}</b>
                   <i aria-hidden>/</i>
                   {list.length}
-                </span>
-                <span className="orbit-deck-neighbour is-next" aria-hidden>
-                  {list.length > 1 ? list[(at + 1) % list.length].title : ''}
                 </span>
 
                 <span className="orbit-deck-indexspacer" aria-hidden />
