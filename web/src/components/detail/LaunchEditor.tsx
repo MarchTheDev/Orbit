@@ -217,7 +217,6 @@ export function LaunchEditor({
       {section !== 'tools' && (
         <>
           <section className="orbit-launchpanel">
-            <h3 className="orbit-launchpanel-title">When you press Play</h3>
 
             <div className="orbit-launchkinds" role="radiogroup" aria-label="How Orbit starts this game">
               {kinds.map((k) => (
@@ -331,10 +330,10 @@ export function LaunchEditor({
           {/* ------------------------------------------------------ alongside */}
           <section className="orbit-launchpanel">
             <header className="orbit-launchpanel-head">
-              <h3 className="orbit-launchpanel-title">
+              <p className="orbit-launchpanel-title">
                 Start alongside
                 {alongside.length > 0 && <span className="orbit-launchbadge">{alongside.length}</span>}
-              </h3>
+              </p>
               <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
                 <Plus className="size-3.5" /> Add
               </button>
@@ -436,10 +435,10 @@ export function LaunchEditor({
           {/* -------------------------------------------------- alternative */}
           <section className="orbit-launchpanel">
             <header className="orbit-launchpanel-head">
-              <h3 className="orbit-launchpanel-title">
+              <p className="orbit-launchpanel-title">
                 Another way to launch it
                 {profiles.length > 0 && <span className="orbit-launchbadge">{profiles.length}</span>}
-              </h3>
+              </p>
               <button type="button" onClick={addProfile} className="orbit-launchaddbtn">
                 <Plus className="size-3.5" /> Add
               </button>

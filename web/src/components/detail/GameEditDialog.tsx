@@ -2,15 +2,16 @@ import { useState } from 'react';
 import type { Game } from '../../types';
 import { Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { GameEditTab, EditDrawerFrame } from './GameEditTab';
+import { Modal } from '../ui/Modal';
+import { GameEditTab } from './GameEditTab';
 
 /**
- * A game's settings, as a drawer beside the library.
+ * A game's settings, in the middle of the window.
  *
- * It used to be a centred dialog with a title bar and a paragraph explaining
- * itself. A drawer says the same thing with its position: the library is still
- * there on the left, this is one game's page pulled out of it, and closing it
- * puts the page back rather than dismissing a window.
+ * It is a wide, tall dialog rather than a narrow form: the first thing in it is
+ * the game's own artwork, then one column of panels of rows. Nothing sits in a
+ * drawer at the side - the library is not being read while a game is edited,
+ * and a page pinned to an edge makes the artwork look like a toolbar.
  */
 export function GameEditDialog({
   game,
@@ -32,12 +33,24 @@ export function GameEditDialog({
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
   /** Open on one page, for the development preview. */
-  startOn?: 'game' | 'actions' | 'launch' | 'tools' | 'saves' | 'proton';
+  startOn?: 'game' | 'actions' | 'launch' | 'tools' | 'saves' | 'proton' | 'artwork';
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   return (
     <>
-      <EditDrawerFrame onClose={onClose}>
+      <Modal
+        title="Game settings"
+        size="xl"
+        bare
+        onClose={onClose}
+        footer={onRemoveFromBacklog ? (
+          <div className="flex justify-start">
+            <button type="button" className="orbit-btn is-danger" onClick={() => setConfirmRemove(true)}>
+              <Trash2 className="size-3.5" /> Remove from Backlog
+            </button>
+          </div>
+        ) : undefined}
+      >
         <GameEditTab
           key={game.id}
           game={game}
@@ -47,14 +60,7 @@ export function GameEditDialog({
           onSaveDir={onSaveDir}
           startOn={startOn}
         />
-        {onRemoveFromBacklog && (
-          <div className="orbit-drawer-foot">
-            <button type="button" className="orbit-pill is-danger" onClick={() => setConfirmRemove(true)}>
-              <Trash2 className="size-3.5" /> Remove from Backlog
-            </button>
-          </div>
-        )}
-      </EditDrawerFrame>
+      </Modal>
       {confirmRemove && onRemoveFromBacklog && (
         <ConfirmDialog
           title={`Remove ${game.title} from the Backlog?`}

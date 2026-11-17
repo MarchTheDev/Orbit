@@ -26,7 +26,7 @@ check('Stardeck is the stage and an edge-to-edge shelf that takes the rest of th
 check('Stardeck game changes animate with reduced-motion support and no stale backdrop lookup delay',
   css.includes('@keyframes deck-game-in') && css.includes('prefers-reduced-motion: reduce') && tv.includes('key={active.id}') && !tv.includes('setTimeout(() => {\n      void findTvBackdrop'));
 check('Launch settings separate what starts with the game from another way to start it',
-  edit.includes("shown === 'launch'") && launchEditor.includes('Start alongside') && launchEditor.includes('Another way to launch it') &&
+  edit.includes("page === 'launch'") && launchEditor.includes('Start alongside') && launchEditor.includes('Another way to launch it') &&
     launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") && types.includes("when?: 'alongside' | 'alternative'"));
 check('a launch profile starts the game while a tool rides along, and neither is swept up by the other',
   session.includes('companion.is_alongside()') && lib.includes('fn start_game_alternative(') && lib.includes('profile.is_alongside()'));
@@ -35,7 +35,7 @@ check('the Play arrow offers named launches beside the tools, by name',
 check('the Play arrow offers saved companions and routes selected tracked utilities into a session',
   gameDetail.includes('aria-label="More launch options"') && gameDetail.includes('onRunCompanion?.(index)') && lib.includes('fn start_game_companion(') && lib.includes('companion.counts_as_playing') && session.includes('pub fn start_action('));
 check('Edit Game exposes Proton on its own Linux-only page',
-  edit.includes("entry.id === 'proton'") && edit.includes("label: 'Wine'") && edit.includes('<WineSettings'));
+  edit.includes("id: 'wine', label: 'Wine', hidden: hideLaunchSettings || desktopOs() !== 'linux'") && edit.includes('<WineSettings'));
 check('ReShade is one switch, with the proxy guessed from the game and the original kept',
   edit.includes('Use ReShade with this game') && native.includes('setReshade') && lib.includes('fn reshade_state(') && lib.includes('fn reshade_set(') &&
     reshadeMod.includes('fn guess_proxies(') && reshadeMod.includes('fn pe_imports(') && reshadeMod.includes('.orbit-original') && reshadeMod.includes('RESHADE_VERSION'));

@@ -54,7 +54,7 @@ check('Backlog details use the Status dropdown without duplicate move-to-status 
     gameDetail.includes('value={game.status}') &&
     !gameDetail.includes('Move to playing now') && !gameDetail.includes('Move to Backlog'));
 check('the Remove from Backlog editor action uses destructive rose styling',
-  gameEditor.includes("orbit-pill is-danger") &&
-    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-pill.is-danger { border-color: #f8717150;'));
+  gameEditor.includes('orbit-btn is-danger') &&
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-btn.is-danger { border-color: #f8717150;'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

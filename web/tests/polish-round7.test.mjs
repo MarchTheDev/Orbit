@@ -32,17 +32,17 @@ check('Deck and Library controls are centered and use the app-styled tab treatme
   css.includes('.orbit-deck-pagetabs') && css.includes('left: 50%') && css.includes('.orbit-deck-pagetab[aria-pressed'));
 check('Liquid Glass uses opaque app-colored panels across platforms',
   css.includes('html.orbit-glass :is(') && css.includes('background-color: var(--c-panel) !important') && css.includes('blur(28px) saturate(1.12)'));
-check('Game settings is a drawer with a rail of pages, not a dialog with a tab strip',
-  ['Game', 'Play', 'Launch', 'Tools', 'Wine', 'Saves'].every((page) => edit.includes(`label: '${page}'`)) &&
-    edit.includes('role="tablist"') && edit.includes('aria-orientation="vertical"') &&
-    !edit.includes('orbit-edit-face') && css.includes('.orbit-drawer-panel') && css.includes('.orbit-drawerrail'));
+check('Game settings opens in the middle, artwork first, with four pages and no numbered sections',
+  ['Game', 'Launch', 'Wine', 'Saves'].every((page) => edit.includes(`label: '${page}'`)) &&
+    edit.includes('role="tablist"') && edit.includes('className="orbit-gameart"') &&
+    !edit.includes('orbit-edit-face') && css.includes('.orbit-settings-page') && css.includes('.orbit-panelbox'));
 check('The editor no longer exposes the Not owned yet option or Notes field and uses Settings-style switches',
   !edit.includes('Not owned yet') && !edit.includes('<MarkdownEditor') && edit.includes('role="switch"') &&
     edit.includes('className="orbit-toggle"') && css.includes('.orbit-toggle[data-on] i { transform: translateX(16px); }'));
-check('Artwork is a slot per shape in the drawer, and searching opens a room of its own with the current picture beside it',
-  edit.includes('<Slot') && edit.includes('<ArtworkSearch') && edit.includes('onSearch={() => setSearching(') &&
-    picker.includes('orbit-artstudio') && picker.includes('Load more') && picker.includes('All sources') &&
-    css.includes('.orbit-artstudio-now {') && css.includes('.orbit-slot-picture.is-wide'));
+check('The covers dialog keeps a slot per shape on the left and the found pictures for that slot on the right',
+  edit.includes('<ArtworkSearch') && edit.includes('onPickSlot={') &&
+    picker.includes('orbit-covers-slots') && picker.includes('orbit-covers-slot') && picker.includes('Load more') &&
+    picker.includes('All') && css.includes('.orbit-covers-tile.is-wide') && css.includes('.orbit-covers-slot-frame.is-portrait'));
 check('Saves opens its folder and removes the redundant status line and help paragraph',
   edit.includes('Open the folder') && edit.includes('revealInExplorer(savePath)') && !edit.includes('Saved folder:') && !edit.includes('Orbit searches this game’s common folders'));
 check('Export selection uses an outline-only state rather than a filled accent overlay',

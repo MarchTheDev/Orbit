@@ -1,6 +1,5 @@
-import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { FolderOpen, Image as ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
 import {
   findArtwork,
@@ -27,42 +26,26 @@ import { ArtworkSearch, type ArtShape } from './ArtworkPicker';
 import { WineSettings } from './WineSettings';
 import { desktopOs } from '../../utils/platform';
 
-type Tab = 'game' | 'actions' | 'launch' | 'tools' | 'proton' | 'saves';
-
-/** Every page, in the order they are read. */
-const PAGES: { id: Tab; label: string }[] = [
-  { id: 'game', label: 'Game' },
-  { id: 'actions', label: 'Play' },
-  { id: 'launch', label: 'Launch' },
-  { id: 'tools', label: 'Tools' },
-  { id: 'proton', label: 'Wine' },
-  { id: 'saves', label: 'Saves' },
-];
+type Page = 'game' | 'launch' | 'wine' | 'saves';
 
 /**
- * A game's settings, as a drawer beside the library.
+ * One game's settings, in the middle of the window.
  *
- * The shape is Heronite's, because it is the one that stops feeling like a form:
+ * The shape is Heronite's, because it is the one that stops reading like a form:
  *
- * - **A drawer, not a dialog.** It slides in from the right at the height of the
- *   window, with the library still visible on its left. Looking something up -
- *   "what did the store say this was called" - no longer means losing the game
- *   you were looking at, and the page is a place you are in rather than a modal
- *   you are trapped in.
- * - **A rail of pages, not a row of tabs.** Each page is a name and a one-word
- *   summary of what it holds, so the shape of the whole game is visible at once
- *   and the page you want is one click, not a hunt through a tab strip.
- * - **Fields in grey panels of rows.** A field is a label and its control, in a
- *   block that belongs to its heading. No numbered sections, no paragraph of
- *   explanation before every group: the label says what it is, and the panel
- *   says what it is about.
- * - **It saves itself.** Every field writes a moment after it settles. There is
- *   no Save button, because there is nothing to save: the game is already
- *   updated by the time the pointer leaves the field.
- *
- * The artwork slots follow the same logic as the covers dialog: a slot per
- * shape, showing the picture it has now, with a way into the search for a
- * better one.
+ * - **A picture, then the facts, then the controls.** The first thing on the
+ *   page is the game itself - its cover and its backdrop, large, side by side -
+ *   because "which game am I editing" should be answered by looking, not by
+ *   reading the title of a dialog. Under it sits what can be said about the
+ *   game in one block of fields, and under that, the switches.
+ * - **Four pages, told apart by what they are about**: the game, how it starts,
+ *   what runs with it, and where it keeps its progress. No page is a dump of
+ *   leftover settings.
+ * - **Rows, not a card per field.** A label and its control on one line, in a
+ *   grey panel that belongs to a heading. The panel says what the group is
+ *   about; the label says what the line is. Nothing else is written.
+ * - **It saves itself.** Every field writes half a second after it settles, so
+ *   there is no Save button to forget and no Cancel to lose typing to.
  */
 export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDir = '', onSaveDir, startOn }: {
   game: Game;
@@ -71,12 +54,16 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   saveDir?: string;
   onSaveDir?: (path: string) => void;
   /** The page to open on, for a preview that wants to look at one directly. */
-  startOn?: Tab;
+  startOn?: Page | 'tools' | 'proton' | 'actions' | 'artwork';
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
   const wineTarget = game.launch.kind === 'wine' ? game.launch : null;
-  const [page, setPage] = useState<Tab>(startOn ?? 'game');
+  const [page, setPage] = useState<Page>(() => {
+    if (startOn === 'tools' || startOn === 'proton') return 'launch';
+    if (startOn === 'actions' || startOn === 'artwork' || startOn === 'game') return 'game';
+    return (startOn as Page) ?? 'game';
+  });
   const [searching, setSearching] = useState<ArtShape | null>(null);
 
   const [title, setTitle] = useState(game.title);
@@ -107,7 +94,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [saveSuggestions, setSaveSuggestions] = useState<string[]>([]);
   const saveAttempted = useRef(false);
 
-  // A different game is a different drawer: every field is reseeded rather than
+  // A different game is a different page: every field is reseeded rather than
   // carrying the last game's title into this one's.
   useEffect(() => {
     setTitle(game.title);
@@ -135,7 +122,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   // The ReShade switch is drawn from the folder it is about, so opening the
   // page looks at it rather than at whatever was remembered last time.
   useEffect(() => {
-    if (page !== 'tools') return;
+    if (page !== 'launch' || hideLaunchSettings) return;
     let live = true;
     setReshadeBusy(true);
     void getReshadeState(game.id)
@@ -143,7 +130,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
       .catch((cause: unknown) => say(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => { if (live) setReshadeBusy(false); });
     return () => { live = false; };
-  }, [page, game.id]);
+  }, [page, game.id, hideLaunchSettings]);
 
   // A save folder is worth finding once, the first time the page is looked at,
   // and never worth looking for behind the player's back afterwards.
@@ -259,13 +246,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     };
   }, []);
 
-  const pages = PAGES.filter((entry) => {
-    if (entry.id === 'launch' || entry.id === 'tools') return !hideLaunchSettings;
-    if (entry.id === 'proton') return !hideLaunchSettings && desktopOs() === 'linux';
-    return true;
-  });
-  const shown = pages.some((entry) => entry.id === page) ? page : 'game';
-
   /** Fill in what the store knows, without touching anything typed here. */
   const lookup = async () => {
     setLooking(true);
@@ -305,291 +285,274 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     }
   };
 
-  /** What the library page needs to know about this game, at the top of the rail. */
-  const facts = [
-    game.meta?.releaseYear ? String(game.meta.releaseYear) : null,
-    game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : null,
-    game.playSecs > 0 ? `${Math.round(game.playSecs / 3600)}h played` : null,
-  ].filter(Boolean).join(' · ');
+  /**
+   * The picture at the top of the page.
+   *
+   * Heronite's game page opens on the game's own art, and so does this: the
+   * cover and the backdrop are the two things a player recognises a game by, and
+   * they are also the two things most often wrong - a cropped capsule, a poster
+   * that is a logo. Putting them first makes fixing them one press away, and
+   * makes the rest of the page read as facts about the game that is pictured.
+   */
+  const hero = (
+    <div className="orbit-gameart">
+      <button
+        type="button"
+        className="orbit-gameart-cover"
+        onClick={() => setSearching('portrait')}
+        title="Find another cover"
+      >
+        {coverShown ? <img src={coverShown} alt="" /> : <span><ImageIcon className="size-4" />No cover</span>}
+        <i>Cover</i>
+      </button>
+      <button
+        type="button"
+        className="orbit-gameart-wide"
+        onClick={() => setSearching('wide')}
+        title="Find another backdrop"
+      >
+        {backdropShown ? <img src={backdropShown} alt="" /> : <span><ImageIcon className="size-4" />No backdrop</span>}
+        <i>Backdrop</i>
+      </button>
+    </div>
+  );
+
+  const pages: { id: Page; label: string; hidden?: boolean }[] = [
+    { id: 'game', label: 'Game' },
+    { id: 'launch', label: 'Launch', hidden: hideLaunchSettings },
+    { id: 'wine', label: 'Wine', hidden: hideLaunchSettings || desktopOs() !== 'linux' },
+    { id: 'saves', label: 'Saves' },
+  ];
 
   return (
-    <div className="orbit-drawer">
-      <nav className="orbit-drawerrail" aria-label="Game settings pages">
-        <div className="orbit-drawer-card">
-          <div className="orbit-drawer-poster">
-            {coverShown ? <img src={coverShown} alt="" /> : <span>{game.title.slice(0, 1)}</span>}
-          </div>
-          <p className="orbit-drawer-title">{title.trim() || game.title}</p>
-          {facts && <p className="orbit-drawer-facts">{facts}</p>}
-        </div>
+    <section className="orbit-settings" aria-label={`Settings for ${game.title}`}>
+      {hero}
 
-        <div className="orbit-drawer-pages" role="tablist" aria-orientation="vertical">
-          {pages.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              aria-selected={shown === entry.id}
-              onClick={() => setPage(entry.id)}
-            >
-              <span>{entry.label}</span>
-              <i>{PAGE_HINT[entry.id]}</i>
-            </button>
-          ))}
+      <header className="orbit-settings-head">
+        <input
+          className="orbit-settings-title"
+          value={title}
+          aria-label="Game name"
+          onChange={(event) => setTitle(event.target.value)}
+          spellCheck={false}
+        />
+        <div className="orbit-settings-strip">
+          <Segmented
+            value={status}
+            onChange={(value) => setStatus(value as GameStatus)}
+            options={[
+              { value: 'backlog', label: 'Backlog' },
+              { value: 'playing', label: 'Playing' },
+              { value: 'completed', label: 'Done' },
+              { value: 'dropped', label: 'Dropped' },
+            ]}
+          />
+          <Toggle checked={favorite} onChange={setFavorite} label="Favorite" />
+          <span className="orbit-settings-strip-label">Favorite</span>
+          <Toggle checked={hidden} onChange={setHidden} label="Hidden from the library" />
+          <span className="orbit-settings-strip-label">Hidden</span>
         </div>
+      </header>
+
+      <nav className="orbit-settings-tabs" role="tablist" aria-label="Settings pages">
+        {pages.filter((entry) => !entry.hidden).map((entry) => (
+          <button key={entry.id} type="button" role="tab" aria-selected={page === entry.id} onClick={() => setPage(entry.id)}>
+            {entry.label}
+          </button>
+        ))}
       </nav>
 
-      <div key={shown} className="orbit-drawer-page" role="tabpanel" data-page={shown}>
-        {/* ------------------------------------------------------------ game */}
-        {shown === 'game' && (
+      <div key={page} className="orbit-settings-page" role="tabpanel" data-page={page}>
+        {/* ---------------------------------------------------------- game */}
+        {page === 'game' && (
           <>
-            <Section title="What it is">
-              <Field label="Name">
-                <input className="orbit-input" value={title} onChange={(event) => setTitle(event.target.value)} spellCheck={false} />
-              </Field>
-              <Field label="Developer">
+            <Panel title="Details" action={
+              <button type="button" className="orbit-btn is-quiet" disabled={looking} onClick={() => void lookup()}>
+                <RefreshCw className={cn('size-3.5', looking && 'animate-spin')} />
+                {looking ? 'Looking…' : 'Fill empty fields'}
+              </button>
+            }>
+              <Row label="Developer">
                 <input className="orbit-input" value={developer} onChange={(event) => setDeveloper(event.target.value)} />
-              </Field>
-              <Field label="Released">
+              </Row>
+              <Row label="Released">
                 <input className="orbit-input" value={releaseYear} onChange={(event) => setReleaseYear(event.target.value)} placeholder="2019" inputMode="numeric" />
-              </Field>
-              <Field label="Genres">
+              </Row>
+              <Row label="Genres">
                 <input className="orbit-input" value={genres} onChange={(event) => setGenres(event.target.value)} placeholder="Action, RPG" />
-              </Field>
-              <Field label="Score">
+              </Row>
+              <Row label="Score">
                 <input className="orbit-input" value={rating} onChange={(event) => setRating(event.target.value)} placeholder="Out of 100" inputMode="numeric" />
-              </Field>
-              <Field label="About" stacked>
+              </Row>
+              <Row label="Size on disk">
+                <div className="orbit-unit">
+                  <input className="orbit-input" value={sizeGb} onChange={(event) => setSizeGb(event.target.value)} placeholder="12.5" inputMode="decimal" />
+                  <span>GB</span>
+                </div>
+              </Row>
+              <Row label="About" stacked>
                 <textarea
                   className="orbit-input orbit-textarea"
                   value={summary}
                   onChange={(event) => setSummary(event.target.value)}
                   placeholder="What the game is. The store's own words, or yours."
                 />
-              </Field>
-              <Foot>
-                <button type="button" className="orbit-pill" disabled={looking} onClick={() => void lookup()}>
-                  {looking ? 'Looking…' : 'Fill the empty fields from the store'}
-                </button>
-              </Foot>
-            </Section>
+              </Row>
+            </Panel>
 
-            <Section title="In the library">
-              <Field label="Status">
-                <Segmented
-                  value={status}
-                  onChange={(value) => setStatus(value as GameStatus)}
-                  options={[
-                    { value: 'backlog', label: 'Backlog' },
-                    { value: 'playing', label: 'Playing' },
-                    { value: 'completed', label: 'Completed' },
-                    { value: 'dropped', label: 'Dropped' },
-                  ]}
-                />
-              </Field>
-              <Field label="Size on disk">
-                <div className="orbit-unit">
-                  <input className="orbit-input" value={sizeGb} onChange={(event) => setSizeGb(event.target.value)} placeholder="12.5" inputMode="decimal" />
-                  <span>GB</span>
+            <Panel title="How long it takes" action={
+              <button
+                type="button"
+                className="orbit-btn is-quiet"
+                onClick={() => void fetchHltb(title.trim() || game.title).then((found) => {
+                  if (!found) return say('HowLongToBeat has no time for that name.');
+                  setMain(String(found.main));
+                  setMainExtra(String(found.mainExtra));
+                  setCompletionist(String(found.completionist));
+                  onUpdate({ hltb: found });
+                })}
+              >
+                Ask HowLongToBeat
+              </button>
+            }>
+              <div className="orbit-times">
+                <label>
+                  <span>Main story</span>
+                  <input className="orbit-input" value={main} onChange={(event) => setMain(event.target.value)} inputMode="decimal" placeholder="—" />
+                </label>
+                <label>
+                  <span>Main + extras</span>
+                  <input className="orbit-input" value={mainExtra} onChange={(event) => setMainExtra(event.target.value)} inputMode="decimal" placeholder="—" />
+                </label>
+                <label>
+                  <span>Completionist</span>
+                  <input className="orbit-input" value={completionist} onChange={(event) => setCompletionist(event.target.value)} inputMode="decimal" placeholder="—" />
+                </label>
+              </div>
+            </Panel>
+
+            <Panel title="Artwork">
+              <Row label="Cover">
+                <div className="orbit-artline">
+                  <div className="orbit-artline-frame is-portrait">
+                    {coverShown ? <img src={coverShown} alt="" /> : <span>None</span>}
+                  </div>
+                  <div className="orbit-artline-copy">
+                    <p>{coverPath.trim() ? 'A picture on this machine' : coverUrl.trim() ? 'Chosen earlier' : 'The library’s own art'}</p>
+                    <div className="orbit-seg is-small" role="group" aria-label="How the cover fills a tile">
+                      {([['auto', 'Auto'], ['cover', 'Fill'], ['contain', 'Fit']] as const).map(([id, label]) => (
+                        <button key={id} type="button" aria-pressed={fit === id} onClick={() => setFit(id)}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="orbit-btnrow">
+                    <button type="button" className="orbit-btn is-accent" onClick={() => setSearching('portrait')}>Find another</button>
+                    {(coverPath || coverUrl) && (
+                      <button type="button" className="orbit-btn" onClick={() => { setCoverPath(''); setCoverUrl(''); }}>Library's own</button>
+                    )}
+                  </div>
                 </div>
-              </Field>
-              <Field label="Favorite">
-                <Toggle checked={favorite} onChange={setFavorite} label="Favorite" />
-              </Field>
-              <Field label="Hidden">
-                <Toggle checked={hidden} onChange={setHidden} label="Hide from the library" />
-              </Field>
-            </Section>
-
-            <Section title="How long it takes" aside="Hours">
-              <Field label="Main story">
-                <input className="orbit-input" value={main} onChange={(event) => setMain(event.target.value)} inputMode="decimal" placeholder="—" />
-              </Field>
-              <Field label="Main + extras">
-                <input className="orbit-input" value={mainExtra} onChange={(event) => setMainExtra(event.target.value)} inputMode="decimal" placeholder="—" />
-              </Field>
-              <Field label="Completionist">
-                <input className="orbit-input" value={completionist} onChange={(event) => setCompletionist(event.target.value)} inputMode="decimal" placeholder="—" />
-              </Field>
-              <Foot>
-                <button
-                  type="button"
-                  className="orbit-pill"
-                  onClick={() => void fetchHltb(title.trim() || game.title).then((found) => {
-                    if (!found) return say('HowLongToBeat has no time for that name.');
-                    setMain(String(found.main));
-                    setMainExtra(String(found.mainExtra));
-                    setCompletionist(String(found.completionist));
-                    onUpdate({ hltb: found });
-                  })}
-                >
-                  Ask HowLongToBeat
-                </button>
-              </Foot>
-            </Section>
+              </Row>
+              <Row label="Wide backdrop">
+                <div className="orbit-artline">
+                  <div className="orbit-artline-frame is-wide">
+                    {backdropShown ? <img src={backdropShown} alt="" /> : <span>None</span>}
+                  </div>
+                  <div className="orbit-artline-copy">
+                    <p>{backdropUrl.trim() ? 'Chosen earlier' : 'The store’s own hero'}</p>
+                  </div>
+                  <div className="orbit-btnrow">
+                    <button type="button" className="orbit-btn is-accent" onClick={() => setSearching('wide')}>Find another</button>
+                    {backdropUrl.trim() && (
+                      <button type="button" className="orbit-btn" onClick={() => setBackdropUrl('')}>Library's own</button>
+                    )}
+                  </div>
+                </div>
+              </Row>
+            </Panel>
           </>
         )}
 
-        {/* --------------------------------------------------------- artwork */}
-        {shown === 'game' && (
-          <Section title="Artwork">
-            <Slot
-              shape="portrait"
-              name="Cover"
-              picture={coverShown}
-              caption={coverPath.trim() ? 'A picture on this machine' : coverUrl.trim() ? 'Chosen earlier' : 'The library’s own art'}
-              custom={Boolean(coverPath.trim() || coverUrl.trim())}
-              onSearch={() => setSearching('portrait')}
-              onReset={() => { setCoverPath(''); setCoverUrl(''); }}
-              extra={
-                <div className="orbit-seg is-small" role="group" aria-label="How the cover fills a tile">
-                  {([['auto', 'Auto'], ['cover', 'Fill'], ['contain', 'Fit']] as const).map(([id, label]) => (
-                    <button key={id} type="button" aria-pressed={fit === id} onClick={() => setFit(id)}>{label}</button>
-                  ))}
-                </div>
-              }
-            />
-            <Slot
-              shape="wide"
-              name="Wide backdrop"
-              picture={backdropShown}
-              caption={backdropUrl.trim() ? 'Chosen earlier' : 'The store’s own hero'}
-              custom={Boolean(backdropUrl.trim())}
-              onSearch={() => setSearching('wide')}
-              onReset={() => setBackdropUrl('')}
-            />
-          </Section>
-        )}
-
-        {/* ----------------------------------------------------------- play */}
-        {shown === 'actions' && (
+        {/* -------------------------------------------------------- launch */}
+        {page === 'launch' && !hideLaunchSettings && (
           <>
-            {game.installDir && (
-              <Section title="Install">
-                <Field label="Folder" stacked>
-                  <div className="orbit-inline">
-                    <input className="orbit-input" value={game.installDir} readOnly spellCheck={false} />
-                    <button type="button" className="orbit-pill" onClick={() => void revealInExplorer(game.installDir!)}>
-                      Open
-                    </button>
-                  </div>
-                </Field>
-                {game.sizeBytes > 0 && <Field label="On disk"><p className="orbit-value">{fmtBytes(game.sizeBytes)}</p></Field>}
-              </Section>
-            )}
-
-            <Section title="Progress">
-              <Field label="Status">
-                <Segmented
-                  value={status}
-                  onChange={(value) => setStatus(value as GameStatus)}
-                  options={[
-                    { value: 'backlog', label: 'Backlog' },
-                    { value: 'playing', label: 'Playing' },
-                    { value: 'completed', label: 'Completed' },
-                    { value: 'dropped', label: 'Dropped' },
-                  ]}
-                />
-              </Field>
-              <Field label="Played">
-                <p className="orbit-value">
-                  {game.playSecs > 0 ? `${(game.playSecs / 3600).toFixed(1)} hours` : 'Never started from Orbit'}
-                  {game.lastPlayed ? ` · last on ${new Date(game.lastPlayed).toLocaleDateString()}` : ''}
-                </p>
-              </Field>
-              {hltb && (
-                <Field label="Story left">
-                  <p className="orbit-value">
-                    {Math.max(0, hltb.main - game.playSecs / 3600).toFixed(1)} of {hltb.main} hours
+            <Panel title="How Orbit starts it">
+              <LaunchEditor
+                game={game}
+                saveOnClose
+                section="launch"
+                onSave={(launch, companions) => onUpdate({ launch, companions })}
+              />
+            </Panel>
+            <Panel title="ReShade">
+              {reshade ? (
+                <>
+                  <Row label={reshade.state === 'on' ? 'On' : reshade.state === 'off' ? 'Off' : 'Not set up'}>
+                    <div className="orbit-inline">
+                      {reshade.proxy && <span className="orbit-chip">{reshade.proxy}.dll</span>}
+                      <Toggle
+                        checked={reshade.state === 'on'}
+                        disabled={reshadeBusy || !reshade.supported || !reshade.folder}
+                        label="Use ReShade with this game"
+                        onChange={(next) => {
+                          setReshadeBusy(true);
+                          void setReshade(game.id, next)
+                            .then((state) => {
+                              setReshadeState(state);
+                              say(next ? 'ReShade is on. Press Home in game to open it.' : 'ReShade is off. The game is as it was.');
+                            })
+                            .catch((cause: unknown) => say(cause instanceof Error ? cause.message : String(cause)))
+                            .finally(() => setReshadeBusy(false));
+                        }}
+                      />
+                    </div>
+                  </Row>
+                  <Row label="Where" stacked>
+                    <p className="orbit-note">
+                      {!reshade.supported
+                        ? reshade.reason ?? 'ReShade is a Windows graphics tool, so this needs a Windows or Wine game.'
+                        : !reshade.folder
+                          ? reshade.reason ?? 'Orbit cannot see a folder for this game yet.'
+                          : `${reshade.folder}${reshade.backup ? ' · the original file is kept beside it' : ''}`}
+                    </p>
+                  </Row>
+                  {reshade.supported && reshade.folder && (
+                    <div className="orbit-panel-foot">
+                      <button
+                        type="button"
+                        className="orbit-btn"
+                        disabled={reshadeBusy}
+                        onClick={() => void pickFile('Choose a ReShade DLL you already have', ['dll'], undefined).then((path) => {
+                          if (!path) return;
+                          setReshadeBusy(true);
+                          void useReshadeFile(game.id, path)
+                            .then((state) => setReshadeState(state))
+                            .catch((cause: unknown) => say(cause instanceof Error ? cause.message : String(cause)))
+                            .finally(() => setReshadeBusy(false));
+                        })}
+                      >
+                        Use a DLL I already have
+                      </button>
+                      <button type="button" className="orbit-btn" onClick={() => void revealInExplorer(reshade.folder ?? '')}>
+                        Open the folder
+                      </button>
+                    </div>
+                  )}
+                  <p className="orbit-note">
+                    Turning it on puts ReShade in the game's own folder, and the original file is kept beside it. Some
+                    anti-cheat systems read it as tampering.
                   </p>
-                </Field>
+                </>
+              ) : (
+                <p className="orbit-note">{reshadeBusy ? 'Looking at the game folder…' : 'ReShade was not checked.'}</p>
               )}
-            </Section>
+            </Panel>
           </>
         )}
 
-        {/* --------------------------------------------------------- launch */}
-        {shown === 'launch' && !hideLaunchSettings && (
-          <Section title="How Orbit starts it" bare>
-            <LaunchEditor
-              game={game}
-              saveOnClose
-              section="launch"
-              onSave={(launch, companions) => onUpdate({ launch, companions })}
-            />
-          </Section>
-        )}
-
-        {/* ---------------------------------------------------------- tools */}
-        {shown === 'tools' && !hideLaunchSettings && (
-          <Section title="ReShade">
-            {reshade ? (
-              <>
-                <Field label={reshade.state === 'on' ? 'On' : reshade.state === 'off' ? 'Off' : 'Not set up'}>
-                  <div className="orbit-inline">
-                    {reshade.proxy && <span className="orbit-chip">{reshade.proxy}.dll</span>}
-                    <Toggle
-                      checked={reshade.state === 'on'}
-                      disabled={reshadeBusy || !reshade.supported || !reshade.folder}
-                      label="Use ReShade with this game"
-                      onChange={(next) => {
-                        setReshadeBusy(true);
-                        void setReshade(game.id, next)
-                          .then((state) => {
-                            setReshadeState(state);
-                            say(next ? 'ReShade is on. Press Home in game to open it.' : 'ReShade is off. The game is as it was.');
-                          })
-                          .catch((cause: unknown) => say(cause instanceof Error ? cause.message : String(cause)))
-                          .finally(() => setReshadeBusy(false));
-                      }}
-                    />
-                  </div>
-                </Field>
-                <Field label="Where" stacked>
-                  <p className="orbit-note">
-                    {!reshade.supported
-                      ? reshade.reason ?? 'ReShade is a Windows graphics tool, so this needs a Windows or Wine game.'
-                      : !reshade.folder
-                        ? reshade.reason ?? 'Orbit cannot see a folder for this game yet.'
-                        : `${reshade.folder}${reshade.backup ? ' · the original file is kept beside it' : ''}`}
-                  </p>
-                </Field>
-                {reshade.supported && reshade.folder && (
-                  <Foot>
-                    <button
-                      type="button"
-                      className="orbit-pill"
-                      disabled={reshadeBusy}
-                      onClick={() => void pickFile('Choose a ReShade DLL you already have', ['dll'], undefined).then((path) => {
-                        if (!path) return;
-                        setReshadeBusy(true);
-                        void useReshadeFile(game.id, path)
-                          .then((state) => setReshadeState(state))
-                          .catch((cause: unknown) => say(cause instanceof Error ? cause.message : String(cause)))
-                          .finally(() => setReshadeBusy(false));
-                      })}
-                    >
-                      Use a DLL I already have
-                    </button>
-                    <button type="button" className="orbit-pill" onClick={() => void revealInExplorer(reshade.folder ?? '')}>
-                      Open the game's folder
-                    </button>
-                  </Foot>
-                )}
-                <p className="orbit-note">
-                  Turning it on downloads ReShade once into the game's own folder. Some anti-cheat systems read it as
-                  tampering, so check the game's rules before using it online.
-                </p>
-              </>
-            ) : (
-              <p className="orbit-note">{reshadeBusy ? 'Looking at the game folder…' : 'ReShade was not checked.'}</p>
-            )}
-          </Section>
-        )}
-
-        {/* --------------------------------------------------------- proton */}
-        {shown === 'proton' && !hideLaunchSettings && (
-          <Section title="Wine and Proton">
+        {/* ---------------------------------------------------------- wine */}
+        {page === 'wine' && !hideLaunchSettings && (
+          <Panel title="Wine and Proton">
             {wineTarget ? (
               <WineSettings
                 proton={wineTarget.proton ?? null}
@@ -600,68 +563,70 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
             ) : (
               <>
                 <p className="orbit-note">This game does not start through Wine, so there is nothing to choose here.</p>
-                <Foot>
-                  <button type="button" className="orbit-pill" onClick={() => setPage('launch')}>
-                    Make it a Windows program instead
-                  </button>
-                </Foot>
+                <div className="orbit-panel-foot">
+                  <button type="button" className="orbit-btn" onClick={() => setPage('launch')}>Change how it starts</button>
+                </div>
               </>
             )}
-          </Section>
+          </Panel>
         )}
 
-        {/* ---------------------------------------------------------- saves */}
-        {shown === 'saves' && (
-          <Section title="Save folder">
-            <Field label="Folder" stacked>
-              <div className="orbit-inline">
-                <input
-                  className="orbit-input"
-                  value={savePath}
-                  onChange={(event) => { setSavePath(event.target.value); onSaveDir?.(event.target.value); }}
-                  placeholder="No save folder found yet"
-                  spellCheck={false}
-                />
-                {isNative() && (
-                  <button
-                    type="button"
-                    className="orbit-pill"
-                    onClick={() => void pickFolder('Choose this game’s save folder', savePath || undefined).then((path) => {
-                      if (path) { setSavePath(path); onSaveDir?.(path); }
-                    })}
-                  >
-                    Browse
+        {/* --------------------------------------------------------- saves */}
+        {page === 'saves' && (
+          <>
+            <Panel title="Save folder">
+              <Row label="Folder" stacked>
+                <div className="orbit-inline">
+                  <input
+                    className="orbit-input"
+                    value={savePath}
+                    onChange={(event) => { setSavePath(event.target.value); onSaveDir?.(event.target.value); }}
+                    placeholder="No save folder found yet"
+                    spellCheck={false}
+                  />
+                  {isNative() && (
+                    <button
+                      type="button"
+                      className="orbit-btn"
+                      onClick={() => void pickFolder('Choose this game’s save folder', savePath || undefined).then((path) => {
+                        if (path) { setSavePath(path); onSaveDir?.(path); }
+                      })}
+                    >
+                      <FolderOpen className="size-3.5" />
+                      Browse
+                    </button>
+                  )}
+                </div>
+              </Row>
+              <div className="orbit-panel-foot">
+                <button
+                  type="button"
+                  className="orbit-btn is-accent"
+                  disabled={saveBusy}
+                  onClick={() => {
+                    setSaveBusy(true);
+                    setSaveError(null);
+                    void findSave(game.title, saveHintsOf(game))
+                      .then(async (found) => {
+                        if (found) { setSavePath(found); onSaveDir?.(found); setSaveSuggestions([]); }
+                        else setSaveSuggestions(await suggestSaves(game.title));
+                      })
+                      .catch((cause: unknown) => setSaveError(cause instanceof Error ? cause.message : String(cause)))
+                      .finally(() => setSaveBusy(false));
+                  }}
+                >
+                  {saveBusy ? 'Searching…' : 'Find it for me'}
+                </button>
+                {savePath.trim() && (
+                  <button type="button" className="orbit-btn" onClick={() => void revealInExplorer(savePath)}>
+                    Open the folder
                   </button>
                 )}
               </div>
-            </Field>
-            <Foot>
-              <button
-                type="button"
-                className="orbit-pill"
-                disabled={saveBusy}
-                onClick={() => {
-                  setSaveBusy(true);
-                  setSaveError(null);
-                  void findSave(game.title, saveHintsOf(game))
-                    .then(async (found) => {
-                      if (found) { setSavePath(found); onSaveDir?.(found); setSaveSuggestions([]); }
-                      else setSaveSuggestions(await suggestSaves(game.title));
-                    })
-                    .catch((cause: unknown) => setSaveError(cause instanceof Error ? cause.message : String(cause)))
-                    .finally(() => setSaveBusy(false));
-                }}
-              >
-                {saveBusy ? 'Searching…' : 'Find it for me'}
-              </button>
-              {savePath.trim() && (
-                <button type="button" className="orbit-pill" onClick={() => void revealInExplorer(savePath)}>
-                  Open the folder
-                </button>
-              )}
-            </Foot>
+            </Panel>
+
             {saveSuggestions.length > 0 && (
-              <Field label="PCGamingWiki suggests" stacked>
+              <Panel title="PCGamingWiki suggests">
                 <div className="orbit-suggestions">
                   {saveSuggestions.map((suggestion) => (
                     <button key={suggestion} type="button" onClick={() => { setSavePath(suggestion); onSaveDir?.(suggestion); }}>
@@ -669,87 +634,85 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
                     </button>
                   ))}
                 </div>
-              </Field>
+              </Panel>
             )}
+
+            {game.installDir && (
+              <Panel title="Install">
+                <Row label="Folder" stacked>
+                  <p className="orbit-note">{game.installDir}{game.sizeBytes > 0 ? ` · ${fmtBytes(game.sizeBytes)}` : ''}</p>
+                </Row>
+                <div className="orbit-panel-foot">
+                  <button type="button" className="orbit-btn" onClick={() => void revealInExplorer(game.installDir!)}>
+                    Open the game's folder
+                  </button>
+                </div>
+              </Panel>
+            )}
+
             {saveError && <p role="alert" className="orbit-note is-error">{saveError}</p>}
-          </Section>
+          </>
         )}
       </div>
 
-      {/* The artwork search, over the drawer, in its own room. */}
       {searching && (
         <ArtworkSearch
           shape={searching}
           title={title.trim() || game.title}
-          current={searching === 'portrait' ? coverShown : backdropShown}
+          current={{ portrait: coverShown, wide: backdropShown }}
           onClose={() => setSearching(null)}
-          onUseFile={
-            isNative()
-              ? () => {
-                  const wide = searching === 'wide';
-                  void pickAnyFile(wide ? 'Choose a wide backdrop' : 'Choose cover art').then((path) => {
-                    if (!path) return;
-                    if (wide) setBackdropUrl(fileSrc(path));
-                    else setCoverPath(path);
-                    setSearching(null);
-                  });
-                }
-              : undefined
-          }
-          onChoose={(url, source) => {
-            saveArt(searching, url);
-            setSearching(null);
-            say(`${searching === 'portrait' ? 'Cover' : 'Backdrop'} set from ${source}.`);
+          onUseFile={isNative() ? (which) => {
+            const wide = which === 'wide';
+            void pickAnyFile(wide ? 'Choose a wide backdrop' : 'Choose cover art').then((path) => {
+              if (!path) return;
+              if (wide) setBackdropUrl(fileSrc(path));
+              else setCoverPath(path);
+            });
+          } : undefined}
+          // The dialog stays open after a choice: the next slot is one click
+          // away, and a game with a bad cover and a bad backdrop is fixed in one
+          // visit rather than two.
+          onChoose={(which, url, source) => {
+            saveArt(which, url);
+            setSearching(which);
+            say(`${which === 'portrait' ? 'Cover' : 'Backdrop'} set from ${source}.`);
           }}
-          load={(query, pageNumber) => {
+          onPickSlot={(which) => setSearching(which)}
+          load={(which, query, pageNumber) => {
             // The game's own record is the fastest, most accurate source; a name
             // typed into the box is asked about by name instead.
             if (query === game.title) {
-              return searching === 'portrait' ? findArtwork(game.id, pageNumber) : findBackdropArtwork(game.id);
+              return which === 'portrait' ? findArtwork(game.id, pageNumber) : findBackdropArtwork(game.id);
             }
             return findArtworkChoices(query, meta?.steamAppId ?? null, pageNumber);
           }}
         />
       )}
-    </div>
+    </section>
   );
 }
 
-const PAGE_HINT: Record<Tab, string> = {
-  game: 'Name, art, times',
-  actions: 'Library facts',
-  launch: 'Program, tools',
-  tools: 'ReShade',
-  proton: 'On Linux',
-  saves: 'Where progress lives',
-};
-
-/** A grey panel of rows under a small heading. */
-function Section({ title, aside, bare = false, children }: { title: string; aside?: string; bare?: boolean; children: React.ReactNode }) {
+/** A grey panel: a heading with the rows that belong to it. */
+function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className={cn('orbit-slab', bare && 'is-bare')}>
-      <header className="orbit-slab-head">
+    <section className="orbit-panelbox">
+      <header className="orbit-panelbox-head">
         <h3>{title}</h3>
-        {aside && <span>{aside}</span>}
+        {action}
       </header>
       {children}
     </section>
   );
 }
 
-/** A label and its control: the row every field is made of. */
-function Field({ label, stacked = false, children }: { label: string; stacked?: boolean; children: React.ReactNode }) {
+/** A label and its control: the one row every field is made of. */
+function Row({ label, stacked = false, children }: { label: string; stacked?: boolean; children: React.ReactNode }) {
   return (
-    <label className={cn('orbit-field', stacked && 'is-stacked')}>
-      <span className="orbit-field-label">{label}</span>
-      <span className="orbit-field-control">{children}</span>
+    <label className={cn('orbit-row2', stacked && 'is-stacked')}>
+      <span className="orbit-row2-label">{label}</span>
+      <span className="orbit-row2-control">{children}</span>
     </label>
   );
-}
-
-/** The row of buttons a panel ends with. */
-function Foot({ children }: { children: React.ReactNode }) {
-  return <div className="orbit-slab-foot">{children}</div>;
 }
 
 /** A row of choices where one is on. */
@@ -792,63 +755,5 @@ function Toggle({ checked, onChange, label, disabled }: {
   );
 }
 
-/** One picture slot: what it shows now, and the way to change it. */
-function Slot({ shape, name, picture, caption, custom, onSearch, onReset, extra }: {
-  shape: ArtShape;
-  name: string;
-  picture: string | null;
-  caption: string;
-  custom: boolean;
-  onSearch: () => void;
-  onReset: () => void;
-  extra?: React.ReactNode;
-}) {
-  return (
-    <div className={cn('orbit-slot', shape === 'wide' && 'is-wide')}>
-      <div className={cn('orbit-slot-picture', shape === 'wide' ? 'is-wide' : 'is-portrait')}>
-        {picture ? <img src={picture} alt="" /> : <span>{shape === 'wide' ? 'None' : 'None'}</span>}
-      </div>
-      <div className="orbit-slot-body">
-        <p className="orbit-field-label">{name}</p>
-        <p className="orbit-note">{caption}</p>
-        {extra}
-        <div className="orbit-slab-foot">
-          <button type="button" className="orbit-pill is-accent" onClick={onSearch}>Find another</button>
-          {custom && <button type="button" className="orbit-pill" onClick={onReset}>Use the library's own</button>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The drawer's backdrop: a dim of the library, and the frame around it.
- *
- * It is a sibling of the page rather than a wrapper, so pressing the dimmed
- * library closes the drawer and pressing the drawer does not.
- */
-export function EditDrawerFrame({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (document.querySelector('[data-overlay-hit]')) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return createPortal(
-    <div className="orbit-drawerwrap" data-overlay-hit="1" role="dialog" aria-modal="true" aria-label="Game settings">
-      <button type="button" tabIndex={-1} aria-label="Close game settings" className="orbit-drawer-scrim" onClick={onClose} />
-      <div className="orbit-drawer-panel">
-        <button type="button" className="orbit-drawer-close" onClick={onClose} aria-label="Close">
-          <X className="size-4" />
-        </button>
-        {children}
-      </div>
-    </div>,
-    document.body,
-  );
-}
+/** Kept exported for callers that only wanted the close affordance. */
+export const EditRemoveIcon = Trash2;

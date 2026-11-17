@@ -5442,7 +5442,6 @@ html.orbit-glass .orbit-themecard[data-chosen]::after {
   font-style: normal;
   opacity: .45;
 }
-.orbit-deck-indexspacer { flex: 1 1 auto; }
 .orbit-deck-indexhead > .orbit-deck-counter { flex: 0 0 auto; }
 /* On the page the header is one centred line with the steps and the menu at
    its ends: the count in the middle, the controls where thumbs expect them. */
@@ -8030,58 +8029,53 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 }
 
 /* ============================================================== the deck, again
-   The deck is two halves of one screen, so both are stated as a share of the
-   window and neither is left to grow into whatever the other leaves. That was
-   the fault behind the two thin strips: the stage was a percentage with a
-   minimum, the shelf grew into the remainder, and the two disagreed by a few
-   pixels on a window that had just come back from fullscreen - a sliver of
-   stage under the controls, a sliver of nothing under the cards.
+   Reading order, top to bottom: what you are browsing (the row of covers),
+   then what you are browsing it with (the game's own page and controls).
 
-   Now: the stage is `1 1 0` with its own minimum, the shelf is a share of the
-   deck with a real floor and ceiling, both are flex items in the same column,
-   and the top bar's height is subtracted once, by the flex container. */
+   The deck used to be built the other way round - the big game page at the top,
+   the shelf under it - which meant the thing you were moving through sat below
+   the thing it was describing, and every arrow press moved something under your
+   thumb. Heronite reads the other way: the row is the object, and the panel under
+   it is what the row selected.
+
+   Both halves are stated as shares of the window, and the shelf is two rows of a
+   grid (a header line, then the covers), because a percentage and a remainder
+   are what left the thin strips of stage and of nothing between them. */
 .orbit-deck:not(.is-side) {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
   align-items: stretch;
-  /* No padding anywhere: the shelf's background reaches all four edges, so
-     there is no frame of the shell's colour to look like a strip. */
   padding: 0;
   gap: 0;
   overflow: hidden;
 }
-.orbit-deck:not(.is-side) .orbit-deck-stage {
-  order: 1;
-  flex: 1 1 0;
-  min-height: 0;
-  /* The stage never collapses below a poster and a title: below this the words
-     are what gets cut, and a title cut in half is worse than a smaller shelf. */
-  min-block-size: 12rem;
-}
+
+/* --- the shelf, on top: the header line, then the row of covers ---------- */
 .orbit-deck:not(.is-side) .orbit-deck-index {
-  order: 2;
-  flex: 0 0 auto;
-  /* A real height rather than a remainder: tall enough for the header line and
-     the cards at their full size, capped so a short window keeps a stage. */
-  block-size: clamp(15.5rem, 46dvh, 26rem);
-  min-height: 0;
+  order: 1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  align-content: stretch;
-  gap: 4px;
-  padding: 6px clamp(16px, 3.4vw, 42px) max(6px, env(safe-area-inset-bottom));
+  flex: 0 0 auto;
+  /* Tall enough for the header and the covers at a size a poster is recognised
+     at, and a share of the window so a bigger screen gets bigger covers. */
+  block-size: clamp(17rem, 50dvh, 30rem);
+  min-height: 0;
+  gap: 2px;
+  padding: 4px clamp(16px, 3.4vw, 42px) 0;
   overflow: hidden;
 }
-/* The header is one row of three: a counter, the arrows, the menu - with the
-   arrows on the page's centre line whatever the width of the ends. */
+/* The header is one line of three: the count at the left end, the two arrows
+   on the page's centre line, the menu at the right end. A grid with equal outer
+   tracks is what keeps the arrows centred; two order rules and a spacer used to
+   push them about by a few pixels on every window. */
 .orbit-deck:not(.is-side) .orbit-deck-indexhead {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 8px;
-  width: min(100%, 82rem);
+  width: min(100%, 92rem);
   margin: 0 auto;
   padding: 0;
   min-height: 0;
@@ -8089,43 +8083,33 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-deck:not(.is-side) .orbit-deck-indexhead > .orbit-deck-counter { grid-column: 1; justify-self: start; order: 0; }
 .orbit-deck:not(.is-side) .orbit-deck-indexhead > .orbit-deck-steps { grid-column: 2; justify-self: center; order: 0; }
 .orbit-deck:not(.is-side) .orbit-deck-indexhead > .orbit-deck-customise { grid-column: 3; justify-self: end; order: 0; }
-/* The cards own the rest of the shelf, at their full size: the row is a rail
-   that scrolls, not a stack that shrinks. */
+/* The covers own everything between the header and the bottom of the shelf:
+   the chosen one in the middle, its neighbours turned away on either side. */
 .orbit-deck:not(.is-side) .orbit-deck-cards {
-  align-self: center;
+  align-self: stretch;
   align-items: center;
   justify-content: center;
   width: min(100%, 92rem);
   max-height: 100%;
   margin: 0 auto;
-  padding: 2px 6px 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  padding: 0 6px 6px;
+  overflow: hidden;
 }
+.orbit-deck:not(.is-side) .orbit-deck-cards > li { height: 100%; display: flex; align-items: center; }
 .orbit-deck:not(.is-side) .orbit-deck-card {
-  /* The poster is the object on this page: sized off the shelf it sits in, so
-     it grows with the window instead of being a thumbnail under it. */
-  height: clamp(11rem, 34dvh, 19rem);
+  height: 100%;
+  max-height: 100%;
   width: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='0'] { transform: translateY(-6px) scale(1.05); }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1'] { transform: perspective(1200px) rotateY(18deg) translateX(20px) scale(.9); }
-.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1'] { transform: perspective(1200px) rotateY(-18deg) translateX(-20px) scale(.9); }
-
-/* A short window gives the shelf up first, then the stage's minimum stops it. */
-@media (max-height: 780px) {
-  .orbit-deck:not(.is-side) .orbit-deck-index { block-size: clamp(13.5rem, 42dvh, 20rem); }
-  .orbit-deck:not(.is-side) .orbit-deck-card { height: clamp(9.5rem, 30dvh, 15rem); }
-}
-/* The poster keeps its own shape whatever the button is told to be: the card
-   sets the height, the frame fills it, and the picture covers the frame. */
-.orbit-deck:not(.is-side) .orbit-deck-frame,
-.orbit-deck:not(.is-side) .orbit-deck-frame.is-poster,
-.orbit-deck:not(.is-side) .orbit-deck-frame.is-banner {
-  aspect-ratio: auto;
-  width: 100%;
-  height: calc(100% - 1.6rem);
-}
+/* The poster keeps its own shape whatever width the button was given: the row's
+   height sets the card, the frame follows from the shape, and the picture covers
+   the frame. */
+.orbit-deck:not(.is-side) .orbit-deck-frame.is-poster { aspect-ratio: 2 / 3; height: 100%; width: auto; }
+.orbit-deck:not(.is-side) .orbit-deck-frame.is-banner { aspect-ratio: 16 / 9; height: 100%; width: auto; }
 .orbit-deck:not(.is-side) .orbit-deck-name {
   margin-top: 5px;
   min-height: 0;
@@ -8133,345 +8117,50 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   color: color-mix(in srgb, var(--c-text) 52%, transparent);
 }
 .orbit-deck:not(.is-side) .orbit-deck-card[aria-current='true'] .orbit-deck-name { color: var(--c-text); }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='0'] { transform: translateY(-3px) scale(1.03); }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='-1'] { transform: perspective(1200px) rotateY(16deg) translateX(18px) scale(.9); }
+.orbit-deck:not(.is-side) .orbit-deck-card[data-deck-position='1'] { transform: perspective(1200px) rotateY(-16deg) translateX(-18px) scale(.9); }
 
-/* ============================================================ the drawer
-   A game's settings, pulled out of the library rather than opened over it.
-
-   Heronite's game settings is a drawer for a reason: every field in it is about
-   the game you were just looking at, and a centred modal makes you forget which
-   one that was. The panel starts where the library's own content does and runs
-   to the bottom of the window, the rail of pages sits on its left, and the
-   glass of the app stays visible down the edge.
-   ============================================================ */
-.orbit-drawerwrap {
-  position: fixed;
-  inset: 0;
-  z-index: 55;
-  display: flex;
-  justify-content: flex-end;
-}
-.orbit-drawer-scrim {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  background: #05040899;
-  backdrop-filter: blur(3px);
-  animation: drawer-scrim .22s ease both;
-}
-@keyframes drawer-scrim { from { opacity: 0; } to { opacity: 1; } }
-.orbit-drawer-panel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: min(100%, 62rem);
-  height: 100%;
+/* --- the game's page, under the shelf ------------------------------------ */
+.orbit-deck:not(.is-side) .orbit-deck-stage {
+  order: 2;
+  flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
-  border-left: 1px solid color-mix(in srgb, #fff 10%, var(--c-border));
-  background: var(--c-panel);
-  box-shadow: -40px 0 90px -50px #000;
-  animation: drawer-in .26s cubic-bezier(.2,.8,.2,1) both;
+  /* The stage is the bottom of the window, so its top edge is where the shelf
+     ends and its own artwork carries the fade between them. */
+  min-block-size: 11rem;
+  border-radius: 0;
+  border-inline: 0;
+  border-bottom: 0;
+  border-top: 0;
+  box-shadow: none;
 }
-@keyframes drawer-in {
-  from { opacity: .4; transform: translate3d(48px, 0, 0); }
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .orbit-drawer-scrim, .orbit-drawer-panel { animation: none; }
-}
-.orbit-drawer-close {
-  position: absolute;
-  inset: 12px 12px auto auto;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  color: var(--c-muted);
-}
-.orbit-drawer-close:hover { background: var(--c-panel2); color: var(--c-text); }
-
-/* The two halves: a rail of pages, then the page itself. */
-.orbit-drawer { display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); min-height: 0; flex: 1; }
-.orbit-drawerrail {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-height: 0;
-  padding: 16px 12px;
-  overflow-y: auto;
-  border-right: 1px solid var(--c-border);
-  background: color-mix(in srgb, var(--c-bg) 55%, transparent);
-  scrollbar-width: thin;
-}
-
-/* The game, at the top of the rail: a poster, its name, its facts. */
-.orbit-drawer-card { display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
-.orbit-drawer-poster {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  aspect-ratio: 16 / 7;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--c-text) 13%, transparent);
-  border-radius: 10px;
-  background: #050507;
-  color: var(--c-muted);
-  font-size: 20px;
-  font-weight: 800;
-}
-.orbit-drawer-poster img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-drawer-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 720;
-  letter-spacing: -.01em;
-  line-height: 1.25;
-  color: var(--c-text);
-  text-wrap: balance;
-}
-.orbit-drawer-facts { margin: 0; color: var(--c-muted); font-size: 11px; }
-
-/* The rail: one row per page, the current one lit. */
-.orbit-drawer-pages { display: flex; flex-direction: column; gap: 2px; }
-.orbit-drawer-pages button {
-  display: flex;
-  align-items: baseline;
+/* The stage's own bottom: no inset, no inner panel, nothing that can leave a
+   line of the shell's colour along the last row of pixels. */
+.orbit-deck:not(.is-side) .orbit-deck-stageinner {
+  height: auto;
+  max-width: 78rem;
+  margin: 0 auto;
+  flex-direction: row;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 8px;
-  padding: 9px 11px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: var(--c-muted);
+  gap: clamp(16px, 2.6vw, 36px);
+  padding: clamp(10px, 1.8vh, 20px) clamp(16px, 3.4vw, 42px) max(10px, env(safe-area-inset-bottom));
   text-align: left;
-  transition: color .14s ease, background .14s ease, border-color .14s ease;
 }
-.orbit-drawer-pages button span { font-size: 12.5px; font-weight: 640; }
-.orbit-drawer-pages button i {
-  font-size: 10px;
-  font-style: normal;
-  opacity: .72;
-  text-align: right;
-}
-.orbit-drawer-pages button:hover { color: var(--c-text); background: var(--c-panel2); }
-.orbit-drawer-pages button[aria-selected='true'] {
-  border-color: color-mix(in srgb, var(--c-accent) 40%, var(--c-border));
-  background: color-mix(in srgb, var(--c-accent) 13%, var(--c-panel2));
-  color: var(--c-text);
-}
-.orbit-drawer-pages button[aria-selected='true'] span { color: var(--c-text); }
-.orbit-drawer-pages button[aria-selected='true'] i { opacity: .85; color: color-mix(in srgb, var(--c-accent) 80%, var(--c-text)); }
+.orbit-deck:not(.is-side) .orbit-deck-copy { order: 1; width: auto; max-width: 46rem; }
+.orbit-deck:not(.is-side) .orbit-deck-art { order: 2; align-self: flex-end; }
+.orbit-deck:not(.is-side) .orbit-deck-cover { height: clamp(7rem, 16dvh, 11rem); border-radius: 12px; }
+.orbit-deck:not(.is-side) .orbit-deck-cover.is-banner { height: clamp(5rem, 11dvh, 8rem); }
 
-/* The page: one scrolling column of slabs. */
-.orbit-drawer-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-height: 0;
-  padding: 16px 18px 26px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  animation: drawer-page-in .2s cubic-bezier(.2,.8,.2,1) both;
+/* A short window gives the shelf up first, then the stage's minimum stops it. */
+@media (max-height: 800px) {
+  .orbit-deck:not(.is-side) .orbit-deck-index { block-size: clamp(13.5rem, 46dvh, 22rem); }
+  .orbit-deck:not(.is-side) .orbit-deck-cover { height: clamp(5.5rem, 13dvh, 8rem); }
 }
-@keyframes drawer-page-in {
-  from { opacity: 0; transform: translate3d(0, 6px, 0); }
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) { .orbit-drawer-page { animation: none; } }
-
-/* --- a slab: a heading and the rows that belong to it --------------------- */
-.orbit-slab {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px;
-  border: 1px solid var(--c-border);
-  border-radius: 12px;
-  background: var(--c-panel2);
-}
-.orbit-slab.is-bare { padding: 0; border: 0; background: none; }
-.orbit-slab-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 4px 8px;
-}
-.orbit-slab-head h3 {
-  font-size: 10px;
-  font-weight: 720;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--c-text) 55%, transparent);
-}
-.orbit-slab-head span { font-size: 10px; font-weight: 650; letter-spacing: .06em; color: var(--c-muted); }
-.orbit-slab-foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; }
-
-/* --- a field: a label and its control ------------------------------------ */
-.orbit-field {
-  display: grid;
-  grid-template-columns: 9.5rem minmax(0, 1fr);
-  align-items: center;
-  gap: 10px 14px;
-  padding: 6px 4px;
-  border-radius: 8px;
-}
-.orbit-field:hover { background: color-mix(in srgb, var(--c-text) 3%, transparent); }
-.orbit-field.is-stacked { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 5px; }
-.orbit-field-label { font-size: 11.5px; font-weight: 620; color: color-mix(in srgb, var(--c-text) 62%, transparent); }
-.orbit-field-control { display: flex; min-width: 0; align-items: center; gap: 8px; }
-.orbit-value { margin: 0; font-size: 12px; color: var(--c-text); }
-.orbit-note { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--c-muted); overflow-wrap: anywhere; }
-.orbit-note.is-error { color: #ff9aa2; }
-.orbit-inline { display: flex; width: 100%; min-width: 0; align-items: center; gap: 6px; }
-.orbit-inline .orbit-input { flex: 1; min-width: 0; }
-.orbit-unit { display: flex; align-items: center; gap: 8px; }
-.orbit-unit span { font-size: 10.5px; font-weight: 680; letter-spacing: .05em; color: var(--c-muted); }
-.orbit-unit .orbit-input { width: 6rem; }
-.orbit-chip {
-  padding: 1px 7px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--c-text) 9%, transparent);
-  font-family: ui-monospace, monospace;
-  font-size: 10px;
-  color: var(--c-muted);
-}
-
-/* --- the controls, in one language -------------------------------------- */
-.orbit-input {
-  width: 100%;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  background: var(--c-bg);
-  color: var(--c-text);
-  font-size: 12px;
-  outline: none;
-  transition: border-color .14s ease;
-}
-.orbit-input:hover { border-color: color-mix(in srgb, var(--c-text) 22%, var(--c-border)); }
-.orbit-input:focus { border-color: color-mix(in srgb, var(--c-accent) 65%, var(--c-border)); }
-.orbit-input[readonly] { color: var(--c-muted); }
-.orbit-textarea { height: 7rem; resize: vertical; line-height: 1.55; }
-.orbit-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--c-border);
-  border-radius: 999px;
-  background: var(--c-panel);
-  color: var(--c-text);
-  font-size: 11px;
-  font-weight: 620;
-  transition: border-color .14s ease, background .14s ease, color .14s ease;
-}
-.orbit-pill:hover { border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); }
-.orbit-pill:disabled { opacity: .55; cursor: default; }
-.orbit-pill.is-accent {
-  border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border));
-  background: color-mix(in srgb, var(--c-accent) 15%, var(--c-panel));
-}
-.orbit-pill.is-accent:hover { background: color-mix(in srgb, var(--c-accent) 24%, var(--c-panel)); }
-.orbit-pill.is-danger { border-color: #f8717150; background: #f871711a; color: #ffb4b4; }
-.orbit-pill.is-danger:hover { background: #f8717129; }
-
-/* A segmented choice: the row a status or a fit is picked from. */
-.orbit-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--c-border); border-radius: 9px; background: var(--c-bg); }
-.orbit-seg button { padding: 5px 10px; border-radius: 7px; color: var(--c-muted); font-size: 11px; font-weight: 620; }
-.orbit-seg button:hover { color: var(--c-text); }
-.orbit-seg button[aria-pressed='true'] { background: var(--c-panel2); color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-border); }
-.orbit-seg.is-small button { padding: 3px 8px; font-size: 10.5px; }
-
-/* The switch: 40 × 24, accent when on, a white knob that slides. */
-.orbit-toggle {
-  position: relative;
-  flex: none;
-  width: 40px;
-  height: 24px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c-text) 18%, transparent);
-  transition: background .18s ease;
-}
-.orbit-toggle i {
-  position: absolute;
-  inset: 3px auto auto 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 1px 3px #0006;
-  transition: transform .18s cubic-bezier(.34,1.4,.64,1);
-}
-.orbit-toggle[data-on] { background: var(--c-accent); }
-.orbit-toggle[data-on] i { transform: translateX(16px); }
-.orbit-toggle:disabled { opacity: .45; }
-.orbit-toggle:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .orbit-toggle, .orbit-toggle i { transition: none; } }
-
-/* --- an artwork slot ----------------------------------------------------- */
-.orbit-slot {
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
-  align-items: start;
-  gap: 14px;
-  padding: 10px 4px;
-}
-.orbit-slot.is-wide { grid-template-columns: 168px minmax(0, 1fr); }
-.orbit-slot-picture {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
-  border-radius: 8px;
-  background: #050507;
-  color: var(--c-muted);
-  font-size: 10px;
-}
-.orbit-slot-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-slot-picture.is-portrait { aspect-ratio: 2 / 3; }
-.orbit-slot-picture.is-wide { aspect-ratio: 16 / 9; }
-.orbit-slot-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-
-.orbit-suggestions { display: flex; flex-direction: column; gap: 3px; }
-.orbit-suggestions button {
-  padding: 6px 9px;
-  border-radius: 7px;
-  color: var(--c-text);
-  font-family: ui-monospace, monospace;
-  font-size: 10.5px;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.orbit-suggestions button:hover { background: var(--c-panel); }
-
-.orbit-drawer-foot {
-  display: flex;
-  gap: 8px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--c-border);
-  background: color-mix(in srgb, var(--c-bg) 60%, transparent);
-}
-
 @media (max-width: 900px) {
-  .orbit-drawer { grid-template-columns: minmax(0, 1fr); }
-  .orbit-drawerrail {
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--c-border);
-    overflow-x: auto;
-  }
-  .orbit-drawer-card { flex-direction: row; align-items: center; gap: 10px; min-width: 0; }
-  .orbit-drawer-poster { width: 64px; flex: none; aspect-ratio: 2 / 3; }
-  .orbit-drawer-facts { display: none; }
-  .orbit-drawer-pages { flex-direction: row; }
-  .orbit-drawer-pages button i { display: none; }
-  .orbit-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .orbit-deck:not(.is-side) .orbit-deck-stageinner { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .orbit-deck:not(.is-side) .orbit-deck-art { display: none; }
 }
 
 /* --- Launch, inside the drawer ------------------------------------------- */
@@ -8610,59 +8299,551 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-proton-envhead { display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 720px) { .orbit-proton-selects { grid-template-columns: minmax(0, 1fr); } }
 
-/* =================================================== the artwork search room
-   Heronite separates the pictures a game keeps from the search for a better
-   one, and this does the same: the drawer shows a slot per shape, and looking
-   for another opens this - a dialog nearly the width of the window, with the
-   picture the game has now pinned on the left for the whole visit, so every
-   candidate is compared against it rather than against a memory of it. */
-.orbit-artstudio-wrap {
+/* --- Launch, inside the drawer ------------------------------------------- */
+.orbit-launchpage { display: flex; flex-direction: column; gap: 14px; }
+.orbit-launchpanel { display: flex; flex-direction: column; gap: 10px; }
+.orbit-launchpanel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.orbit-launchpanel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 660;
+  color: color-mix(in srgb, var(--c-text) 74%, transparent);
+}
+.orbit-launchbadge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 10%, transparent);
+  font-size: 10px;
+  color: var(--c-muted);
+}
+.orbit-launchkinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-launchkind {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-bg);
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 620;
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+.orbit-launchkind:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-text) 22%, var(--c-border)); }
+.orbit-launchkind.is-on {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-bg));
+  color: var(--c-text);
+}
+.orbit-launchkind.is-on svg { color: var(--c-accent); }
+.orbit-launchrows { display: flex; flex-direction: column; gap: 2px; }
+.orbit-launchrow {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 14px;
+  padding: 3px 2px;
+}
+.orbit-launchrow.is-stacked { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.orbit-launchrow-label { font-size: 11.5px; font-weight: 620; color: color-mix(in srgb, var(--c-text) 62%, transparent); }
+.orbit-launchrow-control { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.orbit-launchrow-control.is-column { flex-direction: column; align-items: stretch; }
+.orbit-launchbrowse {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-bg);
+  color: var(--c-muted);
+}
+.orbit-launchbrowse:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); color: var(--c-text); }
+.orbit-launchaddbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 620;
+}
+.orbit-launchaddbtn:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
+.orbit-launchaddbtn.is-quiet { background: none; color: var(--c-muted); border-style: dashed; }
+.orbit-launchaddbtn.is-quiet:hover { color: var(--c-text); }
+.orbit-launchadds { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-launchnote { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--c-muted); }
+.orbit-launchnote.is-quiet { max-width: 62ch; }
+.orbit-launchlink { color: var(--c-accent); font-weight: 620; text-decoration: underline; text-underline-offset: 2px; }
+.orbit-launchlist { display: flex; flex-direction: column; gap: 8px; }
+.orbit-launchentry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 11px;
+  background: var(--c-bg);
+}
+.orbit-launchentry-head { display: flex; align-items: center; gap: 8px; }
+.orbit-launchentry-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  color: var(--c-accent);
+}
+.orbit-launchentry-head h4 { flex: 1; min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 660; color: var(--c-text); text-overflow: ellipsis; white-space: nowrap; }
+.orbit-launchentry-name { flex: 1; min-width: 0; }
+.orbit-launchentry-nameinput {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 18%, transparent);
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font-size: 11.5px;
+  font-weight: 660;
+  outline: none;
+}
+.orbit-launchentry-nameinput:focus { border-style: solid; border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); }
+.orbit-launchentry-remove { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--c-muted); }
+.orbit-launchentry-remove:hover { background: color-mix(in srgb, #f87171 18%, transparent); color: #ffb4b4; }
+.orbit-launchsaved { margin: 0; color: var(--c-muted); font-size: 10.5px; }
+@media (max-width: 720px) {
+  .orbit-launchrow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+
+/* --- Wine and Proton, inside the drawer ---------------------------------- */
+.orbit-proton { display: flex; flex-direction: column; gap: 10px; }
+.orbit-row-control { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.orbit-row-control > :first-child { flex: 1; min-width: 0; }
+.orbit-proton-tweaks { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-proton-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.orbit-proton-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.orbit-proton-field.is-span-2 { grid-column: 1 / -1; }
+.orbit-proton-env { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.orbit-proton-envhead { display: flex; align-items: center; justify-content: space-between; }
+@media (max-width: 720px) { .orbit-proton-selects { grid-template-columns: minmax(0, 1fr); } }
+
+/* ========================================================== game settings
+   In the middle, one column, the game's picture first.
+
+   The page is a dialog that takes the middle of the window, because it is about
+   one game and nothing else needs to be readable while it is open. Its first
+   block is the cover and the backdrop at size; then the name, the status and the
+   two switches on one line; then the pages. Everything under that is the same
+   grey panel of label-and-control rows repeated - the shape Heronite's game
+   settings uses, and the one that stops a settings page reading as a form.
+   ========================================================== */
+.orbit-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+/* --- the picture at the top ---------------------------------------------- */
+.orbit-gameart {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 10px;
+  height: clamp(10rem, 24vh, 14rem);
+}
+.orbit-gameart-cover,
+.orbit-gameart-wide {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  border-radius: 12px;
+  background: #050507;
+  color: var(--c-muted);
+}
+.orbit-gameart-cover img,
+.orbit-gameart-wide img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-gameart-cover > span,
+.orbit-gameart-wide > span {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+}
+/* The label sits on the picture, not above it: the shape of the frame already
+   says which slot it is, and a heading per picture is a third thing to read. */
+.orbit-gameart-cover > i,
+.orbit-gameart-wide > i {
+  position: absolute;
+  inset: auto 8px 8px auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #000000a8;
+  color: #fff;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: .04em;
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+.orbit-gameart-cover:hover > i,
+.orbit-gameart-wide:hover > i { opacity: 1; }
+.orbit-gameart-cover:hover,
+.orbit-gameart-wide:hover { border-color: color-mix(in srgb, var(--c-accent) 60%, transparent); }
+
+/* --- the name, the status, the switches ---------------------------------- */
+.orbit-settings-head { display: flex; flex-direction: column; gap: 8px; }
+.orbit-settings-title {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-size: 20px;
+  font-weight: 760;
+  letter-spacing: -.02em;
+  outline: none;
+}
+.orbit-settings-title:focus { box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--c-accent) 70%, transparent); }
+.orbit-settings-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.orbit-settings-strip-label { font-size: 11px; font-weight: 600; color: var(--c-muted); }
+
+/* --- the pages ------------------------------------------------------------ */
+.orbit-settings-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-panel2);
+}
+.orbit-settings-tabs button {
+  flex: 1 1 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--c-muted);
+  font-size: 12px;
+  font-weight: 640;
+  transition: color .14s ease, background .14s ease, box-shadow .14s ease;
+}
+.orbit-settings-tabs button:hover { color: var(--c-text); background: color-mix(in srgb, var(--c-text) 5%, transparent); }
+.orbit-settings-tabs button[aria-selected='true'] {
+  background: var(--c-panel);
+  color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-border);
+}
+.orbit-settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  animation: settings-page-in .2s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes settings-page-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .orbit-settings-page { animation: none; } }
+
+/* --- a panel of rows ------------------------------------------------------ */
+.orbit-panelbox {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-panel2);
+}
+.orbit-panelbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px 8px;
+}
+.orbit-panelbox-head h3 {
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-text) 55%, transparent);
+}
+.orbit-panel-foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; }
+
+.orbit-row2 {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 14px;
+  padding: 5px 4px;
+  border-radius: 8px;
+}
+.orbit-row2:hover { background: color-mix(in srgb, var(--c-text) 3%, transparent); }
+.orbit-row2.is-stacked { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 5px; }
+.orbit-row2-label { font-size: 11.5px; font-weight: 620; color: color-mix(in srgb, var(--c-text) 62%, transparent); }
+.orbit-row2-control { display: flex; min-width: 0; align-items: center; gap: 8px; }
+
+/* The times, as three fields in one row. */
+.orbit-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 2px 4px; }
+.orbit-times label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.orbit-times span { font-size: 11px; font-weight: 600; color: var(--c-muted); }
+
+/* An artwork row: the picture, what it is, what can be done. */
+.orbit-artline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.orbit-artline-frame {
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  border-radius: 8px;
+  background: #050507;
+  color: var(--c-muted);
+  font-size: 10px;
+}
+.orbit-artline-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-artline-frame.is-portrait { width: 46px; height: 69px; }
+.orbit-artline-frame.is-wide { width: 106px; height: 60px; }
+.orbit-artline-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.orbit-artline-copy p { margin: 0; font-size: 11px; color: var(--c-muted); }
+.orbit-btnrow { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+
+/* --- the controls, in one language --------------------------------------- */
+.orbit-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 12px;
+  outline: none;
+  transition: border-color .14s ease;
+}
+.orbit-input:hover { border-color: color-mix(in srgb, var(--c-text) 22%, var(--c-border)); }
+.orbit-input:focus { border-color: color-mix(in srgb, var(--c-accent) 65%, var(--c-border)); }
+.orbit-input[readonly] { color: var(--c-muted); }
+.orbit-textarea { height: 6.5rem; resize: vertical; line-height: 1.55; }
+.orbit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-panel);
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 620;
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
+}
+.orbit-btn:hover { border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); }
+.orbit-btn:disabled { opacity: .55; cursor: default; }
+.orbit-btn.is-quiet { border-color: transparent; background: none; color: var(--c-muted); }
+.orbit-btn.is-quiet:hover { color: var(--c-text); background: color-mix(in srgb, var(--c-text) 6%, transparent); }
+.orbit-btn.is-accent {
+  border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 15%, var(--c-panel));
+}
+.orbit-btn.is-accent:hover { background: color-mix(in srgb, var(--c-accent) 24%, var(--c-panel)); }
+.orbit-btn.is-danger { border-color: #f8717150; background: #f871711a; color: #ffb4b4; }
+.orbit-btn.is-danger:hover { background: #f8717129; }
+
+.orbit-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--c-border); border-radius: 9px; background: var(--c-bg); }
+.orbit-seg button { padding: 5px 10px; border-radius: 7px; color: var(--c-muted); font-size: 11px; font-weight: 620; }
+.orbit-seg button:hover { color: var(--c-text); }
+.orbit-seg button[aria-pressed='true'] { background: var(--c-panel2); color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-border); }
+.orbit-seg.is-small button { padding: 3px 8px; font-size: 10.5px; }
+
+.orbit-toggle {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 18%, transparent);
+  transition: background .18s ease;
+}
+.orbit-toggle i {
+  position: absolute;
+  inset: 3px auto auto 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px #0006;
+  transition: transform .18s cubic-bezier(.34,1.4,.64,1);
+}
+.orbit-toggle[data-on] { background: var(--c-accent); }
+.orbit-toggle[data-on] i { transform: translateX(16px); }
+.orbit-toggle:disabled { opacity: .45; }
+.orbit-toggle:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .orbit-toggle, .orbit-toggle i { transition: none; } }
+
+.orbit-note { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--c-muted); overflow-wrap: anywhere; }
+.orbit-note.is-error { color: #ff9aa2; }
+.orbit-inline { display: flex; width: 100%; min-width: 0; align-items: center; gap: 6px; }
+.orbit-inline .orbit-input { flex: 1; min-width: 0; }
+.orbit-unit { display: flex; align-items: center; gap: 8px; }
+.orbit-unit span { font-size: 10.5px; font-weight: 680; letter-spacing: .05em; color: var(--c-muted); }
+.orbit-unit .orbit-input { width: 6rem; }
+.orbit-chip {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--c-text) 9%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--c-muted);
+}
+.orbit-suggestions { display: flex; flex-direction: column; gap: 3px; }
+.orbit-suggestions button {
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: var(--c-text);
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.orbit-suggestions button:hover { background: var(--c-panel); }
+
+@media (max-width: 720px) {
+  .orbit-gameart { grid-template-columns: 6rem minmax(0, 1fr); height: 8rem; }
+  .orbit-row2 { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .orbit-times { grid-template-columns: minmax(0, 1fr); }
+  .orbit-btnrow { margin-left: 0; }
+}
+
+/* ===================================================== the covers dialog
+   Heronite's: the slots down the left, what was found for the chosen slot on
+   the right.
+
+   The left column answers "what does this game keep, and what is in it now",
+   in the picture's own shape. The right answers "what else is there", for the
+   slot that is chosen, one source at a time with the counts in front. Nothing
+   in the dialog is about the form behind it: it is a place for one job.
+   ===================================================== */
+.orbit-covers-wrap {
   position: fixed;
   inset: 0;
   z-index: 65;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(12px, 3vh, 32px);
+  padding: clamp(10px, 2.5vh, 28px);
 }
-.orbit-artstudio-scrim {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  background: #04030ac2;
-  backdrop-filter: blur(6px);
-}
-.orbit-artstudio {
+.orbit-covers-scrim { position: absolute; inset: 0; border: 0; background: #04030ac4; backdrop-filter: blur(6px); }
+.orbit-covers {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(100%, 76rem);
-  max-height: 100%;
+  width: min(100%, 80rem);
+  height: min(100%, 54rem);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--c-text) 12%, var(--c-border));
   border-radius: 16px;
   background: var(--c-panel);
   box-shadow: 0 40px 90px -40px #000;
-  animation: artstudio-in .2s cubic-bezier(.2,.8,.2,1) both;
+  animation: covers-in .2s cubic-bezier(.2,.8,.2,1) both;
 }
-@keyframes artstudio-in {
+@keyframes covers-in {
   from { opacity: 0; transform: translate3d(0, 10px, 0) scale(.995); }
   to { opacity: 1; transform: none; }
 }
-@media (prefers-reduced-motion: reduce) { .orbit-artstudio { animation: none; } }
-.orbit-artstudio-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 16px 10px; }
-.orbit-artstudio-kicker {
+@media (prefers-reduced-motion: reduce) { .orbit-covers { animation: none; } }
+
+.orbit-covers-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 16px 10px; }
+.orbit-covers-kicker {
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: .16em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--c-accent) 85%, var(--c-text));
 }
-.orbit-artstudio-title { margin-top: 2px; font-size: 16px; font-weight: 720; letter-spacing: -.01em; color: var(--c-text); }
-.orbit-artstudio-x { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--c-muted); }
-.orbit-artstudio-x:hover { background: var(--c-panel2); color: var(--c-text); }
-.orbit-artstudio-bar { display: flex; gap: 8px; padding: 0 16px 12px; border-bottom: 1px solid var(--c-border); }
-.orbit-artstudio-search {
+.orbit-covers-title { margin-top: 2px; font-size: 16px; font-weight: 720; letter-spacing: -.01em; color: var(--c-text); }
+.orbit-covers-x { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--c-muted); }
+.orbit-covers-x:hover { background: var(--c-panel2); color: var(--c-text); }
+
+.orbit-covers-body { display: grid; grid-template-columns: 17rem minmax(0, 1fr); flex: 1; min-height: 0; }
+
+/* --- the slots ----------------------------------------------------------- */
+.orbit-covers-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 0 12px 14px;
+  overflow-y: auto;
+  border-right: 1px solid var(--c-border);
+  background: color-mix(in srgb, var(--c-bg) 55%, transparent);
+  scrollbar-width: thin;
+}
+.orbit-covers-slot {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 11px;
+  background: var(--c-panel2);
+  text-align: left;
+  transition: border-color .14s ease, background .14s ease;
+}
+.orbit-covers-slot:hover { border-color: color-mix(in srgb, var(--c-text) 24%, var(--c-border)); }
+.orbit-covers-slot.is-on {
+  border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 10%, var(--c-panel2));
+}
+.orbit-covers-slot-frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  border-radius: 7px;
+  background: #050507;
+  color: var(--c-muted);
+  font-size: 9.5px;
+}
+.orbit-covers-slot-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-covers-slot-frame.is-portrait { width: 64px; height: 96px; }
+.orbit-covers-slot-frame.is-wide { width: 64px; height: 36px; align-self: start; }
+.orbit-covers-slot-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.orbit-covers-slot-copy b { font-size: 12px; font-weight: 680; color: var(--c-text); }
+.orbit-covers-slot-copy i { font-style: normal; font-size: 10.5px; line-height: 1.4; color: var(--c-muted); }
+.orbit-covers-slot-actions { margin-top: auto; padding-top: 4px; }
+.orbit-covers-file {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 18%, transparent);
+  border-radius: 9px;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 620;
+}
+.orbit-covers-file:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
+
+/* --- what was found ------------------------------------------------------ */
+.orbit-covers-found { display: flex; flex-direction: column; min-height: 0; }
+.orbit-covers-bar { display: flex; gap: 8px; padding: 0 14px 10px; }
+.orbit-covers-search {
   display: flex;
   flex: 1;
   align-items: center;
@@ -8673,8 +8854,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   background: var(--c-bg);
   color: var(--c-muted);
 }
-.orbit-artstudio-search:focus-within { border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border)); }
-.orbit-artstudio-search input {
+.orbit-covers-search:focus-within { border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border)); }
+.orbit-covers-search input {
   flex: 1;
   min-width: 0;
   padding: 9px 0;
@@ -8684,7 +8865,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   font-size: 12.5px;
   outline: none;
 }
-.orbit-artstudio-find {
+.orbit-covers-find {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -8696,76 +8877,53 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   font-size: 12px;
   font-weight: 650;
 }
-.orbit-artstudio-find:hover { background: color-mix(in srgb, var(--c-accent) 24%, var(--c-panel)); }
-.orbit-artstudio-find:disabled { opacity: .6; cursor: default; }
-.orbit-artstudio-body { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 0; flex: 1; }
-.orbit-artstudio-now {
+.orbit-covers-find:hover { background: color-mix(in srgb, var(--c-accent) 24%, var(--c-panel)); }
+.orbit-covers-find:disabled { opacity: .6; cursor: default; }
+
+.orbit-covers-results {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 16px;
-  border-right: 1px solid var(--c-border);
-  background: color-mix(in srgb, var(--c-bg) 60%, transparent);
-}
-.orbit-artstudio-label { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--c-muted); }
-.orbit-artstudio-frame {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--c-text) 14%, var(--c-border));
-  border-radius: 9px;
-  background: #050507;
-  color: var(--c-muted);
-  font-size: 11px;
-}
-.orbit-artstudio-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-artstudio-frame.is-portrait { aspect-ratio: 2 / 3; }
-.orbit-artstudio-frame.is-wide { aspect-ratio: 16 / 9; }
-.orbit-artstudio-file {
-  padding: 7px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 620;
-  text-align: center;
-}
-.orbit-artstudio-file:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border)); }
-.orbit-artstudio-results {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   min-height: 0;
-  padding: 14px 16px 18px;
+  flex: 1;
+  padding: 10px 14px 16px;
   overflow-y: auto;
   scrollbar-width: thin;
 }
-.orbit-artstudio-sources { display: flex; flex-wrap: wrap; gap: 6px; }
-.orbit-artstudio-sources button {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border: 1px solid var(--c-border);
-  border-radius: 999px;
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 620;
-}
-.orbit-artstudio-sources button span {
-  padding: 0 5px;
+.orbit-covers-results-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.orbit-covers-results-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 11.5px; font-weight: 660; color: var(--c-text); }
+.orbit-covers-results-title span {
+  padding: 0 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--c-text) 9%, transparent);
   font-size: 10px;
+  color: var(--c-muted);
+}
+.orbit-covers-sources { display: flex; flex-wrap: wrap; gap: 5px; }
+.orbit-covers-sources button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  color: var(--c-muted);
+  font-size: 10.5px;
+  font-weight: 620;
+}
+.orbit-covers-sources button span {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 9%, transparent);
+  font-size: 9.5px;
   font-variant-numeric: tabular-nums;
 }
-.orbit-artstudio-sources button[aria-pressed='true'] {
+.orbit-covers-sources button[aria-pressed='true'] {
   border-color: color-mix(in srgb, var(--c-accent) 52%, var(--c-border));
   background: color-mix(in srgb, var(--c-accent) 13%, transparent);
   color: var(--c-text);
 }
-.orbit-artstudio-idle {
+.orbit-covers-idle {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -8777,17 +8935,17 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   font-size: 12px;
   line-height: 1.5;
 }
-.orbit-artstudio-error { margin: 0; color: #ff9aa2; font-size: 12px; }
-.orbit-artstudio-grid {
+.orbit-covers-error { margin: 0; color: #ff9aa2; font-size: 12px; }
+.orbit-covers-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(106px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.orbit-artstudio-grid.is-wide { grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); }
-.orbit-artstudio-tile {
+.orbit-covers-grid.is-wide { grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); }
+.orbit-covers-tile {
   position: relative;
   display: block;
   width: 100%;
@@ -8797,12 +8955,12 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   background: #050507;
   transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
 }
-.orbit-artstudio-tile.is-portrait { aspect-ratio: 2 / 3; }
-.orbit-artstudio-tile.is-wide { aspect-ratio: 16 / 9; }
-.orbit-artstudio-tile img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-artstudio-tile:hover { border-color: color-mix(in srgb, var(--c-accent) 70%, transparent); transform: translateY(-2px); box-shadow: 0 10px 24px -16px #000; }
-.orbit-artstudio-tile.is-chosen { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent); }
-.orbit-artstudio-mark {
+.orbit-covers-tile.is-portrait { aspect-ratio: 2 / 3; }
+.orbit-covers-tile.is-wide { aspect-ratio: 16 / 9; }
+.orbit-covers-tile img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-covers-tile:hover { border-color: color-mix(in srgb, var(--c-accent) 70%, transparent); transform: translateY(-2px); box-shadow: 0 10px 24px -16px #000; }
+.orbit-covers-tile.is-chosen { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent); }
+.orbit-covers-mark {
   position: absolute;
   inset: 5px auto auto 5px;
   padding: 1px 6px;
@@ -8814,7 +8972,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.orbit-artstudio-from {
+.orbit-covers-from {
   position: absolute;
   inset: auto 5px 5px auto;
   padding: 1px 6px;
@@ -8824,7 +8982,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   font-size: 9px;
   font-weight: 650;
 }
-.orbit-artstudio-tick {
+.orbit-covers-tick {
   position: absolute;
   inset: 5px 5px auto auto;
   display: grid;
@@ -8835,7 +8993,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   background: var(--c-accent);
   color: var(--c-on-accent, #08070d);
 }
-.orbit-artstudio-caption {
+.orbit-covers-caption {
   margin: 5px 0 0;
   overflow: hidden;
   color: var(--c-muted);
@@ -8843,22 +9001,26 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.orbit-artstudio-more { display: flex; justify-content: center; padding-top: 4px; }
-.orbit-artstudio-more button {
+.orbit-covers-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: auto; padding-top: 6px; }
+.orbit-covers-foot button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 16px;
+  padding: 7px 14px;
   border: 1px solid var(--c-border);
-  border-radius: 9px;
+  border-radius: 999px;
   color: var(--c-text);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 620;
 }
-.orbit-artstudio-more button:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
-.orbit-artstudio-more button:disabled { opacity: .6; cursor: default; }
+.orbit-covers-foot button:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
+.orbit-covers-foot button:disabled { opacity: .6; cursor: default; }
+.orbit-covers-lede { font-size: 10.5px; color: var(--c-muted); }
+
 @media (max-width: 860px) {
-  .orbit-artstudio-body { grid-template-columns: minmax(0, 1fr); }
-  .orbit-artstudio-now { flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--c-border); }
-  .orbit-artstudio-frame { width: 96px; flex: none; }
+  .orbit-covers-body { grid-template-columns: minmax(0, 1fr); }
+  .orbit-covers-slots { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--c-border); }
+  .orbit-covers-slot { grid-template-columns: 48px minmax(0, 1fr); min-width: 15rem; }
+  .orbit-covers-slot-frame.is-portrait { width: 48px; height: 72px; }
+  .orbit-covers-slot-actions { display: none; }
 }
