@@ -35,12 +35,12 @@ check('the Play arrow offers named launches beside the tools, by name',
 check('the Play arrow offers saved companions and routes selected tracked utilities into a session',
   gameDetail.includes('aria-label="More launch options"') && gameDetail.includes('onRunCompanion?.(index)') && lib.includes('fn start_game_companion(') && lib.includes('companion.counts_as_playing') && session.includes('pub fn start_action('));
 check('Edit Game exposes Proton on its own Linux-only page',
-  edit.includes("desktopOs() === 'linux' && !hideLaunchSettings") && edit.includes("label: 'Proton'") && edit.includes('Proton for this game') && edit.includes('<WineSettings'));
+  edit.includes("desktopOs() === 'linux' && !hideLaunchSettings") && edit.includes("label: 'Proton'") && edit.includes('<WineSettings'));
 check('ReShade is one switch, with the proxy guessed from the game and the original kept',
   edit.includes('Use ReShade with this game') && native.includes('setReshade') && lib.includes('fn reshade_state(') && lib.includes('fn reshade_set(') &&
     reshadeMod.includes('fn guess_proxies(') && reshadeMod.includes('fn pe_imports(') && reshadeMod.includes('.orbit-original') && reshadeMod.includes('RESHADE_VERSION'));
 check('wide backdrop picker requests broad artwork and uses the generalized wide presentation',
   edit.includes('findBackdropArtwork(game.id)') && native.includes("'artwork_backdrops'") && portrait.includes("shape === 'wide'") &&
-    picker.includes("shape: ArtShape") && picker.includes('is-wide'));
+    picker.includes('shape: ArtShape') && picker.includes("'is-wide'"));
 
 (globalThis).__orbitFailures = ((globalThis).__orbitFailures ?? 0) + failures;

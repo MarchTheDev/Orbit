@@ -37,7 +37,12 @@ check('A maximized window comes back to the desk area rather than through maximi
   // Asking a frameless window to maximize can place it over the whole screen,
   // taskbar and all; laying it out inside the monitor's work area cannot.
   tvService.includes('await window.maximize()') === false &&
-    /if \(bounds\.maximized\) \{\n\s+\/\/[\s\S]{0,600}?await window\.setSize\(new PhysicalSize\(bounds\.width, bounds\.height\)\)/.test(tvService));
+    tvService.includes('await settleInside(window, bounds, area)') &&
+    tvService.includes('await window.setSize(new PhysicalSize(want.width, want.height))'));
 check('And it puts the window back inside the monitor work area, so the bottom edge stays above the taskbar',
-  tvService.includes('workArea()') && tvService.includes('monitor.workArea') && tvService.includes('area.y + area.height') && tvService.includes('Math.min(bounds.height, area.height)'));
+  tvService.includes('workArea()') && tvService.includes('monitor.workArea') && tvService.includes('limit.y + limit.height') && tvService.includes('Math.min(target.height, limit.height)'));
+check('The restore is measured and repeated, because the compositor re-applies the frame after one pair of calls',
+  /for \(let attempt = 0; attempt < 6; attempt \+= 1\)/.test(tvService) &&
+    tvService.includes('await window.isMaximized().catch(() => false)') &&
+    tvService.includes('Math.abs(size.height - want.height) <= 2'));
 (globalThis).__orbitFailures = ((globalThis.__orbitFailures ?? 0) + failures);

@@ -250,15 +250,16 @@ const editor = readFileSync(
   'utf8',
 );
 check('every column in the switch grid can shrink below its text',
-  wine.includes('[&>*]:min-w-0') && (wine.match(/\[&>\*\]:min-w-0/g) ?? []).length === 2);
+  wine.includes('orbit-proton-tweaks') && wine.includes('orbit-proton-selects') &&
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-proton-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));'));
 check('the fields themselves are allowed to be narrower than their hint',
-  (wine.match(/<label className="block min-w-0"/g) ?? []).length >= 4);
+  (wine.match(/<label className="orbit-proton-field"/g) ?? []).length >= 4);
 check('an environment row shares its width instead of overflowing',
   wine.includes('flex min-w-0 items-center gap-1.5') &&
     (wine.match(/min-w-0 flex-1/g) ?? []).length >= 2 &&
     wine.includes('shrink-0 px-2 py-1.5'));
 check('the path fields in the launch editor can shrink too',
-  editor.includes('orbit-launchfield-row') &&
-    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-launchfield-row {\n  display: flex;\n  min-width: 0;'));
+  editor.includes('orbit-launchrow-control') &&
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-launchrow-control { display: flex; min-width: 0;'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

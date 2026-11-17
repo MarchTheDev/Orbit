@@ -17,7 +17,7 @@ import type { ProtonBuild, WineTweaks } from '../../types';
 import { isNative, protonBuilds } from '../../services/native';
 import { Checkbox } from '../ui/Checkbox';
 import { Select } from '../ui/Select';
-import { btnBrowse, btnGhost, inputCls, labelCls } from '../ui/Modal';
+import { btnGhost, inputCls } from '../ui/Modal';
 import { ProtonManager } from './ProtonManager';
 
 const BLANK: WineTweaks = {
@@ -88,46 +88,38 @@ export function WineSettings({
   const setEnv = (next: { key: string; value: string }[]) => change({ env: next });
 
   return (
-    <div className="space-y-3 border-t border-line pt-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="block min-w-[12rem] flex-1 basis-56">
-          <span className={labelCls}>Proton</span>
+    <div className="orbit-proton">
+      <div className="orbit-row">
+        <span className="orbit-row-label">Proton</span>
+        <div className="orbit-row-control">
+          
           <Select
             value={proton ?? ''}
             onChange={(v) => onProton(v || null)}
             options={options}
             ariaLabel="Proton build"
           />
-        </label>
-        <button
-          type="button"
-          className={`${btnBrowse} flex items-center gap-2`}
-          onClick={() => setManager(true)}
-          disabled={!native}
-          title={native ? 'Fetch a Proton-GE build' : 'Only the desktop app can fetch builds'}
-        >
-          <Download className="size-4" />
-          Get Proton-GE…
-        </button>
+          <button
+            type="button"
+            className="orbit-edit-action"
+            onClick={() => setManager(true)}
+            disabled={!native}
+            title={native ? 'Fetch a Proton-GE build' : 'Only the desktop app can fetch builds'}
+          >
+            <Download className="size-3.5" />
+            Get Proton-GE
+          </button>
+        </div>
       </div>
-      <p className="text-xs text-muted">
+      <p className="orbit-edit-hint">
         {loading
           ? 'Looking for Proton builds…'
-          : `${builds.length} build${builds.length === 1 ? '' : 's'} found on this machine. ` +
-            (proton
-              ? 'This game runs through the one above, the way Steam runs it.'
-              : 'Pick one to run this game through Proton, or leave it on Wine.')}
+          : `${builds.length} build${builds.length === 1 ? '' : 's'} on this machine. ` +
+            (proton ? 'This game runs through the one above.' : 'Leave it empty to use Wine.')}
       </p>
 
       <div>
-        <h4 className="mb-2 mt-1 text-sm font-semibold">Tweaks</h4>
-        <p className="mb-2 text-xs text-muted">
-          For the game that needs a hand: a pad it will not see, a stutter the
-          default profile leaves in. Unchecked means Orbit writes nothing and the
-          game sees what your machine normally gives it.
-        </p>
-
-        <div className="grid grid-cols-1 gap-2 [&>*]:min-w-0 sm:grid-cols-2">
+        <div className="orbit-proton-tweaks">
           <Checkbox
             checked={t.mangohud}
             onChange={(v) => change({ mangohud: v })}
@@ -160,9 +152,9 @@ export function WineSettings({
           />
         </div>
 
-        <div className="mt-2 grid grid-cols-1 gap-2 [&>*]:min-w-0 sm:grid-cols-2">
-          <label className="block min-w-0">
-            <span className={labelCls}>fsync</span>
+        <div className="orbit-proton-selects">
+          <label className="orbit-proton-field">
+            <span className="orbit-row-label">fsync</span>
             <Select
               value={triTo(t.fsync)}
               onChange={(v) => change({ fsync: triFrom(v) })}
@@ -174,8 +166,8 @@ export function WineSettings({
               ariaLabel="fsync"
             />
           </label>
-          <label className="block min-w-0">
-            <span className={labelCls}>esync</span>
+          <label className="orbit-proton-field">
+            <span className="orbit-row-label">esync</span>
             <Select
               value={triTo(t.esync)}
               onChange={(v) => change({ esync: triFrom(v) })}
@@ -187,8 +179,8 @@ export function WineSettings({
               ariaLabel="esync"
             />
           </label>
-          <label className="block min-w-0">
-            <span className={labelCls}>HUD contents</span>
+          <label className="orbit-proton-field">
+            <span className="orbit-row-label">HUD contents</span>
             <input
               className={inputCls}
               value={t.hud}
@@ -197,8 +189,8 @@ export function WineSettings({
               spellCheck={false}
             />
           </label>
-          <label className="block min-w-0">
-            <span className={labelCls}>Game ID for umu</span>
+          <label className="orbit-proton-field">
+            <span className="orbit-row-label">Game ID for umu</span>
             <input
               className={inputCls}
               value={t.gameid}
@@ -207,8 +199,8 @@ export function WineSettings({
               spellCheck={false}
             />
           </label>
-          <label className="block min-w-0 sm:col-span-2">
-            <span className={labelCls}>DLL overrides</span>
+          <label className="orbit-proton-field is-span-2">
+            <span className="orbit-row-label">DLL overrides</span>
             <input
               className={inputCls}
               value={t.dllOverrides}
@@ -219,11 +211,9 @@ export function WineSettings({
           </label>
         </div>
 
-        <div className="mt-3">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs uppercase tracking-widest text-muted">
-              Environment for this game
-            </span>
+        <div className="orbit-proton-env">
+          <div className="orbit-proton-envhead">
+            <span className="orbit-row-label">Environment</span>
             <button
               type="button"
               className="flex items-center gap-1 text-xs text-muted hover:text-accent"

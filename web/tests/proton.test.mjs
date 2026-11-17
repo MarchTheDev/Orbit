@@ -105,7 +105,7 @@ check('the separate Proton page exposes the build and compatibility switches for
     editorTs.includes('onProton=') && editorTs.includes('onTweaks='));
 check('Launch stays focused on the executable while Proton has its own edit page',
   !launchEditorTs.includes('buildName(t.proton)') && !launchEditorTs.includes('WineSettings') &&
-    editorTs.includes('Proton for this game'));
+    editorTs.includes("label: 'Proton'") && editorTs.includes('<WineSettings'));
 check('the folder name is what a path means, on either slash',
   buildName('/home/me/.local/share/Steam/compatibilitytools.d/GE-Proton9-20') ===
     'GE-Proton9-20' && buildName('C:\\Orbit\\runners\\proton\\GE-Proton10-3') === 'GE-Proton10-3');
@@ -122,7 +122,7 @@ const drawn = renderToStaticMarkup(
   }),
 );
 check('a game that has never been set up still draws',
-  drawn.includes('Wine on this machine') && drawn.includes('Tweaks'));
+  drawn.includes('Wine on this machine') && drawn.includes('MangoHud') && drawn.includes('orbit-proton-tweaks'));
 check('a missing set of switches reads as everything off',
   (drawn.match(/type="checkbox"/g) ?? []).length === 5 &&
     !/\schecked=""/.test(drawn) &&

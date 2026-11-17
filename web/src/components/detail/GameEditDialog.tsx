@@ -26,16 +26,13 @@ export function GameEditDialog({
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
   /** Open on one page, for the development preview. */
-  startOn?: 'details' | 'launch' | 'tools' | 'saves' | 'proton';
+  startOn?: 'details' | 'launch' | 'artwork' | 'tools' | 'saves' | 'proton';
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   return (
     <>
     <Modal
       title={`Edit ${game.title}`}
-      subtitle={hideLaunchSettings
-        ? "Edit this game's details. Closing this keeps the changes."
-        : "All of this game's details and launch settings, together. Closing this keeps the changes."}
       size="xl"
       onClose={onClose}
       footer={onRemoveFromBacklog ? (

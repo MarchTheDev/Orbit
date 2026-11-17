@@ -1476,7 +1476,7 @@ export function TvMode({
         </div>
       )}
 
-      <main className="relative z-10 flex min-h-0 flex-1 flex-col">
+      <main className="orbit-tv-stage relative z-10 flex min-h-0 flex-1 flex-col">
         {detailed ? (
           <TvDetails
             game={detailed}
@@ -1517,13 +1517,10 @@ export function TvMode({
                   <p className="orbit-tv-library-kicker">Your collection</p>
                   <h1>Library</h1>
                 </div>
-                <div className="orbit-tv-library-facts">
-                  <p>
-                    <b>{list.length}</b>
-                    {list.length === 1 ? ' game' : ' games'}
-                  </p>
-                  <p className="orbit-tv-library-hint">Pick one to look at, press it again to play.</p>
-                </div>
+                <p className="orbit-tv-library-count">
+                  <b>{list.length}</b>
+                  {list.length === 1 ? ' game' : ' games'}
+                </p>
               </header>
               <div className="orbit-tv-library-grid">
                 {list.map((game, n) => (

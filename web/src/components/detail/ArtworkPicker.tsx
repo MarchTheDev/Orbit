@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ImageOff, LoaderCircle, Plus, Search, Sparkles } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, ImageOff, LoaderCircle, Plus, Search, Sparkles, X } from 'lucide-react';
 import type { ArtworkFound, ArtworkPick } from '../../services/native';
 import { cn } from '../../utils/cn';
 
@@ -7,105 +8,76 @@ import { cn } from '../../utils/cn';
  * The shapes a game's art comes in.
  *
  * These are the frames the game is actually drawn in: a tall poster on a
- * library tile, a wide picture behind Stardeck, a square icon for a console
- * grid. Each one is fetched and offered on its own, because the best picture of
- * a game is a different picture in each shape - and picking a wide hero for a
- * tall slot used to crop whatever was in the middle of it.
+ * library tile, a wide picture behind Stardeck. Each is fetched and offered on
+ * its own, because the best picture of a game is a different picture in each
+ * shape - and a wide hero picked for a tall slot crops whatever was in the
+ * middle of it.
  */
-export type ArtShape = 'portrait' | 'wide' | 'square';
+export type ArtShape = 'portrait' | 'wide';
 
-/** What the two slots are for, in the words the page uses. */
-export const ART_SLOTS: { id: ArtShape; title: string; hint: string }[] = [
-  { id: 'portrait', title: 'Cover', hint: 'The poster on library tiles and in the deck.' },
-  { id: 'wide', title: 'Backdrop', hint: 'The picture behind the game in Stardeck.' },
-];
+/** One picture a source found, with where it came from. */
+type Found = ArtworkPick & { source: string };
 
-/** How wide a tile asks to be drawn, per shape, so the grid stays even. */
-const SHAPE_TILE: Record<ArtShape, string> = {
-  portrait: 'orbit-arttile is-portrait',
-  wide: 'orbit-arttile is-wide',
-  square: 'orbit-arttile is-square',
+const SOURCE_MARK: Record<string, string> = {
+  Steam: 'store',
+  SteamGridDB: 'community',
+  Web: 'web',
+  Library: 'here',
 };
 
 /**
- * One picture a source found.
+ * The artwork search, in a room of its own.
  *
- * The same shape as Heronite's: the source it came from, and the region when a
- * source knows one. A player looking at six near-identical covers is helped by
- * "SteamGridDB" and "web" more than by anything else on the tile, because it
- * tells them which of the two is the store's own art.
+ * Heronite's version is a dialog for a reason, and the reason is the one thing
+ * a page of thumbnails inside a form cannot do: give the pictures the whole
+ * width. A 90 px tile in a column beside a summary is not a picture anyone can
+ * judge - the crop, the logo, the region, the noise - and judging them is the
+ * entire job. So the page shows what the game has now, and a search opens this:
+ *
+ * - **The current picture, at size, first**, in the shape it will be drawn in,
+ *   so a replacement is always a comparison rather than a memory.
+ * - **One source at a time, with counts.** The store's own art, SteamGridDB and
+ *   the web are different rooms in the same gallery; the counts say where the
+ *   pictures are before a click is spent finding out.
+ * - **A name to search under.** The art for a game is often filed under a
+ *   shorter title, or under the sequel's - so the field starts with this game's
+ *   name and can be told otherwise without renaming anything.
+ * - **A page at a time**, with "Load more" as a second ask rather than a slower
+ *   first one.
+ *
+ * Choosing a picture hands its URL back and saves it there. Escape closes
+ * without choosing, which is also the only way to change your mind.
  */
-type Found = ArtworkPick & { source: string };
-
-/**
- * Covers and backdrops, found rather than guessed at.
- *
- * This is the shape Heronite uses, and it is the one that makes a page of
- * artwork usable:
- *
- * - **A slot per shape.** The page shows what the game has now, then the
- *   pictures found for that shape. A cover choice never lands in the backdrop
- *   slot.
- * - **Every source at once, labelled.** The store's own picture, SteamGridDB
- *   when a key is set, and the web as a last resort. Each tile says where it
- *   came from, so a choice is a choice between pictures and not between
- *   invisible sources.
- * - **A page at a time.** Nothing is fetched until the player asks for it, and
- *   "Show more" is a second ask rather than a slower first one.
- * - **Search by name.** The art for a game is often under a shorter title, or
- *   under its sequel's name; the field is there to say so without renaming the
- *   game.
- *
- * Choosing one writes it into the game at once. Everything here is a picture,
- * and a picture that has been picked is the player's decision.
- */
-export function ArtworkPicker({
+export function ArtworkSearch({
   shape,
   title,
-  load,
   current,
+  load,
   onChoose,
-  onReset,
-  canReset,
+  onClose,
   onUseFile,
 }: {
   shape: ArtShape;
-  /** The game's name, as the search field starts. */
   title: string;
-  /** Finds one more page for this shape and this search text. */
-  load: (query: string, page: number) => Promise<ArtworkFound>;
-  /** What the game shows now, if anything. */
   current: string | null;
+  load: (query: string, page: number) => Promise<ArtworkFound>;
   onChoose: (url: string, source: string) => void;
-  /** Back to whatever the library would draw on its own. */
-  onReset: () => void;
-  canReset: boolean;
-  /** A picture on this machine, which no search can find. */
+  onClose: () => void;
+  /** A picture from this machine, which no search can find. */
   onUseFile?: () => void;
 }) {
+  const what = shape === 'portrait' ? 'cover' : 'backdrop';
   const [query, setQuery] = useState(title);
+  const [searched, setQuerySearched] = useState(title);
   const [picks, setPicks] = useState<Found[]>([]);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false);
-  /** Which sources found something, for the filter row. */
+  const [started, setStarted] = useState(false);
   const [source, setSource] = useState<string | null>(null);
   const run = useRef(0);
-
-  // A different game, or a different title, starts over: the pictures found for
-  // one game are never offered for another.
-  useEffect(() => {
-    run.current += 1;
-    setQuery(title);
-    setPicks([]);
-    setPage(0);
-    setHasMore(false);
-    setSearched(false);
-    setError(null);
-    setSource(null);
-  }, [title, shape]);
+  const field = useRef<HTMLInputElement>(null);
 
   const fetchPage = useCallback(
     async (nextPage: number, text: string, replace: boolean) => {
@@ -131,7 +103,8 @@ export function ArtworkPicker({
         });
         setPage(nextPage);
         setHasMore(incoming.length > 0);
-        setSearched(true);
+        setSource(null);
+        setStarted(true);
       } catch (cause) {
         if (token === run.current) setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -141,117 +114,174 @@ export function ArtworkPicker({
     [load],
   );
 
-  const sources = Array.from(new Set(picks.map((pick) => pick.source)));
+  // The search runs on open. A dialog that opens on an empty box and a button
+  // is asking for a decision before it has shown anything to decide between.
+  useEffect(() => {
+    void fetchPage(0, title, true);
+  }, [fetchPage, title]);
+
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const counts = new Map<string, number>();
+  for (const pick of picks) counts.set(pick.source, (counts.get(pick.source) ?? 0) + 1);
   const shown = source ? picks.filter((pick) => pick.source === source) : picks;
 
-  return (
-    <div className="orbit-artpicker">
-      <div className="orbit-artpicker-bar">
-        <label className="orbit-artpicker-search">
-          <Search className="size-3.5" aria-hidden />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              event.preventDefault();
-              void fetchPage(0, query.trim() || title, true);
+  return createPortal(
+    <div
+      className="orbit-artstudio-wrap"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Find a ${what} for ${title}`}
+    >
+      <button type="button" tabIndex={-1} aria-label={`Close the ${what} search`} className="orbit-artstudio-scrim" onClick={onClose} />
+
+      <div className="orbit-artstudio">
+        <header className="orbit-artstudio-head">
+          <div className="min-w-0">
+            <p className="orbit-artstudio-kicker">{shape === 'portrait' ? 'Cover art' : 'Wide backdrop'}</p>
+            <h2 className="orbit-artstudio-title">{title}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="orbit-artstudio-x">
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div className="orbit-artstudio-bar">
+          <label className="orbit-artstudio-search">
+            <Search className="size-4" aria-hidden />
+            <input
+              ref={field}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                const text = query.trim() || title;
+                setQuerySearched(text);
+                void fetchPage(0, text, true);
+              }}
+              placeholder={`Search ${shape === 'portrait' ? 'covers' : 'pictures'} by name`}
+              aria-label={`Search name for ${what} art`}
+              spellCheck={false}
+            />
+          </label>
+          <button
+            type="button"
+            className="orbit-artstudio-find"
+            disabled={busy}
+            onClick={() => {
+              const text = query.trim() || title;
+              setQuerySearched(text);
+              void fetchPage(0, text, true);
             }}
-            placeholder={`Search ${shape === 'portrait' ? 'covers' : 'pictures'} for ${title}`}
-            aria-label="Search for artwork by name"
-            spellCheck={false}
-          />
-        </label>
-        <button
-          type="button"
-          className="orbit-artpicker-find"
-          disabled={busy}
-          onClick={() => void fetchPage(0, query.trim() || title, true)}
-        >
-          {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-          {searched ? 'Search again' : 'Find artwork'}
-        </button>
-      </div>
-
-      {sources.length > 1 && (
-        <div className="orbit-artpicker-sources" role="group" aria-label="Sources">
-          <button type="button" aria-pressed={source === null} onClick={() => setSource(null)}>
-            Every source
-            <span>{picks.length}</span>
+          >
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            Search
           </button>
-          {sources.map((id) => (
-            <button key={id} type="button" aria-pressed={source === id} onClick={() => setSource(id)}>
-              {id}
-              <span>{picks.filter((pick) => pick.source === id).length}</span>
-            </button>
-          ))}
         </div>
-      )}
 
-      {error && <p role="alert" className="orbit-artpicker-error">{error}</p>}
+        <div className="orbit-artstudio-body">
+          {/* What the game shows now, at the size it is shown at. Kept on the
+              left for the whole visit, so every picture on the right is read
+              against it. */}
+          <aside className="orbit-artstudio-now">
+            <p className="orbit-artstudio-label">Showing now</p>
+            <div className={cn('orbit-artstudio-frame', shape === 'wide' ? 'is-wide' : 'is-portrait')}>
+              {current ? <img src={current} alt="" /> : <span>{shape === 'wide' ? 'No backdrop yet' : 'No cover yet'}</span>}
+            </div>
+            {onUseFile && (
+              <button type="button" className="orbit-artstudio-file" onClick={onUseFile}>
+                A file from this machine…
+              </button>
+            )}
+          </aside>
 
-      {!searched && !busy && (
-        <p className="orbit-artpicker-idle">
-          {shape === 'portrait'
-            ? 'Find a cover from the store, SteamGridDB and the web, or choose a picture from this machine.'
-            : 'Find a wide picture for Stardeck, or choose one from this machine.'}
-        </p>
-      )}
-
-      {searched && shown.length === 0 && !busy && (
-        <p className="orbit-artpicker-empty">
-          <ImageOff className="size-4" />
-          Nothing was found under “{query.trim() || title}”. A shorter name, or the game's other title, often finds it.
-        </p>
-      )}
-
-      {shown.length > 0 && (
-        <ul className={cn('orbit-artpicker-grid', shape === 'portrait' && 'is-portrait')}>
-          {shown.map((pick) => {
-            const chosen = current === pick.url;
-            return (
-              <li key={pick.url}>
-                <button
-                  type="button"
-                  className={cn(SHAPE_TILE[shape], chosen && 'is-chosen')}
-                  aria-pressed={chosen}
-                  title={`${pick.label} · ${pick.source}`}
-                  onClick={() => onChoose(pick.url, pick.source)}
-                >
-                  <img src={pick.url} alt={pick.label} loading="lazy" draggable={false} />
-                  <span className="orbit-arttile-source">{pick.source}</span>
-                  {chosen && (
-                    <span className="orbit-arttile-chosen">
-                      <Check className="size-3.5" />
-                    </span>
-                  )}
+          <div className="orbit-artstudio-results">
+            {picks.length > 0 && (
+              <div className="orbit-artstudio-sources" role="group" aria-label="Where the pictures came from">
+                <button type="button" aria-pressed={source === null} onClick={() => setSource(null)}>
+                  All sources<span>{picks.length}</span>
                 </button>
-                <p className="orbit-arttile-label">{pick.label}</p>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                {[...counts.entries()].map(([id, n]) => (
+                  <button key={id} type="button" aria-pressed={source === id} onClick={() => setSource(id)}>
+                    {id}<span>{n}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-      <div className="orbit-artpicker-foot">
-        {hasMore && (
-          <button type="button" className="orbit-artpicker-more" disabled={busy} onClick={() => void fetchPage(page + 1, query.trim() || title, false)}>
-            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            Show more
-          </button>
-        )}
-        {onUseFile && (
-          <button type="button" className="orbit-artpicker-more" onClick={onUseFile}>
-            Choose a file…
-          </button>
-        )}
-        {canReset && (
-          <button type="button" className="orbit-artpicker-reset" onClick={onReset}>
-            Use the library's own
-          </button>
-        )}
+            {error && <p role="alert" className="orbit-artstudio-error">{error}</p>}
+
+            {!started && busy && (
+              <p className="orbit-artstudio-idle">
+                <LoaderCircle className="size-4 animate-spin" />
+                Looking for {what} art under “{query.trim() || title}”…
+              </p>
+            )}
+
+            {started && shown.length === 0 && !busy && (
+              <p className="orbit-artstudio-idle">
+                <ImageOff className="size-4" />
+                Nothing came back for “{searched}”. A shorter name, or the name the store uses, usually finds it.
+              </p>
+            )}
+
+            {shown.length > 0 && (
+              <ul className={cn('orbit-artstudio-grid', shape === 'wide' && 'is-wide')}>
+                {shown.map((pick) => {
+                  const chosen = current === pick.url;
+                  return (
+                    <li key={pick.url}>
+                      <button
+                        type="button"
+                        className={cn('orbit-artstudio-tile', shape === 'wide' ? 'is-wide' : 'is-portrait', chosen && 'is-chosen')}
+                        aria-pressed={chosen}
+                        title={`${pick.label} · ${pick.source}`}
+                        onClick={() => onChoose(pick.url, pick.source)}
+                      >
+                        <img src={pick.url} alt={pick.label} loading="lazy" draggable={false} />
+                        <span className="orbit-artstudio-mark">{SOURCE_MARK[pick.source] ?? 'found'}</span>
+                        <span className="orbit-artstudio-from">{pick.source}</span>
+                        {chosen && (
+                          <span className="orbit-artstudio-tick">
+                            <Check className="size-3.5" />
+                          </span>
+                        )}
+                      </button>
+                      <p className="orbit-artstudio-caption">{pick.label}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {hasMore && (
+              <div className="orbit-artstudio-more">
+                <button type="button" disabled={busy} onClick={() => void fetchPage(page + 1, searched, false)}>
+                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                  Load more
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -259,13 +289,12 @@ export function ArtworkPicker({
  * Which source a picture came from, from what the backend says about it.
  *
  * The backend labels a picture by what it is ("SteamGridDB hero", "Steam
- * capsule", "Web image"); this turns that into the short name a tile can carry.
+ * capsule", "Web image"); this turns that into the short name a tile carries.
  */
 function sourceOf(kind: string, label: string): string {
   const text = `${kind} ${label}`.toLowerCase();
-  if (text.includes('steamgriddb') || text.includes('sgdb')) return 'SteamGridDB';
-  if (text.includes('bonker') || text.includes('cloudflare')) return 'SteamGridDB';
+  if (text.includes('steamgriddb') || text.includes('sgdb') || text.includes('bonker')) return 'SteamGridDB';
   if (text.includes('web')) return 'Web';
-  if (text.includes('steam') || kind === 'portrait' || kind === 'hero' || kind === 'header' || kind === 'capsule') return 'Steam';
+  if (text.includes('steam') || ['portrait', 'hero', 'header', 'capsule'].includes(kind)) return 'Steam';
   return 'Library';
 }

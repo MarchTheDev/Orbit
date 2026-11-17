@@ -1821,8 +1821,11 @@ html.orbit-linux .orbit-topbar {
   z-index: 2;
   display: flex;
   align-items: center;
+  /* The bar is 62px including its own bottom hairline, so a 62px button is one
+     pixel taller than the room it has and its hover colour painted over the
+     line. Filling the bar's content box instead keeps every button inside it. */
   flex: 0 0 auto;
-  height: 62px;
+  height: 100%;
   margin-right: -16px;
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -1832,7 +1835,7 @@ html.orbit-linux .orbit-topbar {
   align-items: center;
   justify-content: center;
   width: 46px;
-  height: 62px;
+  height: 100%;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -1854,6 +1857,9 @@ html.orbit-linux .orbit-topbar {
 }
 .orbit-wincontrols .orbit-win-close:hover { background: #c42b1c; color: #fff; }
 .orbit-wincontrols .orbit-win-close:active { background: #b02418; color: #fff; }
+/* A hair of breathing room at the bar's edge, so the red reads as a square the
+   size of the other two hits and not as a painted corner. */
+.orbit-wincontrols button { background-clip: padding-box; }
 /* One box for every glyph, so all three share an optical centre. */
 .orbit-win-glyph { display: block; width: 10px; height: 10px; overflow: visible; }
 
@@ -7355,7 +7361,9 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
 .orbit-tv-library-hint { margin-top: 3px; font-size: 11px; color: color-mix(in srgb, #fff 34%, transparent); }
 .orbit-tv-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(clamp(104px, 11vh, 168px), 1fr));
+  /* A sofa is further from the screen than a chair: covers sized off the
+     window's height, in a range a poster can still be recognised in. */
+  grid-template-columns: repeat(auto-fill, minmax(clamp(150px, 17vh, 240px), 1fr));
   gap: clamp(10px, 1.6vw, 22px);
   align-content: start;
   padding-bottom: 8px;
@@ -8003,233 +8011,206 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   line-height: 1.5;
 }
 
-/* ============================================================ edit · artwork
-   The artwork page, built the way Heronite's is: a slot per shape, what the
-   game shows now on the left, everything found for that shape on the right,
-   each tile marked with where it came from. The old workbench laid the two
-   slots side by side and gave each a button; a cover and a backdrop are not
-   comparable pictures, so they became two rows instead of two columns. */
-.orbit-artslot {
-  display: grid;
-  grid-template-columns: 132px minmax(0, 1fr);
-  align-items: start;
-  gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--c-border);
-  border-radius: 16px;
-  background: var(--c-panel2);
-}
-.orbit-artslot.is-wide { grid-template-columns: 200px minmax(0, 1fr); }
-.orbit-artslot-now {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--c-text) 14%, var(--c-border));
-  border-radius: 10px;
-  background: #050507;
-  color: var(--c-muted);
-  font-size: 11px;
-  text-align: center;
-}
-.orbit-artslot-now img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-artslot-now.is-portrait { aspect-ratio: 2 / 3; }
-.orbit-artslot-now.is-wide { aspect-ratio: 16 / 9; }
-.orbit-artslot-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.orbit-artslot-head { display: flex; flex-direction: column; gap: 2px; }
-.orbit-artslot-head h5 { font-size: 13px; font-weight: 700; color: var(--c-text); }
-.orbit-artslot-head p { margin: 0; font-size: 11px; color: var(--c-muted); }
-.orbit-artslot-fit { display: flex; gap: 2px; width: fit-content; padding: 2px; border: 1px solid var(--c-border); border-radius: 8px; }
-.orbit-artslot-fit button {
-  padding: 4px 10px;
-  border-radius: 6px;
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-.orbit-artslot-fit button[aria-pressed='true'] { background: var(--c-panel); color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-border); }
+/* ============================================================ the edit page
+   One page, one column of rows.
 
-/* --- the picker itself ---------------------------------------------------- */
-.orbit-artpicker { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.orbit-artpicker-bar { display: flex; gap: 8px; flex-wrap: wrap; }
-.orbit-artpicker-search {
+   The editor used to be a stack of numbered cards: a heading, a sentence, a
+   grid of fields, a rule, another card. Each card made its contents look like a
+   separate decision and the whole page look like a form to be filled in, which
+   is exactly how it read. It is now a list of lines - a name on the left, the
+   thing you change on the right - because that is the shape every settings page
+   the player already knows uses, and because a line does not pretend to be a
+   step.
+
+   The tab strip sits on one line with its icons beside its words and a single
+   moving panel under it, so a page change is a page turn rather than a re-render
+   of a document. */
+
+.orbit-edit { display: flex; flex-direction: column; gap: 16px; width: 100%; }
+
+/* --- the tabs ------------------------------------------------------------- */
+.orbit-edit-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
+  justify-content: flex-start;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-panel);
+  scrollbar-width: none;
+}
+.orbit-edit-tabs::-webkit-scrollbar { display: none; }
+.orbit-edit-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 7px;
-  flex: 1 1 14rem;
-  min-width: 0;
-  padding: 0 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 10px;
-  background: var(--c-bg);
+  padding: 8px 13px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   color: var(--c-muted);
-}
-.orbit-artpicker-search:focus-within { border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border)); }
-.orbit-artpicker-search input {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 0;
-  border: 0;
-  background: none;
-  color: var(--c-text);
   font-size: 12px;
-  outline: none;
-}
-.orbit-artpicker-find,
-.orbit-artpicker-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--c-accent) 45%, var(--c-border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-panel));
-  color: var(--c-text);
-  font-size: 11.5px;
-  font-weight: 650;
-}
-.orbit-artpicker-find:hover,
-.orbit-artpicker-more:hover { background: color-mix(in srgb, var(--c-accent) 22%, var(--c-panel)); }
-.orbit-artpicker-find:disabled,
-.orbit-artpicker-more:disabled { opacity: .6; cursor: default; }
-.orbit-artpicker-sources { display: flex; flex-wrap: wrap; gap: 6px; }
-.orbit-artpicker-sources button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 999px;
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-.orbit-artpicker-sources button span {
-  padding: 0 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c-text) 8%, transparent);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.orbit-artpicker-sources button[aria-pressed='true'] {
-  border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border));
-  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
-  color: var(--c-text);
-}
-.orbit-artpicker-idle,
-.orbit-artpicker-empty {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 12px;
-  border: 1px dashed color-mix(in srgb, var(--c-text) 14%, transparent);
-  border-radius: 10px;
-  color: var(--c-muted);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-.orbit-artpicker-error { margin: 0; color: #ff9aa2; font-size: 11.5px; }
-
-/* --- tiles ---------------------------------------------------------------- */
-.orbit-artpicker-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.orbit-artpicker-grid.is-portrait { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
-.orbit-arttile {
-  position: relative;
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
-  border-radius: 9px;
-  background: #050507;
-  transition: border-color .14s ease, transform .14s ease;
-}
-.orbit-arttile.is-portrait { aspect-ratio: 2 / 3; }
-.orbit-arttile.is-wide { aspect-ratio: 16 / 9; }
-.orbit-arttile.is-square { aspect-ratio: 1 / 1; }
-.orbit-arttile img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.orbit-arttile:hover { border-color: color-mix(in srgb, var(--c-accent) 60%, transparent); transform: translateY(-1px); }
-.orbit-arttile.is-chosen { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent); }
-.orbit-arttile-source {
-  position: absolute;
-  inset: auto 4px 4px auto;
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: #000000b8;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: .01em;
-}
-.orbit-arttile-chosen {
-  position: absolute;
-  inset: 4px 4px auto auto;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--c-accent);
-  color: var(--c-on-accent, #08070d);
-}
-.orbit-arttile-label {
-  margin: 4px 0 0;
-  overflow: hidden;
-  color: var(--c-muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
+  font-weight: 620;
   white-space: nowrap;
+  transition: color .14s ease, background .14s ease, border-color .14s ease;
 }
-.orbit-artpicker-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.orbit-artpicker-reset {
-  padding: 7px 10px;
-  border-radius: 9px;
-  color: var(--c-muted);
-  font-size: 11.5px;
-  font-weight: 600;
+.orbit-edit-tabs button svg { flex: none; opacity: .8; }
+.orbit-edit-tabs button:hover { color: var(--c-text); background: var(--c-panel2); }
+.orbit-edit-tabs button[aria-selected='true'] {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-accent) 42%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 13%, var(--c-panel));
 }
-.orbit-artpicker-reset:hover { color: var(--c-text); background: var(--c-panel); }
+.orbit-edit-tabs button[aria-selected='true'] svg { color: var(--c-accent); opacity: 1; }
 
-/* --- the rest of the page ------------------------------------------------ */
-.orbit-edit-facts label.is-span-2 { grid-column: 1 / -1; }
-.orbit-edit-about { height: 7.5rem; resize: vertical; }
-.orbit-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: 46rem; }
-.orbit-edit-hint { margin: 0; color: var(--c-muted); font-size: 11px; line-height: 1.5; }
-.orbit-edit-row { display: flex; gap: 8px; max-width: 46rem; }
-.orbit-edit-path { margin: 0; color: var(--c-muted); font-size: 11px; overflow-wrap: anywhere; }
-.orbit-edit-error { margin: 0; color: #ff9aa2; font-size: 11.5px; }
-.orbit-edit-nudge {
+/* --- the page that changes ------------------------------------------------ */
+.orbit-edit-page {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 16px;
-  border: 1px solid var(--c-border);
-  border-radius: 14px;
-  background: var(--c-panel2);
+  gap: 18px;
+  animation: edit-page-in .24s cubic-bezier(.2,.8,.2,1) both;
 }
-.orbit-edit-nudge-title { margin: 0; font-size: 12.5px; font-weight: 680; color: var(--c-text); }
+@keyframes edit-page-in {
+  from { opacity: 0; transform: translate3d(0, 7px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-edit-page { animation: none; }
+}
+
+/* --- rows ----------------------------------------------------------------- */
+.orbit-edit-facts { display: flex; flex-direction: column; gap: 2px; max-width: 54rem; }
+.orbit-row {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 16px;
+  min-height: 40px;
+  padding: 5px 8px;
+  border-radius: 10px;
+}
+.orbit-row:hover { background: color-mix(in srgb, var(--c-text) 3%, transparent); }
+.orbit-row.is-span-2,
+.orbit-row.is-stacked { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.orbit-row.is-stacked { gap: 6px; }
+.orbit-row-label {
+  font-size: 12px;
+  font-weight: 620;
+  color: color-mix(in srgb, var(--c-text) 72%, transparent);
+}
+.orbit-row-unit { display: flex; align-items: center; gap: 8px; }
+.orbit-row-unit i {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: .04em;
+  color: var(--c-muted);
+}
+.orbit-edit-about { height: 6.5rem; resize: vertical; line-height: 1.55; }
+.orbit-edit-path {
+  margin: 0;
+  padding: 0 8px;
+  overflow-wrap: anywhere;
+  color: var(--c-muted);
+  font-size: 11px;
+}
+.orbit-edit-row { display: flex; gap: 8px; }
+.orbit-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 54rem; }
+.orbit-edit-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-panel2);
+  color: var(--c-text);
+  font-size: 11.5px;
+  font-weight: 620;
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
+}
+.orbit-edit-action:hover { border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); color: var(--c-text); }
+.orbit-edit-action:disabled { opacity: .55; cursor: default; }
+.orbit-edit-action.is-primary {
+  border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-panel2));
+}
+.orbit-edit-action.is-primary:hover { background: color-mix(in srgb, var(--c-accent) 22%, var(--c-panel2)); }
+.orbit-edit-hint { margin: 0; max-width: 60ch; color: var(--c-muted); font-size: 11.5px; line-height: 1.55; }
+.orbit-edit-error { margin: 0; color: #ff9aa2; font-size: 11.5px; }
+.orbit-edit-switches { display: flex; flex-wrap: wrap; gap: 6px; max-width: 54rem; }
+.orbit-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-panel2);
+  color: var(--c-text);
+  font-size: 11.5px;
+  font-weight: 620;
+}
+.orbit-edit-toggle:hover { border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border)); }
+
+/* --- completion times, as one line --------------------------------------- */
+.orbit-edit-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  max-width: 54rem;
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-text) 2.5%, transparent);
+}
+.orbit-edit-times-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+  color: color-mix(in srgb, var(--c-text) 72%, transparent);
+  font-size: 12px;
+  font-weight: 620;
+}
+.orbit-edit-times-label svg { color: var(--c-accent); }
+.orbit-edit-time { display: inline-flex; align-items: center; gap: 6px; }
+.orbit-edit-time span { color: var(--c-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.orbit-edit-time input { width: 4.6rem; }
+.orbit-edit-lookup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 620;
+}
+.orbit-edit-lookup:hover { color: var(--c-text); background: var(--c-panel2); }
+
 .orbit-edit-suggestions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
+  max-width: 54rem;
+  padding: 8px;
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--c-panel2);
 }
 .orbit-edit-suggestion {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--c-text);
   font-family: ui-monospace, monospace;
   font-size: 11px;
@@ -8238,10 +8219,494 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 }
 .orbit-edit-suggestion:hover { background: var(--c-panel); }
 .orbit-edit-suggestion svg { flex: none; color: var(--c-muted); }
+.orbit-edit-nudge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-panel2);
+}
+.orbit-edit-nudge-title { margin: 0; font-size: 12.5px; font-weight: 680; color: var(--c-text); }
 
-@media (max-width: 900px) {
-  .orbit-artslot,
-  .orbit-artslot.is-wide { grid-template-columns: minmax(0, 1fr); }
-  .orbit-artslot-now { width: 132px; }
-  .orbit-artslot-now.is-wide { width: min(100%, 200px); }
+@media (max-width: 720px) {
+  .orbit-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .orbit-edit-time input { width: 3.6rem; }
+}
+
+/* --- artwork, as rows ----------------------------------------------------- */
+.orbit-artpage { display: flex; flex-direction: column; gap: 14px; }
+.orbit-artrow {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-panel2);
+}
+.orbit-artrow.is-wide { grid-template-columns: 210px minmax(0, 1fr); }
+.orbit-artrow-frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, var(--c-border));
+  border-radius: 8px;
+  background: #050507;
+  color: var(--c-muted);
+  font-size: 10.5px;
+  text-align: center;
+}
+.orbit-artrow-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-artrow-frame.is-portrait { aspect-ratio: 2 / 3; }
+.orbit-artrow-frame.is-wide { aspect-ratio: 16 / 9; }
+.orbit-artrow-main { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.orbit-artrow-title { margin: 0; font-size: 12.5px; font-weight: 680; color: var(--c-text); }
+.orbit-artrow-caption { margin: 0; font-size: 11px; color: var(--c-muted); }
+.orbit-artrow-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.orbit-artpage-fit { display: flex; gap: 2px; width: fit-content; padding: 2px; border: 1px solid var(--c-border); border-radius: 8px; }
+.orbit-artpage-fit button { padding: 4px 10px; border-radius: 6px; color: var(--c-muted); font-size: 11px; font-weight: 600; }
+.orbit-artpage-fit button[aria-pressed='true'] { background: var(--c-panel); color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-border); }
+@media (max-width: 720px) {
+  .orbit-artrow, .orbit-artrow.is-wide { grid-template-columns: 84px minmax(0, 1fr); }
+  .orbit-artrow.is-wide { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* =================================================== the artwork search room
+   A dialog the width of the window, because the pictures are the point.
+
+   Heronite separates the list of what a game keeps from the search for what to
+   put in it, and this does the same: the page shows two rows, and searching
+   opens this. The current picture stays pinned on the left for the whole visit,
+   so every candidate on the right is compared against the thing it would
+   replace rather than against a memory of it. */
+.orbit-artstudio-wrap { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: clamp(12px, 3vh, 32px); }
+.orbit-artstudio-scrim { position: absolute; inset: 0; border: 0; background: #04030aa8; backdrop-filter: blur(6px); }
+.orbit-artstudio {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 78rem);
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, var(--c-border));
+  border-radius: 16px;
+  background: var(--c-panel);
+  box-shadow: 0 40px 90px -40px #000;
+  animation: artstudio-in .2s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes artstudio-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .orbit-artstudio { animation: none; } }
+.orbit-artstudio-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px 10px;
+}
+.orbit-artstudio-kicker {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--c-accent) 85%, var(--c-text));
+}
+.orbit-artstudio-title {
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 720;
+  letter-spacing: -.01em;
+  color: var(--c-text);
+}
+.orbit-artstudio-x {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--c-muted);
+}
+.orbit-artstudio-x:hover { background: var(--c-panel2); color: var(--c-text); }
+.orbit-artstudio-bar { display: flex; gap: 8px; padding: 0 16px 12px; border-bottom: 1px solid var(--c-border); }
+.orbit-artstudio-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-bg);
+  color: var(--c-muted);
+}
+.orbit-artstudio-search:focus-within { border-color: color-mix(in srgb, var(--c-accent) 60%, var(--c-border)); }
+.orbit-artstudio-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-size: 12.5px;
+  outline: none;
+}
+.orbit-artstudio-find {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 48%, var(--c-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--c-accent) 16%, var(--c-panel));
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.orbit-artstudio-find:hover { background: color-mix(in srgb, var(--c-accent) 24%, var(--c-panel)); }
+.orbit-artstudio-find:disabled { opacity: .6; cursor: default; }
+.orbit-artstudio-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; flex: 1; }
+.orbit-artstudio-now {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--c-border);
+  background: color-mix(in srgb, var(--c-bg) 60%, transparent);
+}
+.orbit-artstudio-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.orbit-artstudio-frame {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, var(--c-border));
+  border-radius: 9px;
+  background: #050507;
+  color: var(--c-muted);
+  font-size: 11px;
+}
+.orbit-artstudio-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-artstudio-frame.is-portrait { aspect-ratio: 2 / 3; }
+.orbit-artstudio-frame.is-wide { aspect-ratio: 16 / 9; }
+.orbit-artstudio-file {
+  padding: 7px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 620;
+  text-align: center;
+}
+.orbit-artstudio-file:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border)); }
+.orbit-artstudio-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.orbit-artstudio-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-artstudio-sources button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 620;
+}
+.orbit-artstudio-sources button span {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 9%, transparent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.orbit-artstudio-sources button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--c-accent) 52%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 13%, transparent);
+  color: var(--c-text);
+}
+.orbit-artstudio-idle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 15%, transparent);
+  border-radius: 10px;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.orbit-artstudio-error { margin: 0; color: #ff9aa2; font-size: 12px; }
+.orbit-artstudio-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.orbit-artstudio-grid.is-wide { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.orbit-artstudio-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-text) 13%, transparent);
+  border-radius: 9px;
+  background: #050507;
+  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+}
+.orbit-artstudio-tile.is-portrait { aspect-ratio: 2 / 3; }
+.orbit-artstudio-tile.is-wide { aspect-ratio: 16 / 9; }
+.orbit-artstudio-tile img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.orbit-artstudio-tile:hover { border-color: color-mix(in srgb, var(--c-accent) 70%, transparent); transform: translateY(-2px); box-shadow: 0 10px 24px -16px #000; }
+.orbit-artstudio-tile.is-chosen { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent); }
+/* The source is the one thing a tile cannot show, so it is written on the
+   picture: a corner mark for the family, and the name where it fits. */
+.orbit-artstudio-mark {
+  position: absolute;
+  inset: 5px auto auto 5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #000000b0;
+  color: #fff;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.orbit-artstudio-from {
+  position: absolute;
+  inset: auto 5px 5px auto;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #000000b8;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 650;
+}
+.orbit-artstudio-tick {
+  position: absolute;
+  inset: 5px 5px auto auto;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: var(--c-on-accent, #08070d);
+}
+.orbit-artstudio-caption {
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: var(--c-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orbit-artstudio-more { display: flex; justify-content: center; padding-top: 4px; }
+.orbit-artstudio-more button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  color: var(--c-text);
+  font-size: 11.5px;
+  font-weight: 620;
+}
+.orbit-artstudio-more button:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
+.orbit-artstudio-more button:disabled { opacity: .6; cursor: default; }
+@media (max-width: 860px) {
+  .orbit-artstudio-body { grid-template-columns: minmax(0, 1fr); }
+  .orbit-artstudio-now { flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--c-border); }
+  .orbit-artstudio-frame { width: 96px; flex: none; }
+}
+
+/* ============================================================ launch, as rows
+   Play behaves one way, so that is one panel. The two kinds of "and also" are
+   lists under it, in the order they happen. */
+.orbit-launchpage { display: flex; flex-direction: column; gap: 16px; max-width: 54rem; }
+.orbit-launchpanel { display: flex; flex-direction: column; gap: 10px; }
+.orbit-launchpanel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.orbit-launchpanel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: .01em;
+  color: color-mix(in srgb, var(--c-text) 78%, transparent);
+}
+.orbit-launchbadge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-text) 10%, transparent);
+  font-size: 10px;
+  color: var(--c-muted);
+}
+.orbit-launchkinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-launchkind {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-panel2);
+  color: var(--c-muted);
+  font-size: 11.5px;
+  font-weight: 620;
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+.orbit-launchkind:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-text) 22%, var(--c-border)); }
+.orbit-launchkind.is-on {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-panel2));
+  color: var(--c-text);
+}
+.orbit-launchkind.is-on svg { color: var(--c-accent); }
+.orbit-launchrows { display: flex; flex-direction: column; gap: 2px; }
+.orbit-launchrow {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 14px;
+  padding: 3px 4px;
+}
+.orbit-launchrow.is-stacked { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.orbit-launchrow-label { font-size: 11.5px; font-weight: 620; color: color-mix(in srgb, var(--c-text) 66%, transparent); }
+.orbit-launchrow-control { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.orbit-launchrow-control.is-column { flex-direction: column; align-items: stretch; }
+.orbit-launchbrowse {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-panel2);
+  color: var(--c-muted);
+}
+.orbit-launchbrowse:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); color: var(--c-text); }
+.orbit-launchaddbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-panel2);
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 620;
+}
+.orbit-launchaddbtn:hover { border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-border)); }
+.orbit-launchaddbtn.is-quiet { background: none; color: var(--c-muted); border-style: dashed; }
+.orbit-launchaddbtn.is-quiet:hover { color: var(--c-text); }
+.orbit-launchadds { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-launchnote { margin: 0; color: var(--c-muted); font-size: 11.5px; line-height: 1.55; }
+.orbit-launchnote.is-quiet { max-width: 62ch; }
+.orbit-launchlink { color: var(--c-accent); font-weight: 620; text-decoration: underline; text-underline-offset: 2px; }
+.orbit-launchlist { display: flex; flex-direction: column; gap: 8px; }
+.orbit-launchentry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 11px;
+  background: var(--c-panel2);
+}
+.orbit-launchentry-head { display: flex; align-items: center; gap: 8px; }
+.orbit-launchentry-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: color-mix(in srgb, var(--c-accent) 14%, transparent); color: var(--c-accent); }
+.orbit-launchentry-head h4 { flex: 1; min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 660; color: var(--c-text); text-overflow: ellipsis; white-space: nowrap; }
+.orbit-launchentry-name { flex: 1; min-width: 0; }
+.orbit-launchentry-nameinput {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px dashed color-mix(in srgb, var(--c-text) 18%, transparent);
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font-size: 11.5px;
+  font-weight: 660;
+  outline: none;
+}
+.orbit-launchentry-nameinput:focus { border-style: solid; border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border)); }
+.orbit-launchentry-remove { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--c-muted); }
+.orbit-launchentry-remove:hover { background: color-mix(in srgb, #f87171 18%, transparent); color: #ffb4b4; }
+.orbit-launchsaved { margin: 0; color: var(--c-muted); font-size: 10.5px; }
+@media (max-width: 720px) {
+  .orbit-launchrow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+
+/* --- ReShade, with no heading of its own -------------------------------- */
+.orbit-toolspage { display: flex; flex-direction: column; gap: 12px; max-width: 54rem; }
+.orbit-reshade-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.orbit-reshade-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 660; color: var(--c-text); }
+.orbit-reshade-file { padding: 1px 6px; border-radius: 5px; background: color-mix(in srgb, var(--c-text) 9%, transparent); font-family: ui-monospace, monospace; font-size: 10px; color: var(--c-muted); }
+.orbit-reshade-hint { margin-top: 3px; overflow-wrap: anywhere; color: var(--c-muted); font-size: 11px; line-height: 1.5; }
+
+/* --- Proton, as rows too -------------------------------------------------- */
+.orbit-proton { display: flex; flex-direction: column; gap: 10px; max-width: 54rem; }
+.orbit-row-control { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.orbit-row-control > :first-child { flex: 1; min-width: 0; }
+.orbit-proton-tweaks { display: flex; flex-wrap: wrap; gap: 6px; }
+.orbit-proton-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.orbit-proton-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.orbit-proton-field.is-span-2 { grid-column: 1 / -1; }
+.orbit-proton-env { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.orbit-proton-envhead { display: flex; align-items: center; justify-content: space-between; }
+@media (max-width: 720px) { .orbit-proton-selects { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------- Stardeck page changes
+   A page is a place, so changing pages is a short fade and a small rise rather
+   than an instant swap: the deck's two halves and the library wall come in the
+   same way, so moving between them reads as one gesture. It is a third of a
+   second and transform/opacity only, so it stays on the compositor on a machine
+   that is already painting 4K artwork. */
+.orbit-tv-stage > * { animation: tv-page-in .3s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes tv-page-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-tv-stage > * { animation: none; }
+}
+/* The library's own count, on the header's baseline: a number and its noun,
+   with no second paragraph under it to explain what a cover does. */
+.orbit-tv-library-count {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, #fff 48%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orbit-tv-library-count b {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
 }

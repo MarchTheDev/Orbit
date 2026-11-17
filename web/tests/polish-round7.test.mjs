@@ -36,9 +36,10 @@ check('Edit Game is divided into Details, Launch, Artwork, Tools and Saves tabs 
   ['Details', 'Launch', 'Artwork', 'Tools', 'Saves'].every((tab) => edit.includes(`label: '${tab}'`)) && edit.includes('role="tablist"') && !edit.includes('orbit-edit-face') && css.includes('.orbit-editsection-title::before { content: none; }'));
 check('The editor no longer exposes the Not owned yet option or Notes field and uses Settings-style switches',
   !edit.includes('Not owned yet') && !edit.includes('<MarkdownEditor') && edit.includes('role="switch"') && edit.includes('className="orbit-switch"'));
-check('Artwork is a slot per shape: what the game shows now, then the pictures found for that shape',
-  edit.includes('<ArtSlot') && edit.includes('load={(query, page) =>') && css.includes('.orbit-artslot-now.is-portrait') &&
-    css.includes('.orbit-arttile.is-wide') && picker.includes('orbit-artpicker-grid') && picker.includes('Show more'));
+check('Artwork is a row per shape, and searching opens a room of its own with the current picture pinned beside it',
+  edit.includes('<ArtRow') && edit.includes('<ArtworkSearch') && edit.includes('onSearch={() => setSearching(') &&
+    picker.includes('orbit-artstudio') && picker.includes('Load more') && picker.includes('All sources') &&
+    css.includes('.orbit-artstudio-now') && css.includes('.orbit-artstudio-tile.is-wide'));
 check('Saves opens its folder and removes the redundant status line and help paragraph',
   edit.includes('Open folder') && edit.includes('revealInExplorer(savePath)') && !edit.includes('Saved folder:') && !edit.includes('Orbit searches this game’s common folders'));
 check('Export selection uses an outline-only state rather than a filled accent overlay',
@@ -46,7 +47,7 @@ check('Export selection uses an outline-only state rather than a filled accent o
 check('The Saves tab automatically searches and exposes the existing PCGamingWiki path suggestions',
   edit.includes('findSave(game.title, saveHintsOf(game))') && edit.includes('suggestSaves(game.title)') && app.includes('onSaveDir={(path)'));
 check('Launch companions include programs, shell scripts, browser pages, and separate arguments',
-  launch.includes('Program or script') && launch.includes('Web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
+  launch.includes('Program') && launch.includes('Web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
 check('Tools are one ReShade switch: on, off, or your own DLL, with nothing to configure first',
   edit.includes('Use ReShade with this game') && edit.includes('setReshade(game.id, next)') && edit.includes('Use a ReShade DLL I already have') &&
     !edit.includes('Graphics API') && !edit.includes('Adopt existing') &&
