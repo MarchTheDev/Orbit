@@ -44,26 +44,35 @@ export function HltbPlanPage({
   useEffect(() => {
     let current = true;
     setLoading(true);
-    void Promise.all([fetchHltbDetails(suggestion.id), fetchNonSteamFacts(suggestion.name)])
-      .then(([result, external]) => {
-        const combined: HltbGameDetails = {
-          ...result,
-          ...external,
-          releaseDate: normalizeReleaseDate(result.releaseDate || external.releaseDate || null),
-          developers: result.developers?.length ? result.developers : external.developers,
-          publishers: result.publishers?.length ? result.publishers : external.publishers,
-          genres: result.genres?.length ? result.genres : external.genres,
-        };
-        if (current) {
+    // Show the catalogue's own description as soon as it arrives. Wikidata is
+    // optional enrichment and can be slow or unavailable; it must not hold up
+    // the HLTB page while a separate public service responds.
+    const hltb = fetchHltbDetails(suggestion.id);
+    const external = fetchNonSteamFacts(suggestion.name);
+    void hltb
+      .then((result) => {
+        if (!current) return;
+        setDetails(result);
+        setLoading(false);
+        void external.then((facts) => {
+          if (!current) return;
+          const combined: HltbGameDetails = {
+            ...result,
+            ...facts,
+            releaseDate: normalizeReleaseDate(result.releaseDate || facts.releaseDate || null),
+            developers: result.developers?.length ? result.developers : facts.developers,
+            publishers: result.publishers?.length ? result.publishers : facts.publishers,
+            genres: result.genres?.length ? result.genres : facts.genres,
+          };
           setDetails(combined);
           onEnriched?.(combined);
-        }
+        });
       })
       .catch(() => {
-        if (current) setLoadError(true);
-      })
-      .finally(() => {
-        if (current) setLoading(false);
+        if (current) {
+          setLoadError(true);
+          setLoading(false);
+        }
       });
     return () => { current = false; };
   }, [suggestion.id]);

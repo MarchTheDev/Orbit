@@ -88,8 +88,8 @@ stub('dpkg-deb', 'cat "$2"');
 // These stand-ins model the package metadata readers directly. Selecting by
 // fixture name avoids system tar/rpm versions and option-position differences
 // making this parser test flaky on different runners.
-stub('rpm', `case "$3" in *good.rpm) printf '%s\\n' 'libwebkit2gtk-4.1.so.0()(64bit)' 'gstreamer1-plugins-base' 'gstreamer1-plugins-good' 'pipewire-gstreamer';; *typo.rpm) printf '%s\\n' 'gstreamer1-plugins-missing';; *) exit 2;; esac`);
-stub('tar', `case "$2" in *good.pkg.tar.zst) printf '%s\\n' 'depend = gst-plugins-base' 'depend = gst-plugins-good' 'depend = gst-plugin-pipewire';; *gap.pkg.tar.zst) printf '%s\\n' 'depend = gst-plugins-base' 'depend = gst-plugins-good';; *typo.pkg.tar.zst) printf '%s\\n' 'depend = gst-plugins-base' 'depend = gst-plugins-good' 'depend = gst-plugin-pipewire' 'depend = gst-plugins-missing';; *) exit 2;; esac`);
+stub('rpm', 'for a in "$@"; do case "$a" in *.rpm) cat "$a"; exit $?;; esac; done; exit 2');
+stub('tar', 'for a in "$@"; do case "$a" in *.pkg.tar.zst) cat "$a"; exit $?;; esac; done; exit 2');
 stub('apt-get', 'for a in "$@"; do case "$a" in *missing*) exit 100;; esac; done; exit 0');
 stub('dnf', 'for a in "$@"; do case "$a" in *missing*) exit 0;; esac; done; echo "gstreamer1-plugins-good-1.24.0-1.fc42.x86_64"');
 stub('pacman', 'for a in "$@"; do case "$a" in *missing*) exit 1;; esac; done; echo "https://mirror/gst-plugins-good.pkg.tar.zst"');
