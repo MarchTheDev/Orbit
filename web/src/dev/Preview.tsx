@@ -41,7 +41,7 @@ const PREVIEW_LAUNCH_GAME: Game = {
 };
 const settings: Settings = { ...DEFAULT_SETTINGS };
 
-const TABS = ['stardeck', 'statistics', 'settings', 'journal', 'editor', 'launch', 'tools', 'add'] as const;
+const TABS = ['stardeck', 'statistics', 'settings', 'journal', 'editor', 'artwork', 'launch', 'tools', 'add'] as const;
 type Surface = (typeof TABS)[number];
 
 function Preview() {
@@ -150,10 +150,10 @@ function Preview() {
           Launch page with an alongside tool and a named launch already in it,
           and the ReShade switch. A game with both, so the shapes are visible
           without filling a form first. */}
-      {(surface === 'launch' || surface === 'tools') && (
+      {(surface === 'launch' || surface === 'tools' || surface === 'artwork') && (
         <GameEditDialog
           game={PREVIEW_LAUNCH_GAME}
-          startOn={surface}
+          startOn={surface === 'artwork' ? 'game' : surface}
           onUpdate={() => undefined}
           onClose={() => setSurface('statistics')}
         />

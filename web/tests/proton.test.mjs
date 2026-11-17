@@ -101,11 +101,11 @@ check('the wine section draws the builds as a list, with a way out of it',
 check('a build that has been deleted stays visible instead of blank',
   wineTs.includes('A build that is gone'));
 check('the separate Proton page exposes the build and compatibility switches for Wine games',
-  editorTs.includes("id: 'proton' as const, label: 'Proton'") && editorTs.includes('<WineSettings') &&
+  editorTs.includes("id: 'proton', label: 'Wine'") && editorTs.includes('<WineSettings') &&
     editorTs.includes('onProton=') && editorTs.includes('onTweaks='));
 check('Launch stays focused on the executable while Proton has its own edit page',
   !launchEditorTs.includes('buildName(t.proton)') && !launchEditorTs.includes('WineSettings') &&
-    editorTs.includes("label: 'Proton'") && editorTs.includes('<WineSettings'));
+    editorTs.includes("label: 'Wine'") && editorTs.includes('<WineSettings'));
 check('the folder name is what a path means, on either slash',
   buildName('/home/me/.local/share/Steam/compatibilitytools.d/GE-Proton9-20') ===
     'GE-Proton9-20' && buildName('C:\\Orbit\\runners\\proton\\GE-Proton10-3') === 'GE-Proton10-3');

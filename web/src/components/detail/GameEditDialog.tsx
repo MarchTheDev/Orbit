@@ -2,10 +2,16 @@ import { useState } from 'react';
 import type { Game } from '../../types';
 import { Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { Modal, btnGhost } from '../ui/Modal';
-import { GameEditTab } from './GameEditTab';
+import { GameEditTab, EditDrawerFrame } from './GameEditTab';
 
-/** A centered, full-width editor used by the pencil affordance and context menus. */
+/**
+ * A game's settings, as a drawer beside the library.
+ *
+ * It used to be a centred dialog with a title bar and a paragraph explaining
+ * itself. A drawer says the same thing with its position: the library is still
+ * there on the left, this is one game's page pulled out of it, and closing it
+ * puts the page back rather than dismissing a window.
+ */
 export function GameEditDialog({
   game,
   onUpdate,
@@ -26,37 +32,41 @@ export function GameEditDialog({
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
   /** Open on one page, for the development preview. */
-  startOn?: 'details' | 'launch' | 'artwork' | 'tools' | 'saves' | 'proton';
+  startOn?: 'game' | 'actions' | 'launch' | 'tools' | 'saves' | 'proton';
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   return (
     <>
-    <Modal
-      title={`Edit ${game.title}`}
-      size="xl"
-      onClose={onClose}
-      footer={onRemoveFromBacklog ? (
-        <div className="flex justify-start">
-          <button type="button" className={`${btnGhost} flex items-center gap-2 border-rose-500/40 bg-rose-500/10 text-rose-300 hover:border-rose-400 hover:bg-rose-500/20 hover:text-rose-200 text-xs`} onClick={() => setConfirmRemove(true)}>
-            <Trash2 className="size-3.5" /> Remove from Backlog
-          </button>
-        </div>
-      ) : undefined}
-    >
-      <GameEditTab key={game.id} game={game} onUpdate={onUpdate} hideLaunchSettings={hideLaunchSettings} saveDir={saveDir} onSaveDir={onSaveDir} startOn={startOn} />
-    </Modal>
-    {confirmRemove && onRemoveFromBacklog && (
-      <ConfirmDialog
-        title={`Remove ${game.title} from the Backlog?`}
-        description="The game stays in your Library with its files, sessions and notes. Only its Backlog membership is removed."
-        confirmLabel="Remove from Backlog"
-        onCancel={() => setConfirmRemove(false)}
-        onConfirm={() => {
-          setConfirmRemove(false);
-          onRemoveFromBacklog();
-        }}
-      />
-    )}
+      <EditDrawerFrame onClose={onClose}>
+        <GameEditTab
+          key={game.id}
+          game={game}
+          onUpdate={onUpdate}
+          hideLaunchSettings={hideLaunchSettings}
+          saveDir={saveDir}
+          onSaveDir={onSaveDir}
+          startOn={startOn}
+        />
+        {onRemoveFromBacklog && (
+          <div className="orbit-drawer-foot">
+            <button type="button" className="orbit-pill is-danger" onClick={() => setConfirmRemove(true)}>
+              <Trash2 className="size-3.5" /> Remove from Backlog
+            </button>
+          </div>
+        )}
+      </EditDrawerFrame>
+      {confirmRemove && onRemoveFromBacklog && (
+        <ConfirmDialog
+          title={`Remove ${game.title} from the Backlog?`}
+          description="The game stays in your Library with its files, sessions and notes. Only its Backlog membership is removed."
+          confirmLabel="Remove from Backlog"
+          onCancel={() => setConfirmRemove(false)}
+          onConfirm={() => {
+            setConfirmRemove(false);
+            onRemoveFromBacklog();
+          }}
+        />
+      )}
     </>
   );
 }

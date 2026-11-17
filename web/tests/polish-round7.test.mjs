@@ -32,16 +32,19 @@ check('Deck and Library controls are centered and use the app-styled tab treatme
   css.includes('.orbit-deck-pagetabs') && css.includes('left: 50%') && css.includes('.orbit-deck-pagetab[aria-pressed'));
 check('Liquid Glass uses opaque app-colored panels across platforms',
   css.includes('html.orbit-glass :is(') && css.includes('background-color: var(--c-panel) !important') && css.includes('blur(28px) saturate(1.12)'));
-check('Edit Game is divided into Details, Launch, Artwork, Tools and Saves tabs without the old title hero or numbered sections',
-  ['Details', 'Launch', 'Artwork', 'Tools', 'Saves'].every((tab) => edit.includes(`label: '${tab}'`)) && edit.includes('role="tablist"') && !edit.includes('orbit-edit-face') && css.includes('.orbit-editsection-title::before { content: none; }'));
+check('Game settings is a drawer with a rail of pages, not a dialog with a tab strip',
+  ['Game', 'Play', 'Launch', 'Tools', 'Wine', 'Saves'].every((page) => edit.includes(`label: '${page}'`)) &&
+    edit.includes('role="tablist"') && edit.includes('aria-orientation="vertical"') &&
+    !edit.includes('orbit-edit-face') && css.includes('.orbit-drawer-panel') && css.includes('.orbit-drawerrail'));
 check('The editor no longer exposes the Not owned yet option or Notes field and uses Settings-style switches',
-  !edit.includes('Not owned yet') && !edit.includes('<MarkdownEditor') && edit.includes('role="switch"') && edit.includes('className="orbit-switch"'));
-check('Artwork is a row per shape, and searching opens a room of its own with the current picture pinned beside it',
-  edit.includes('<ArtRow') && edit.includes('<ArtworkSearch') && edit.includes('onSearch={() => setSearching(') &&
+  !edit.includes('Not owned yet') && !edit.includes('<MarkdownEditor') && edit.includes('role="switch"') &&
+    edit.includes('className="orbit-toggle"') && css.includes('.orbit-toggle[data-on] i { transform: translateX(16px); }'));
+check('Artwork is a slot per shape in the drawer, and searching opens a room of its own with the current picture beside it',
+  edit.includes('<Slot') && edit.includes('<ArtworkSearch') && edit.includes('onSearch={() => setSearching(') &&
     picker.includes('orbit-artstudio') && picker.includes('Load more') && picker.includes('All sources') &&
-    css.includes('.orbit-artstudio-now') && css.includes('.orbit-artstudio-tile.is-wide'));
+    css.includes('.orbit-artstudio-now {') && css.includes('.orbit-slot-picture.is-wide'));
 check('Saves opens its folder and removes the redundant status line and help paragraph',
-  edit.includes('Open folder') && edit.includes('revealInExplorer(savePath)') && !edit.includes('Saved folder:') && !edit.includes('Orbit searches this game’s common folders'));
+  edit.includes('Open the folder') && edit.includes('revealInExplorer(savePath)') && !edit.includes('Saved folder:') && !edit.includes('Orbit searches this game’s common folders'));
 check('Export selection uses an outline-only state rather than a filled accent overlay',
   copy.includes("'border-accent bg-transparent text-fg") && !copy.includes('border-accent bg-accent/15'));
 check('The Saves tab automatically searches and exposes the existing PCGamingWiki path suggestions',
@@ -49,7 +52,7 @@ check('The Saves tab automatically searches and exposes the existing PCGamingWik
 check('Launch companions include programs, shell scripts, browser pages, and separate arguments',
   launch.includes('Program') && launch.includes('Web page') && launch.includes("['sh', 'exe', 'AppImage']") && launch.includes('Arguments') && nativeLaunch.includes('command_for_path(path)') && session.includes('companion.url'));
 check('Tools are one ReShade switch: on, off, or your own DLL, with nothing to configure first',
-  edit.includes('Use ReShade with this game') && edit.includes('setReshade(game.id, next)') && edit.includes('Use a ReShade DLL I already have') &&
+  edit.includes('Use ReShade with this game') && edit.includes('setReshade(game.id, next)') && edit.includes('Use a DLL I already have') &&
     !edit.includes('Graphics API') && !edit.includes('Adopt existing') &&
     nativeLib.includes('fn reshade_state(') && nativeLib.includes('fn reshade_set(') && nativeLib.includes('fn reshade_use_file('));
 check('Save discovery tries editionless and Roman-numeral title variants like GhostHunterPro',

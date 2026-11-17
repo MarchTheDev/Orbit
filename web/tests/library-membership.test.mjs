@@ -53,6 +53,8 @@ check('Backlog details use the Status dropdown without duplicate move-to-status 
     gameDetail.includes('<div className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg bg-panel2 px-3 py-2">') &&
     gameDetail.includes('value={game.status}') &&
     !gameDetail.includes('Move to playing now') && !gameDetail.includes('Move to Backlog'));
-check('the Remove from Backlog editor action uses destructive rose styling', gameEditor.includes('border-rose-500/40 bg-rose-500/10'));
+check('the Remove from Backlog editor action uses destructive rose styling',
+  gameEditor.includes("orbit-pill is-danger") &&
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-pill.is-danger { border-color: #f8717150;'));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

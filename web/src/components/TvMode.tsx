@@ -1728,20 +1728,18 @@ export function TvMode({
                   backgroundColor: `hsl(${active.hue} 35% 16%)`,
                 }}
               />
+              {/* One row, three parts, each where a thumb expects it: the
+                  count at the left end, the two arrows either side of the
+                  shelf's middle, and the menu at the right end. They used to
+                  be pushed about by two different order rules and a spacer,
+                  which made them sit a few pixels differently on every window;
+                  a three-column grid with equal outer tracks cannot. */}
               <div className="orbit-deck-indexhead">
-                {/* Where you are in the deck, and nothing else. The names of
-                    the games either side were here for a while, and they were
-                    read as a title bar rather than as a shelf: the three covers
-                    already say what is there, and each one is named under
-                    itself. What they cannot say is how far into the deck this
-                    is, which is what the counter is for. */}
                 <span className="orbit-deck-counter">
                   <b>{at + 1}</b>
                   <i aria-hidden>/</i>
                   {list.length}
                 </span>
-
-                <span className="orbit-deck-indexspacer" aria-hidden />
 
                 <div className="orbit-deck-steps">
                   <button onClick={() => select(at - 1)} aria-label="Previous game" title="Previous game" className="orbit-deck-step">
