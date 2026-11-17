@@ -542,11 +542,11 @@ pub async fn set(
             // else on that thread waits with it.
             {
                 let setup = setup.clone();
-                let exe = exe.clone();
+                let exe = exe.to_path_buf();
                 let proxy = proxy.to_string();
                 tauri::async_runtime::spawn_blocking(move || install_into(&setup, &exe, &proxy, fresh))
-                .await
-                .map_err(|error| format!("ReShade's setup could not be waited on: {error}"))??;
+                    .await
+                    .map_err(|error| format!("ReShade's setup could not be waited on: {error}"))??;
             }
             if !active.is_file() {
                 return Err(format!(

@@ -748,21 +748,25 @@ fn start_game_alternative(orbit: State<'_, Orbit>, game_id: String, index: usize
         // this command knows nothing about - a Wine prefix, a Proton build, the
         // tweaks for this game - exactly as the game saved them.
         if let Some(launch) = launch_json.as_object_mut() {
-            if let Some(slot) = launch.get_mut("args") {
-                if let Some(extra) = extra {
-                    let existing = slot.as_str().unwrap_or("").trim();
-                    *slot = serde_json::Value::String(format!("{existing} {extra}").trim().to_string());
+            let kind = launch.get("kind").and_then(|kind| kind.as_str()).unwrap_or("").to_string();
+            if let Some(extra) = extra {
+                let existing = launch
+                    .get("args")
+                    .and_then(|args| args.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if kind == "executable" || kind == "wine" {
+                    launch.insert(
+                        "args".to_string(),
+                        serde_json::Value::String(format!("{existing} {extra}").trim().to_string()),
+                    );
                 }
             }
-            let kind = launch.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
-            if (kind == "executable" || kind == "wine") && launch.get("args").is_none() {
-                // A launch that never had arguments still takes the profile's.
-                if let Some(extra) = extra {
-                    launch["args"] = serde_json::Value::String(extra.to_string());
+            if let Some(dir) = working {
+                if kind == "executable" {
+                    launch.insert("workingDir".to_string(), serde_json::Value::String(dir.to_string()));
                 }
-            }
-            if let (Some(dir), true) = (working, kind == "executable") {
-                launch["workingDir"] = serde_json::Value::String(dir.to_string());
             }
         }
     }
