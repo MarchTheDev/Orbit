@@ -194,7 +194,7 @@ check(
     !librarySrc.includes('{facetCount}\n                </span>'),
 );
 
-// 8. Heronite-style smart CommandPalette (`play:`, filtering, launch, and Level 2 game actions)
+// 8. Smart CommandPalette (`play:`, filtering, launch, and Level 2 game actions)
 const root = createRoot(document.getElementById('root'));
 let playedId = null;
 let editedId = null;

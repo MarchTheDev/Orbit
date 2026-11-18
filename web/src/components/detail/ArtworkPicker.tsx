@@ -34,7 +34,7 @@ const SOURCE_MARK: Record<string, string> = {
 };
 
 /**
- * Heronite's covers dialog, as Orbit can have it.
+ * The covers dialog, as Orbit can have it.
  *
  * The dialog is two columns with two jobs, which is the whole of the idea:
  *

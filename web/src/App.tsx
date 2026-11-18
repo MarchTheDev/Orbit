@@ -184,7 +184,7 @@ interface Step {
  *
  * Older copies stored 70-170 (percent of a 150px tile) under the same key, and
  * a percentage is never a sensible pixel width below 110, so anything smaller
- * is read the old way. The result is what Heronite offers: 110 to 240 pixels.
+ * is read the old way. The result is 110 to 240 pixels across.
  */
 function coverWidthFromSetting(value?: number): number {
   if (!value) return 150;

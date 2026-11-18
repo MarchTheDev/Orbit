@@ -95,7 +95,7 @@ export function coverArtCandidates(game: Game): string[] {
     game.coverPath ? fileSrc(game.coverPath) : null,
     (game.meta?.coverUrlCustom || game.meta?.edited) ? game.meta.coverUrl : null,
     // A provider's purpose-made cover (IGDB, LaunchBox, Steam metadata, etc.)
-    // is more informative than a store header. Like Heronite, try it before
+    // is more informative than a store header, so try it before
     // generated Steam fallbacks, while retaining Steam's large poster assets.
     game.meta?.coverUrl,
     ...(id ? [steamAsset(id, 'library_600x900_2x.jpg'), steamAsset(id, 'library_600x900.jpg')] : []),

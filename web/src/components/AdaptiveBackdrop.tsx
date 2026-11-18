@@ -5,7 +5,7 @@ import { coverArtCandidates } from '../utils/art';
 /**
  * The app's own light, taken from whichever game is in hand.
  *
- * Heronite changes the colour of its whole interface to whatever is selected:
+ * The interface takes the colour of whatever is selected:
  * the covers behind it, the shading, the accent. Orbit's shell is a dark room
  * with one accent, which is what makes a library of four hundred unrelated
  * pictures readable - so this is the quiet version of the same idea. The

@@ -33,7 +33,7 @@ let previousNativeBounds: Bounds | null = null;
 /**
  * The window's placement, kept across restarts.
  *
- * Heronite writes where its window is whenever a move or resize comes to rest,
+ * The window's place is written whenever a move or resize comes to rest,
  * and never writes the fullscreen rectangle: a window that reopens fullscreen is
  * how a launcher ends up oversized under the taskbar. Orbit's restore already
  * clamps into the desk area, but the rectangle it clamps was only held in

@@ -1,6 +1,6 @@
 //! A last-resort cover: DuckDuckGo's image search.
 //!
-//! Steam, Bonker and SteamGridDB cover the games that are in a store. Heronite
+//! Steam, Bonker and SteamGridDB cover the games that are in a store. Web
 //! falls back to a plain web image search after its own stores, and the same
 //! step is here: when nothing else offers a portrait, a picture of the game's
 //! box is asked for by name. DuckDuckGo is chosen because it answers with JSON

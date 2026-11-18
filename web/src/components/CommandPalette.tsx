@@ -156,7 +156,7 @@ function fold(text: string): string {
 }
 
 /**
- * Multi-token fuzzy scorer inspired by Heronite's `matching::fuzzy_score`:
+ * Multi-token fuzzy scorer:
  * rewards exact prefix, word-boundary starts, contiguous runs, and keyword hits.
  */
 function scoreText(query: string, candidate: string): number | null {
@@ -230,7 +230,7 @@ function scoreRow(query: string, row: PaletteRow): number | null {
 }
 
 /**
- * Parse smart command prefixes and Heronite-style leading/trailing verbs:
+ * Parse smart command prefixes and leading/trailing verbs:
  * - Colon prefixes work immediately even with empty remainder (`play:`, `edit:`, `fav:`, `folder:`, `hide:`, `log:`, `genre:`, `theme:`, `stop:`)
  * - `@<genre>` -> genre mode, `><cmd>` -> actions mode
  * - Space-separated `<verb> <game>` (e.g. `play hades`, `open hollow folder`) or `<game> <verb>` (e.g. `hades settings`)
@@ -299,7 +299,7 @@ function parseSmartIntent(raw: string): {
     }
   }
 
-  // Multi-word verb queries like Heronite's `verb_query`: `play elden`, `elden settings`, `open hades folder`, `fav celeste`
+  // Multi-word verb queries: `play elden`, `elden settings`, `open hades folder`, `fav celeste`
   const toks = trimmedLeft.trim().split(/\s+/);
   if (toks.length >= 2) {
     const first = toks[0]!.toLowerCase();
@@ -729,7 +729,7 @@ export function CommandPalette({
       });
     }
 
-    // Random game pickers (inspired by Heronite's `palette/random.rs`)
+    // Random game pickers
     const shelfPool = playableGames.filter((g) => !g.hidden);
     if (shelfPool.length > 0) {
       actions.push({
@@ -1001,7 +1001,7 @@ export function CommandPalette({
       .filter((row): row is PaletteRow => Boolean(row))
       .map((row) => ({ ...row, id: `pinned-${row.id}`, group: 'Pinned' }));
 
-    // Empty-query smart browse (Heronite `browse()` layout)
+    // Empty-query smart browse layout
     if (!q) {
       if (effectiveFilter === 'pages') return [...pinnedBrowseRows, ...staticRows.filter((r) => r.filterCat === 'pages')];
       if (effectiveFilter === 'actions') return [...pinnedBrowseRows, ...staticRows.filter((r) => r.filterCat === 'actions' && !r.secondary)];
@@ -1144,7 +1144,7 @@ export function CommandPalette({
 
     const topList = scored.slice(0, 24).map((x) => x.row);
 
-    // Heronite inline verbs for the best-matching game (`rank.rs` lines 255-264)!
+    // Inline verbs for the best-matching game
     if (effectiveFilter === 'all') {
       const topGameHit = scored.find((x) => x.row.filterCat === 'games' && x.row.game && !x.row.game.planned);
       if (topGameHit?.row.game && topGameHit.score >= 120) {
@@ -1383,7 +1383,7 @@ export function CommandPalette({
           )}
         </div>
 
-        {/* Main body: Ranked list + Heronite-style side preview */}
+        {/* Main body: ranked list plus side preview */}
         <div className="flex max-h-[62vh] min-h-[280px] divide-x divide-line">
           <div ref={listRef} className="min-w-0 flex-1 overflow-y-auto p-2">
             {grouped.length === 0 ? (
@@ -1510,7 +1510,7 @@ export function CommandPalette({
             )}
           </div>
 
-          {/* Heronite-style preview pane on desktop */}
+          {/* Side preview pane on desktop */}
           <aside className="hidden w-60 shrink-0 flex-col justify-between bg-bg/35 p-4 md:flex">
             {activeRow?.game ? (
               <GamePreview game={activeRow.game} running={runningId === activeRow.game.id} onToggleFavorite={onToggleFavorite} />

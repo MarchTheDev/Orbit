@@ -220,7 +220,7 @@ export function backdropsFor(game: Game): string[] {
   const out: string[] = [];
   if (game.meta?.backgroundUrlCustom && game.meta.backgroundUrl) out.push(game.meta.backgroundUrl);
   if (id) {
-    // Heronite keeps Steam's cached hero, then tries the 2x hero across Steam's
+    // Steam's cached hero is kept, then the 2x hero is tried across Steam's
     // current CDNs before its older 1x asset. Orbit used to ask only one CDN
     // for the 1x image, which made missing/cropped backdrops needlessly common.
     const cdns = ['https://cdn.akamai.steamstatic.com', 'https://cdn.cloudflare.steamstatic.com', 'https://shared.akamai.steamstatic.com/store_item_assets'];
@@ -384,7 +384,7 @@ function PanelToggle({
 /**
  * The sidebar.
  *
- * Heronite's console menu is a full-height panel down the right edge over the
+ * The console menu is a full-height panel down the right edge over the
  * dimmed screen, and it is where everything that is not browsing the collection
  * lives: the look of the room, what the deck holds, adding a game, Orbit's own
  * settings, the way back to the desktop and the power switch. Escape opens it
@@ -640,7 +640,7 @@ function StardeckMenu({
 /**
  * The light in the room: the selected game's own cover, blurred hard.
  *
- * Heronite points its whole screen at one picture - the focused game's art -
+ * The whole screen points at one picture - the focused game's art -
  * and cross-fades to the next when the focus moves, 520 ms of one game
  * dissolving into another. This is the same idea with the asset a library here
  * always has: the cover. Two layers are kept, the one that has settled and the
@@ -690,7 +690,7 @@ function DeckBackdrop({ game }: { game: Game | null }) {
  * The game the shelf is about, as a panel down the left edge.
  *
  * A console puts the thing you are looking at in front of you: the poster, the
- * name, what has been played of it and the one button that starts it. Heronite
+ * name, what has been played of it and the one button that starts it. The
  * calls this a sheet and floats it over the collection rather than making a page
  * of it, and that is the shape here too - 27rem wide with a margin off the edge,
  * so the covers are still visible to the right of it and the shelf behind it

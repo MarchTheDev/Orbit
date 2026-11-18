@@ -158,7 +158,7 @@ index is what you move.
 The in-game overlay is drawn over somebody else's game, so it must read at a
 glance and then leave. It wears the app's own panel - solid, one hairline, no
 glass - and the theme's accent for what is chosen. It is not a copy of
-Heronite's white-on-black pills, and it does not blur: a blurred panel over a
+Plain white-on-black pills, and it does not blur: a blurred panel over a
 moving game is the most expensive thing on the screen and is almost never why
 somebody opened it.
 

@@ -54,10 +54,10 @@ storefront and not a dashboard template. The library is a system of bodies; the
 selected game is the one being observed. The interface is dark, precise, warm at
 the point of action, and quiet everywhere else.
 
-The reference point is Heronite's artwork-led focus view: the selected game's art
+The reference point is an artwork-led focus view: the selected game's art
 lights the room, the library stays visible beside it, and details are read in a
 calm column. Orbit's own identity comes from celestial mechanics — orbital
-lines, telemetry, grouped bodies — not from copying Heronite's chrome.
+lines, telemetry, grouped bodies - not from copying another launcher's chrome.
 
 ## Non-goals
 

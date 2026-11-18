@@ -566,7 +566,7 @@ const SECTIONS: { id: string; label: string; icon: typeof Palette }[] = [
 /**
  * The cards whose feature is not finished yet.
  *
- * These are the parts of Heronite that Orbit still has to catch up on: reading
+ * These are the parts of the reference launcher that Orbit still has to catch up on: reading
  * launchers properly, filling in metadata, achievements, captures and the cloud.
  * They are marked rather than hidden, because seeing the shape of the whole
  * settings page is how somebody knows what Orbit is going to be; the note tells

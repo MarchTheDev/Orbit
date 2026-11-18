@@ -86,7 +86,7 @@ const SECTIONS: { value: GameSection; label: string }[] = [
 
 const DEFAULT_SHAPE: CoverShape = '3:4';
 const DEFAULT_LABEL: GridLabel = 'title-info';
-/** Grid covers, the way Heronite sizes them: a pixel width, 110 to 240. */
+/** Grid covers: a pixel width, 110 to 240. */
 const DEFAULT_COVER_WIDTH = 150;
 const MIN_COVER_WIDTH = 110;
 const MAX_COVER_WIDTH = 240;
@@ -106,7 +106,7 @@ const MAX_SHELF_WIDTH = 260;
 /**
  * How many covers sit in a row on the shelf.
  *
- * Heronite's observatory always packs two per row at every size, which makes the
+ * The observatory always packs two per row at every size, which makes the
  * shelf long and narrow; the covers are chosen here, so the player picks the
  * shape of the shelf. It reads from left to right, like a console's library,
  * rather than from top to bottom like a list.
@@ -293,7 +293,7 @@ export function LibraryView({
   setQuery: (next: string) => void;
   sort: SortKey;
   setSort: (next: SortKey) => void;
-  /** The cover's width in pixels, as Heronite sizes them. */
+  /** The cover's width in pixels. */
   coverWidth: number;
   setCoverWidth: (next: number) => void;
   coverTint: boolean;

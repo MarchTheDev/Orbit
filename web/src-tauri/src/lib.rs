@@ -1685,7 +1685,7 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
     }
 
     if picks.is_empty() && page == 0 {
-        // The same last step Heronite takes: when no store has a cover, the
+        // The last step: when no store has a cover,
         // web is asked for one by name, and whatever comes back is offered as
         // a choice rather than applied.
         match webart::covers(title, 12).await {

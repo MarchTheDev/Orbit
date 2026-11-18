@@ -31,7 +31,7 @@ type Page = 'game' | 'launch' | 'wine' | 'saves';
 /**
  * One game's settings, in the middle of the window.
  *
- * The shape is Heronite's, because it is the one that stops reading like a form:
+ * The shape is deliberate, because it stops reading like a form:
  *
  * - **A picture, then the facts, then the controls.** The first thing on the
  *   page is the game itself - its cover and its backdrop, large, side by side -
@@ -288,7 +288,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   /**
    * The picture at the top of the page.
    *
-   * Heronite's game page opens on the game's own art, and so does this: the
+   * A game page should open on the game's own art, and so does this: the
    * cover and the backdrop are the two things a player recognises a game by, and
    * they are also the two things most often wrong - a cropped capsule, a poster
    * that is a logo. Putting them first makes fixing them one press away, and
@@ -732,7 +732,7 @@ function Segmented<T extends string>({ value, onChange, options }: {
   );
 }
 
-/** Heronite's switch: an accent pill with a white knob that slides. */
+/** The switch: an accent pill with a white knob that slides. */
 function Toggle({ checked, onChange, label, disabled }: {
   checked: boolean;
   onChange: (next: boolean) => void;

@@ -721,8 +721,7 @@ html.orbit-linux.orbit-glass .orbit-ovsheet {
   color: var(--c-muted);
 }
 
-/* The heading of a section inside a panel. Heronite's sections are named the
-   same way: small, solid, and unmistakable. */
+/* The heading of a section inside a panel. Small, solid, and unmistakable. */
 .orbit-section-head {
   font-size: 12px;
   font-weight: 700;
@@ -2599,7 +2598,7 @@ html.orbit-linux .orbit-topbar {
 }
 
 /* The rail.
-   Heronite's is a column of tiles rather than a list of links: every section
+   It is a column of tiles rather than a list of links: every section
    has its own icon in its own square, the name beside it, and the chosen one
    lifts off the rail. It is the index somebody reads to find their way around
    eighteen cards, so it is sized to be read at a glance - not a set of
@@ -4703,8 +4702,8 @@ html.orbit-glass .orbit-statsbar .orbit-period button[aria-pressed='true']:hover
 
 /* The in-game overlay is drawn over somebody else's game, so it has one job the
    rest of Orbit does not have: it must read instantly and then get out of the
-   way. It used to be a set of white-on-black glass pills borrowed from
-   Heronite's look. Now it is the same dark panel the app uses, with the theme's
+   way. It used to be a set of white-on-black glass pills. Now it is the same
+   dark panel the app uses, with the theme's
    accent for what is chosen, hairline rules and tabular numbers - so the desktop
    and the overlay are recognisably the same program without the overlay
    shouting over the game underneath it. */
@@ -4842,7 +4841,7 @@ html.orbit-glass .orbit-statsbar .orbit-period button[aria-pressed='true']:hover
   padding-top: 22px;
 }
 .orbit-setsec:first-of-type { border-top: 0; padding-top: 0; }
-/* A section's heading sits on a plate, the way Heronite's do.
+/* A section's heading sits on a plate.
    The page behind it can now be a blurred cover, and a title with nothing under
    it is the first thing a picture takes away. The plate is the panel's own
    colour at a little over half strength, so it reads as a surface laid on the
@@ -5234,7 +5233,7 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 /* ------------------------------------------------------------- the Stardeck */
 
 /* A line of type over artwork always gets a plate behind it.
-   Heronite does this everywhere and it is the difference between text that
+   It is the difference between text that
    happens to sit on a picture and text that can be read against one. These are
    the two shapes it comes in: `.orbit-deck-plate` for a block of words, and the
    `[data-plate]` marker for anything drawn over Stardeck's own covers. */
@@ -5254,7 +5253,7 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
    across the top: Deck and Library are two pills floating on the picture, and
    everything that is not browsing - the look of the room, adding a game,
    Orbit's settings, the way back to the desktop, power - is one Escape away in
-   the sidebar, the way Heronite's console menu works.
+   the sidebar.
 
    The selected game's own panel floats down the left edge instead of a strip
    under the row: on a television the panel describing a game should not be
@@ -5517,7 +5516,7 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 .orbit-deck-step:hover { border-color: #ffffff59; color: #fff; }
 
 /* --- the game's own panel, down the left edge ------------------------------- */
-/* Heronite calls this a sheet: a floating window over the collection with the
+/* The sheet: a floating window over the collection with the
    poster, the name, what has been played of it and the buttons that start it.
    It is anchored to the left edge with a margin, so the covers behind it are
    still visible to its right and the row is still the thing being browsed. */
@@ -7932,8 +7931,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
    one game and nothing else needs to be readable while it is open. Its first
    block is the cover and the backdrop at size; then the name, the status and the
    two switches on one line; then the pages. Everything under that is the same
-   grey panel of label-and-control rows repeated - the shape Heronite's game
-   settings uses, and the one that stops a settings page reading as a form.
+   grey panel of label-and-control rows repeated - the shape that stops a
+   settings page reading as a form.
    ========================================================== */
 .orbit-settings {
   display: flex;
@@ -8218,8 +8217,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 }
 
 /* ===================================================== the covers dialog
-   Heronite's: the slots down the left, what was found for the chosen slot on
-   the right.
+   The slots down the left, what was found for the chosen slot on the right.
 
    The left column answers "what does this game keep, and what is in it now",
    in the picture's own shape. The right answers "what else is there", for the
