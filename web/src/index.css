@@ -8190,6 +8190,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 /* --- the pages ------------------------------------------------------------ */
 .orbit-settings-tabs {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--c-border);
@@ -8197,8 +8199,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   background: var(--c-panel2);
 }
 .orbit-settings-tabs button {
-  flex: 1 1 0;
-  padding: 7px 12px;
+  flex: 0 1 auto;
+  padding: 7px 14px;
   border-radius: 8px;
   color: var(--c-muted);
   font-size: 12px;
@@ -8206,10 +8208,17 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   transition: color .14s ease, background .14s ease, box-shadow .14s ease;
 }
 .orbit-settings-tabs button:hover { color: var(--c-text); background: color-mix(in srgb, var(--c-text) 5%, transparent); }
+/* The pages of a game's editor read as the theme's own: the chosen page takes
+   a tint of the accent rather than a raised grey, so the six pages are a part of
+   the app and not a control borrowed from somewhere else. */
 .orbit-settings-tabs button[aria-selected='true'] {
-  background: var(--c-panel);
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-panel));
   color: var(--c-text);
-  box-shadow: inset 0 0 0 1px var(--c-border);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-accent) 42%, var(--c-border));
+}
+.orbit-settings-tabs button:hover { color: var(--c-text); }
+.orbit-settings-tabs button:hover:not([aria-selected='true']) {
+  background: color-mix(in srgb, var(--c-accent) 7%, transparent);
 }
 .orbit-settings-page {
   display: flex;
@@ -8264,9 +8273,20 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-row2-control { display: flex; min-width: 0; align-items: center; gap: 8px; }
 
 /* The times, as three fields in one row. */
-.orbit-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 2px 4px; }
-.orbit-times label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.orbit-times span { font-size: 11px; font-weight: 600; color: var(--c-muted); }
+/* How long it takes: three short numbers side by side, centred and narrow.
+   Full-width inputs under three headings made a row of three digits look like
+   the most important thing on the page, which it is not. */
+.orbit-times {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 24rem;
+  margin: 0 auto;
+  padding: 2px 4px;
+}
+.orbit-times label { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.orbit-times .orbit-input { text-align: center; }
+.orbit-times span { font-size: 10.5px; font-weight: 600; color: var(--c-muted); }
 
 /* An artwork row: the picture, what it is, what can be done. */
 .orbit-artline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }

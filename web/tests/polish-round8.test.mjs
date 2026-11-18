@@ -25,8 +25,11 @@ check('Stardeck game changes fade the room and cross-fade the panel, with reduce
   css.includes('@keyframes deck-game-in') && css.includes('@keyframes deck-backdrop-in') &&
     css.includes('prefers-reduced-motion: reduce') && tv.includes('key={game.id}') && !tv.includes('findTvBackdrop'));
 check('Launch settings separate what starts with the game from another way to start it',
-  edit.includes("page === 'launch'") && launchEditor.includes('Start alongside') && launchEditor.includes('Another way to launch it') &&
-    launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") && types.includes("when?: 'alongside' | 'alternative'"));
+  edit.includes("page === 'launch'") && edit.includes("page === 'extra'") &&
+    launchEditor.includes('Starts with the game') && launchEditor.includes('Alternative launch') &&
+    launchEditor.includes("section === 'extra'") && launchEditor.includes("section === 'launch'") &&
+    launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") &&
+    types.includes("when?: 'alongside' | 'alternative'"));
 check('a launch profile starts the game while a tool rides along, and neither is swept up by the other',
   session.includes('companion.is_alongside()') && lib.includes('fn start_game_alternative(') && lib.includes('profile.is_alongside()'));
 check('the Play arrow offers named launches beside the tools, by name',

@@ -33,7 +33,7 @@ export function GameEditDialog({
   /** Remove only this game's Backlog membership, preserving its Library record. */
   onRemoveFromBacklog?: () => void;
   /** Open on one page, for the development preview. */
-  startOn?: 'game' | 'actions' | 'launch' | 'tools' | 'saves' | 'proton' | 'artwork';
+  startOn?: 'game' | 'actions' | 'launch' | 'extra' | 'tools' | 'saves' | 'proton' | 'artwork';
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   return (

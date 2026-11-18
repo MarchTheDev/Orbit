@@ -67,7 +67,16 @@ export function LaunchEditor({
   onSave: (launch: LaunchTarget, companions: Companion[]) => void;
   /** The edit dialog keeps launch changes when it closes, so it has no button. */
   saveOnClose?: boolean;
-  section?: 'all' | 'launch' | 'tools';
+  /**
+   * Which page of the game's editor is being drawn.
+   *
+   * `launch` is the one decision - how Play behaves - plus the named other ways
+   * to start the same game. `extra` is everything that rides along: another
+   * program, a script, a web page. They are separate pages because they are
+   * separate questions, and putting both on one page made "how do I start this"
+   * look like three decisions of equal weight.
+   */
+  section?: 'all' | 'launch' | 'extra';
 }) {
   const [target, setTarget] = useState<LaunchTarget>(game.launch ?? { kind: 'none' });
   const [args, setArgs] = useState(
@@ -214,7 +223,7 @@ export function LaunchEditor({
 
   return (
     <div className="orbit-launchpage">
-      {section !== 'tools' && (
+      {(section === 'all' || section === 'launch') && (
         <>
           <section className="orbit-launchpanel">
 
@@ -327,116 +336,11 @@ export function LaunchEditor({
             )}
           </section>
 
-          {/* ------------------------------------------------------ alongside */}
-          <section className="orbit-launchpanel">
-            <header className="orbit-launchpanel-head">
-              <p className="orbit-launchpanel-title">
-                Start alongside
-                {alongside.length > 0 && <span className="orbit-launchbadge">{alongside.length}</span>}
-              </p>
-              <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
-                <Plus className="size-3.5" /> Add
-              </button>
-            </header>
-
-            {alongside.length === 0 ? (
-              <p className="orbit-launchnote is-quiet">
-                Tools that run with the game: a mod manager, a frame-rate cap, a script. They start every time, and
-                closing one never ends the session.{' '}
-                <button type="button" className="orbit-launchlink" onClick={() => addAlongside(true)}>A web page</button>{' '}
-                works too.
-              </p>
-            ) : (
-              <div className="orbit-launchlist">
-                {alongside.map(({ companion: c, index: i }) => (
-                  <article key={`along-${i}`} className="orbit-launchentry">
-                    <div className="orbit-launchentry-head">
-                      <span className="orbit-launchentry-icon" aria-hidden>
-                        {c.url !== undefined && c.url !== null ? <Layers className="size-3.5" /> : <AppWindow className="size-3.5" />}
-                      </span>
-                      <h4>{c.url !== undefined && c.url !== null ? 'Web page' : baseName(c.path) || 'Program'}</h4>
-                      <button
-                        type="button"
-                        onClick={() => removeCompanion(i)}
-                        className="orbit-launchentry-remove"
-                        aria-label={`Remove ${c.url || c.path || 'this entry'}`}
-                        title="Remove"
-                      >
-                        <X className="size-3.5" />
-                      </button>
-                    </div>
-                    {c.url !== undefined && c.url !== null ? (
-                      <div className="orbit-launchrow">
-                        <span className="orbit-launchrow-label">Address</span>
-                        <span className="orbit-launchrow-control">
-                          <input
-                            className={inputCls}
-                            type="url"
-                            value={c.url ?? ''}
-                            onChange={(event) => setCompanion(i, { url: event.target.value })}
-                            placeholder="https://example.com/this-game"
-                            spellCheck={false}
-                          />
-                        </span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="orbit-launchrow">
-                          <span className="orbit-launchrow-label">Program</span>
-                          <span className="orbit-launchrow-control">
-                            <input
-                              className={inputCls}
-                              value={c.path}
-                              onChange={(event) => setCompanion(i, { path: event.target.value })}
-                              placeholder={desktopOs() === 'linux' ? '/home/you/Tools/tool.AppImage' : 'C:\\Tools\\LosslessScaling\\LosslessScaling.exe'}
-                              spellCheck={false}
-                            />
-                            {native && (
-                              <button
-                                type="button"
-                                className="orbit-launchbrowse"
-                                aria-label="Choose a program or script"
-                                onClick={() =>
-                                  void pickFile(
-                                    'Choose a program or script',
-                                    desktopOs() === 'linux' ? ['sh', 'exe', 'AppImage'] : ['exe', 'bat', 'cmd', 'ps1'],
-                                    c.path || undefined,
-                                  ).then((path) => path && setCompanion(i, { path }))
-                                }
-                              >
-                                <FolderOpen className="size-4" />
-                              </button>
-                            )}
-                          </span>
-                        </div>
-                        <div className="orbit-launchrow">
-                          <span className="orbit-launchrow-label">Arguments</span>
-                          <span className="orbit-launchrow-control">
-                            <input
-                              className={inputCls}
-                              value={c.args}
-                              onChange={(event) => setCompanion(i, { args: event.target.value })}
-                              placeholder="Optional"
-                              spellCheck={false}
-                            />
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </article>
-                ))}
-                <button type="button" onClick={() => addAlongside(true)} className="orbit-launchaddbtn is-quiet">
-                  <Plus className="size-3.5" /> Also start a web page with it
-                </button>
-              </div>
-            )}
-          </section>
-
           {/* -------------------------------------------------- alternative */}
           <section className="orbit-launchpanel">
             <header className="orbit-launchpanel-head">
               <p className="orbit-launchpanel-title">
-                Another way to launch it
+                Alternative launch
                 {profiles.length > 0 && <span className="orbit-launchbadge">{profiles.length}</span>}
               </p>
               <button type="button" onClick={addProfile} className="orbit-launchaddbtn">
@@ -446,8 +350,8 @@ export function LaunchEditor({
 
             {profiles.length === 0 ? (
               <p className="orbit-launchnote is-quiet">
-                The same game started differently - other arguments, another folder, a mod loader in front. Each one
-                gets a name and appears in the arrow beside Play.
+                The same game started differently: other arguments, another folder, a mod loader in front. Each
+                one gets a name and appears in the arrow beside Play.
               </p>
             ) : (
               <div className="orbit-launchlist">
@@ -578,9 +482,120 @@ export function LaunchEditor({
         </>
       )}
 
-      {section === 'tools' && (
-        <p className="orbit-launchnote is-quiet">Tools that start with the game are on the Launch page, under “Start alongside”.</p>
+      {/* ------------------------------------------------------------ extra */}
+      {/* Everything that rides along with a launch, and only that. A tool that
+          has to be running with the game - a frame-rate cap, a mod manager, a
+          script, a wiki in the browser - belongs on its own page, because it is
+          a different question from "how does Play start this game". */}
+      {section === 'extra' && (
+        <>
+          <section className="orbit-launchpanel">
+            <header className="orbit-launchpanel-head">
+              <p className="orbit-launchpanel-title">
+                Starts with the game
+                {alongside.length > 0 && <span className="orbit-launchbadge">{alongside.length}</span>}
+              </p>
+              <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
+                <Plus className="size-3.5" /> Add
+              </button>
+            </header>
+
+            {alongside.length === 0 ? (
+              <p className="orbit-launchnote is-quiet">
+                Nothing yet. A mod manager, a frame-rate cap, a script or a wiki page can be started with every
+                launch, and stopping one never ends the session.{' '}
+                <button type="button" className="orbit-launchlink" onClick={() => addAlongside(true)}>A web page</button>{' '}
+                works too.
+              </p>
+            ) : (
+              <div className="orbit-launchlist">
+                {alongside.map(({ companion: c, index: i }) => (
+                  <article key={`along-${i}`} className="orbit-launchentry">
+                    <div className="orbit-launchentry-head">
+                      <span className="orbit-launchentry-icon" aria-hidden>
+                        {c.url !== undefined && c.url !== null ? <Layers className="size-3.5" /> : <AppWindow className="size-3.5" />}
+                      </span>
+                      <h4>{c.url !== undefined && c.url !== null ? 'Web page' : baseName(c.path) || 'Program'}</h4>
+                      <button
+                        type="button"
+                        onClick={() => removeCompanion(i)}
+                        className="orbit-launchentry-remove"
+                        aria-label={`Remove ${c.url || c.path || 'this entry'}`}
+                        title="Remove"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    {c.url !== undefined && c.url !== null ? (
+                      <div className="orbit-launchrow">
+                        <span className="orbit-launchrow-label">Address</span>
+                        <span className="orbit-launchrow-control">
+                          <input
+                            className={inputCls}
+                            type="url"
+                            value={c.url ?? ''}
+                            onChange={(event) => setCompanion(i, { url: event.target.value })}
+                            placeholder="https://example.com/this-game"
+                            spellCheck={false}
+                          />
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="orbit-launchrow">
+                          <span className="orbit-launchrow-label">Program</span>
+                          <span className="orbit-launchrow-control">
+                            <input
+                              className={inputCls}
+                              value={c.path}
+                              onChange={(event) => setCompanion(i, { path: event.target.value })}
+                              placeholder={desktopOs() === 'linux' ? '/home/you/Tools/tool.AppImage' : 'C:\\Tools\\cap\\cap.exe'}
+                              spellCheck={false}
+                            />
+                            {native && (
+                              <button
+                                type="button"
+                                className="orbit-launchbrowse"
+                                aria-label="Choose a program or script"
+                                onClick={() =>
+                                  void pickFile(
+                                    'Choose a program or script',
+                                    desktopOs() === 'linux' ? ['sh', 'exe', 'AppImage'] : ['exe', 'bat', 'cmd', 'ps1'],
+                                    c.path || undefined,
+                                  ).then((path) => path && setCompanion(i, { path }))
+                                }
+                              >
+                                <FolderOpen className="size-4" />
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                        <div className="orbit-launchrow">
+                          <span className="orbit-launchrow-label">Arguments</span>
+                          <span className="orbit-launchrow-control">
+                            <input
+                              className={inputCls}
+                              value={c.args}
+                              onChange={(event) => setCompanion(i, { args: event.target.value })}
+                              placeholder="Optional"
+                              spellCheck={false}
+                            />
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                ))}
+                <button type="button" onClick={() => addAlongside(true)} className="orbit-launchaddbtn is-quiet">
+                  <Plus className="size-3.5" /> Also start a web page with it
+                </button>
+              </div>
+            )}
+          </section>
+          <p className="orbit-launchsaved" aria-live="polite">{dirty ? 'Saving…' : 'Saved'}</p>
+        </>
       )}
+
     </div>
   );
 }

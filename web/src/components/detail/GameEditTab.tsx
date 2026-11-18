@@ -26,7 +26,16 @@ import { ArtworkSearch, type ArtShape } from './ArtworkPicker';
 import { WineSettings } from './WineSettings';
 import { desktopOs } from '../../utils/platform';
 
-type Page = 'game' | 'launch' | 'wine' | 'saves';
+/**
+ * The editor's pages.
+ *
+ * One page, one question. What the game *is* (its facts and art), how Play
+ * starts it, what rides along with a launch, the tools that go in the game's
+ * own folder, and where it keeps its progress. Grouping these differently - a
+ * page of "launch and tools", a page of "artwork and details" - is what made the
+ * old form read like a list of fields rather than a game being described.
+ */
+type Page = 'game' | 'launch' | 'extra' | 'tools' | 'wine' | 'saves';
 
 /**
  * One game's settings, in the middle of the window.
@@ -54,14 +63,16 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   saveDir?: string;
   onSaveDir?: (path: string) => void;
   /** The page to open on, for a preview that wants to look at one directly. */
-  startOn?: Page | 'tools' | 'proton' | 'actions' | 'artwork';
+  startOn?: Page | 'proton' | 'actions' | 'artwork';
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
   const wineTarget = game.launch.kind === 'wine' ? game.launch : null;
   const [page, setPage] = useState<Page>(() => {
-    if (startOn === 'tools' || startOn === 'proton') return 'launch';
-    if (startOn === 'actions' || startOn === 'artwork' || startOn === 'game') return 'game';
+    if (startOn === 'tools') return 'tools';
+    if (startOn === 'proton') return 'wine';
+    if (startOn === 'actions') return 'extra';
+    if (startOn === 'artwork' || startOn === 'game') return 'game';
     return (startOn as Page) ?? 'game';
   });
   const [searching, setSearching] = useState<ArtShape | null>(null);
@@ -320,6 +331,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const pages: { id: Page; label: string; hidden?: boolean }[] = [
     { id: 'game', label: 'Game' },
     { id: 'launch', label: 'Launch', hidden: hideLaunchSettings },
+    { id: 'extra', label: 'Extra', hidden: hideLaunchSettings },
+    { id: 'tools', label: 'Tools', hidden: hideLaunchSettings },
     { id: 'wine', label: 'Wine', hidden: hideLaunchSettings || desktopOs() !== 'linux' },
     { id: 'saves', label: 'Saves' },
   ];
@@ -475,16 +488,34 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
 
         {/* -------------------------------------------------------- launch */}
         {page === 'launch' && !hideLaunchSettings && (
-          <>
-            <Panel title="How Orbit starts it">
-              <LaunchEditor
-                game={game}
-                saveOnClose
-                section="launch"
-                onSave={(launch, companions) => onUpdate({ launch, companions })}
-              />
-            </Panel>
-            <Panel title="ReShade">
+          <Panel title="How Orbit starts it">
+            <LaunchEditor
+              game={game}
+              saveOnClose
+              section="launch"
+              onSave={(launch, companions) => onUpdate({ launch, companions })}
+            />
+            {/* The reshade copy says what it does once. The closing note under
+                it explained the same thing a second time, which is the kind of
+                paragraph that makes a settings page feel like a manual. */}
+          </Panel>
+        )}
+
+        {/* ----------------------------------------------------------- extra */}
+        {page === 'extra' && !hideLaunchSettings && (
+          <Panel title="Runs with the game">
+            <LaunchEditor
+              game={game}
+              saveOnClose
+              section="extra"
+              onSave={(launch, companions) => onUpdate({ launch, companions })}
+            />
+          </Panel>
+        )}
+
+        {/* ----------------------------------------------------------- tools */}
+        {page === 'tools' && !hideLaunchSettings && (
+          <Panel title="ReShade">
               {reshade ? (
                 <>
                   <Row label={reshade.state === 'on' ? 'On' : reshade.state === 'off' ? 'Off' : 'Not set up'}>
@@ -539,15 +570,14 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
                     </div>
                   )}
                   <p className="orbit-note">
-                    Turning it on puts ReShade in the game's own folder, and the original file is kept beside it. Some
-                    anti-cheat systems read it as tampering.
+                    The original file is kept beside ReShade's, so turning it off puts the game back. Some anti-cheat
+                    systems read it as tampering.
                   </p>
                 </>
               ) : (
                 <p className="orbit-note">{reshadeBusy ? 'Looking at the game folder…' : 'ReShade was not checked.'}</p>
               )}
-            </Panel>
-          </>
+          </Panel>
         )}
 
         {/* ---------------------------------------------------------- wine */}
