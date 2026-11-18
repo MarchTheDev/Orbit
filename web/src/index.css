@@ -5754,13 +5754,6 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
   overflow: hidden;
   box-shadow: 0 22px 50px -22px #000;
 }
-.orbit-decksheet-glow {
-  position: absolute;
-  inset: 18% 22% -8%;
-  z-index: -1;
-  border-radius: 999px;
-  filter: blur(30px);
-}
 .orbit-decksheet-star {
   position: absolute;
   right: 6px;
@@ -8224,6 +8217,26 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-settings-title:focus { box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--c-accent) 70%, transparent); }
 .orbit-settings-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .orbit-settings-strip-label { font-size: 11px; font-weight: 600; color: var(--c-muted); }
+/* Two traits, two buttons: a star and an eye, tinted when they are on. */
+.orbit-settings-flags { display: flex; gap: 6px; margin-left: auto; }
+.orbit-settings-flag {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+  color: var(--c-muted);
+  cursor: pointer;
+  transition: color .12s var(--ease-snap), border-color .12s var(--ease-snap), background-color .12s var(--ease-snap);
+}
+.orbit-settings-flag:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--c-text) 26%, transparent); }
+.orbit-settings-flag[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--c-accent) 48%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 82%, var(--c-text));
+}
 
 /* --- the pages ------------------------------------------------------------ */
 .orbit-settings-tabs {

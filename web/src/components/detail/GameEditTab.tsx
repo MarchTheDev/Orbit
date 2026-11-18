@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FolderOpen, Image as ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, FolderOpen, Image as ImageIcon, RefreshCw, Star, Trash2 } from 'lucide-react';
 import type { Game, GameStatus, HltbData, MetaData } from '../../types';
 import {
   findArtwork,
@@ -350,6 +350,12 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
           onChange={(event) => setTitle(event.target.value)}
           spellCheck={false}
         />
+        {/* The two traits used to be a switch, the word "Favorite", another
+            switch and the word "Hidden" - four controls and two labels for two
+            booleans, which is the wall of chrome that made this strip feel
+            bigger than the game it describes. They are two buttons now, each
+            carrying the state in its own fill and saying what it is on hover
+            and to a reader. */}
         <div className="orbit-settings-strip">
           <Segmented
             value={status}
@@ -361,10 +367,28 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
               { value: 'dropped', label: 'Dropped' },
             ]}
           />
-          <Toggle checked={favorite} onChange={setFavorite} label="Favorite" />
-          <span className="orbit-settings-strip-label">Favorite</span>
-          <Toggle checked={hidden} onChange={setHidden} label="Hidden from the library" />
-          <span className="orbit-settings-strip-label">Hidden</span>
+          <div className="orbit-settings-flags">
+            <button
+              type="button"
+              className="orbit-settings-flag"
+              aria-pressed={favorite}
+              onClick={() => setFavorite(!favorite)}
+              title={favorite ? 'Remove from favourites' : 'Add to favourites'}
+              aria-label={favorite ? 'Remove from favourites' : 'Add to favourites'}
+            >
+              <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />
+            </button>
+            <button
+              type="button"
+              className="orbit-settings-flag"
+              aria-pressed={hidden}
+              onClick={() => setHidden(!hidden)}
+              title={hidden ? 'Show in the library again' : 'Hide from the library'}
+              aria-label={hidden ? 'Show in the library again' : 'Hide from the library'}
+            >
+              {hidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
         </div>
       </header>
 

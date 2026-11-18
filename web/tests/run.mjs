@@ -74,6 +74,8 @@ const checks = [
   'tests/polish-round6.test.mjs',
   'tests/polish-round7.test.mjs',
   'tests/polish-round8.test.mjs',
+  'tests/polish-round9.test.mjs',
+  'tests/polish-round10.test.mjs',
 ];
 
 try {
