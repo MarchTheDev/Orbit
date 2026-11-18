@@ -1594,6 +1594,23 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
     Ok(metadata::wide_art(app_id).await.into_iter().next().map(|pick| pick.url))
 }
 
+/// Wide pictures found on the web by name, for a game no store knows.
+///
+/// A picker for the backdrop has the same problem the cover picker had: a store
+/// has one hero, so a search that only asks a store offers one answer. The
+/// result is a choice, filtered to landscape, and never applied on its own.
+#[tauri::command]
+async fn artwork_web_wide(title: String, limit: Option<usize>) -> Result<Artwork, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Name the game before looking for artwork.".into());
+    }
+    let picks = webart::wide_covers(title, limit.unwrap_or(12).clamp(1, 30))
+        .await
+        .map_err(|e| format!("The image search did not answer: {e}"))?;
+    Ok(Artwork { app_id: None, picks, page: 0, has_more: false })
+}
+
 /// Wide artwork options for the Edit Game backdrop picker. Follows the same
 /// source order as Stardeck but returns choices instead of auto-applying one.
 #[tauri::command]
@@ -1616,6 +1633,16 @@ async fn artwork_backdrops(orbit: State<'_, Orbit>, game_id: String) -> Result<A
         if let Ok(found) = metadata::artwork(id).await {
             for pick in found.into_iter().filter(|pick| matches!(pick.kind.as_str(), "hero" | "screenshot" | "header")) {
                 if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+            }
+        }
+    }
+    // And the web, because one hero is not a choice. The store's own art is
+    // still first; this is what fills the rest of the page when a search under
+    // another name has to find something the catalogues do not know.
+    if let Ok(found) = webart::wide_covers(&game.title, 12).await {
+        for pick in found {
+            if !picks.iter().any(|existing| existing.url == pick.url) {
+                picks.push(pick);
             }
         }
     }
@@ -1684,12 +1711,22 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
         }
     }
 
-    if picks.is_empty() && page == 0 {
-        // The last step: when no store has a cover,
-        // web is asked for one by name, and whatever comes back is offered as
-        // a choice rather than applied.
+    // The web is asked as well, not only when every store came up empty.
+    //
+    // A store has one cover, so a picker fed only by the store offers exactly
+    // one picture and a search box that appears to do nothing. What somebody
+    // opening this wants is a choice: what the store has, what the community
+    // has, and whatever else can be found by name. The store's own art still
+    // comes first, because that is the one that is always right.
+    if page == 0 {
         match webart::covers(title, 12).await {
-            Ok(found) => picks.extend(found),
+            Ok(found) => {
+                for pick in found {
+                    if !picks.iter().any(|have| have.url == pick.url) {
+                        picks.push(pick);
+                    }
+                }
+            }
             Err(e) => log::warn!("Web image search offered nothing: {e}"),
         }
     }
@@ -2954,6 +2991,7 @@ pub fn run() {
             achievements_fetch,
             artwork_candidates,
             artwork_choices,
+            artwork_web_wide,
             tv_backdrop,
             artwork_backdrops,
             reorder_game_logs,

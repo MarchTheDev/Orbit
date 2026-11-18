@@ -709,6 +709,11 @@ export function findArtwork(gameId: string, page = 0): Promise<ArtworkFound> {
   );
 }
 
+/** Landscape pictures the web has for a name, for a game no store knows. */
+export function findWebWideArt(title: string): Promise<ArtworkFound> {
+  return call('artwork_web_wide', { title, limit: 12 }, async () => ({ appId: null, picks: [] }));
+}
+
 /** User-selectable wide art from SteamGridDB and Steam's own store images. */
 export function findBackdropArtwork(gameId: string): Promise<ArtworkFound> {
   return call('artwork_backdrops', { gameId }, async () => ({ appId: null, picks: [] }));

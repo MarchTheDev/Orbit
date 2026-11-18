@@ -1765,6 +1765,44 @@ html.orbit-linux .orbit-backdrop {
   overflow-wrap: anywhere;
 }
 
+/* The Observatory's own column: facts in two quiet columns, then the folder on
+   a line of its own. Eight label-and-value rows down 300 pixels of page was the
+   crowded part of the game page - the same information reads at a glance when
+   the short values sit side by side and the long one gets the width. */
+.orbit-gamepage-facts .orbit-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+  margin-top: 4px;
+}
+.orbit-gamepage-facts .orbit-fact {
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+.orbit-gamepage-facts .orbit-fact dd { font-size: 12px; }
+.orbit-fact-wide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 0 2px;
+  font-size: 12px;
+}
+.orbit-fact-wide dt { color: var(--c-muted); white-space: nowrap; }
+.orbit-fact-wide dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+@media (max-width: 720px) {
+  .orbit-gamepage-facts .orbit-facts { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ----------------------------------------------------- the console shell */
 
 /* One bar across the top, then the room below it. Nothing floats over the

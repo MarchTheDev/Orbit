@@ -6,6 +6,7 @@ import {
   findArtworkChoices,
   findBackdropArtwork,
   findSave,
+  findWebWideArt,
   getReshadeState,
   isNative,
   revealInExplorer,
@@ -708,12 +709,29 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
             say(`${which === 'portrait' ? 'Cover' : 'Backdrop'} set from ${source}.`);
           }}
           onPickSlot={(which) => setSearching(which)}
-          load={(which, query, pageNumber) => {
+          load={async (which, query, pageNumber) => {
             // The game's own record is the fastest, most accurate source; a name
-            // typed into the box is asked about by name instead.
-            if (query === game.title) {
-              return which === 'portrait' ? findArtwork(game.id, pageNumber) : findBackdropArtwork(game.id);
+            // typed into the box is asked about by name instead. A backdrop has
+            // its own lookup either way, because the store's hero and a web
+            // wallpaper are not the same picture as a poster.
+            if (which === 'wide') {
+              const [own, web] = await Promise.all([
+                query === game.title
+                  ? findBackdropArtwork(game.id).catch(() => ({ appId: null, picks: [] }))
+                  : findArtworkChoices(query, meta?.steamAppId ?? null, pageNumber),
+                findWebWideArt(query).catch(() => ({ appId: null, picks: [] })),
+              ]);
+              // The catalogues first, then what the web has: the store's own
+              // hero is the one picture that is always the right game.
+              const seen = new Set<string>();
+              const picks = [...own.picks, ...web.picks].filter((pick) => {
+                if (seen.has(pick.url)) return false;
+                seen.add(pick.url);
+                return true;
+              });
+              return { appId: own.appId ?? null, picks, hasMore: false };
             }
+            if (query === game.title) return findArtwork(game.id, pageNumber);
             return findArtworkChoices(query, meta?.steamAppId ?? null, pageNumber);
           }}
         />

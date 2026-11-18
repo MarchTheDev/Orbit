@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
-  CalendarDays,
   Check,
-  HardDrive,
   Images,
   Info,
   LayoutGrid,
@@ -14,7 +12,6 @@ import {
   SlidersHorizontal,
   Square,
   Star,
-  Timer,
   X,
 } from 'lucide-react';
 import { isSteamGame } from '../utils/steam';
@@ -1494,41 +1491,36 @@ function GamePage({
           )}
         </div>
 
+        {/* The right-hand column.
+            It used to be three stacked cards that each said a variation of the
+            same thing - details, HowLongToBeat, then Playtime repeating the
+            playtime that is already on the rule above. One panel now: the facts
+            in two short groups, the folder as its own line because it is the
+            one value that is a path rather than a word, and the times card
+            underneath. Everything that was repeated is gone. */}
         <aside className="orbit-gamepage-side">
-          <section className="orbit-section">
-            <h2>Details</h2>
+          <section className="orbit-panelbox orbit-gamepage-facts">
+            <header className="orbit-panelbox-head">
+              <h3>Details</h3>
+            </header>
             <dl className="orbit-facts">
               <Fact label="Developer" value={game.meta?.developer || '-'} />
               <Fact label="Released" value={game.meta?.releaseYear ? String(game.meta.releaseYear) : '-'} />
               <Fact label="Genres" value={game.meta?.genres?.length ? game.meta.genres.join(', ') : '-'} />
-              <Fact label="Store rating" value={rating !== null && rating !== undefined ? `${rating}/100` : '-'} />
-              <Fact label="Sessions" value={String(game.sessionCount)} />
+              <Fact label="Rating" value={rating !== null && rating !== undefined ? `${rating}/100` : '-'} />
+              <Fact label="Sessions" value={game.sessionCount ? `${game.sessionCount}` : '-'} />
+              <Fact label="Longest" value={game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '-'} />
               <Fact label="Added" value={fmtDate(game.addedAt)} />
               <Fact label="Size" value={game.sizeBytes > 0 ? fmtBytes(game.sizeBytes) : '-'} />
-              <Fact label="Drive" value={game.drive ? driveLabel(game.drive) : '-'} />
-              <Fact label="Folder" value={game.installDir || '-'} />
             </dl>
+            <div className="orbit-fact-wide">
+              <dt>Folder</dt>
+              <dd title={game.installDir ?? ''}>{game.installDir || (game.drive ? driveLabel(game.drive) : '-')}</dd>
+            </div>
           </section>
 
           <section className="orbit-section">
             <HltbCard game={game} onFetch={loadHltb} loading={hltbBusy} error={hltbError} />
-          </section>
-
-          <section className="orbit-section">
-            <h2>
-              <CalendarDays className="size-3.5" />
-              Playtime
-            </h2>
-            <div className="orbit-section-body flex flex-col gap-2 text-[12.5px] text-muted">
-              <p className="flex items-center gap-2">
-                <Timer className="size-3.5" />
-                {fmtMinutes(game.playSecs / 60)} in {game.sessionCount} {game.sessionCount === 1 ? 'session' : 'sessions'}
-              </p>
-              <p className="flex items-center gap-2">
-                <HardDrive className="size-3.5" />
-                Longest session {game.longestSecs > 0 ? fmtMinutes(game.longestSecs / 60) : '-'}
-              </p>
-            </div>
           </section>
 
           {!game.meta?.steamAppId && (

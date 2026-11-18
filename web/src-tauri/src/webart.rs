@@ -89,6 +89,97 @@ fn portraits(body: &Value, limit: usize) -> Vec<ArtworkPick> {
     out
 }
 
+/// The landscape results of a search body, best first.
+///
+/// The same rows the portrait search reads, kept when they are wider than they
+/// are tall: a backdrop slot is 16:9, and a poster stretched across it is a crop
+/// nobody chose.
+fn landscapes(body: &Value, limit: usize) -> Vec<ArtworkPick> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let Some(rows) = body.get("results").and_then(Value::as_array) else {
+        return out;
+    };
+    for row in rows {
+        let Some(url) = row
+            .get("image")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+        else {
+            continue;
+        };
+        let width = side(row, "width");
+        let height = side(row, "height");
+        // Wider than tall, and not a sliver: a 3:1 banner is not a backdrop.
+        if width > 0 && height > 0 && (width < height * 5 / 4 || width > height * 5 / 2) {
+            continue;
+        }
+        if !seen.insert(url.to_string()) {
+            continue;
+        }
+        out.push(ArtworkPick {
+            url: url.to_string(),
+            kind: "hero".into(),
+            label: "Web image".into(),
+        });
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
+}
+
+/// A search body for one query, so the two shapes ask the same way.
+async fn search(title: &str, words: &str) -> Result<Value, String> {
+    let client = client()?;
+    let query = format!("{title} {words}");
+    let page = client
+        .get(format!("{HOST}/"))
+        .query(&[("q", query.as_str()), ("iax", "images"), ("ia", "images")])
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach the image search: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("The image search did not answer: {e}"))?;
+    let token = vqd(&page).ok_or_else(|| "The image search did not return a token.".to_string())?;
+    client
+        .get(format!("{HOST}/i.js"))
+        .query(&[
+            ("l", "us-en"),
+            ("o", "json"),
+            ("q", query.as_str()),
+            ("vqd", token.as_str()),
+            ("f", ",,,,,"),
+            ("p", "1"),
+        ])
+        .header("Referer", format!("{HOST}/"))
+        .header("X-Requested-With", "XMLHttpRequest")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .map_err(|e| format!("The image search did not answer: {e}"))?
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("The image search answered in a form Orbit cannot read: {e}"))
+}
+
+/// Landscape pictures for a title, from the web.
+///
+/// The backdrop slot's half of [`covers`]: a game the stores do not have, or one
+/// whose only hero is a header with a logo in the middle, still deserves a
+/// choice. Offered, never applied.
+pub async fn wide_covers(title: &str, limit: usize) -> Result<Vec<ArtworkPick>, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body = search(title, "game wallpaper").await?;
+    Ok(landscapes(&body, limit))
+}
+
 /// Portrait covers for a title, from the web.
 pub async fn covers(title: &str, limit: usize) -> Result<Vec<ArtworkPick>, String> {
     let title = title.trim();
