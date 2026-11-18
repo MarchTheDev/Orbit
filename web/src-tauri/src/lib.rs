@@ -1196,6 +1196,37 @@ fn window_ready(app: tauri::AppHandle, startup: State<'_, StartupVisibility>) {
     overlay::warm(&app);
 }
 
+/// Shrink the window into the monitor's work area, keeping its proportions.
+///
+/// A maximized or remembered window is left alone: this only ever pulls a
+/// window that is too big back inside the desk, which is the case Orbit's own
+/// default hits on a small screen.
+fn fit_window_to_desk(window: &tauri::WebviewWindow) {
+    use tauri::Manager;
+    let monitor = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else { return };
+    let desk = monitor.work_area();
+    if desk.size.width == 0 || desk.size.height == 0 {
+        return;
+    }
+    // The frame is the desktop's, not ours, so a little room is kept for it.
+    let room_w = (desk.size.width as f64 * 0.94) as u32;
+    let room_h = (desk.size.height as f64 * 0.9) as u32;
+    let Ok(size) = window.outer_size() else { return };
+    if size.width <= room_w && size.height <= room_h {
+        return;
+    }
+    let scale = f64::min(room_w as f64 / size.width as f64, room_h as f64 / size.height as f64);
+    let width = ((size.width as f64 * scale) as u32).max(1);
+    let height = ((size.height as f64 * scale) as u32).max(1);
+    let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+    // Centred on the desk it was just fitted to, rather than wherever the
+    // configured opening position put it.
+    let x = desk.position.x + ((desk.size.width as i32 - width as i32) / 2).max(0);
+    let y = desk.position.y + ((desk.size.height as i32 - height as i32) / 2).max(0);
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
 /// Pull the queued paths opened through Explorer, then clear the queue.
 #[tauri::command]
 fn take_open_exe_paths(pending: State<'_, PendingOpenExePaths>) -> Vec<String> {
@@ -2833,6 +2864,17 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_shadow(true);
                 let _ = window.set_decorations(false);
+            }
+
+            // The window opens inside the desk area, whatever the desk is.
+            //
+            // Its configured size is a sensible default on a 1080p screen and too
+            // tall on a laptop, where the bottom edge - and with it the last row
+            // of the interface - ends up under the taskbar. The monitor's work
+            // area is what the window has to fit in, so the opening size is
+            // clamped to it rather than trusted.
+            if let Some(window) = app.get_webview_window("main") {
+                fit_window_to_desk(&window);
             }
 
             if let Ok(current) = policy.lock() {

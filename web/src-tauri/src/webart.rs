@@ -186,37 +186,6 @@ pub async fn covers(title: &str, limit: usize) -> Result<Vec<ArtworkPick>, Strin
     if title.is_empty() {
         return Ok(Vec::new());
     }
-    let client = client()?;
-    let query = format!("{title} game cover art");
-    let page = client
-        .get(format!("{HOST}/"))
-        .query(&[("q", query.as_str()), ("iax", "images"), ("ia", "images")])
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach the image search: {e}"))?
-        .text()
-        .await
-        .map_err(|e| format!("The image search did not answer: {e}"))?;
-    let token = vqd(&page).ok_or_else(|| "The image search did not return a token.".to_string())?;
-    let body = client
-        .get(format!("{HOST}/i.js"))
-        .query(&[
-            ("l", "us-en"),
-            ("o", "json"),
-            ("q", query.as_str()),
-            ("vqd", token.as_str()),
-            ("f", ",,,,,"),
-            ("p", "1"),
-        ])
-        .header("Referer", format!("{HOST}/"))
-        .header("X-Requested-With", "XMLHttpRequest")
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .send()
-        .await
-        .map_err(|e| format!("The image search did not answer: {e}"))?
-        .json::<Value>()
-        .await
-        .map_err(|e| format!("The image search answered in a form Orbit cannot read: {e}"))?;
+    let body = search(title, "game cover art").await?;
     Ok(portraits(&body, limit))
 }
