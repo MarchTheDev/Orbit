@@ -26,6 +26,20 @@ export const tvLite = navigator.userAgent.includes('Linux');
 
 /** Whether the document itself is the thing that was made fullscreen. */
 let askedTheDocument = false;
+
+/**
+ * Whether *this* code is the reason the window is fullscreen.
+ *
+ * This is the difference between a fullscreen that comes apart cleanly and one
+ * that does not. Toggling fullscreen is not a property Orbit owns: the player
+ * can make the window fullscreen themselves, a compositor can, and a second
+ * press can arrive before the first has settled. Leaving Stardeck must give
+ * back exactly what was taken - so the flag is only set when the toggle was
+ * ours, is cleared the moment the window is handed back, and is checked again
+ * against the window's real state before anything is toggled.
+ */
+let weWentFullscreen = false;
+
 type Bounds = { x: number; y: number; width: number; height: number; maximized: boolean };
 
 let previousNativeBounds: Bounds | null = null;
@@ -105,7 +119,33 @@ export async function enterFullscreen(): Promise<boolean> {
         ? { ...area, maximized: true }
         : { x: position.x, y: position.y, width: size.width, height: size.height, maximized };
       rememberBounds(previousNativeBounds);
+      // A window that is already fullscreen is not ours to claim, and one the
+      // player made fullscreen should stay fullscreen when Stardeck closes.
+      if (await window.isFullscreen().catch(() => false)) {
+        weWentFullscreen = false;
+        return true;
+      }
+      // Some compositors ignore a fullscreen request made while another window
+      // is active - the usual case here, since Stardeck is opened from a
+      // window that has just been clicked but not yet raised. The toggle is
+      // deferred to the moment the window is actually in front.
+      const focused = await window.isFocused().catch(() => true);
+      if (!focused) {
+        const unlisten = await window.onFocusChanged(({ payload }) => {
+          if (!payload) return;
+          unlisten();
+          void window.setFullscreen(true).then(
+            () => { weWentFullscreen = true; },
+            () => undefined,
+          );
+        });
+        // A window that never comes forward stays in its own frame; Stardeck
+        // fills it either way.
+        globalThis.setTimeout(() => { void unlisten(); }, 4000);
+        return true;
+      }
       await window.setFullscreen(true);
+      weWentFullscreen = true;
       return true;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -226,8 +266,19 @@ export async function leaveFullscreen(): Promise<void> {
     // in memory is fresher when both exist, so it wins.
     const bounds = previousNativeBounds ?? savedBounds();
     previousNativeBounds = null;
+    const ours = weWentFullscreen;
+    weWentFullscreen = false;
     rememberBounds(null);
-    try { await window.setFullscreen(false); } catch { /* Still try to restore the saved window state. */ }
+    try {
+      // Only what we took is given back. A window the player made fullscreen
+      // by hand keeps it, and a window that is already out of fullscreen is
+      // left alone rather than toggled *into* it.
+      if (ours && (await window.isFullscreen().catch(() => false))) {
+        await window.setFullscreen(false);
+      }
+    } catch {
+      /* Still try to restore the saved window state. */
+    }
 
     try {
       await waitForFullscreenExit(window);

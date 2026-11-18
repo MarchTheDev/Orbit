@@ -40,8 +40,8 @@ export type DeckArt = 'poster' | 'banner';
 /** How wide the covers on the rail are drawn. */
 export type StardeckCover = 'compact' | 'standard' | 'large';
 
-/** The menu's own pages: the hub of them, and the three it opens. */
-export type StardeckPage = 'home' | 'look' | 'library' | 'about';
+/** The menu's own pages: the hub of them, and the two it opens. */
+export type StardeckPage = 'home' | 'look' | 'library';
 
 /** How far the artwork is pushed back behind the stage. */
 export type StardeckDim = 'soft' | 'balanced' | 'deep';
@@ -431,7 +431,6 @@ function StardeckMenu({
     home: 'Stardeck',
     look: 'Look',
     library: 'Library',
-    about: 'About',
   };
 
   return (
@@ -485,6 +484,11 @@ function StardeckMenu({
             <MenuButton icon={Settings2} label="Orbit settings" hint="Every setting in the app" onClick={onOpenSettings} />
 
             <div className="orbit-deckside-sep" />
+            <button type="button" onClick={onReset} className="orbit-deckside-chip w-full justify-center">
+              <RotateCcw className="size-3.5" />
+              Reset Stardeck to its defaults
+            </button>
+            <div className="orbit-deckside-sep" />
             <button type="button" onClick={onExit} className="orbit-deckside-exit">
               <Minimize2 className="size-4" />
               Back to desktop
@@ -493,7 +497,6 @@ function StardeckMenu({
               <Power className="size-4" />
               Quit Orbit
             </button>
-            <MenuButton icon={Info} label="About Stardeck" hint="What the mode is, and the keys" onClick={() => onPage('about')} />
           </>
         )}
 
@@ -611,27 +614,6 @@ function StardeckMenu({
           </>
         )}
 
-        {page === 'about' && (
-          <>
-            <p className="orbit-deckside-note">
-              Stardeck is Orbit read from a couch: one game at a time, on its own cover, with the rest
-              of the library one press away. Left and right walk the deck, Enter plays what is on
-              screen, and Escape brings this menu back.
-            </p>
-            <dl className="orbit-deckside-keys">
-              <div><dt>← →</dt><dd>Another game</dd></div>
-              <div><dt>↑ ↓</dt><dd>The game's panel, then the covers</dd></div>
-              <div><dt>Enter</dt><dd>Play what is on screen</dd></div>
-              <div><dt>L</dt><dd>Deck or library</dd></div>
-              <div><dt>Escape</dt><dd>This menu</dd></div>
-            </dl>
-            <div className="orbit-deckside-sep" />
-            <button type="button" onClick={onReset} className="orbit-deckside-chip w-full justify-center">
-              <RotateCcw className="size-3.5" />
-              Reset Stardeck to its defaults
-            </button>
-          </>
-        )}
       </div>
     </div>
   );
@@ -680,7 +662,8 @@ function DeckBackdrop({ game }: { game: Game | null }) {
           }}
         />
       ))}
-      <div className="orbit-deckbackdrop-tint" style={{ background: game ? `hsl(${game.hue} 45% 12% / .62)` : undefined }} />
+      <div className="orbit-deckbackdrop-tint" style={{ background: game ? `hsl(${game.hue} 45% 14% / .4)` : undefined }} />
+      <div className="orbit-deckbackdrop-glass" aria-hidden />
       <div className="orbit-deckbackdrop-shade" />
     </div>
   );
@@ -707,6 +690,7 @@ function GameSheet({
   onDetails,
   onEdit,
   onFavourite,
+  onClose,
 }: {
   game: Game;
   running: boolean;
@@ -718,6 +702,7 @@ function GameSheet({
   onDetails: () => void;
   onEdit: () => void;
   onFavourite: () => void;
+  onClose: () => void;
 }) {
   const facts = [
     game.meta?.releaseYear ? String(game.meta.releaseYear) : null,
@@ -726,11 +711,13 @@ function GameSheet({
   ].filter(Boolean) as string[];
 
   return (
-    <aside className="orbit-decksheet" data-deck-sheet>
+    <aside className="orbit-decksheet" data-deck-sheet aria-label={`${game.title}, selected`}>
+      <button type="button" onClick={onClose} className="orbit-decksheet-close" aria-label="Close this panel">
+        <X className="size-4" />
+      </button>
       <div key={game.id} className="orbit-decksheet-inner">
         <div className="orbit-decksheet-art">
           <Cover game={game} className="orbit-decksheet-cover" fit="cover" loading="eager" />
-          <div className="orbit-decksheet-glow" style={{ background: `hsl(${game.hue} 65% 46% / .28)` }} aria-hidden />
           {game.favorite && (
             <span className="orbit-decksheet-star" aria-hidden>
               <Star className="size-3" fill="currentColor" strokeWidth={0} />
@@ -973,6 +960,16 @@ export function TvMode({
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     runningId && list.some((game) => game.id === runningId) ? runningId : null,
   );
+  /**
+   * Whether the selected game's own panel is out.
+   *
+   * The deck is the covers. A panel describing whichever one the row happens to
+   * be on stands in the middle of the screen and answers a question nobody has
+   * asked yet; it belongs to a game that was chosen, so it opens when its cover
+   * is pressed and closes when it is dismissed. Walking the row with a key or a
+   * stick does not open it - that is browsing, not choosing.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [view, setView] = useState<'deck' | 'library'>(savedStardeckPage);
   useEffect(() => {
     try { localStorage.setItem('orbit.stardeck.lastPage', view); } catch { /* Storage may be unavailable in a private or test context. */ }
@@ -1166,6 +1163,27 @@ export function TvMode({
     else if (key === 'ArrowUp' && source.top < 120) barButtons()[0]?.focus({ preventScroll: true });
   }, [at]);
 
+  /**
+   * Bring the selected game's panel out and put the focus on its Play button.
+   *
+   * The panel is not part of browsing the row, so it is only ever opened by a
+   * press that means "this one" - a click on the cover, a vertical move, or the
+   * game's own page coming back. The focus lands after the frame that paints
+   * it, since the button does not exist before that.
+   */
+  const revealSheet = useCallback(() => {
+    if (sheetOpen) {
+      actionButtons()[0]?.focus({ preventScroll: true });
+      return;
+    }
+    setSheetOpen(true);
+    window.requestAnimationFrame(() => {
+      (document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action="play"]')
+        ?? document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action]'))
+        ?.focus({ preventScroll: true });
+    });
+  }, [sheetOpen]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // A game's own page reads its own keys, a dialog over the hub owns them
@@ -1191,11 +1209,16 @@ export function TvMode({
       }
       switch (event.key) {
         case 'Escape':
-          // Escape never drops the player onto the desktop: it opens the side
-          // menu, where leaving is one of the things that can be chosen. This
-          // is the console convention and the reason the mode feels like a
-          // room rather than a page - there is always a way back to the shelf.
+          // Escape never drops the player onto the desktop: it closes what is
+          // open, and when nothing is, it opens the side menu, where leaving is
+          // one of the things that can be chosen. This is the console
+          // convention and the reason the mode feels like a room rather than a
+          // page - there is always a way back to the shelf.
           event.preventDefault();
+          if (sheetOpen) {
+            setSheetOpen(false);
+            return;
+          }
           event.stopPropagation();
           setMenuPage('home');
           setMenu(true);
@@ -1253,7 +1276,10 @@ export function TvMode({
             else barButtons()[0]?.focus({ preventScroll: true });
             return;
           }
-          (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
+          // Nothing but the covers is on screen until one is chosen, and a
+          // vertical press is the choice: it brings the game's panel out and
+          // lands on its first button.
+          revealSheet();
           return;
         }
         case 'ArrowDown': {
@@ -1275,7 +1301,7 @@ export function TvMode({
             else buttons[Math.max(0, here - 1)]?.focus({ preventScroll: true });
             return;
           }
-          (actionButtons()[0] ?? coverOf(at))?.focus({ preventScroll: true });
+          revealSheet();
           return;
         }
         case 'Enter':
@@ -1305,7 +1331,7 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, detailed, menu, moveLibraryFocus, select, start, view]);
+  }, [at, detailed, menu, moveLibraryFocus, revealSheet, select, sheetOpen, start, view]);
 
   /**
    * The controller.
@@ -1338,6 +1364,7 @@ export function TvMode({
       // drops somebody onto the desktop without asking.
       if (menu) setMenu(false);
       else if (detailed) setDetailId(null);
+      else if (sheetOpen) setSheetOpen(false);
       else {
         setMenuPage('home');
         setMenu(true);
@@ -1351,7 +1378,7 @@ export function TvMode({
       window.removeEventListener('orbit-pad-page', onPadPage);
       window.removeEventListener('orbit-pad-back', onPadBack, true);
     };
-  }, [detailed, menu, onPlay, onStop, runningId, start]);
+  }, [detailed, menu, onPlay, onStop, runningId, sheetOpen, start]);
 
   const left =
     active?.hltb?.main && active.hltb.main > 0
@@ -1528,25 +1555,32 @@ export function TvMode({
           </section>
         ) : (
           <div className="orbit-deck">
+            {/* The covers are the screen, so no name is drawn under them. The
+                game is still named for anyone reading the page aloud, and the
+                panel that a press opens repeats it at size. */}
+            <h1 className="sr-only">{active.title}</h1>
             {/* The game the shelf is about, on the left, the way a console draws
                 it: a floating panel over the covers with the poster, the name,
                 the numbers and the buttons that start it - rather than a strip
                 along the bottom competing with the row for the same space. */}
-            <GameSheet
-              game={active}
-              running={running}
-              left={left}
-              progress={progress}
-              prefs={prefs}
-              onPlay={() => onPlay(active)}
-              onStop={onStop}
-              onDetails={() => {
-                setDetailId(active.id);
-                onDetails(active);
-              }}
-              onEdit={() => onEditGame(active)}
-              onFavourite={() => onToggleFavorite(active.id)}
-            />
+            {sheetOpen && (
+              <GameSheet
+                game={active}
+                running={running}
+                left={left}
+                progress={progress}
+                prefs={prefs}
+                onPlay={() => onPlay(active)}
+                onStop={onStop}
+                onDetails={() => {
+                  setDetailId(active.id);
+                  onDetails(active);
+                }}
+                onEdit={() => onEditGame(active)}
+                onFavourite={() => onToggleFavorite(active.id)}
+                onClose={() => setSheetOpen(false)}
+              />
+            )}
 
             {/* The shelf: one row of covers across the middle of the screen,
                 nothing above it and nothing under it. */}
@@ -1581,7 +1615,14 @@ export function TvMode({
                             else onPlay(game);
                             return;
                           }
-                          setSelectedId(game.id);
+                          // A press on a cover chooses the game and brings its
+                          // panel out; a press on a cover that already chose
+                          // it puts it away again.
+                          if (game.id === active?.id) setSheetOpen((open) => !open);
+                          else {
+                            setSelectedId(game.id);
+                            setSheetOpen(true);
+                          }
                         }}
                         onDoubleClick={() => {
                           if (game.id !== runningId) onPlay(game);
@@ -1607,7 +1648,13 @@ export function TvMode({
                             </span>
                           )}
                         </span>
-                        <span className="orbit-deck-name line-clamp-2">{game.title}</span>
+                        {/* The covers stand on a dark floor, so they are laid on
+                            one: a mirrored copy of the same picture, fading out
+                            from the foot of the artwork. It is what turns a row
+                            of rectangles into a shelf of objects. */}
+                        <span className={cn('orbit-deck-floor', prefs.art === 'banner' ? 'is-banner' : 'is-poster')} aria-hidden>
+                          <Cover game={game} className="size-full" fit="cover" />
+                        </span>
                       </button>
                     </li>
                   );

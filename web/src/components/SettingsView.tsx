@@ -1358,6 +1358,26 @@ export function SettingsView({
     }
     return hits;
   }, [query, searchItems]);
+  /**
+   * The settings a search found, section by section.
+   *
+   * Filtering the sections alone leaves somebody who typed `volume` in a rail
+   * that says Sound and nothing else - true, and no help at all: the rail is
+   * the index, so what it found should be named there, under the section it
+   * lives in, rather than left to be hunted for on the card.
+   */
+  const matchingItems = useMemo(() => {
+    if (!query) return null;
+    const found = new Map<string, string[]>();
+    for (const item of searchItems) {
+      if (desktopOs() !== 'windows' && desktopOs() !== 'linux' && item.label === 'Open in Orbit') continue;
+      if (!item.label.toLowerCase().includes(query) && !item.keywords.toLowerCase().includes(query)) continue;
+      const list = found.get(item.section) ?? [];
+      if (!list.includes(item.label)) list.push(item.label);
+      found.set(item.section, list);
+    }
+    return found;
+  }, [query, searchItems]);
   const shownSections = matchingSections ? SECTIONS.filter((section) => matchingSections.has(section.id)) : SECTIONS;
   /** The card on screen: the chosen one, or the first the search left standing. */
   const shownSection = matchingSections
@@ -1366,22 +1386,27 @@ export function SettingsView({
 
   const settingsSearch = (
     <div className="relative z-20">
-      <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
-      <input
-        value={settingsQuery}
-        onChange={(event) => setSettingsQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') setSettingsQuery('');
-          // Enter takes the keyboard into the section the search left on
-          // screen, which is the one the words were about.
-          if (event.key === 'Enter' && shownSections[0] && !matchingSections?.has(activeSection)) {
-            jump(shownSections[0].id);
-          }
-        }}
-        placeholder="Search settings…"
-        aria-label="Search settings"
-        className="orbit-setsearch"
-      />
+      {/* The lens belongs to the field, not to the block around it: kept on the
+          block it slid down the moment the note under the field appeared,
+          which is exactly when somebody is typing. */}
+      <div className="relative">
+        <Search className="orbit-setsearch-lens" aria-hidden />
+        <input
+          value={settingsQuery}
+          onChange={(event) => setSettingsQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setSettingsQuery('');
+            // Enter takes the keyboard into the section the search left on
+            // screen, which is the one the words were about.
+            if (event.key === 'Enter' && shownSections[0] && !matchingSections?.has(activeSection)) {
+              jump(shownSections[0].id);
+            }
+          }}
+          placeholder="Search settings…"
+          aria-label="Search settings"
+          className="orbit-setsearch"
+        />
+      </div>
       {query && (
         <p className="orbit-setsearch-note" role="status">
           {shownSections.length === 0
@@ -1425,9 +1450,10 @@ export function SettingsView({
               if (!section) return null;
               const chosen = shownSection === id;
               const Icon = section.icon;
+              const found = compact ? undefined : matchingItems?.get(id);
               return (
+                <div key={id} className="orbit-setnav-entry">
                 <button
-                  key={id}
                   onClick={() => jump(id)}
                   aria-current={chosen ? 'page' : undefined}
                   className={compact
@@ -1443,6 +1469,16 @@ export function SettingsView({
                   {compact ? section.label : <span className="min-w-0 flex-1 truncate">{section.label}</span>}
                   {NEEDS_WORK.has(id) && <span className="orbit-setnav-needs" title="Need work" />}
                 </button>
+                {found && found.length > 0 && (
+                  <ul className="orbit-setnav-found" aria-label={`${section.label} settings found`}>
+                    {found.slice(0, 6).map((label) => (
+                      <li key={label}>
+                        <button type="button" onClick={() => jump(id)}>{label}</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                </div>
               );
             })}
           </div>

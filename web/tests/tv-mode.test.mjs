@@ -294,6 +294,11 @@ check('Back on the controller from the rail stays in TV mode', left === 0, Strin
 
 // From a game's page the same press steps back to the rail, not out of the mode.
 await render(library);
+// The game's panel is a press away, not part of browsing: a cover is chosen,
+// then the panel it opens carries the way to the full page.
+await act(async () => {
+  document.querySelector('[data-tv-cover="0"]').click();
+});
 await act(async () => {
   buttonWith('Full page').click();
 });
@@ -359,10 +364,11 @@ check('and says which order it is in', !!buttonWith('A–Z'));
 await key('Escape');
 await key('Escape');
 check('switching order keeps the focused cover and neighboring pages visible', covers().length === 3);
-// A long name is the one thing a rail cannot guess at: it gets two lines rather
-// than an ellipsis on the first.
-check('rail titles are allowed to wrap instead of being cut',
-  !!document.querySelector('[data-tv-cover] span.line-clamp-2'));
+// The covers are the screen: nothing is written under them any more. The game
+// is still named for a reader - on the page, and in the panel a press opens.
+check('no name is drawn under a cover',
+  !document.querySelector('[data-orbit-tv] .orbit-deck-name') &&
+    !tvSource.includes('orbit-deck-name line-clamp-2'));
 check('the rail carries no title attribute, so no badge appears over a name',
   document.querySelectorAll('[data-tv-cover][title]').length === 0);
 // The ring is drawn on the artwork, in the theme's own accent, for hover and
