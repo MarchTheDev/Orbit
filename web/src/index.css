@@ -1169,8 +1169,7 @@ html.orbit-pad [data-orbit-journal-game].orbit-pad-focus {
 }
 /* A row is a thin thing: the flash needs a little room around it to read as a
  * place rather than as a border on the text. */
-.orbit-setrow.settings-spot,
-.orbit-setrow.settings-spot + .orbit-setrow {
+.orbit-setrow.settings-spot {
   padding-inline: 10px;
   margin-inline: -10px;
 }
