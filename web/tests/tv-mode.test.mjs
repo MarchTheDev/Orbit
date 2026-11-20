@@ -53,11 +53,24 @@ function check(name, ok, detail = '') {
 }
 
 const wait = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Wait for the frame after this one.
+ *
+ * Pressing a direction on the rail opens the game's panel and focuses its first
+ * button *in the next frame*, because the button does not exist before the
+ * frame that draws it. A fixed handful of milliseconds caught that on a fast
+ * machine and missed it on a slow one, so the press after it landed on whatever
+ * had been focused before and ten checks failed at once. This waits for the
+ * frames themselves, however long they take.
+ */
+const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(() => resolve()));
 const key = async (name) => {
   await act(async () => {
     window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: name, bubbles: true }));
   });
   await wait(10);
+  await frame();
+  await frame();
 };
 const covers = () => [...document.querySelectorAll('[data-tv-cover]')];
 const selected = () => document.querySelector('[data-orbit-tv] [aria-current="true"]')?.getAttribute('data-tv-cover') ?? null;
@@ -156,6 +169,8 @@ const render = async (games, runningId = null, extra = {}) => {
     );
   });
   await act(async () => wait(40));
+  await frame();
+  await frame();
 };
 
 await render(library);
