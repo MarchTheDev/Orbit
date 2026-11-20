@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(vqd("<script>vqd='4-1234567890_ab'</script>"), Some("4-1234567890_ab".into()));
         assert_eq!(vqd("vqd=4-1234567890"), Some("4-1234567890".into()));
         assert_eq!(vqd(r#"<script>{"vqd":"4-json_token"}</script>"#), Some("4-json_token".into()));
-        assert_eq!(vqd("vqd='' then vqd=4-real_token"), Some("4-real_token".into()));
+        assert_eq!(vqd("vqd=''&vqd=4-real_token"), Some("4-real_token".into()));
         assert_eq!(vqd("no token here"), None);
     }
 }

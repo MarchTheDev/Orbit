@@ -37,6 +37,6 @@ check('symbol icons use accent colour without a matching filled tile',
   css.includes('background: transparent !important;') && css.includes('color: color-mix(in srgb, var(--c-accent)'));
 check('web artwork token parsing tolerates DuckDuckGo query and JSON assignment formats',
   webart.includes('JSON-style') && webart.includes('r#"<script>{"vqd":"4-json_token"}</script>"#') &&
-    webart.includes('then vqd=4-real_token'));
+    webart.includes("vqd=''&vqd=4-real_token"));
 
 (globalThis).__orbitFailures = ((globalThis).__orbitFailures ?? 0) + failures;
