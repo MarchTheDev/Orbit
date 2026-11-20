@@ -8,11 +8,8 @@ import {
   Layers,
   LayoutGrid,
   ListOrdered,
-  Minimize2,
   Play,
   Plus,
-  Power,
-  RotateCcw,
   Settings2,
   SlidersHorizontal,
   Square,
@@ -366,27 +363,11 @@ function PanelToggle({
 }
 
 /**
- * The side menu.
+ * The Stardeck home panel.
  *
- * Escape opens it, Escape closes it, and the way out of the mode is one of the
- * things inside it rather than a button in the corner of the screen. That is
- * what a console does and what makes this a room instead of a page: nothing
- * leaves the room by accident, and everything that could is in one place.
- *
- * It is a column of choices, not a settings dialog. Home is what somebody on a
- * couch needs - leave, read the controls - and Look, Library and About are one
- * step in from it. Every choice is applied the moment it is made, so the menu
- * can be closed while looking at the thing it changed.
- */
-/**
- * The sidebar.
- *
- * The console menu is a full-height panel down the right edge over the
- * dimmed screen, and it is where everything that is not browsing the collection
- * lives: the look of the room, what the deck holds, adding a game, Orbit's own
- * settings, the way back to the desktop and the power switch. Escape opens it
- * and Escape closes it, which is the one rule Escape has here - it never drops
- * somebody onto the desktop without asking.
+ * It stays inside the mode: look and library preferences live here, while Add
+ * game and Orbit settings open as overlays above the deck. Escape only closes
+ * the panel or steps back within it; leaving Stardeck is not offered here.
  */
 function StardeckMenu({
   prefs,
@@ -394,11 +375,8 @@ function StardeckMenu({
   page,
   onPage,
   onClose,
-  onReset,
-  onExit,
   onAddGame,
   onOpenSettings,
-  onPower,
   sound,
   onSound,
   running,
@@ -410,11 +388,8 @@ function StardeckMenu({
   page: StardeckPage;
   onPage: (next: StardeckPage) => void;
   onClose: () => void;
-  onReset: () => void;
-  onExit: () => void;
   onAddGame: () => void;
   onOpenSettings: () => void;
-  onPower: () => void;
   sound: Settings['sound'];
   onSound: (next: Settings['sound']) => void;
   running: Game | null;
@@ -480,20 +455,6 @@ function StardeckMenu({
             <MenuButton icon={Plus} label="Add a game" hint="A program, or a launcher's library" onClick={onAddGame} />
             <MenuButton icon={Settings2} label="Orbit settings" hint="Every setting in the app" onClick={onOpenSettings} />
 
-            <div className="orbit-deckside-sep" />
-            <button type="button" onClick={onReset} className="orbit-deckside-chip w-full justify-center">
-              <RotateCcw className="size-3.5" />
-              Reset Stardeck to its defaults
-            </button>
-            <div className="orbit-deckside-sep" />
-            <button type="button" onClick={onExit} className="orbit-deckside-exit">
-              <Minimize2 className="size-4" />
-              Back to desktop
-            </button>
-            <button type="button" onClick={onPower} className="orbit-deckside-power">
-              <Power className="size-4" />
-              Quit Orbit
-            </button>
           </>
         )}
 
@@ -674,7 +635,6 @@ function GameSheet({
   game,
   running,
   left,
-  progress,
   prefs,
   onPlay,
   onStop,
@@ -686,7 +646,6 @@ function GameSheet({
   game: Game;
   running: boolean;
   left: number | null;
-  progress: number | null;
   prefs: StardeckPrefs;
   onPlay: () => void;
   onStop: () => void;
@@ -709,28 +668,9 @@ function GameSheet({
       <div key={game.id} className="orbit-decksheet-inner">
         <div className="orbit-decksheet-art">
           <Cover game={game} className="orbit-decksheet-cover" fit="cover" loading="eager" />
-          {game.favorite && (
-            <span className="orbit-decksheet-star" aria-hidden>
-              <Star className="size-3" fill="currentColor" strokeWidth={0} />
-            </span>
-          )}
         </div>
 
         <div className="orbit-decksheet-head">
-          <p className="orbit-decksheet-kicker">
-            {running ? (
-              <>
-                <span className="orbit-deck-live" aria-hidden />
-                Playing now
-              </>
-            ) : game.status === 'playing' ? (
-              'In progress'
-            ) : game.status === 'completed' ? (
-              'Finished'
-            ) : (
-              'Ready to play'
-            )}
-          </p>
           <GameTitle game={game} logo={prefs.logo} />
           {prefs.facts && facts.length > 0 && <p className="orbit-decksheet-facts">{facts.join('  ·  ')}</p>}
         </div>
@@ -760,18 +700,6 @@ function GameSheet({
               </div>
             )}
           </dl>
-        )}
-
-        {progress !== null && (
-          <div className="orbit-decksheet-progress">
-            <div className="orbit-deck-progresshead">
-              <span>Main story</span>
-              <b>{progress}%</b>
-            </div>
-            <div className="orbit-deck-rail" aria-hidden>
-              <i style={{ width: `${progress}%` }} />
-            </div>
-          </div>
         )}
 
         <div data-tv-actions className="orbit-decksheet-actions">
@@ -877,7 +805,6 @@ export function TvMode({
   onAddGame,
   onEditGame,
   onToggleFavorite,
-  onPower,
 }: {
   games: Game[];
   /** The game with the clock running, if there is one. */
@@ -898,8 +825,6 @@ export function TvMode({
   onEditGame: (game: Game) => void;
   /** The star, so a favourite can be made one from the couch. */
   onToggleFavorite: (id: string) => void;
-  /** Quit Orbit, having asked the shell to do it the usual way. */
-  onPower: () => void;
 }) {
   const [prefs, setPrefs] = useState<StardeckPrefs>(savedStardeck);
   /**
@@ -1089,6 +1014,7 @@ export function TvMode({
   useEffect(() => {
     if (!menu) return;
     const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"]:not([aria-label="Stardeck menu"])')) return;
       if (event.key === 'Escape' || event.key.toLowerCase() === 'm') {
         event.preventDefault();
         event.stopPropagation();
@@ -1344,6 +1270,7 @@ export function TvMode({
     };
     const onPadPage = () => setView((current) => current === 'deck' ? 'library' : 'deck');
     const onPadBack = (event: Event) => {
+      if (document.querySelector('[role="dialog"]:not([aria-label="Stardeck menu"])')) return;
       // Answered here rather than by the shell: only the hub knows whether it
       // is on the rail, on a game's page or inside its settings. The rail is
       // where the night stays, so Back there has nothing to step out of.
@@ -1373,11 +1300,6 @@ export function TvMode({
     active?.hltb?.main && active.hltb.main > 0
       ? Math.max(0, Math.round(active.hltb.main - active.playSecs / 3600))
       : null;
-  const progress =
-    active?.hltb?.main && active.hltb.main > 0
-      ? Math.min(100, Math.round((active.playSecs / 3600 / active.hltb.main) * 100))
-      : null;
-
   return (
     <div
       data-orbit-tv="1"
@@ -1433,14 +1355,11 @@ export function TvMode({
             page={menuPage}
             onPage={setMenuPage}
             onClose={closeMenu}
-            onReset={() => setPrefs(STARDECK_DEFAULT)}
-            onExit={exit}
             onAddGame={() => {
               closeMenu();
               window.setTimeout(onAddGame, 220);
             }}
             onOpenSettings={onOpenSettings}
-            onPower={onPower}
             sound={sound}
             onSound={setSound}
             running={playingNow}
@@ -1557,7 +1476,6 @@ export function TvMode({
                 game={active}
                 running={running}
                 left={left}
-                progress={progress}
                 prefs={prefs}
                 onPlay={() => onPlay(active)}
                 onStop={onStop}

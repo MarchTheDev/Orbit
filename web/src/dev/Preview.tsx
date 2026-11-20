@@ -82,7 +82,6 @@ function Preview() {
             onAddGame={() => setSurface('add')}
             onEditGame={() => setSurface('editor')}
             onToggleFavorite={() => undefined}
-            onPower={() => undefined}
           />
         </div>
       )}

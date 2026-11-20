@@ -27,6 +27,13 @@ import { ArtworkSearch, type ArtShape } from './ArtworkPicker';
 import { WineSettings } from './WineSettings';
 import { desktopOs } from '../../utils/platform';
 
+
+const GAME_GENRES = [
+  'Action', 'Adventure', 'Arcade', 'Board game', 'Card game', 'Fighting', 'Horror',
+  'Indie', 'Music', 'Platformer', 'Puzzle', 'Racing', 'Role-playing', 'Shooter',
+  'Simulation', 'Sports', 'Strategy', 'Survival', 'Visual novel',
+];
+
 /**
  * The editor's pages.
  *
@@ -82,7 +89,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [summary, setSummary] = useState(meta?.summary ?? '');
   const [developer, setDeveloper] = useState(meta?.developer ?? '');
   const [releaseYear, setReleaseYear] = useState(meta?.releaseYear ? String(meta.releaseYear) : '');
-  const [genres, setGenres] = useState((meta?.genres ?? []).join(', '));
+  const [genres, setGenres] = useState((meta?.genres ?? [])[0] ?? '');
+  const [customGenre, setCustomGenre] = useState(() => Boolean(meta?.genres?.[0] && !GAME_GENRES.includes(meta.genres[0])));
   const [rating, setRating] = useState(meta?.rating !== null && meta?.rating !== undefined ? String(meta.rating) : '');
   const [sizeGb, setSizeGb] = useState(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
   const [status, setStatus] = useState<GameStatus>(game.status);
@@ -113,7 +121,8 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     setSummary(game.meta?.summary ?? '');
     setDeveloper(game.meta?.developer ?? '');
     setReleaseYear(game.meta?.releaseYear ? String(game.meta.releaseYear) : '');
-    setGenres((game.meta?.genres ?? []).join(', '));
+    setGenres((game.meta?.genres ?? [])[0] ?? '');
+    setCustomGenre(Boolean(game.meta?.genres?.[0] && !GAME_GENRES.includes(game.meta.genres[0])));
     setRating(game.meta?.rating !== null && game.meta?.rating !== undefined ? String(game.meta.rating) : '');
     setCoverUrl(game.meta?.coverUrl ?? '');
     setBackdropUrl(game.meta?.backgroundUrl ?? '');
@@ -200,7 +209,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
       developer: developer.trim(),
       releaseYear: releaseYear.trim() === '' ? null : Number(releaseYear) || null,
       rating: rating.trim() === '' ? null : Number(rating) || null,
-      genres: genres.split(',').map((genre) => genre.trim()).filter(Boolean),
+      genres: genres.trim() ? [genres.trim()] : [],
       coverUrl: coverUrl.trim() || null,
       backgroundUrl: backdropUrl.trim() || null,
       coverUrlCustom: Boolean(coverUrl.trim()) && (meta?.coverUrlCustom === true || coverUrl.trim() !== (meta?.coverUrl ?? '')),
@@ -270,7 +279,11 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
       if (!summary.trim() && found.summary) setSummary(found.summary);
       if (!developer.trim() && found.developer) setDeveloper(found.developer);
       if (!releaseYear.trim() && found.releaseYear) setReleaseYear(String(found.releaseYear));
-      if (!genres.trim() && found.genres?.length) setGenres(found.genres.join(', '));
+      if (!genres.trim() && found.genres?.length) {
+        const foundGenre = found.genres[0];
+        setGenres(foundGenre);
+        setCustomGenre(!GAME_GENRES.includes(foundGenre));
+      }
       if (!coverUrl.trim() && found.coverUrl) setCoverUrl(found.coverUrl);
       if (!backdropUrl.trim() && found.backgroundUrl) setBackdropUrl(found.backgroundUrl);
       onUpdate({ meta: { ...(meta ?? { summary: '', genres: [], developer: '', releaseYear: null, rating: null }), ...found } });
@@ -416,8 +429,40 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
               <Row label="Released">
                 <input className="orbit-input" value={releaseYear} onChange={(event) => setReleaseYear(event.target.value)} placeholder="2019" inputMode="numeric" />
               </Row>
-              <Row label="Genres">
-                <input className="orbit-input" value={genres} onChange={(event) => setGenres(event.target.value)} placeholder="Action, RPG" />
+              <Row label="Genre">
+                <div className="flex min-w-0 gap-2">
+                  {customGenre ? (
+                    <input
+                      className="orbit-input min-w-0 flex-1"
+                      aria-label="Custom genre"
+                      value={genres}
+                      onChange={(event) => setGenres(event.target.value)}
+                      placeholder="Custom genre"
+                    />
+                  ) : (
+                    <select
+                      className="orbit-input min-w-0 flex-1"
+                      aria-label="Genre"
+                      value={genres}
+                      onChange={(event) => {
+                        if (event.target.value === '__custom__') {
+                          setCustomGenre(true);
+                          setGenres('');
+                        } else setGenres(event.target.value);
+                      }}
+                    >
+                      <option value="">No genre</option>
+                      {genres && !GAME_GENRES.includes(genres) && <option value={genres}>{genres}</option>}
+                      {GAME_GENRES.map((genre) => <option key={genre} value={genre}>{genre}</option>)}
+                      <option value="__custom__">Create custom…</option>
+                    </select>
+                  )}
+                  {customGenre && (
+                    <button type="button" className="orbit-btn is-quiet" onClick={() => { setCustomGenre(false); setGenres(''); }}>
+                      Choose
+                    </button>
+                  )}
+                </div>
               </Row>
               <Row label="Score">
                 <input className="orbit-input" value={rating} onChange={(event) => setRating(event.target.value)} placeholder="Out of 100" inputMode="numeric" />

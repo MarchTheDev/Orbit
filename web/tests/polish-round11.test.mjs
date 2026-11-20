@@ -96,9 +96,9 @@ console.log('the game editor is tighter');
 
 check('the dialog is a page about one game rather than a window the size of the library',
   editDialog.includes('panelClassName="orbit-modaledit"') &&
-    /\.orbit-modaledit \{ max-width: 54rem; \}/.test(css));
+    /\.orbit-modaledit \{ max-width: 64rem; \}/.test(css));
 check('a short page fills its width instead of stacking down one column',
-  /\.orbit-settings-page \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(22rem/.test(css));
+  /\.orbit-settings-page \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(19rem/.test(css));
 check('and the artwork is a header, not half the page',
   /\.orbit-gameart \{[^}]*height: clamp\(8rem, 18vh, 10\.5rem\)/.test(css));
 

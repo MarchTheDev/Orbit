@@ -29,18 +29,13 @@ fn client() -> Result<reqwest::Client, String> {
 
 /// The `vqd` token DuckDuckGo puts in its results page, which its JSON needs.
 fn vqd(html: &str) -> Option<String> {
-    for marker in ["vqd=\"", "vqd='", "vqd="] {
-        let Some(at) = html.find(marker) else { continue };
-        let rest = &html[at + marker.len()..];
-        let token: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '-')
-            .collect();
-        if !token.is_empty() {
-            return Some(token);
-        }
-    }
-    None
+    let at = html.find("vqd=")? + 4;
+    let rest = html[at..].trim_start_matches(|c| c == '\'' || c == '"');
+    let token: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    (!token.is_empty()).then_some(token)
 }
 
 fn side(row: &Value, key: &str) -> u64 {
@@ -188,4 +183,16 @@ pub async fn covers(title: &str, limit: usize) -> Result<Vec<ArtworkPick>, Strin
     }
     let body = search(title, "game cover art").await?;
     Ok(portraits(&body, limit))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vqd;
+
+    #[test]
+    fn reads_quoted_and_unquoted_duckduckgo_tokens() {
+        assert_eq!(vqd("<script>vqd='4-1234567890_ab'</script>"), Some("4-1234567890_ab".into()));
+        assert_eq!(vqd("vqd=4-1234567890"), Some("4-1234567890".into()));
+        assert_eq!(vqd("no token here"), None);
+    }
 }

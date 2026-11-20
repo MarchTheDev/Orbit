@@ -12,15 +12,10 @@ import { cn } from '../../utils/cn';
 // a program with a ROM as an argument, and Steam is not something the player
 // should have to type an app id for, games imported from a Steam library carry
 // that with them.
-const KINDS: { kind: LaunchTarget['kind']; label: string; hint: string; icon: typeof Timer }[] = [
-  { kind: 'executable', label: 'This program', hint: 'Orbit starts the program below, and the clock starts with it.', icon: AppWindow },
-  {
-    kind: 'wine',
-    label: 'A Windows program',
-    hint: 'An .exe, run through Wine or a Proton build.',
-    icon: Wine,
-  },
-  { kind: 'none', label: 'Timer only', hint: 'Orbit keeps the clock but does not start anything.', icon: Timer },
+const KINDS: { kind: LaunchTarget['kind']; label: string; icon: typeof Timer }[] = [
+  { kind: 'executable', label: 'This program', icon: AppWindow },
+  { kind: 'wine', label: 'A Windows program', icon: Wine },
+  { kind: 'none', label: 'Timer only', icon: Timer },
 ];
 
 /** Windows starts a program. Linux can start a native program, or a Windows .exe through Wine. */
@@ -236,7 +231,6 @@ export function LaunchEditor({
                   aria-checked={target.kind === k.kind}
                   onClick={() => switchKind(k.kind)}
                   className={cn('orbit-launchkind', target.kind === k.kind && 'is-on')}
-                  title={k.hint}
                 >
                   <k.icon className="size-4" />
                   <span>{k.label}</span>
@@ -319,21 +313,6 @@ export function LaunchEditor({
               </div>
             )}
 
-            {target.kind === 'lutris' && (
-              <p className="orbit-launchnote">
-                Came in from Lutris{target.slug ? ` (${target.slug})` : ''}; Play asks Lutris to start it. Pick{' '}
-                <button type="button" className="orbit-launchlink" onClick={() => switchKind('wine')}>a Windows program</button>{' '}
-                to choose those yourself.
-              </p>
-            )}
-
-            {target.kind === 'steam' && (
-              <p className="orbit-launchnote">
-                Came in from Steam, so Play hands it back to Steam (app {target.appId}). Pick{' '}
-                <button type="button" className="orbit-launchlink" onClick={() => switchKind('executable')}>a program</button>{' '}
-                to point Orbit at an .exe instead.
-              </p>
-            )}
           </section>
 
           {/* -------------------------------------------------- alternative */}
@@ -348,12 +327,7 @@ export function LaunchEditor({
               </button>
             </header>
 
-            {profiles.length === 0 ? (
-              <p className="orbit-launchnote is-quiet">
-                The same game started differently: other arguments, another folder, a mod loader in front. Each
-                one gets a name and appears in the arrow beside Play.
-              </p>
-            ) : (
+            {profiles.length === 0 ? null : (
               <div className="orbit-launchlist">
                 {profiles.map(({ companion: c, index: i }) => (
                   <article key={`profile-${i}`} className="orbit-launchentry is-profile">
@@ -500,14 +474,7 @@ export function LaunchEditor({
               </button>
             </header>
 
-            {alongside.length === 0 ? (
-              <p className="orbit-launchnote is-quiet">
-                Nothing yet. A mod manager, a frame-rate cap, a script or a wiki page can be started with every
-                launch, and stopping one never ends the session.{' '}
-                <button type="button" className="orbit-launchlink" onClick={() => addAlongside(true)}>A web page</button>{' '}
-                works too.
-              </p>
-            ) : (
+            {alongside.length === 0 ? null : (
               <div className="orbit-launchlist">
                 {alongside.map(({ companion: c, index: i }) => (
                   <article key={`along-${i}`} className="orbit-launchentry">

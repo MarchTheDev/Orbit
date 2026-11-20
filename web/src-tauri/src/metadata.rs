@@ -593,18 +593,12 @@ fn wide_of(images: &BonkerImages) -> Option<String> {
 }
 
 /// The library hero at its own file name, which newer titles publish before
-/// the cache has indexed them.
+/// the cache has indexed them. Use the same HEAD/ranged-GET probe as the other
+/// art paths because this CDN can reject HEAD for a file it serves normally.
 async fn hero_file(client: &reqwest::Client, app_id: Option<u64>) -> Option<Wide> {
     let id = app_id?;
     let url = format!("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{id}/library_hero.jpg");
-    client
-        .head(url.clone())
-        .timeout(std::time::Duration::from_secs(3))
-        .send()
-        .await
-        .ok()
-        .filter(|response| response.status().is_success())
-        .map(|_| Wide { url, label: "Steam, library hero".into() })
+    exists(client, &url).await.then(|| Wide { url, label: "Steam, library hero".into() })
 }
 
 // ------------------------------------------------------------ the full sheet
@@ -968,13 +962,25 @@ pub async fn app_id_for(title: &str) -> Option<u64> {
 /// A HEAD request, with a short clock on it: a wrong guess about artwork is
 /// never worth making a lookup slow.
 async fn exists(client: &reqwest::Client, url: &str) -> bool {
-    client
+    // Some Steam CDN edges reject HEAD even though the same asset is publicly
+    // readable with GET. Probe cheaply first, then retry with a one-byte range
+    // instead of silently losing valid artwork on those hosts.
+    if client
         .head(url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+    {
+        return true;
+    }
+    client
+        .get(url)
+        .header(reqwest::header::RANGE, "bytes=0-0")
         .timeout(Duration::from_secs(6))
         .send()
         .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+        .is_ok_and(|response| response.status().is_success() || response.status() == reqwest::StatusCode::PARTIAL_CONTENT)
 }
 
 /// Ask the store what it has for a name.

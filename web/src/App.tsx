@@ -79,7 +79,6 @@ import { AdaptiveBackdrop } from './components/AdaptiveBackdrop';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
-import { closeApp } from './services/windowChrome';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Logo } from './components/ui/Logo';
@@ -274,6 +273,7 @@ export default function App() {
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
+  const [stardeckSettingsOpen, setStardeckSettingsOpen] = useState(false);
   const [editingHideLaunchSettings, setEditingHideLaunchSettings] = useState(false);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [removeSteamConfirm, setRemoveSteamConfirm] = useState(false);
@@ -1669,40 +1669,101 @@ export default function App() {
   // clicked through, or keep the controller ring wandering off the shelves.
   if (tv) {
     return (
-      <TvMode
-        games={played}
-        runningId={runningGame?.id ?? null}
-        sound={settings.sound}
-        setSound={(sound) => setSettings({ sound })}
-        showMusic={settings.topbarMusic !== false}
-        showBars={settings.musicBars !== false}
-        onPlay={(game) => void startGame(game)}
-        onStop={() => void stop()}
-        // Details is a page of the hub: the game is read in TV mode, at the
-        // size TV mode is read, and Back returns to the rail.
-        onDetails={() => undefined}
-        onExit={leaveTv}
-        onOpenSettings={() => {
-          leaveTv();
-          openSettings('orbit-sound');
-        }}
-        // The sidebar's other three: the Add game form, a game's own settings
-        // and the power switch. The first two give the window back first, so
-        // the dialog opens over the desktop shell rather than over Stardeck.
-        onAddGame={() => {
-          leaveTv();
-          setShowAdd(true);
-        }}
-        onEditGame={(game) => {
-          leaveTv();
-          openGameEditor(game.id);
-        }}
-        onToggleFavorite={toggleFavorite}
-        onPower={() => {
-          leaveTv();
-          void closeApp();
-        }}
-      />
+      <>
+        <TvMode
+          games={played}
+          runningId={runningGame?.id ?? null}
+          sound={settings.sound}
+          setSound={(sound) => setSettings({ sound })}
+          showMusic={settings.topbarMusic !== false}
+          showBars={settings.musicBars !== false}
+          onPlay={(game) => void startGame(game)}
+          onStop={() => void stop()}
+          onDetails={() => undefined}
+          onExit={leaveTv}
+          onOpenSettings={() => setStardeckSettingsOpen(true)}
+          onAddGame={() => setShowAdd(true)}
+          onEditGame={(game) => openGameEditor(game.id)}
+          onToggleFavorite={toggleFavorite}
+        />
+        {editingGame && (
+          <GameEditDialog
+            game={editingGame}
+            onUpdate={(patch) => updateGame(editingGame.id, patch)}
+            saveDir={settings.saves?.dirs?.[editingGame.id] ?? ''}
+            onSaveDir={(path) => setSettings((current) => ({ saves: { ...current.saves, dirs: { ...current.saves?.dirs, [editingGame.id]: path } } }))}
+            hideLaunchSettings={editingHideLaunchSettings}
+            onClose={() => {
+              setEditingGameId(null);
+              setEditingHideLaunchSettings(false);
+            }}
+          />
+        )}
+        {showAdd && (
+          <AddGameModal
+            initialPaths={droppedPaths}
+            onImportLauncher={(launcher) => {
+              addTabImport.current = true;
+              if (launcher === 'Steam') setShowSteam(true);
+              else setShowOtherLaunchers(launcher);
+            }}
+            onScanFolder={() => {
+              addTabImport.current = true;
+              setImportFolder(settings.scanPath?.trim() || null);
+              setShowImport(true);
+            }}
+            onClose={() => {
+              addTabImport.current = false;
+              setShowAdd(false);
+              setDroppedPaths(null);
+            }}
+            onAdd={(g, fetchMeta) => void handleAdd(g, fetchMeta)}
+          />
+        )}
+        {stardeckSettingsOpen && (
+          <div
+            className="fixed inset-0 z-[90] overflow-y-auto bg-bg/95 p-4 sm:p-8"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Orbit settings"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setStardeckSettingsOpen(false);
+              }
+            }}
+          >
+            <div className="mx-auto max-w-7xl">
+              <header className="mb-4 flex items-center justify-between">
+                <h1 className="text-xl font-bold text-fg">Orbit settings</h1>
+                <button type="button" autoFocus className="orbit-btn" onClick={() => setStardeckSettingsOpen(false)}>Close</button>
+              </header>
+              <SettingsView
+                settings={settings}
+                setSettings={setSettings}
+                replaceSettings={replaceSettings}
+                onImportLauncher={(launcher) => {
+                  if (launcher === 'Steam') setShowSteam(true);
+                  else setShowOtherLaunchers(launcher);
+                }}
+                onScanDrive={() => {
+                  setImportFolder(settings.scanPath?.trim() || null);
+                  setShowImport(true);
+                }}
+                onOpenThemeManager={() => setShowThemeManager(true)}
+                onClearLibrary={() => { void clearLibrary().then(() => location.reload()); }}
+                onReset={resetEverything}
+                onLibraryChanged={() => void reload()}
+                update={update}
+                onFoundUpdate={setUpdate}
+                onOpenAlbum={() => setStardeckSettingsOpen(false)}
+                section="orbit-sound"
+              />
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 

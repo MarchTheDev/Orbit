@@ -15,10 +15,11 @@ check('Stardeck has no top bar, and Deck and Library float on the picture as pil
   !css.includes('.orbit-deck-topbar') && tv.includes('data-tv-pills') &&
     tv.includes('orbit-deck-pillbtn') && css.includes('.orbit-deck-pills'));
 
-check('Escape opens a right-hand sidebar over the deck, holding every way out',
-  css.includes('.orbit-deckside') && /justify-content: flex-end/.test(css) &&
-    tv.includes('aria-label="Stardeck menu"') && tv.includes('Back to desktop') &&
-    tv.includes('Quit Orbit') && tv.includes('Orbit settings') && tv.includes('Add a game'));
+check('Escape opens a left-hand sidebar; its actions stay inside Stardeck',
+  css.includes('.orbit-deckside') && /justify-content: flex-start/.test(css) &&
+    tv.includes('aria-label="Stardeck menu"') && !tv.includes('Back to desktop') &&
+    !tv.includes('Quit Orbit') && !tv.includes('Reset Stardeck to its defaults') &&
+    tv.includes('Orbit settings') && tv.includes('Add a game'));
 
 check('the selected game is a floating sheet on the left, not a strip under the row',
   css.includes('.orbit-decksheet') && /\.orbit-decksheet \{[^}]*left:/.test(css) &&

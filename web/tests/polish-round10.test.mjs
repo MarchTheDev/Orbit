@@ -42,10 +42,10 @@ check('the room behind the deck is glass, still blurred hard',
   tv.includes('orbit-deckbackdrop-glass') && css.includes('.orbit-deckbackdrop-glass') &&
     /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\) saturate\([\d.]+\) brightness\(1\.\d+\)/.test(css));
 
-check('Escape opens a menu sized for a television, with no About page in it',
+check('Escape opens a menu sized for a television, with no About or exit action',
   /\.orbit-deckside \{[^}]*width: min\(34rem/.test(css) &&
     !tv.includes('About Stardeck') && !tv.includes("'about'") &&
-    tv.includes('Back to desktop'));
+    !tv.includes('Back to desktop'));
 
 check('leaving Stardeck gives back only the fullscreen Orbit itself took',
   tvService.includes('let weWentFullscreen = false') &&

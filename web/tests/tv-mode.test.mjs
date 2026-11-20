@@ -443,17 +443,14 @@ check('Deck and Library float on the picture instead',
 const leftBeforeSidebar = left;
 await key('Escape');
 const sidebar = document.querySelector('[data-orbit-tv] [role="dialog"]');
-check('escape opens the sidebar down the right-hand edge', !!sidebar);
-check('and it is where leaving, adding a game and Orbit’s settings live',
-  ['Back to desktop', 'Add a game', 'Orbit settings'].every((label) =>
+check('escape opens the sidebar from the left edge', !!sidebar);
+check('it offers add and Orbit settings without an exit or reset action',
+  ['Add a game', 'Orbit settings'].every((label) =>
     [...sidebar.querySelectorAll('button')].some((button) => button.textContent?.includes(label)),
-  ));
-await act(async () => {
-  [...sidebar.querySelectorAll('button')].find((button) => button.textContent?.includes('Back to desktop'))?.click();
-});
-await act(async () => wait(320));
-check('and leaving is one press there, not a key on the deck',
-  left === leftBeforeSidebar + 1, `left ${left}`);
+  ) && !sidebar.textContent?.includes('Back to desktop') &&
+    !sidebar.textContent?.includes('Reset Stardeck to its defaults'));
+await key('Escape');
+check('closing the sidebar keeps Stardeck active', left === leftBeforeSidebar);
 
 console.log('leaving fullscreen gives the window back');
 
