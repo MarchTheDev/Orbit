@@ -117,18 +117,21 @@ import { moveInOrder } from '../utils/reorder';
  */
 function Setting<T extends string>({
   label,
+  anchor,
   value,
   onChange,
   options,
 }: {
   label: string;
+  /** The id a Settings search sends the page to. */
+  anchor?: string;
   value: T;
   onChange: (value: T) => void;
   options: { value: T; label: string; hint: string }[];
 }) {
   const current = options.find((o) => o.value === value) ?? options[0];
   return (
-    <div className="space-y-1.5">
+    <div id={anchor} className="space-y-1.5 scroll-mt-28">
       <p className="text-sm font-medium">{label}</p>
       <Select
         value={value}
@@ -143,9 +146,9 @@ function Setting<T extends string>({
   );
 }
 
-function SwitchRow({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
+function SwitchRow({ checked, onChange, label, hint, disabled, anchor }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean; anchor?: string }) {
   return (
-    <div className="orbit-setrow">
+    <div id={anchor} className="orbit-setrow scroll-mt-28">
       <div className="orbit-setrow-copy">
         <p className="orbit-setrow-label">{label}</p>
         {hint && <p className="orbit-setrow-hint">{hint}</p>}
@@ -406,9 +409,9 @@ function Section({
 }
 
 /** A heading inside a card, with a hairline running out to the edge. */
-function SubHead({ children }: { children: ReactNode }) {
+function SubHead({ children, anchor }: { children: ReactNode; anchor?: string }) {
   return (
-    <h3 className="orbit-setsubhead">
+    <h3 id={anchor} className="orbit-setsubhead scroll-mt-28">
       {children}
       <span className="h-px flex-1 bg-line" aria-hidden />
     </h3>
@@ -419,15 +422,18 @@ function SubHead({ children }: { children: ReactNode }) {
 function Group({
   children,
   title,
+  anchor,
   className,
 }: {
   children: ReactNode;
   /** The name of the block of settings, when it holds more than one. */
   title?: string;
+  /** The id a Settings search sends the page to. */
+  anchor?: string;
   className?: string;
 }) {
   return (
-    <div className={cn('orbit-setgroup', className)}>
+    <div id={anchor} className={cn('orbit-setgroup scroll-mt-28', className)}>
       {title && <p className="orbit-setgroup-title">{title}</p>}
       {children}
     </div>
@@ -587,18 +593,30 @@ const SETTINGS_GROUPS: { label: string; ids: string[] }[] = [
   { label: 'System', ids: ['orbit-integrations', 'orbit-copy', 'orbit-advanced', 'orbit-logs', 'orbit-updates', 'orbit-about'] },
 ];
 
-const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string }[] = [
+/**
+ * Where a search result lands.
+ *
+ * A result used to be a section and nothing more, so typing "volume" offered
+ * Sound and then left the reader to find the slider on a card with thirty rows
+ * on it. Each result now names the one control it is about: the rail lists it,
+ * and pressing it puts that control under the search field and lights it for a
+ * moment, which is the difference between a hint and a destination.
+ *
+ * The anchor is the label as an id - `set-` then the words, dashed - so a
+ * control and the index entry that names it cannot drift apart in wording
+ * without a check noticing.
+ */
+const anchorFor = (label: string) => `set-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+
+const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string; anchor?: string }[] = [
   { label: 'Themes and colours', section: 'orbit-appearance', keywords: 'appearance background accent nebula theme colour colors' },
   { label: 'Fonts', section: 'orbit-appearance', keywords: 'font typography sans serif rounded mono' },
-  { label: 'Cover hover tint', section: 'orbit-appearance', keywords: 'covers artwork tiles hover tint' },
   { label: 'Background follows the game', section: 'orbit-appearance', keywords: 'adaptive background blur cover art colour color ambience game selected' },
   { label: 'Liquid glass', section: 'orbit-appearance', keywords: 'glass frosted blur transparent acrylic translucency prism' },
   { label: 'Opening animation', section: 'orbit-appearance', keywords: 'startup intro opening motion launch' },
   { label: 'Add games to the Backlog', section: 'orbit-backlog', keywords: 'backlog sync add new games' },
   { label: 'Upcoming release calendar on Backlog', section: 'orbit-backlog', keywords: 'backlog calendar upcoming release dates personal steam coming soon' },
   { label: 'Add new games to Journal', section: 'orbit-journal', keywords: 'journal sync new games automatic add' },
-  { label: 'Library cover size', section: 'orbit-library', keywords: 'grid tiles covers small large scale slider zoom' },
-  { label: 'Library order and sorting', section: 'orbit-library', keywords: 'sort alphabetically recently added playtime drag manual order' },
   { label: 'Library chips', section: 'orbit-library', keywords: 'all favorites hidden reorder show hide' },
   { label: 'Library folders and drives', section: 'orbit-library', keywords: 'where installed paths storage folders drives move' },
   { label: 'Hide games', section: 'orbit-library', keywords: 'hidden library visibility' },
@@ -609,12 +627,12 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Replay lengths', section: 'orbit-overlay', keywords: 'overlay last 30 45 60 90 120 seconds custom clip lengths' },
   { label: 'Picture quality', section: 'orbit-overlay', keywords: 'overlay 720p 1080p 1440p 4k 2160 quality fps frames recording replay' },
   { label: 'Capture chime', section: 'orbit-overlay', keywords: 'overlay shutter recording replay screenshot chime sound saved volume' },
-  { label: 'Capture notes', section: 'orbit-overlay', keywords: 'overlay toast screenshot recording replay saved notification' },
-  { label: 'Game start note', section: 'orbit-overlay', keywords: 'overlay working popup banner start game notice' },
+  { label: 'Capture toast', section: 'orbit-overlay', keywords: 'overlay toast screenshot recording replay saved notification' },
+  { label: 'Ready notice', section: 'orbit-overlay', keywords: 'overlay working popup banner start game notice' },
   { label: 'Capture folder', section: 'orbit-overlay', keywords: 'overlay screenshots recordings replays save location path directory folder' },
-  { label: 'Screenshots, recordings and replays', section: 'orbit-captures', keywords: 'gallery album captures screenshots recordings replays browse per game' },
-  { label: 'Data folder and portable copy', section: 'orbit-advanced', keywords: 'advanced folders cache data directory portable beside program' },
-  { label: 'Log files', section: 'orbit-logs', keywords: 'logs diagnostics errors support folder tail report' },
+  { label: 'Screenshots, recordings and replays', section: 'orbit-captures', anchor: 'orbit-captures', keywords: 'gallery album captures screenshots recordings replays browse per game' },
+  { label: 'Data folder and portable copy', section: 'orbit-advanced', anchor: 'orbit-advanced', keywords: 'advanced folders cache data directory portable beside program' },
+  { label: 'Log files', section: 'orbit-logs', anchor: 'orbit-logs', keywords: 'logs diagnostics errors support folder tail report' },
   { label: 'Overlay boxes', section: 'orbit-overlay', keywords: 'overlay hide show fps performance clock notes audio gallery capture boxes resize' },
   { label: 'How the overlay boxes are drawn', section: 'orbit-overlay', keywords: 'overlay opacity transparency blur frosted glass corners radius solid see through' },
   { label: 'Send backups to the cloud', section: 'orbit-backups', keywords: 'cloud auto send after backup marked tick' },
@@ -628,17 +646,16 @@ const SETTINGS_SEARCH_ITEMS: { label: string; section: string; keywords: string 
   { label: 'Start Orbit in the background', section: 'orbit-appearance', keywords: 'tray hidden background boot launch on sign-in startup' },
   { label: 'Open in Orbit', section: 'orbit-appearance', keywords: 'explorer windows linux context menu right click executable import nautilus dolphin' },
   { label: 'Metadata and artwork sources', section: 'orbit-details', keywords: 'metadata description cover genres rating release year steamgriddb portrait key' },
-  { label: 'Default cover fit', section: 'orbit-details', keywords: 'cover fit fill crop banner portrait letterbox artwork' },
   { label: 'Automatic background lookups', section: 'orbit-details', keywords: 'fetch metadata offline background automatic' },
   { label: 'Background music', section: 'orbit-sound', keywords: 'sound music melody volume' },
   { label: 'Music while unfocused', section: 'orbit-sound', keywords: 'sound focus background other window' },
   { label: 'Music button and visualizer', section: 'orbit-sound', keywords: 'top bar music controls visualizer bars' },
   { label: 'Your own music', section: 'orbit-sound', keywords: 'sound file mp3 ogg wav flac restore default chord' },
-  { label: 'Integrations', section: 'orbit-integrations', keywords: 'integrations discord steamgriddb webhook services connect account' },
-  { label: 'Achievements', section: 'orbit-achievements', keywords: 'achievements trophies completion steam unlocks' },
-  { label: 'Export and import', section: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
+  { label: 'Integrations', section: 'orbit-integrations', anchor: 'orbit-integrations', keywords: 'integrations discord steamgriddb webhook services connect account' },
+  { label: 'Achievements', section: 'orbit-achievements', anchor: 'orbit-achievements', keywords: 'achievements trophies completion steam unlocks' },
+  { label: 'Export and import', section: 'orbit-copy', anchor: 'orbit-copy', keywords: 'export import file settings journal sessions playthrough copy backup orbit' },
   { label: 'Updates and pre-releases', section: 'orbit-updates', keywords: 'version release github update beta' },
-  { label: 'Reset or clear Orbit data', section: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
+  { label: 'Reset or clear Orbit data', section: 'orbit-about', anchor: 'orbit-about', keywords: 'delete remove reset library games sessions notes' },
 ];
 
 function OverlaySettings({
@@ -725,24 +742,27 @@ function OverlaySettings({
   return (
     <>
       <SwitchRow
+        anchor={anchorFor('Overlay')}
         checked={enabled}
         onChange={(on) => setOverlay({ enabled: on })}
         label="Overlay"
         hint="Shortcut opens it in-game."
       />
       <SwitchRow
+        anchor={anchorFor('Only while playing')}
         checked={overlay?.gameOnly === true}
         onChange={(on) => setOverlay({ gameOnly: on })}
         label="Only while playing"
         hint="Only open during a session."
       />
       <SwitchRow
+        anchor={anchorFor('Keep replay buffer')}
         checked={replay}
         onChange={(on) => setOverlay({ replay: on })}
         label="Keep replay buffer"
         hint="Save last seconds on demand."
       />
-      <div className="space-y-1.5">
+      <div id={anchorFor('Replay lengths')} className="space-y-1.5 scroll-mt-28">
         <p className="text-sm font-medium">Replay lengths</p>
         <div className="flex flex-wrap gap-2">
           {lengths.map((length) => {
@@ -794,7 +814,7 @@ function OverlaySettings({
         </div>
         <p className="text-xs leading-relaxed text-muted">30, 45, and 60 stay. Add others, such as 90 or 120, and they show up in the overlay too. The highlighted one is selected until you pick another there. From 5 seconds to 5 minutes.</p>
       </div>
-      <div className="space-y-1.5">
+      <div id={anchorFor('Picture quality')} className="space-y-1.5 scroll-mt-28">
         <p className="text-sm font-medium">Quality</p>
         <div className="flex flex-wrap gap-2">
           {([
@@ -837,12 +857,13 @@ function OverlaySettings({
         </p>
       </div>
       <SwitchRow
+        anchor={anchorFor('Capture chime')}
         checked={shutterOn}
         onChange={(on) => setOverlay({ shutter: on })}
         label="Capture sound"
         hint="A chime after a screenshot, recording, or replay is saved."
       />
-      <div className="space-y-1.5">
+      <div id={anchorFor('Capture chime volume')} className="space-y-1.5 scroll-mt-28">
         <div className="flex items-center justify-between gap-3">
           <label className="text-sm font-medium" htmlFor="shutter-volume">Capture chime</label>
           <button
@@ -868,24 +889,27 @@ function OverlaySettings({
         <p className="text-xs text-muted">{shutterOn ? `${shutterVolume}` : 'Off'}</p>
       </div>
       <SwitchRow
+        anchor={anchorFor('Capture toast')}
         checked={overlay?.captureToast !== false}
         onChange={(on) => setOverlay({ captureToast: on })}
         label="Capture toast"
         hint="Show notification on save."
       />
       <SwitchRow
+        anchor={anchorFor('Ready notice')}
         checked={overlay?.readyNotice !== false}
         onChange={(on) => setOverlay({ readyNotice: on })}
         label="Ready notice"
         hint="Show when game starts."
       />
       <SwitchRow
+        anchor={anchorFor('Live stats')}
         checked={overlay?.liveStats !== false}
         onChange={(on) => setOverlay({ liveStats: on })}
         label="Live stats"
         hint="FPS, CPU, GPU in overlay."
       />
-      <div className="orbit-setgroup">
+      <div id={anchorFor('How the overlay boxes are drawn')} className="orbit-setgroup scroll-mt-28">
         <div className="orbit-setgroup-head">
           <h3 className="orbit-setgroup-title">How the boxes are drawn</h3>
           <p className="orbit-setgroup-note">
@@ -940,6 +964,7 @@ function OverlaySettings({
         onOpenShortcutChange={(openShortcut) => setOverlay({ openShortcut })}
       />
       <SwitchRow
+        anchor={anchorFor('Capture without overlay')}
         checked={overlay?.captureShortcutsOutsideOverlay === true}
         onChange={(on) => setOverlay({ captureShortcutsOutsideOverlay: on })}
         label="Capture without overlay"
@@ -950,7 +975,7 @@ function OverlaySettings({
         controller input directly while it is open; blocking that device-level input requires an
         operating-system driver, which Orbit does not install.
       </p>
-      <div className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3">
+      <div id={anchorFor('Capture folder')} className="space-y-3 rounded-2xl border border-line bg-panel2/30 p-3 scroll-mt-28">
         <div>
           <p className="text-sm font-medium">Capture folders</p>
           <p className="mt-1 text-xs leading-relaxed text-muted">
@@ -998,7 +1023,7 @@ function OverlaySettings({
         ))}
         {folderNote && <p className="text-xs text-muted">{folderNote}</p>}
       </div>
-      <div className="space-y-1.5">
+      <div id={anchorFor('Overlay boxes')} className="space-y-1.5 scroll-mt-28">
         <p className="text-sm font-medium">Overlay boxes</p>
         <p className="text-xs leading-relaxed text-muted">Turn a box off and it stays out of the overlay. The same switches are on the overlay, so a hidden capture box can still be brought back.</p>
         <div className="flex flex-wrap gap-2">
@@ -1246,19 +1271,32 @@ export function SettingsView({
   };
 
   /** Take the page to one of its own cards, and mark it for a moment. */
-  const jump = (id: string) => {
+  /**
+   * Go to a card, or to one setting inside it.
+   *
+   * A card is reached by name from the rail, and lands at the top of the page
+   * because the card swaps in where the last one was. A setting found by a
+   * search is a different move: the card has to be painted first, and then the
+   * page travels down to that one row and marks it, so what was typed is where
+   * the eye already is.
+   */
+  const jump = (id: string, anchor?: string) => {
     setActiveSection(id);
     // The card has to be on screen before it can be measured, so the scroll
     // waits for the frame that paints it.
     window.requestAnimationFrame(() => {
-      const el = document.getElementById(id);
-      if (!el) return;
+      const card = document.getElementById(id);
+      if (!card) return;
       // Cards swap in place, so the page goes back to its own top rather than
       // sliding to the card: the heading and the search stay where they were.
-      el.closest<HTMLElement>('.orbit-scroll')?.scrollTo({ top: 0 });
-      scrollSettingsSectionToTop(el);
-      el.classList.add('settings-spot');
-      window.setTimeout(() => el.classList.remove('settings-spot'), 2400);
+      card.closest<HTMLElement>('.orbit-scroll')?.scrollTo({ top: 0 });
+      const target = (anchor && document.getElementById(anchor)) || card;
+      scrollSettingsSectionToTop(target, 'smooth', { always: target !== card });
+      target.classList.remove('settings-spot');
+      // A second frame, so asking for the same setting twice flashes twice
+      // instead of doing nothing because the class was already there.
+      window.requestAnimationFrame(() => target.classList.add('settings-spot'));
+      window.setTimeout(() => target.classList.remove('settings-spot'), 2400);
     });
   };
 
@@ -1368,12 +1406,13 @@ export function SettingsView({
    */
   const matchingItems = useMemo(() => {
     if (!query) return null;
-    const found = new Map<string, string[]>();
+    const found = new Map<string, { label: string; anchor: string }[]>();
     for (const item of searchItems) {
       if (desktopOs() !== 'windows' && desktopOs() !== 'linux' && item.label === 'Open in Orbit') continue;
       if (!item.label.toLowerCase().includes(query) && !item.keywords.toLowerCase().includes(query)) continue;
       const list = found.get(item.section) ?? [];
-      if (!list.includes(item.label)) list.push(item.label);
+      const anchor = item.anchor ?? anchorFor(item.label);
+      if (!list.some((entry) => entry.label === item.label)) list.push({ label: item.label, anchor });
       found.set(item.section, list);
     }
     return found;
@@ -1471,9 +1510,12 @@ export function SettingsView({
                 </button>
                 {found && found.length > 0 && (
                   <ul className="orbit-setnav-found" aria-label={`${section.label} settings found`}>
-                    {found.slice(0, 6).map((label) => (
-                      <li key={label}>
-                        <button type="button" onClick={() => jump(id)}>{label}</button>
+                    {found.slice(0, 8).map((entry) => (
+                      <li key={entry.label}>
+                        {/* The words the search found, and the way to them: a
+                            result that only opened the card was a hint, not an
+                            answer. */}
+                        <button type="button" onClick={() => jump(id, entry.anchor)}>{entry.label}</button>
                       </li>
                     ))}
                   </ul>
@@ -1516,7 +1558,7 @@ export function SettingsView({
         title="Appearance"
 
       >
-        <SubHead>Orbit themes</SubHead>
+        <SubHead anchor={anchorFor('Themes and colours')}>Orbit themes</SubHead>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {THEMES.map((t) => (
             <button
@@ -1572,7 +1614,7 @@ export function SettingsView({
             </button>
           )}
         </div>
-        <SubHead>Fonts</SubHead>
+        <SubHead anchor={anchorFor('Fonts')}>Fonts</SubHead>
         {/* Each face is shown by writing in it, at the size the app writes at,
             rather than by a swatch card with two letters on it. */}
         <div className="orbit-fontlist" role="radiogroup" aria-label="Fonts">
@@ -1598,13 +1640,14 @@ export function SettingsView({
         </div>
 
         <SwitchRow
+          anchor={anchorFor('Background follows the game')}
           checked={settings.adaptiveBackground !== false}
           onChange={(v) => setSettings({ adaptiveBackground: v })}
           label="Background follows the game"
           hint="The selected game's cover, blurred, behind the library."
         />
 
-        <div className="orbit-setrow">
+        <div id={anchorFor('Liquid glass')} className="orbit-setrow scroll-mt-28">
           <div className="orbit-setrow-copy">
             <p className="orbit-setrow-label">Liquid glass</p>
           </div>
@@ -1625,12 +1668,14 @@ export function SettingsView({
 
         <SubHead>When the app opens</SubHead>
         <SwitchRow
+          anchor={anchorFor('Opening animation')}
           checked={settings.startupAnimation !== false}
           onChange={(v) => setSettings({ startupAnimation: v })}
           label="Opening animation"
           hint="Short animated intro on launch."
         />
         <SwitchRow
+          anchor={anchorFor('Launch Orbit at sign-in')}
           checked={settings.launchOnStartup === true}
           onChange={(value) => void setLaunchAtSignIn(value)}
           label="Launch at sign-in"
@@ -1638,6 +1683,7 @@ export function SettingsView({
           disabled={!native || startupBusy}
         />
         <SwitchRow
+          anchor={anchorFor('Start Orbit in the background')}
           checked={settings.launchOnStartupBackground === true}
           onChange={(value) => setSettings({ launchOnStartupBackground: value })}
           label="Start in background"
@@ -1649,6 +1695,7 @@ export function SettingsView({
           <>
             <SubHead>{desktopOs() === 'windows' ? 'Windows Explorer' : 'File manager'}</SubHead>
             <SwitchRow
+              anchor={anchorFor('Open in Orbit')}
               checked={settings.openExeInOrbit !== false}
               onChange={(enabled) => void setOpenExeInOrbit(enabled)}
               label={desktopOs() === 'windows' ? 'Open in Orbit (Explorer)' : 'Open in Orbit'}
@@ -1669,7 +1716,7 @@ export function SettingsView({
         title="Library"
 
       >
-        <SubHead>Library filters</SubHead>
+        <SubHead anchor={anchorFor('Library chips')}>Library filters</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Drag to choose the order of the Library chips. Hide the ones you do not use; at least one stays visible.
         </p>
@@ -1679,13 +1726,13 @@ export function SettingsView({
           onChange={(libraryFilterOrder, hiddenLibraryFilters) => setSettings({ libraryFilterOrder, hiddenLibraryFilters })}
         />
 
-        <SubHead>Hidden games</SubHead>
+        <SubHead anchor={anchorFor('Hide games')}>Hidden games</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           A game is hidden from its own page or from the right-click menu. It keeps its sessions, notes and playtime,
           and the Hidden chip on the library page is where it comes back.
         </p>
 
-        <SubHead>Where games live</SubHead>
+        <SubHead anchor={anchorFor('Library folders and drives')}>Where games live</SubHead>
         <p className="text-xs leading-relaxed text-muted">
           Games inside these folders are yours as far as Orbit is concerned: it reports what they take and can move them
           between the folders you list. A game added from anywhere else is listed but never touched.
@@ -1750,6 +1797,7 @@ export function SettingsView({
       >
         <SubHead>Adding games</SubHead>
         <SwitchRow
+          anchor={anchorFor('Add games to the Backlog')}
           checked={settings.syncBacklog === true}
           onChange={(v) => setSettings({ syncBacklog: v })}
           label="Add new games to Backlog"
@@ -1757,6 +1805,7 @@ export function SettingsView({
         />
         <SubHead>Backlog view</SubHead>
         <SwitchRow
+          anchor={anchorFor('Upcoming release calendar on Backlog')}
           checked={settings.showBacklogCalendar !== false}
           onChange={(v) => setSettings({ showBacklogCalendar: v })}
           label="Show upcoming release calendar on Backlog"
@@ -1770,7 +1819,7 @@ export function SettingsView({
         icon={BookOpen}
         title="Journal"
       >
-        <SubHead>Adding games to Journal</SubHead>
+        <SubHead anchor={anchorFor('Add new games to Journal')}>Adding games to Journal</SubHead>
         <p className="max-w-2xl text-xs leading-relaxed text-muted">
           Keep Journal settings separate from Library organization. This only controls new games; it does not change existing Journal entries.
         </p>
@@ -1795,6 +1844,7 @@ export function SettingsView({
         </p>
 
         <Setting
+          anchor={anchorFor('Window when a game starts')}
           label="When a game starts"
           value={settings.window.onLaunch}
           onChange={(v) => setSettings({ window: { ...settings.window, onLaunch: v } })}
@@ -1821,6 +1871,7 @@ export function SettingsView({
         )}
 
         <Setting
+          anchor={anchorFor('Window when a game closes')}
           label="When the game closes"
           value={settings.window.onClose}
           onChange={(v) => setSettings({ window: { ...settings.window, onClose: v } })}
@@ -1841,6 +1892,7 @@ export function SettingsView({
           Hiding only works when the tray icon is there; otherwise Orbit quits, so it cannot vanish with no way back.
         </p>
         <Setting
+          anchor={anchorFor('Close button')}
           label="When the close button is pressed"
           value={settings.window.onAppClose ?? 'quit'}
           onChange={(v) => setSettings({ window: { ...settings.window, onAppClose: v } })}
@@ -1968,14 +2020,21 @@ export function SettingsView({
 
       >
         <SwitchRow
+          anchor={anchorFor('Send backups to the cloud')}
           checked={cloudAutoOn(settings.saves)}
           onChange={(on) => setSettings((current) => ({ saves: savesWithClouds(current.saves, { cloudAuto: on }) }))}
           label="Auto-send to cloud"
           hint="Send backups to connected clouds."
         />
-        <AddCloud settings={settings} setSettings={setSettings} />
-        <CloudTools />
-        <CloudAccounts settings={settings} setSettings={setSettings} />
+        <div id={anchorFor('Add a cloud')} className="scroll-mt-28">
+          <AddCloud settings={settings} setSettings={setSettings} />
+        </div>
+        <div id={anchorFor('rclone')} className="scroll-mt-28">
+          <CloudTools />
+        </div>
+        <div id={anchorFor('Connected clouds')} className="scroll-mt-28">
+          <CloudAccounts settings={settings} setSettings={setSettings} />
+        </div>
       </Section>
 
       <Section
@@ -1987,8 +2046,8 @@ export function SettingsView({
 
       >
         {!native && <p className="text-xs text-muted">Local scans are available in the desktop app.</p>}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher) => {
+        <div id={anchorFor('Launcher library scans')} className="grid gap-3 scroll-mt-28 sm:grid-cols-2">
+          {LAUNCHERS.filter((launcher) => launcherOn(launcher.id, desktopOs())).map((launcher, card) => {
             const scannable = canScan(launcher);
             const rescan = launcher.id === 'Steam'
               ? settings.steamOnLaunch
@@ -2018,7 +2077,12 @@ export function SettingsView({
                     <Download className="size-4 shrink-0 text-muted transition group-hover:text-accent" />
                   )}
                 </button>
-                <div className="border-t border-line/70 px-3 py-2.5">
+                <div
+                  // One switch per launcher: the search lands on the first,
+                  // which is the one whose name it is filed under.
+                  id={card === 0 ? anchorFor('Rescan libraries on launch') : undefined}
+                  className="border-t border-line/70 px-3 py-2.5 scroll-mt-28"
+                >
                   <CheckboxInline
                     checked={rescan && scannable}
                     disabled={!native || !scannable}
@@ -2028,7 +2092,7 @@ export function SettingsView({
                 </div>
               </div>
               {launcher.id === 'Steam' && (
-                <div className="overflow-hidden rounded-2xl border border-line bg-panel/55">
+                <div id={anchorFor('Drive or folder scan')} className="overflow-hidden rounded-2xl border border-line bg-panel/55 scroll-mt-28">
                   <button
                     type="button"
                     onClick={onScanDrive}
@@ -2097,7 +2161,7 @@ export function SettingsView({
         title="Metadata"
 
       >
-        <Group title="Sources">
+        <Group title="Sources" anchor={anchorFor('Metadata and artwork sources')}>
           <p className="text-xs leading-relaxed text-muted">Web search uses the game title to look up public metadata when no store match is found. It never sends your library.</p>
           <MetadataSources settings={settings} setSettings={setSettings} />
           <div className="orbit-setrow">
@@ -2123,9 +2187,9 @@ export function SettingsView({
             <span className={cn('orbit-settag', settings.sgdbApiKey ? 'is-on' : 'is-off')}>{settings.sgdbApiKey ? 'Key saved' : 'No key'}</span>
           </div>
         </Group>
-        <Group title="Looking things up">
-          <SwitchRow checked={settings.fetchMetadata ?? true} onChange={(v) => setSettings({ fetchMetadata: v })} label="Lookup on add" hint="Fetch on add." />
-          <SwitchRow checked={settings.autoFetchMetadata ?? true} onChange={(v) => setSettings({ autoFetchMetadata: v })} label="Background fill" hint="Fill missing quietly." />
+        <Group title="Looking things up" anchor={anchorFor('Automatic background lookups')}>
+          <SwitchRow anchor={anchorFor('Metadata on add')} checked={settings.fetchMetadata ?? true} onChange={(v) => setSettings({ fetchMetadata: v })} label="Lookup on add" hint="Fetch on add." />
+          <SwitchRow anchor={anchorFor('Background fill')} checked={settings.autoFetchMetadata ?? true} onChange={(v) => setSettings({ autoFetchMetadata: v })} label="Background fill" hint="Fill missing quietly." />
         </Group>
       </Section>
 
@@ -2138,13 +2202,14 @@ export function SettingsView({
       >
         <Group>
           <SwitchRow
+            anchor={anchorFor('Background music')}
             checked={settings.sound?.enabled !== false}
             onChange={(v) => setSettings({ sound: withSound(settings, { enabled: v }) })}
             label="Background music"
             hint="Quiet chord. Your file replaces it."
           />
 
-          <label className={cn('block space-y-1', settings.sound?.enabled === false && 'opacity-50')}>
+          <label id={anchorFor('Volume')} className={cn('block space-y-1 scroll-mt-28', settings.sound?.enabled === false && 'opacity-50')}>
             <span className="flex items-center gap-2 text-xs text-muted">
               <Volume2 className="size-3.5" />
               Volume
@@ -2169,13 +2234,14 @@ export function SettingsView({
           </label>
 
           <SwitchRow
+            anchor={anchorFor('Music while unfocused')}
             checked={settings.sound?.unfocused === true}
             onChange={(v) => setSettings({ sound: withSound(settings, { unfocused: v }) })}
             label="Play when unfocused"
             hint="Keep playing in background."
           />
 
-          <SubHead>Your own music</SubHead>
+          <SubHead anchor={anchorFor('Your own music')}>Your own music</SubHead>
           <p className="text-xs leading-relaxed text-muted">
             {settings.sound?.file
               ? `Playing ${fileName(settings.sound.file)}. Restore the default to hear the chord again.`
@@ -2209,15 +2275,17 @@ export function SettingsView({
           )}
           {!native && <p className="text-xs text-muted">Choosing a file needs the desktop app.</p>}
 
-          <SubHead>In the top bar</SubHead>
+          <SubHead anchor={anchorFor('Music button and visualizer')}>In the top bar</SubHead>
 
           <SwitchRow
+            anchor={anchorFor('Music in the top bar')}
             checked={settings.topbarMusic !== false}
             onChange={(v) => setSettings({ topbarMusic: v })}
             label="Show in top bar"
             hint="Music controls in header."
           />
           <SwitchRow
+            anchor={anchorFor('Music visualizer')}
             checked={settings.musicBars !== false}
             onChange={(v) => setSettings({ musicBars: v })}
             label="Music visualizer"
@@ -2371,6 +2439,7 @@ export function SettingsView({
       >
         <Group>
           <SwitchRow
+            anchor={anchorFor('Updates and pre-releases')}
             checked={settings.updatePrerelease === true}
             onChange={(v) => setSettings({ updatePrerelease: v })}
             label="Include pre-releases"
@@ -2421,6 +2490,7 @@ export function SettingsView({
           {updateNote && <p className="text-xs text-muted">{updateNote}</p>}
 
           <SwitchRow
+            anchor={anchorFor('Check for updates on launch')}
             checked={settings.updateCheck !== false}
             onChange={(v) => setSettings({ updateCheck: v })}
             label="Check on launch"

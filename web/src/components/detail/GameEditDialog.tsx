@@ -42,6 +42,7 @@ export function GameEditDialog({
         title="Game settings"
         size="xl"
         bare
+        panelClassName="orbit-modaledit"
         onClose={onClose}
         footer={onRemoveFromBacklog ? (
           <div className="flex justify-start">

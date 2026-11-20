@@ -334,7 +334,7 @@ check('TV mode has no entrance, exit, or child transitions',
   !tvCss.includes('@keyframes tv-in') && !tvCss.includes('@keyframes tv-out') &&
     /\.tv-root,\s*\n\.tv-root \*/.test(tvCss) &&
     /animation: none !important;[\s\S]*?transition: none !important;/.test(tvCss));
-check('the room’s backdrop is one fixed, transform-free frame', tvSource.includes('data-tv-deckbackdrop') && tvCss.includes('.orbit-deckbackdrop-layer') && tvCss.includes('filter: blur(64px)'));
+check('the room’s backdrop is one fixed, transform-free frame', tvSource.includes('data-tv-deckbackdrop') && tvCss.includes('.orbit-deckbackdrop-layer') && /\.orbit-deckbackdrop-layer[^}]*filter: blur\(\d+px\)/.test(tvCss));
 check('TV mode preserves the animated top-bar music visualizer', /prefers-reduced-motion: no-preference[\s\S]{0,900}orbit-bars-active i:nth-child\(1\)[\s\S]{0,220}animation: orbit-bar-1/.test(tvCss));
 
 console.log('the rail can be read by name instead of by memory');

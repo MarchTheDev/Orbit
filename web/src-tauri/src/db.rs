@@ -21,7 +21,7 @@ use serde_json::Value;
 /// 7, a log entry can keep extra details apart from its short summary.
 /// 8, a game can have more than one playthrough, each with its own journal
 ///    and its own notes. Time already counted stays on the game.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// How a session came to an end. Short enough to read in a table.
 pub const ENDED_MANUAL: &str = "manual";
@@ -419,6 +419,11 @@ impl Db {
         // own journal and its own notes. Time already counted stays on the game.
         Self::upgrade_to_8(conn)?;
 
+        // Version 9 stops a library accumulating one "Started playing" note per
+        // launch. The Journal is the player's own writing; Orbit only ever adds
+        // that one line, once, the first time a game is played.
+        Self::upgrade_to_9(conn)?;
+
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("Could not record the schema version: {e}"))?;
         Ok(())
@@ -611,6 +616,33 @@ impl Db {
             )
             .map_err(|e| format!("Could not add details to game logs: {e}"))?;
             log::info!("added game_logs.details");
+        }
+        Ok(())
+    }
+
+    /// Keep only the first "Started playing" note a launch ever wrote.
+    ///
+    /// A note is the player's own writing, so the only line Orbit adds is the
+    /// first one - and until now the front end added another on every launch,
+    /// which filled a Journal with the same sentence. The extra copies are
+    /// removed here, keeping the earliest one for each game (and the note's
+    /// playthrough), because that is the one that records when the game was
+    /// first opened. Nothing else in the log is touched.
+    fn upgrade_to_9(conn: &Connection) -> Result<(), String> {
+        let removed = conn
+            .execute(
+                "DELETE FROM game_logs
+                  WHERE note = 'Started playing'
+                    AND id NOT IN (
+                        SELECT MIN(id) FROM game_logs
+                         WHERE note = 'Started playing'
+                         GROUP BY game_id, COALESCE(playthrough_id, '')
+                    )",
+                [],
+            )
+            .map_err(|e| format!("Could not tidy the first-play notes: {e}"))?;
+        if removed > 0 {
+            log::info!("removed {removed} repeated first-play notes");
         }
         Ok(())
     }

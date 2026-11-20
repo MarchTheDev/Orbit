@@ -1352,7 +1352,7 @@ function GamePage({
           style={{ aspectRatio: shape.replace(':', ' / ') }}
           loading="eager"
         />
-        <div className="min-w-0">
+        <div className="orbit-gamepage-plate min-w-0">
           <h1 className="orbit-gamepage-title">{game.title}</h1>
           <div className="orbit-gamepage-meta">
             {game.meta?.releaseYear ? <span>{game.meta.releaseYear}</span> : null}

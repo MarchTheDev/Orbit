@@ -6,7 +6,16 @@
  * against the actual scroll root instead, so both the in-page category buttons
  * and cross-page Settings links land at the same, predictable top position.
  */
-export function scrollSettingsSectionToTop(element: HTMLElement, behavior: ScrollBehavior = 'smooth') {
+export function scrollSettingsSectionToTop(
+  element: HTMLElement,
+  behavior: ScrollBehavior = 'smooth',
+  /**
+   * A card swaps in place at the top of the page, so there is nothing to travel
+   * to. One setting inside a card is somewhere else entirely, and a search that
+   * named it has to carry the reader all the way down to it.
+   */
+  { always = false }: { always?: boolean } = {},
+) {
   const scroller = element.closest<HTMLElement>('.orbit-scroll');
   if (!scroller) {
     element.scrollIntoView({ behavior, block: 'start' });
@@ -20,7 +29,7 @@ export function scrollSettingsSectionToTop(element: HTMLElement, behavior: Scrol
   // Settings shows one card at a time and swaps it in place, so there is
   // nothing to travel to: a page already at its top is showing the card that
   // was asked for, and scrolling it under the bar would only hide the heading.
-  if (scroller.scrollTop <= 0 && elementTop >= 0) return;
+  if (!always && scroller.scrollTop <= 0 && elementTop >= 0) return;
   const top = Math.max(0, scroller.scrollTop + elementTop - clearSpace);
   scroller.scrollTo({ top, behavior });
 }

@@ -20,9 +20,12 @@ check('the single calendar requires a day and makes clock time and play duration
     journal.includes("draft.secs.trim() === '' ? 0 : parseDuration(draft.secs)") &&
     journal.includes("row.at > 0 ? toLocalInput(row.at) : ''") &&
     datePicker.includes('--:--') && datePicker.includes('Clear time') && datePicker.includes('const selectedDate = parseValue(value)') && datePicker.includes('const hasTime = Boolean(selectedDate') && journal.includes("return 'No date'"));
-check('starting a game writes a Started playing entry with the actual session start time',
-  app.includes("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") &&
-    app.indexOf("addGameLog(g.id, started.startedAt, 0, 'Started playing', '')") > app.indexOf('const started = await play(g.id);'));
+// The Journal belongs to the player. Orbit writes one line on the very first
+// launch of a game (in the backend) and never again - least of all one per
+// press of Play, which used to fill the page with the same sentence.
+check('starting a game never writes a Started playing entry of its own',
+  !app.includes("'Started playing'") && !app.includes('addGameLog') &&
+    app.includes("dispatchEvent(new Event('orbit-journal-changed'))"));
 check('the Journal and Logs list refresh after an automatic start entry is saved',
   journal.includes("addEventListener('orbit-journal-changed'") &&
     logs.includes("addEventListener('orbit-journal-changed'"));

@@ -31,16 +31,19 @@ check('the sheet carries Play, the star, the game settings and the full page',
 
 check('the room is lit by the selected game’s cover, blurred and cross-fading',
   tv.includes('function DeckBackdrop') && css.includes('.orbit-deckbackdrop-layer') &&
-    css.includes('filter: blur(64px)') && css.includes('@keyframes deck-backdrop-in'));
+    /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\)/.test(css) && css.includes('@keyframes deck-backdrop-in'));
 
 check('the app’s background can follow the game, and off is today’s look',
   types.includes('adaptiveBackground?: boolean') && app.includes('<AdaptiveBackdrop') &&
     adaptive.includes('orbit-adaptive-layer') && settings.includes('Background follows the game') &&
     css.includes('.orbit-adaptive-shade'));
 
-check('type that sits on artwork gets a plate behind it, settings included',
-  css.includes('.orbit-pagehead {') && /\.orbit-pagehead \{[^}]*backdrop-filter/.test(css) &&
-    /\.orbit-setsec-head \{[^}]*backdrop-filter/.test(css) && css.includes('.orbit-deck-plate'));
+// Round eleven took the plates off the flat pages and put one where the type
+// really is over a picture: the game's hero and Stardeck's own overlays.
+check('type that sits on artwork gets a plate behind it, and a page title does not',
+  /\.orbit-gamepage-plate \{[^}]*backdrop-filter/.test(css) &&
+    /\.orbit-setsec-head \{[^}]*backdrop-filter/.test(css) && css.includes('.orbit-deck-plate') &&
+    !/\.orbit-pagehead \{[^}]*backdrop-filter/.test(css));
 
 check('the settings rail is a column of icon tiles and the search filters it',
   settings.includes("icon: Palette") && settings.includes('orbit-setnav-icon') &&

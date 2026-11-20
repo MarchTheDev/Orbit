@@ -63,7 +63,6 @@ import {
   overlayQuality,
   overlayShowPins,
   setClockOffset,
-  addGameLog,
   dataDir,
   logsDir,
   overlayOpenKind,
@@ -1217,14 +1216,12 @@ export default function App() {
     await flush();
     const started = await play(g.id);
     if (!started) return;
-    // A playthrough start is worth a Journal entry even if the game is not in
-    // the Journal yet. Its session timestamp is the moment the game started,
-    // not when the player later adds it to the Journal.
-    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
-      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
-      .catch(() => {
-        toast({ text: `Could not save the Journal entry for ${g.title}.` });
-      });
+    // No Journal note here. The Journal is the player's own writing: the only
+    // line Orbit ever adds on its own is the very first "Started playing", and
+    // the session code writes that once, for a game that has never been played.
+    // Doing it here as well made a new entry every single launch, which turned
+    // a diary into a log of button presses.
+    window.dispatchEvent(new Event('orbit-journal-changed'));
     const launchedFromOrbit = g.launch.kind !== 'none' && (!started.manual || g.launch.kind === 'steam');
     if (overlayAvailable && launchedFromOrbit && settings?.overlay?.enabled !== false && settings?.overlay?.readyNotice !== false) {
       const fallbackNotice = () => announce({ text: 'Overlay deployed in Orbit' });
@@ -1242,9 +1239,7 @@ export default function App() {
     await flush();
     const started = await runCompanion(g.id, index);
     if (!started) return;
-    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
-      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
-      .catch(() => toast({ text: `Could not save the Journal entry for ${g.title}.` }));
+    window.dispatchEvent(new Event('orbit-journal-changed'));
     updateGame(g.id, { lastPlayed: new Date().toISOString(), status: g.status === 'backlog' ? 'playing' : g.status });
   };
 
@@ -1259,9 +1254,7 @@ export default function App() {
     await flush();
     const started = await runAlternative(g.id, index);
     if (!started) return;
-    void addGameLog(g.id, started.startedAt, 0, 'Started playing', '')
-      .then(() => window.dispatchEvent(new Event('orbit-journal-changed')))
-      .catch(() => toast({ text: `Could not save the Journal entry for ${g.title}.` }));
+    window.dispatchEvent(new Event('orbit-journal-changed'));
     updateGame(g.id, { lastPlayed: new Date().toISOString(), status: g.status === 'backlog' ? 'playing' : g.status });
   };
 

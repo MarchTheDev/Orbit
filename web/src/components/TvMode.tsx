@@ -61,7 +61,6 @@ export interface StardeckPrefs {
   /** Posters, which are what a library looks like, or the wide banners a store uses. */
   art: DeckArt;
   /** The game's own description under its facts. */
-  summary: boolean;
   /** The store's wordmark instead of the title text, when there is one. */
   logo: boolean;
   /** The facts under the title: year, developer, the time left in the story. */
@@ -85,7 +84,6 @@ const STARDECK_DEFAULT: StardeckPrefs = {
   cover: 'standard',
   dim: 'balanced',
   art: 'poster',
-  summary: true,
   logo: true,
   facts: true,
   stats: true,
@@ -125,7 +123,6 @@ function savedStardeck(): StardeckPrefs {
         scope: value.scope === 'startable' ? 'startable' : 'all',
         coverLabel: value.coverLabel === 'none' || value.coverLabel === 'info' ? value.coverLabel : 'name',
         grain: value.grain !== false,
-        summary: value.summary !== false,
         logo: value.logo !== false,
         backdrop: value.backdrop !== false,
       };
@@ -551,12 +548,6 @@ function StardeckMenu({
                 onChange={(next) => set('stats', next)}
               />
               <PanelToggle
-                label="Description"
-                hint="A couple of lines about the game, under its numbers."
-                on={prefs.summary}
-                onChange={(next) => set('summary', next)}
-              />
-              <PanelToggle
                 label="Store logo"
                 hint="The game's wordmark in place of its title, when there is one."
                 on={prefs.logo}
@@ -782,8 +773,6 @@ function GameSheet({
             </div>
           </div>
         )}
-
-        {prefs.summary && game.meta?.summary && <p className="orbit-decksheet-summary">{game.meta.summary}</p>}
 
         <div data-tv-actions className="orbit-decksheet-actions">
           {running ? (
@@ -1647,13 +1636,6 @@ export function TvMode({
                               On
                             </span>
                           )}
-                        </span>
-                        {/* The covers stand on a dark floor, so they are laid on
-                            one: a mirrored copy of the same picture, fading out
-                            from the foot of the artwork. It is what turns a row
-                            of rectangles into a shelf of objects. */}
-                        <span className={cn('orbit-deck-floor', prefs.art === 'banner' ? 'is-banner' : 'is-poster')} aria-hidden>
-                          <Cover game={game} className="size-full" fit="cover" />
                         </span>
                       </button>
                     </li>

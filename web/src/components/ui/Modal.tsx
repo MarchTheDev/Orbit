@@ -26,6 +26,7 @@ export function Modal({
   subtitle,
   size = 'md',
   bare = false,
+  panelClassName,
   onClose,
   children,
   footer,
@@ -41,6 +42,8 @@ export function Modal({
    * big enough to read through rather than a window to be talked into.
    */
   bare?: boolean;
+  /** A page-shaped dialog that wants a width of its own. */
+  panelClassName?: string;
   onClose: () => void;
   children: ReactNode;
   /** Pinned to the bottom, for long forms that should not scroll their buttons away. */
@@ -104,6 +107,7 @@ export function Modal({
         className={cn(
           'modal-panel-enter orbit-modal flex w-full flex-col overflow-hidden',
           bare ? 'max-h-[92vh] max-w-6xl' : `max-h-[88vh] ${SIZES[size]}`,
+          panelClassName,
         )}
         onClick={(e) => e.stopPropagation()}
       >

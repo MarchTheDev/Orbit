@@ -1147,9 +1147,11 @@ html.orbit-pad [data-orbit-journal-game].orbit-pad-focus {
 }
 
 /* A card that was jumped to from somewhere else says so for a moment, so a
- * press on "All sound settings" lands somewhere that is clearly the place. */
+ * press on "All sound settings" lands somewhere that is clearly the place.
+ * A single row found by a search uses the same flash, on its own hairline. */
 .settings-spot {
   animation: settings-spot 2.4s ease-out;
+  border-radius: 12px;
 }
 
 @keyframes settings-spot {
@@ -1158,10 +1160,22 @@ html.orbit-pad [data-orbit-journal-game].orbit-pad-focus {
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--c-accent) 55%, transparent),
       0 0 40px -8px color-mix(in srgb, var(--c-accent) 40%, transparent);
+    background: color-mix(in srgb, var(--c-accent) 9%, transparent);
   }
   100% {
     box-shadow: 0 0 0 2px transparent;
+    background: transparent;
   }
+}
+/* A row is a thin thing: the flash needs a little room around it to read as a
+ * place rather than as a border on the text. */
+.orbit-setrow.settings-spot,
+.orbit-setrow.settings-spot + .orbit-setrow {
+  padding-inline: 10px;
+  margin-inline: -10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-spot { animation-duration: .01ms; animation-iteration-count: 1; }
 }
 
 /* The note editor uses an ordinary textarea for writing and a separate, safe
@@ -2101,17 +2115,7 @@ html.orbit-linux .orbit-topbar {
   font-size: 13px;
   line-height: 1.55;
   color: var(--c-muted);
-  /* Body text over a picture gets its own backing; the heading above it does
-     not need one, and never has one here. */
-  display: inline-block;
-  max-inline-size: min(62ch, 100%);
-  padding: 6px 11px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--c-bg) 62%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
 }
-html.orbit-linux .orbit-pagehead-lead { background: color-mix(in srgb, var(--c-bg) 88%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 /* Readings on one rule, as the game page draws its telemetry. */
 .orbit-telemetry {
@@ -2833,24 +2837,22 @@ html.orbit-linux .orbit-pagehead-lead { background: color-mix(in srgb, var(--c-b
   margin: 0 auto;
 }
 
-/* Every page's title gets the same plate a settings section does: with the
-   room lit by a game, type that sits straight on the background is the first
-   thing that stops being readable. */
+/* A page's title, on the page itself.
+   It used to be a bordered, half-transparent box - a plate around the words
+   "Library" and a count - which is exactly the backing a title does not need:
+   the words are large, and nothing is behind them. The backing belongs to type
+   over artwork, where the picture is the reason it cannot be read. */
 .orbit-pagehead {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 18px;
-  padding: 10px 14px 12px;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--c-text) 6%, transparent);
-  background: color-mix(in srgb, var(--c-bg) 66%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  /* A heading is not a card. On a page of panels an outlined box holding two
+     words says "the page starts here" once too often, and on a page lit by a
+     game it is a plate the words did not need. */
+  padding: 0 0 4px;
 }
-html.orbit-linux .orbit-pagehead { background: color-mix(in srgb, var(--c-bg) 92%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; }
-/* A window too narrow for a plate that runs the width: it keeps its title and
-   gives up the border, so nothing is drawn inside nothing. */
+/* A narrow window keeps the title and the readings on separate lines. */
 @media (max-width: 560px) {
   .orbit-pagehead { flex-direction: column; align-items: stretch; }
 }
@@ -3472,6 +3474,21 @@ html.orbit-linux .orbit-gamepage-art { --stage-art-opacity: .5; }
     linear-gradient(180deg, color-mix(in srgb, var(--c-bg) 45%, transparent) 0%, transparent 14%);
 }
 .orbit-gamepage-hero > *:not(.orbit-gamepage-art) { position: relative; z-index: 2; }
+/* The hero's words are over the game's own picture, which is the case a plate
+   exists for: the title, the year and the studio are the page's identity and a
+   bright piece of artwork would take all three away. The cover is left alone. */
+.orbit-gamepage-plate {
+  display: inline-block;
+  justify-self: start;
+  max-inline-size: 100%;
+  padding: 14px 18px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, #06050e 52%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: inset 0 1px 0 #ffffff12;
+}
+html.orbit-linux .orbit-gamepage-plate { background: color-mix(in srgb, #06050e 72%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .orbit-gamepage-cover {
   width: 210px;
   aspect-ratio: 2 / 3;
@@ -4998,18 +5015,8 @@ html.orbit-linux .orbit-setsec-head { background: color-mix(in srgb, var(--c-bg)
   line-height: 1.6;
   color: var(--c-muted);
   text-wrap: pretty;
-  /* The words sit on the picture; the title above them is on the plate. That is
-     the whole point of the plate, and a lead wide enough to run past it would
-     be the same mistake at a narrower width. */
-  display: inline-block;
-  max-inline-size: min(64ch, 100%);
-  padding: 6px 11px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--c-bg) 62%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  text-wrap: pretty;
 }
-html.orbit-linux .orbit-setsec-lead { background: color-mix(in srgb, var(--c-bg) 88%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .orbit-setsec-body { display: flex; flex-direction: column; gap: 20px; }
 
 /* The typefaces — cards that write in themselves, so the choice is visible. */
@@ -5420,7 +5427,7 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
      a dark wash: the cover behind the covers should read as a picture seen
      through frosted glass, with its own colours and light, rather than as a
      backdrop painted out until only the covers are left. */
-  filter: blur(64px) saturate(1.3) brightness(1.02);
+  filter: blur(62px) saturate(1.34) brightness(1.18);
   transform: scale(1.16);
   opacity: 0;
   animation: deck-backdrop-in .6s var(--ease-out) both;
@@ -5433,7 +5440,7 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 .orbit-deckbackdrop-tint {
   position: absolute;
   inset: 0;
-  background: hsl(250 40% 12% / .34);
+  background: hsl(250 40% 14% / .2);
   mix-blend-mode: multiply;
 }
 /* The shade: darker at the bottom and along the left edge, where the covers and
@@ -5446,8 +5453,8 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 90% at 50% 34%, transparent 32%, #05040d9c 100%),
-    linear-gradient(180deg, #05040d52 0%, transparent 26%, transparent 58%, #05040dd2 100%);
+    radial-gradient(120% 90% at 50% 34%, transparent 40%, #05040d86 100%),
+    linear-gradient(180deg, #05040d33 0%, transparent 24%, transparent 66%, #05040dbf 100%);
 }
 /* The glass itself: one very drained wash over the whole picture, so a bright
    cover does not turn the room into a lightbox, and the covers still separate
@@ -5455,9 +5462,9 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 .orbit-deckbackdrop-glass {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, #0a0813 26%, transparent);
-  -webkit-backdrop-filter: blur(2px) saturate(1.05);
-  backdrop-filter: blur(2px) saturate(1.05);
+  background: color-mix(in srgb, #0a0813 15%, transparent);
+  -webkit-backdrop-filter: blur(2px) saturate(1.06);
+  backdrop-filter: blur(2px) saturate(1.06);
 }
 .tv-lite .orbit-deckbackdrop-layer { filter: blur(30px) saturate(1.1) brightness(.86); }
 .tv-lite .orbit-deckbackdrop-glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -5611,34 +5618,6 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 .orbit-deck .orbit-deck-card[data-deck-position='0'] .orbit-deck-frame {
   box-shadow: 0 34px 80px -26px #000, inset 0 0 0 1px color-mix(in srgb, var(--c-accent) 40%, #ffffff22);
 }
-
-/* The floor under the covers.
-   A mirrored copy of the same artwork, upside down and dimmed, fading out from
-   the foot of the cover: the row stops being rectangles pinned to the middle of
-   a screen and becomes objects standing on a surface. It is drawn from the same
-   cached picture, so it costs one transform and no second download. */
-.orbit-deck .orbit-deck-floor {
-  display: block;
-  overflow: hidden;
-  margin-top: 6px;
-  border-radius: 14px;
-  transform: scaleY(-1);
-  opacity: .3;
-  -webkit-mask-image: linear-gradient(0deg, transparent 4%, #000 92%);
-  mask-image: linear-gradient(0deg, transparent 4%, #000 92%);
-  filter: blur(1.5px) saturate(.7) brightness(.75);
-  pointer-events: none;
-  transition: opacity .34s ease;
-}
-.orbit-deck .orbit-deck-floor.is-poster { block-size: clamp(2.4rem, 7dvh, 4.6rem); aspect-ratio: 2 / 3; }
-.orbit-deck .orbit-deck-floor.is-banner { block-size: clamp(1.8rem, 4.6dvh, 3rem); aspect-ratio: 16 / 9; }
-.orbit-deck .orbit-deck-card[data-deck-position='0'] .orbit-deck-floor { opacity: .42; }
-.orbit-deck .orbit-deck-card[data-deck-position='-1'] .orbit-deck-floor,
-.orbit-deck .orbit-deck-card[data-deck-position='1'] .orbit-deck-floor { opacity: .18; }
-/* A narrow window has no room to stand a cover on anything. */
-@media (max-height: 520px) {
-  .orbit-deck .orbit-deck-floor { display: none; }
-}
 .orbit-deck .orbit-deck-on {
   position: absolute;
   right: 6px;
@@ -5700,10 +5679,13 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 .orbit-decksheet {
   position: absolute;
   z-index: 5;
-  left: clamp(16px, 2.4vw, 34px);
+  left: clamp(18px, 2.6vw, 40px);
   top: 50%;
-  width: min(27rem, 34vw);
-  max-height: calc(100% - 110px);
+  /* Sized to be read from a sofa, not from the desk chair: a third of the
+     screen with type to match, and no description - the sheet answers "what is
+     this and do I want to play it", and a paragraph is neither. */
+  width: min(31rem, 38vw);
+  max-height: calc(100% - 96px);
   transform: translateY(-50%);
   overflow-y: auto;
   border-radius: 26px;
@@ -5718,13 +5700,13 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .orbit-decksheet-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 14px;
+  right: 14px;
   z-index: 2;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
   border: 1px solid #ffffff24;
   background: #0a0813b8;
@@ -5736,8 +5718,8 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
 .orbit-decksheet-inner {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px 18px;
+  gap: 18px;
+  padding: 24px 24px 24px;
 }
 /* The game changed: the panel's contents come in rather than swapping over. */
 .orbit-decksheet-inner { animation: deck-game-in .32s cubic-bezier(.2,.8,.2,1) both; }
@@ -5748,7 +5730,7 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
 .orbit-decksheet-art { position: relative; display: flex; justify-content: center; }
 .orbit-decksheet-cover {
   width: auto;
-  block-size: clamp(9rem, 26dvh, 15rem);
+  block-size: clamp(11rem, 32dvh, 19rem);
   aspect-ratio: 2 / 3;
   border-radius: 14px;
   overflow: hidden;
@@ -5770,45 +5752,45 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
 .orbit-decksheet-kicker {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 4px;
-  font-size: 9.5px;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: .2em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--c-accent) 80%, #ffffff);
 }
 .orbit-decksheet-head h1 {
-  font-size: clamp(1.35rem, 2.6dvh + .4vw, 2rem);
+  font-size: clamp(1.7rem, 3.4dvh + .5vw, 2.6rem);
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -.02em;
   color: #fff;
 }
 .orbit-decksheet-facts {
-  margin: 5px 0 0;
-  font-size: 11.5px;
+  margin: 7px 0 0;
+  font-size: 14px;
   color: #ffffffa6;
 }
 .orbit-decksheet-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: 14px 26px;
   margin: 0;
-  padding: 11px 0 0;
+  padding: 16px 0 0;
   border-top: 1px solid #ffffff14;
 }
 .orbit-decksheet-stats > div { min-width: 0; }
 .orbit-decksheet-stats dt {
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: .16em;
   text-transform: uppercase;
   color: #ffffff5c;
 }
 .orbit-decksheet-stats dd {
-  margin: 2px 0 0;
-  font-size: 12.5px;
+  margin: 3px 0 0;
+  font-size: 17px;
   font-weight: 620;
   color: #fff;
   font-variant-numeric: tabular-nums;
@@ -5817,30 +5799,20 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
 .orbit-decksheet-progress .orbit-deck-progresshead { color: #ffffff73; }
 .orbit-decksheet-progress .orbit-deck-progresshead b { color: #fff; }
 .orbit-decksheet-progress .orbit-deck-rail { background: #ffffff24; }
-.orbit-decksheet-summary {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: #ffffff9e;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  overflow: hidden;
-}
-.orbit-decksheet-actions { display: flex; align-items: center; gap: 8px; }
+.orbit-decksheet-actions { display: flex; align-items: center; gap: 10px; }
 .orbit-decksheet-play {
   display: inline-flex;
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 42px;
-  padding: 0 20px;
+  gap: 9px;
+  height: 54px;
+  padding: 0 24px;
   border-radius: 999px;
   background: var(--c-accent);
   color: var(--c-on-accent, #14161a);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 720;
   cursor: pointer;
   transition: filter .14s var(--ease-snap);
 }
@@ -5850,8 +5822,8 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
   display: grid;
   flex: none;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 54px;
+  height: 54px;
   border-radius: 999px;
   border: 1px solid #ffffff24;
   background: #ffffff0f;
@@ -5865,25 +5837,27 @@ html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filt
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 32px;
+  gap: 7px;
+  height: 44px;
+  padding: 0 12px;
   border-radius: 999px;
-  color: #ffffff8a;
-  font-size: 11.5px;
+  color: #ffffffa6;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
 .orbit-decksheet-more:hover { color: #fff; background: #ffffff12; }
 @media (max-width: 980px) {
-  .orbit-decksheet { width: min(22rem, 46vw); }
-  .orbit-decksheet-cover { block-size: clamp(7rem, 20dvh, 11rem); }
+  .orbit-decksheet { width: min(26rem, 50vw); }
+  .orbit-decksheet-cover { block-size: clamp(8rem, 22dvh, 12rem); }
+  .orbit-decksheet-play { height: 46px; font-size: 14px; }
+  .orbit-decksheet-iconbtn { width: 46px; height: 46px; }
 }
 /* A narrow window cannot hold a panel and a row side by side: the row keeps the
    screen and the panel drops its picture. */
 @media (max-width: 720px) {
   .orbit-decksheet { width: min(18rem, 62vw); left: 12px; }
   .orbit-decksheet-art { display: none; }
-  .orbit-decksheet-summary { display: none; }
 }
 
 /* --- the sidebar (Escape): everything that is not browsing ------------------ */
@@ -7168,9 +7142,9 @@ html.orbit-glass .orbit-cover-bg { opacity: .18; }
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
-  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
-  color: var(--c-accent);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 70%, var(--c-muted));
   flex-shrink: 0;
 }
 .orbit-release-body {
@@ -7962,8 +7936,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   width: 22px;
   height: 22px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
-  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 70%, var(--c-muted));
 }
 .orbit-launchentry-head h4 { flex: 1; min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 660; color: var(--c-text); text-overflow: ellipsis; white-space: nowrap; }
 .orbit-launchentry-name { flex: 1; min-width: 0; }
@@ -8098,8 +8072,8 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
   width: 22px;
   height: 22px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--c-accent) 14%, transparent);
-  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--c-accent) 70%, var(--c-muted));
 }
 .orbit-launchentry-head h4 { flex: 1; min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 660; color: var(--c-text); text-overflow: ellipsis; white-space: nowrap; }
 .orbit-launchentry-name { flex: 1; min-width: 0; }
@@ -8144,19 +8118,24 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
    grey panel of label-and-control rows repeated - the shape that stops a
    settings page reading as a form.
    ========================================================== */
+/* The dialog is a page about one game, not a window the size of the library.
+   At six columns wide the artwork grew to a billboard, the name sat a hand's
+   width from its own fields, and every panel had empty space down one side: the
+   page was large because the frame was, not because it had anything to say. */
+.orbit-modaledit { max-width: 54rem; }
 .orbit-settings {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
 }
 
 /* --- the picture at the top ---------------------------------------------- */
 .orbit-gameart {
   display: grid;
-  grid-template-columns: 8.5rem minmax(0, 1fr);
+  grid-template-columns: 7rem minmax(0, 1fr);
   gap: 10px;
-  height: clamp(10rem, 24vh, 14rem);
+  height: clamp(8rem, 18vh, 10.5rem);
 }
 .orbit-gameart-cover,
 .orbit-gameart-wide {
@@ -8271,9 +8250,13 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-settings-tabs button:hover:not([aria-selected='true']) {
   background: color-mix(in srgb, var(--c-accent) 7%, transparent);
 }
+/* The pages are two columns of panels on a wide window and one on a narrow
+   one, so a short page fills its width instead of stacking six panels of two
+   rows each down a single column. */
 .orbit-settings-page {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  align-items: start;
   gap: 12px;
   min-height: 0;
   animation: settings-page-in .2s cubic-bezier(.2,.8,.2,1) both;

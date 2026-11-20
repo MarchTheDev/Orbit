@@ -33,13 +33,14 @@ check('and there is no glow behind its cover, and no name under a deck cover',
   !tv.includes('orbit-decksheet-glow') && !css.includes('.orbit-decksheet-glow {') &&
     !tv.includes('orbit-deck-name'));
 
-check('the covers stand on a reflection of themselves',
-  tv.includes('orbit-deck-floor') && css.includes('.orbit-deck-floor') &&
-    /\.orbit-deck \.orbit-deck-floor \{[^}]*mask-image/.test(css));
+// Round eleven took the reflection back out: the mirrored cover travelled with
+// the selection overlay and read as a second, broken cover rather than a floor.
+check('the covers do not stand on a reflection of themselves',
+  !tv.includes('orbit-deck-floor') && !css.includes('.orbit-deck-floor'));
 
 check('the room behind the deck is glass, still blurred hard',
   tv.includes('orbit-deckbackdrop-glass') && css.includes('.orbit-deckbackdrop-glass') &&
-    css.includes('filter: blur(64px) saturate(1.3) brightness(1.02)'));
+    /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\) saturate\([\d.]+\) brightness\(1\.\d+\)/.test(css));
 
 check('Escape opens a menu sized for a television, with no About page in it',
   /\.orbit-deckside \{[^}]*width: min\(34rem/.test(css) &&
@@ -55,11 +56,15 @@ check('icons are drawn in a tint of the accent rather than filled with it',
     /\.orbit-setsec-icon,[\s\S]{0,320}color: color-mix\(in srgb, var\(--c-accent\) 68%, var\(--c-muted\)\)/.test(css) &&
     !/\.orbit-play \{[\s\S]{0,400}linear-gradient\(135deg, color-mix\(in srgb, var\(--c-accent\) 92%/.test(css));
 
+// Round eleven reversed half of this one: a page's own lead sits on the page,
+// not on a picture, so it lost its plate. The rule that survives is the shape of
+// it - a heading never wears a backing, and type over artwork always does.
 check('a body of text over artwork has its own backing, a title does not',
-  /\.orbit-setsec-lead \{[\s\S]{0,700}background: color-mix\(in srgb, var\(--c-bg\) 62%/.test(css) &&
-    /\.orbit-pagehead-lead \{[\s\S]{0,700}background: color-mix\(in srgb, var\(--c-bg\) 62%/.test(css) &&
+  /\.orbit-gamepage-plate \{[\s\S]{0,700}background: color-mix\(in srgb, #06050e 52%/.test(css) &&
+    /\.orbit-deck-plate \{[\s\S]{0,300}background: #06050eb8/.test(css) &&
     !/\.orbit-setsec-head h2 \{[\s\S]{0,200}background:/.test(css) &&
-    !/\.orbit-pagehead h1 \{[\s\S]{0,200}background:/.test(css));
+    !/\.orbit-pagehead h1 \{[\s\S]{0,200}background:/.test(css) &&
+    !/\.orbit-pagehead-lead \{[\s\S]{0,700}background: color-mix/.test(css));
 
 check('the settings lens belongs to its field, and a search names what it found inside a section',
   settings.includes('orbit-setsearch-lens') && css.includes('.orbit-setsearch-lens') &&

@@ -16,7 +16,7 @@ const picker = read('../src/components/detail/ArtworkPicker.tsx');
 const reshadeMod = read('../src-tauri/src/reshade.rs');
 
 check('Stardeck is one row of covers over the selected game\'s own blurred cover',
-  css.includes('.orbit-deckbackdrop-layer') && css.includes('filter: blur(64px)') &&
+  css.includes('.orbit-deckbackdrop-layer') && /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\)/.test(css) &&
     // The row takes everything the window has: a fixed share left a strip of
     // the shell's own colour under the covers.
     /\.orbit-deck \.orbit-deck-index \{[^}]*flex: 1 1 auto/.test(css) &&
