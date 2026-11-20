@@ -78,6 +78,7 @@ const checks = [
   'tests/polish-round10.test.mjs',
   'tests/polish-round11.test.mjs',
   'tests/polish-round12.test.mjs',
+  'tests/stardeck-regressions.test.mjs',
 ];
 
 try {

@@ -38,8 +38,9 @@ check('Backlog KPI strip is removed, search is wider, catalogue entries open Pla
   !backlog.includes('orbit-backlog-kpis') && backlog.includes('flex-[2]') && backlog.includes('initialGame={catalogueGame ?? undefined}') && /\.orbit-release-bar\s*\{[^}]*position:\s*relative/s.test(css));
 check('High-resolution Steam hero and portrait fallbacks are ordered ahead of low-resolution artwork',
   art.includes('library_hero_2x.jpg') && art.includes('library_hero.jpg') && art.includes('library_600x900_2x.jpg') && art.includes('decodeArtwork') && art.includes('prewarmLibraryArtwork'));
-check('GamePage keeps the selected page mounted and retains the previous decoded hero during transitions',
-  !library.includes('<GamePage\n              key={focus.id}') && library.includes('resolveWideArt(game)') && css.includes('animation: none;'));
+check('Observatory game details show a cover and title without the wide-art banner',
+  !library.includes('<GamePage\n              key={focus.id}') && !library.includes('orbit-gamepage-art') &&
+    library.includes('className="orbit-gamepage-hero"') && css.includes('.orbit-gamepage-hero::before { display: none; }'));
 check('Cover memoizes aspect ratio and retries the available high-resolution source chain',
   cover.includes('aspectRatios') && cover.includes('coverArtCandidates(game)'));
 check('HLTB parsing returns regional releases and catalogue metadata; non-Steam page displays it and queries Wikidata',

@@ -15,8 +15,10 @@ const css = read('../src/index.css');
 
 console.log('polish round 6 checks');
 const wideCandidates = art.slice(art.indexOf('export function wideArtCandidates'), art.indexOf('/** A known usable source'));
-check('wide-art fallbacks never stretch a portrait cover across the hero',
-  !wideCandidates.includes('coverUrl') && !wideCandidates.includes('coverPath') && library.includes('wideArtImmediateFallback(game)') && library.includes('stageArt.gameId === game.id'));
+check('wide-art fallbacks never stretch a portrait cover, and Observatory details omit the banner',
+  !wideCandidates.includes('coverUrl') && !wideCandidates.includes('coverPath') &&
+    !library.includes('wideArtImmediateFallback(game)') && !library.includes('stageArt.gameId === game.id') &&
+    !library.includes('orbit-gamepage-art'));
 check('right-click palette menu is narrower and uses larger text',
   palette.includes('w-44 rounded-lg') && palette.includes('text-[13px]'));
 check('Backlog has no rank numbers on cards',

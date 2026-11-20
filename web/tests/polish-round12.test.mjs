@@ -18,9 +18,11 @@ check('Stardeck removes the selection frame and eases cover movement',
 check('The game sheet has no top-corner star, status kicker, or progress percentage',
   !tv.includes('orbit-decksheet-star') && !tv.includes('orbit-decksheet-kicker') &&
   !tv.includes('orbit-decksheet-progress') && !tv.includes('{progress}%'));
-check('The Stardeck menu opens on the left and has no mode-exit, quit, or reset actions',
+check('The Stardeck menu opens on the left; its explicit exit and quit actions stay outside it',
   /\.orbit-deckmenu-wrap[^}]*justify-content: flex-start/.test(css) &&
-  !tv.includes('Back to desktop') && !tv.includes('Quit Orbit') &&
+  !tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Return to desktop mode') &&
+  !tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Quit Orbit') &&
+  tv.includes('aria-label="Return to desktop mode"') && tv.includes('aria-label="Quit Orbit"') &&
   !tv.includes('Reset Stardeck to its defaults'));
 check('Add game, game settings, and Orbit settings are mounted over Stardeck',
   app.includes('onOpenSettings={() => setStardeckSettingsOpen(true)}') &&

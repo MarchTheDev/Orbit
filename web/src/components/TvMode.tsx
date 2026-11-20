@@ -8,8 +8,10 @@ import {
   Layers,
   LayoutGrid,
   ListOrdered,
+  Minimize2,
   Play,
   Plus,
+  Power,
   Settings2,
   SlidersHorizontal,
   Square,
@@ -454,7 +456,6 @@ function StardeckMenu({
             <MenuButton icon={ListOrdered} label="Library" hint="Order and what the deck holds" onClick={() => onPage('library')} />
             <MenuButton icon={Plus} label="Add a game" hint="A program, or a launcher's library" onClick={onAddGame} />
             <MenuButton icon={Settings2} label="Orbit settings" hint="Every setting in the app" onClick={onOpenSettings} />
-
           </>
         )}
 
@@ -784,7 +785,7 @@ function MenuButton({
  * Everything is one axis of movement, which is what makes it work from a couch:
  * left and right walk the rail and the game the page is about changes with it.
  * Up reaches the buttons, where left and right then move between them, and down
- * comes back to the rail. Enter plays. Escape gives nothing back to the desktop:
+ * comes back to the rail. Enter opens details; Play is explicit. Escape gives nothing back to the desktop:
  * a night on the couch is only over when the button at the top right says so.
  * The rail's own settings sheet, opened with C or the Customize chip, changes
  * the size of the covers, the artwork behind them and the shelf itself without
@@ -805,6 +806,7 @@ export function TvMode({
   onAddGame,
   onEditGame,
   onToggleFavorite,
+  onPower,
 }: {
   games: Game[];
   /** The game with the clock running, if there is one. */
@@ -825,6 +827,8 @@ export function TvMode({
   onEditGame: (game: Game) => void;
   /** The star, so a favourite can be made one from the couch. */
   onToggleFavorite: (id: string) => void;
+  /** Close Orbit after Stardeck has handed the window back. */
+  onPower: () => void;
 }) {
   const [prefs, setPrefs] = useState<StardeckPrefs>(savedStardeck);
   /**
@@ -1003,7 +1007,9 @@ export function TvMode({
     if (!menu) return;
     const away = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
-      if (!menuBox.current?.contains(event.target)) setMenu(false);
+      if (menuBox.current?.contains(event.target)) return;
+      if (document.querySelector('[role="dialog"]:not([aria-label="Stardeck menu"])')) return;
+      setMenu(false);
     };
     window.addEventListener('pointerdown', away);
     return () => window.removeEventListener('pointerdown', away);
@@ -1030,12 +1036,6 @@ export function TvMode({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [menu, menuPage]);
-
-  const start = useCallback(() => {
-    if (!active) return;
-    if (running) onStop();
-    else onPlay(active);
-  }, [active, onPlay, onStop, running]);
 
   /**
    * The buttons on the game's own panel: Play, the star, the settings and the
@@ -1086,18 +1086,24 @@ export function TvMode({
    * game's own page coming back. The focus lands after the frame that paints
    * it, since the button does not exist before that.
    */
+  const focusPlayAction = () => {
+    (document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action="play"]')
+      ?? document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action]'))
+      ?.focus({ preventScroll: true });
+  };
   const revealSheet = useCallback(() => {
     if (sheetOpen) {
       actionButtons()[0]?.focus({ preventScroll: true });
       return;
     }
     setSheetOpen(true);
-    window.requestAnimationFrame(() => {
-      (document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action="play"]')
-        ?? document.querySelector<HTMLElement>('[data-tv-actions] [data-tv-action]'))
-        ?.focus({ preventScroll: true });
-    });
+    window.requestAnimationFrame(focusPlayAction);
   }, [sheetOpen]);
+  const revealLibraryDetails = useCallback(() => {
+    setView('deck');
+    setSheetOpen(true);
+    window.requestAnimationFrame(focusPlayAction);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1220,18 +1226,17 @@ export function TvMode({
           return;
         }
         case 'Enter':
-          // A focused button gets its own Enter - the sound, the way out, Play,
-          // Details - so pressing it twice cannot also start the game behind
-          // it. The press is turned into the click here rather than left to the
-          // browser, so that a controller and a keyboard arrive at the same
-          // button the same way. Only a bare hub has no button to give it to.
+          // A focused button gets its own Enter. On the library wall, Enter
+          // opens the selected game's details on the deck; on the deck it opens
+          // the sheet. Starting a game is always an explicit Play action.
           if (inActions || inBar) {
             event.preventDefault();
             (document.activeElement as HTMLElement | null)?.click();
             return;
           }
           event.preventDefault();
-          start();
+          if (view === 'library') revealLibraryDetails();
+          else revealSheet();
           return;
         case 'Tab':
           // Tabbing out of the rail is how a keyboard loses the interface
@@ -1246,27 +1251,36 @@ export function TvMode({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [at, detailed, menu, moveLibraryFocus, revealSheet, select, sheetOpen, start, view]);
+  }, [at, detailed, menu, moveLibraryFocus, revealLibraryDetails, revealSheet, select, sheetOpen, view]);
 
   /**
    * The controller.
    *
    * A pad does not send arrow keys: it moves the focus ring itself, and the
    * hub follows the ring, so walking the rail with a stick works without any of
-   * this. What it cannot do on its own is the two things the mode is named for:
-   * a confirm press on a cover plays the game rather than only selecting it,
-   * and Back steps out of a game's page - or closes the settings sheet - never
-   * out of Stardeck when there is nothing to step out of.
+   * this. Confirm opens the focused game's details; only the Play action starts
+   * it. Back closes a details/settings surface or opens the Stardeck menu, and
+   * never leaves Stardeck by itself.
    */
   useEffect(() => {
     const onPadPlay = () => {
-      if (menu) return;
-      if (detailed) {
-        if (detailed.id === runningId) onStop();
-        else onPlay(detailed);
+      if (menu || document.querySelector('[role="dialog"]:not([aria-label="Stardeck menu"])')) return;
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const action = focused?.closest<HTMLElement>('[data-tv-action]');
+      if (action) {
+        action.click();
         return;
       }
-      start();
+      const libraryCover = focused?.closest<HTMLElement>('[data-tv-library-cover]');
+      if (libraryCover) {
+        const target = list.find((game) => game.id === libraryCover.dataset.gameId);
+        if (target) setSelectedId(target.id);
+        revealLibraryDetails();
+        return;
+      }
+      if (focused?.matches('[data-tv-cover]') || !sheetOpen) {
+        revealSheet();
+      }
     };
     const onPadPage = () => setView((current) => current === 'deck' ? 'library' : 'deck');
     const onPadBack = (event: Event) => {
@@ -1294,7 +1308,7 @@ export function TvMode({
       window.removeEventListener('orbit-pad-page', onPadPage);
       window.removeEventListener('orbit-pad-back', onPadBack, true);
     };
-  }, [detailed, menu, onPlay, onStop, runningId, sheetOpen, start]);
+  }, [detailed, list, menu, revealLibraryDetails, revealSheet, sheetOpen]);
 
   const left =
     active?.hltb?.main && active.hltb.main > 0
@@ -1338,6 +1352,14 @@ export function TvMode({
             </button>
           </span>
         )}
+      </div>
+      <div className="orbit-deck-exit-actions" aria-label="Stardeck window actions">
+        <button type="button" onClick={exit} aria-label="Return to desktop mode" title="Return to desktop mode">
+          <Minimize2 className="size-4" /><span>Desktop mode</span>
+        </button>
+        <button type="button" onClick={onPower} aria-label="Quit Orbit" title="Quit Orbit" className="is-quit">
+          <Power className="size-4" /><span>Quit Orbit</span>
+        </button>
       </div>
 
       {(menu || menuExiting) && (
@@ -1420,13 +1442,14 @@ export function TvMode({
                   key={game.id}
                   data-tv-cover={n}
                   data-tv-library-cover
+                  data-game-id={game.id}
                   type="button"
                   onFocus={() => setSelectedId(game.id)}
                   onClick={() => {
                     // A mouse is looking; a pad is choosing. The same press,
                     // told apart by where it came from.
                     setSelectedId(game.id);
-                    if (padJustActivated(400)) onPlay(game);
+                    if (padJustActivated(400)) revealLibraryDetails();
                   }}
                   onDoubleClick={() => onPlay(game)}
                   aria-current={game.id === active.id ? 'true' : undefined}
@@ -1514,12 +1537,11 @@ export function TvMode({
                         onDragStart={(event) => event.preventDefault()}
                         onFocus={() => setSelectedId(game.id)}
                         onClick={() => {
-                          // The same button is the mouse's "look at this" and
-                          // the pad's "play this", so the press that produced
-                          // the click is what tells them apart.
+                          // Mouse click selects or toggles the details sheet;
+                          // the controller confirm opens it as well. Launch is
+                          // reserved for the explicit Play action.
                           if (padJustActivated(400)) {
-                            if (game.id === runningId) onStop();
-                            else onPlay(game);
+                            revealSheet();
                             return;
                           }
                           // A press on a cover chooses the game and brings its

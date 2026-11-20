@@ -29,9 +29,9 @@ import type {
 import type { Filter, FilterDefinition } from '../data/libraryFilters';
 import { orderedLibraryFilters, LIBRARY_FILTERS } from '../data/libraryFilters';
 import { fetchHltb } from '../services/hltb';
-import { findTvBackdrop, overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
+import { overlayDelete, overlayGallery, type GalleryItem } from '../services/native';
 import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
-import { prewarmLibraryArtwork, resolveWideArt, wideArtImmediateFallback } from '../utils/art';
+import { prewarmLibraryArtwork } from '../utils/art';
 import { driveLabel } from '../utils/drive';
 import { cn } from '../utils/cn';
 import { useHoverTint } from '../utils/palette';
@@ -451,6 +451,9 @@ export function LibraryView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [games, filter, genre, facets],
   );
+  useEffect(() => {
+    if (focusId && shown.some((game) => game.id === focusId)) onFocus?.(focusId);
+  }, [focusId, onFocus, shown]);
 
   const facetCount = facets.only.length + (facets.start === 'any' ? 0 : 1) + (genre ? 1 : 0);
   useEffect(() => localStorage.setItem('orbit.library.genre', genre ?? ''), [genre]);
@@ -1263,24 +1266,6 @@ function GamePage({
   onUpdate: (patch: Partial<Game>) => void;
   onDiscoverSteam: () => void;
 }) {
-  const [stageArt, setStageArt] = useState<{ gameId: string; src: string | null }>({ gameId: '', src: null });
-  const currentStageArt = stageArt.gameId === game.id ? stageArt.src : wideArtImmediateFallback(game);
-  useEffect(() => {
-    let current = true;
-    setStageArt({ gameId: game.id, src: wideArtImmediateFallback(game) });
-    void resolveWideArt(game).then((src) => {
-      if (current) setStageArt({ gameId: game.id, src });
-    });
-    // SteamGridDB's console heroes are often cleaner than a store header. Keep
-    // the selected game's own custom background absolute, but upgrade automatic
-    // artwork when an independently curated backdrop is available.
-    if (!game.meta?.backgroundUrlCustom) {
-      void findTvBackdrop(game.id).then((src) => {
-        if (current && src) setStageArt({ gameId: game.id, src });
-      });
-    }
-    return () => { current = false; };
-  }, [game.id, game.coverPath, game.meta?.steamAppId, game.meta?.backgroundUrl, game.meta?.headerUrl, game.meta?.coverUrl]);
   const main = game.hltb?.main ?? 0;
   const hours = game.playSecs / 3600;
   const progress = main > 0 ? Math.min(100, Math.round((hours / main) * 100)) : null;
@@ -1335,17 +1320,10 @@ function GamePage({
 
   return (
     <div className="orbit-gamepage">
-      <div className="orbit-gamepage-hero">
-        <div
-          className="orbit-gamepage-art"
-          aria-hidden
-          style={{
-            backgroundImage: currentStageArt
-              ? `url("${currentStageArt}")`
-              : `radial-gradient(120% 90% at 76% 16%, hsl(${game.hue} 48% 34% / .6), transparent 62%), radial-gradient(90% 70% at 10% 90%, hsl(${game.hue} 44% 26% / .4), transparent 62%)`,
-            backgroundSize: 'cover, auto',
-          }}
-        />
+      <div
+        className="orbit-gamepage-hero"
+        style={{ background: `radial-gradient(ellipse 55% 120% at 6% 50%, hsl(${game.hue} 38% 28% / .34), transparent 100%)` }}
+      >
         <Cover
           game={game}
           className="orbit-gamepage-cover"

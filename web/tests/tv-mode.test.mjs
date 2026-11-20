@@ -6,7 +6,7 @@
  * and play. The order it is in, because the first game on it is the one the
  * page opens on. And the hub itself, because every control has to work with one
  * hand on a controller: an arrow key walks the rail and the page follows it,
- * Enter plays what it is on, Escape gives the screen back.
+ * Enter opens details for what is focused, Play launches, and Escape keeps the screen in Stardeck.
  */
 import { JSDOM } from 'jsdom';
 import { SAMPLE_GAMES } from '../src/data/sampleGames.ts';
@@ -199,10 +199,10 @@ await key('ArrowLeft');
 check('and wraps the other way', selected() === '3', String(selected()));
 
 await key('Enter');
-check('enter plays the game the hub is about', played.join() === 'hand', JSON.stringify(played));
+check('Enter opens details for the focused game without launching it',
+  played.length === 0 && !!document.querySelector('[data-tv-actions]'), `${played.join()} / ${!!document.querySelector('[data-tv-actions]')}`);
+check('details open on the explicit Play action', document.activeElement?.getAttribute('data-tv-action') === 'play');
 
-await key('ArrowUp');
-check('up reaches the game’s own panel, on Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowRight');
 check('right in the panel goes to the next button, not the next game',
   document.activeElement?.getAttribute('data-tv-action') === 'favourite' &&
@@ -235,8 +235,8 @@ await act(async () => {
 await act(async () => {
   document.querySelector('[data-tv-cover="0"]').click();
 });
-check('the single cover can be browsed by step without a row competing for attention',
-  title() === 'Middle Of It' && played.length === 1, `${title()} / ${played.length}`);
+check('the single cover can be browsed by step without launching it',
+  title() === 'Middle Of It' && played.length === 0, `${title()} / ${played.length}`);
 
 // Enter belongs to a focused button when one is focused, or pressing it twice
 // would both open the details and start the game behind it.
@@ -300,8 +300,8 @@ await key('ArrowRight');
 act(() => {
   window.dispatchEvent(new dom.window.CustomEvent('orbit-pad-play'));
 });
-check('Start on the controller plays the game the hub is about',
-  played.join() === 'p2', JSON.stringify(played));
+check('Confirm on a controller cover opens details without launching',
+  played.length === 0 && !!document.querySelector('[data-tv-actions]'), `${played.join()} / ${!!document.querySelector('[data-tv-actions]')}`);
 
 pad('orbit-pad-back');
 await act(async () => wait(320));
@@ -319,7 +319,8 @@ await act(async () => {
 });
 pad('orbit-pad-back');
 await act(async () => wait(20));
-check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 0);
+check('Back on a game\'s page returns to the rail', !!document.querySelector('[data-tv-cover]') && left === 0,
+  `cover ${!!document.querySelector('[data-tv-cover]')} / left ${left} / title ${title()} / back ${!!document.querySelector('[data-tv-action="back"]')} / dialogs ${[...document.querySelectorAll('[role="dialog"]')].map((node) => node.getAttribute('aria-label')).join(',')}`);
 
 console.log('TV mode opens without entrance choreography');
 

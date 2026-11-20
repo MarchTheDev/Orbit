@@ -79,6 +79,7 @@ import { AdaptiveBackdrop } from './components/AdaptiveBackdrop';
 import { CommandPalette } from './components/CommandPalette';
 import { TvMode } from './components/TvMode';
 import { enterFullscreen, leaveFullscreen } from './services/tv';
+import { closeApp } from './services/windowChrome';
 import { ContextMenu, type MenuItem } from './components/ui/ContextMenu';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { Logo } from './components/ui/Logo';
@@ -250,9 +251,14 @@ export default function App() {
     void enterFullscreen();
   }, []);
 
-  const leaveTv = useCallback(() => {
+  const leaveTv = useCallback(async () => {
+    // Keep the full-screen surface mounted until the native window has actually
+    // returned to its saved bounds. Rendering the desktop during the compositor's
+    // transition leaves a stale-height strip at the bottom on some platforms.
+    await leaveFullscreen();
+    window.dispatchEvent(new Event('resize'));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     setTv(false);
-    void leaveFullscreen();
   }, []);
   const [filter, setFilter] = useState<Filter>(savedFilter);
   const [query, setQuery] = useState('');
@@ -270,6 +276,7 @@ export default function App() {
   const [sections, setSections] = useState<GameSection[]>(savedSections);
   const [sort, setSort] = useState<SortKey>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [libraryFocusId, setLibraryFocusId] = useState<string | null>(null);
   /** Bumped when the pad asks the open details drawer to close, so it can slide out first. */
   const [detailClose, setDetailClose] = useState(0);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
@@ -921,13 +928,14 @@ export default function App() {
   const adaptivePage = page === 'library' || page === 'statistics' || page === 'backlog';
   const adaptiveGame = useMemo(() => {
     if (settings?.adaptiveBackground === false || !adaptivePage) return null;
-    const chosen = (selectedId && played.find((game) => game.id === selectedId)) || null;
+    const focusId = page === 'library' ? libraryFocusId : selectedId;
+    const chosen = (focusId && played.find((game) => game.id === focusId)) || null;
     if (chosen) return chosen;
     return [...played]
       .filter((game) => !game.planned && !game.hidden)
       .sort((a, b) => (b.lastPlayed ?? '').localeCompare(a.lastPlayed ?? ''))
       .at(0) ?? null;
-  }, [adaptivePage, played, selectedId, settings?.adaptiveBackground]);
+  }, [adaptivePage, libraryFocusId, page, played, selectedId, settings?.adaptiveBackground]);
 
   const hiddenLibraryFilters = settings?.hiddenLibraryFilters ?? [];
   // If a selected chip is hidden in Settings, fall back to All immediately.
@@ -1685,6 +1693,9 @@ export default function App() {
           onAddGame={() => setShowAdd(true)}
           onEditGame={(game) => openGameEditor(game.id)}
           onToggleFavorite={toggleFavorite}
+          onPower={() => {
+            void leaveTv().then(() => closeApp());
+          }}
         />
         {editingGame && (
           <GameEditDialog
@@ -1722,7 +1733,7 @@ export default function App() {
         )}
         {stardeckSettingsOpen && (
           <div
-            className="fixed inset-0 z-[90] overflow-y-auto bg-bg/95 p-4 sm:p-8"
+            className="orbit-tv-config"
             role="dialog"
             aria-modal="true"
             aria-label="Orbit settings"
@@ -1736,7 +1747,7 @@ export default function App() {
           >
             <div className="mx-auto max-w-7xl">
               <header className="mb-4 flex items-center justify-between">
-                <h1 className="text-xl font-bold text-fg">Orbit settings</h1>
+                <div><p className="mb-1 text-[10px] font-bold uppercase tracking-[.24em] text-accent">Stardeck</p><h1 className="text-xl font-bold text-fg">Settings</h1></div>
                 <button type="button" autoFocus className="orbit-btn" onClick={() => setStardeckSettingsOpen(false)}>Close</button>
               </header>
               <SettingsView
@@ -1966,7 +1977,10 @@ export default function App() {
             onAdd={() => setShowAdd(true)}
             onReorder={sort === 'manual' ? reorder : undefined}
             historyFocus={historyFocus}
-            onFocus={rememberFocus}
+            onFocus={(id) => {
+              rememberFocus(id);
+              setLibraryFocusId(id);
+            }}
             genreRequest={libraryGenre}
             onGenreRequest={() => setLibraryGenre(null)}
           />

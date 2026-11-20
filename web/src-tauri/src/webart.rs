@@ -29,13 +29,32 @@ fn client() -> Result<reqwest::Client, String> {
 
 /// The `vqd` token DuckDuckGo puts in its results page, which its JSON needs.
 fn vqd(html: &str) -> Option<String> {
-    let at = html.find("vqd=")? + 4;
-    let rest = html[at..].trim_start_matches(|c| c == '\'' || c == '"');
-    let token: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        .collect();
-    (!token.is_empty()).then_some(token)
+    // DuckDuckGo has used both query-style `vqd='…'` and JSON-style
+    // `"vqd":"…"` assignments. Look at every occurrence: boot scripts can
+    // contain an empty placeholder before the real page token.
+    let mut offset = 0;
+    while let Some(found) = html[offset..].find("vqd") {
+        let at = offset + found + 3;
+        let tail = html[at..].trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, '\'' | '"')
+        });
+        let Some(separator) = tail.chars().next().filter(|c| matches!(c, '=' | ':')) else {
+            offset = at;
+            continue;
+        };
+        let rest = tail[separator.len_utf8()..].trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, '\'' | '"')
+        });
+        let token: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        if !token.is_empty() {
+            return Some(token);
+        }
+        offset = at;
+    }
+    None
 }
 
 fn side(row: &Value, key: &str) -> u64 {
@@ -193,6 +212,8 @@ mod tests {
     fn reads_quoted_and_unquoted_duckduckgo_tokens() {
         assert_eq!(vqd("<script>vqd='4-1234567890_ab'</script>"), Some("4-1234567890_ab".into()));
         assert_eq!(vqd("vqd=4-1234567890"), Some("4-1234567890".into()));
+        assert_eq!(vqd(r#"<script>{"vqd":"4-json_token"}</script>"#), Some("4-json_token".into()));
+        assert_eq!(vqd("vqd='' then vqd=4-real_token"), Some("4-real_token".into()));
         assert_eq!(vqd("no token here"), None);
     }
 }

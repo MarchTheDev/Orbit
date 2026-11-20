@@ -8744,3 +8744,136 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
    rings; the artwork itself stays clean. */
 .tv-root .orbit-deck-card:focus-visible,
 .tv-root .orbit-deck-card:focus-visible .orbit-deck-frame { outline: none; box-shadow: none; }
+
+/* The Observatory game page is a portrait cover and its name, not a wide
+   banner competing with them. Keep its first view calm and let the cover be
+   the artwork. */
+.orbit-gamepage-hero {
+  min-height: 250px;
+  align-items: center;
+  padding: 24px 30px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  border-radius: 18px;
+  background-color: color-mix(in srgb, var(--c-panel) 38%, transparent);
+}
+.orbit-gamepage-hero::before { display: none; }
+.orbit-gamepage-hero > .orbit-gamepage-cover { z-index: 1; width: clamp(132px, 15vw, 190px); }
+.orbit-gamepage-plate {
+  display: block;
+  align-self: center;
+  padding: 10px 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.orbit-gamepage-title { font-size: clamp(2rem, 4vw, 3.4rem); letter-spacing: -.035em; }
+@media (max-width: 720px) {
+  .orbit-gamepage-hero { grid-template-columns: 104px minmax(0, 1fr); min-height: 0; padding: 16px; }
+  .orbit-gamepage-hero > .orbit-gamepage-cover { width: 104px; }
+  .orbit-gamepage-plate { padding: 4px 0; }
+}
+
+
+/* TV pages deliberately hide native auto-hide scrollbars: the deck is a full
+   screen surface, and a transient gutter beside a details panel looks like a
+   layout shift rather than a scroll affordance. Keyboard/controller scrolling
+   remains available. */
+.tv-details-scroll, [data-orbit-tv] .orbit-tv-library {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tv-details-scroll::-webkit-scrollbar, [data-orbit-tv] .orbit-tv-library::-webkit-scrollbar {
+  display: none; width: 0; height: 0;
+}
+
+html.orbit-tv, html.orbit-tv body, html.orbit-tv #root {
+  width: 100%; height: 100%; min-height: 0; overflow: hidden;
+}
+[data-orbit-tv] {
+  position: fixed; inset: 0; width: 100%;
+  height: 100vh; height: 100dvh; min-height: 0;
+}
+.orbit-deckside-item.orbit-deckside-leave { margin-top: 4px; }
+.orbit-deckside-item.orbit-deckside-quit .orbit-deckside-itemicon { color: #f18c90; }
+.orbit-deckside-item.orbit-deckside-quit:hover { border-color: #f18c904d; }
+
+/* Settings and Add-game surfaces opened from Stardeck keep the console's
+   dark-room treatment while their contents stay fully usable. */
+html.orbit-tv .orbit-modal-scrim { background: #03020bd9; }
+html.orbit-tv .orbit-modal {
+  border-color: #ffffff1a;
+  background: #0c0a15;
+  box-shadow: 0 28px 100px #000c;
+}
+html.orbit-tv .orbit-modal-head { border-color: #ffffff10; background: #0c0a15; }
+html.orbit-tv .orbit-modal-title { color: #fff; }
+.orbit-tv-config {
+  position: fixed; inset: 0; z-index: 90; overflow-y: auto;
+  padding: clamp(12px, 2vw, 32px);
+  background: #05040df5; color: #fff;
+}
+.orbit-tv-config > header {
+  position: sticky; top: 0; z-index: 2; padding: 12px 0;
+  background: linear-gradient(#05040d 72%, transparent);
+}
+.orbit-tv-config .orbit-settings {
+  border: 1px solid #ffffff12; border-radius: 18px;
+  padding: clamp(12px, 2vw, 24px); background: #0b0914;
+}
+
+/* Keep icon-holder surfaces neutral. Accent belongs to the glyph, not to a
+   matching colour block behind it. */
+:is(.orbit-setsec-icon, .orbit-setnav-icon, .orbit-deckside-itemicon,
+    .orbit-sourcecard-icon, .orbit-release-icon, .orbit-launchentry-icon) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: color-mix(in srgb, var(--c-accent) 82%, var(--c-text)) !important;
+}
+:is(.orbit-setsec-icon, .orbit-setnav-icon, .orbit-deckside-itemicon,
+    .orbit-sourcecard-icon, .orbit-release-icon, .orbit-launchentry-icon) svg {
+  color: inherit !important;
+}
+.orbit-setnav-row[aria-current='page'] .orbit-setnav-icon { background: transparent !important; }
+.orbit-deck-exit-actions {
+  position: fixed;
+  z-index: 30;
+  top: max(18px, env(safe-area-inset-top));
+  right: clamp(18px, 3vw, 42px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orbit-deck-exit-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid #ffffff1a;
+  border-radius: 999px;
+  background: #0807109e;
+  color: #ffffffbd;
+  font-size: 11px;
+  font-weight: 650;
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  transition: border-color .16s, background .16s, color .16s;
+}
+.orbit-deck-exit-actions button:hover,
+.orbit-deck-exit-actions button:focus-visible {
+  border-color: color-mix(in srgb, var(--c-accent) 60%, #fff);
+  background: #11101bcf;
+  color: #fff;
+  outline: none;
+}
+.orbit-deck-exit-actions button.is-quit { color: #f1a0a5; }
+.orbit-deck-exit-actions button.is-quit:hover,
+.orbit-deck-exit-actions button.is-quit:focus-visible { border-color: #f1a0a580; }
+@media (max-width: 680px) {
+  .orbit-deck-exit-actions { top: auto; bottom: max(16px, env(safe-area-inset-bottom)); right: 16px; }
+  .orbit-deck-exit-actions button { width: 40px; min-width: 40px; padding: 0; }
+  .orbit-deck-exit-actions button span { display: none; }
+}
