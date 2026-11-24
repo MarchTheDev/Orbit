@@ -21,10 +21,11 @@ check('controller confirm on a game cover opens details; only a focused action b
   tv.includes("focused?.closest<HTMLElement>('[data-tv-action]')") &&
     tv.includes("focused?.matches('[data-tv-cover]')") && !tv.includes('if (game.id === runningId) onStop();\n                            else onPlay(game);'));
 
-check('desktop mode and quit are explicit Stardeck controls outside the Escape menu',
-  tv.includes('orbit-deck-exit-actions') && tv.includes('aria-label="Return to desktop mode"') &&
-    tv.includes('aria-label="Quit Orbit"') &&
-    !tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('onExit'));
+check('desktop mode and quit live in the Escape menu opened by the top-left hamburger',
+  tv.includes('orbit-deck-hamburger') &&
+    tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Desktop mode') &&
+    tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Quit Orbit') &&
+    !tv.includes('orbit-deck-exit-actions'));
 check('TV detail scrolling has no transient scrollbar gutter',
   details.includes('tv-details-scroll') && css.includes('.tv-details-scroll::-webkit-scrollbar') &&
     css.includes('scrollbar-width: none;'));

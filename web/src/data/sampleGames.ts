@@ -103,7 +103,7 @@ export const DEFAULT_SETTINGS: Settings = {
     { id: 'lutris', label: 'Lutris', enabled: true, kind: 'builtin', note: 'Linux install scripts & icons' },
     { id: 'libretro', label: 'Libretro Thumbnails', enabled: true, kind: 'builtin', note: 'Emulated box art (LaunchBox via Libretro)' },
     { id: 'protondb', label: 'ProtonDB', enabled: true, kind: 'builtin', note: 'Compatibility & anti-cheat' },
-    { id: 'web', label: 'Web search', enabled: true, kind: 'builtin', note: 'Fallback web metadata' },
+    { id: 'web', label: 'Web search', enabled: true, kind: 'builtin', note: 'Fallback cover artwork' },
   ],
   fetchMetadata: true,
   autoFetchMetadata: true,

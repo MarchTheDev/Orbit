@@ -2162,7 +2162,7 @@ export function SettingsView({
 
       >
         <Group title="Sources" anchor={anchorFor('Metadata and artwork sources')}>
-          <p className="text-xs leading-relaxed text-muted">Web search uses the game title to look up public metadata when no store match is found. It never sends your library.</p>
+          <p className="text-xs leading-relaxed text-muted">Steam provides store details. SteamGridDB and web search can fill missing cover art; each lookup uses the title only, never your library.</p>
           <MetadataSources settings={settings} setSettings={setSettings} />
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">

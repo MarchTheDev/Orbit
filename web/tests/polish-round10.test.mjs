@@ -71,11 +71,10 @@ check('the settings lens belongs to its field, and a search names what it found 
     settings.includes('matchingItems') && settings.includes('orbit-setnav-found') &&
     css.includes('.orbit-setnav-found'));
 
-check('the editor has an Extra page between Launch and Tools',
-  edit.includes("type Page = 'game' | 'launch' | 'extra' | 'tools' | 'wine' | 'saves'") &&
-    edit.indexOf("label: 'Launch'") < edit.indexOf("label: 'Extra'") &&
-    edit.indexOf("label: 'Extra'") < edit.indexOf("label: 'Tools'") &&
-    edit.includes('section="extra"'));
+check('the editor folds Extra into Launch without exposing a separate page',
+  edit.includes("type Page = 'game' | 'launch' | 'tools' | 'wine' | 'saves'") &&
+    edit.indexOf("label: 'Launch'") < edit.indexOf("label: 'Tools'") &&
+    !edit.includes("label: 'Extra'") && edit.includes('section="all"'));
 
 check('Alternative launch is named as such, and Tools carries ReShade',
   launch.includes('Alternative launch') && !launch.includes('Another way to launch it') &&

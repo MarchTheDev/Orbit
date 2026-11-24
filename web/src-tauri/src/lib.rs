@@ -1526,14 +1526,45 @@ async fn metadata_lookup(
     title: String,
     app_id: Option<u64>,
 ) -> Result<metadata::Meta, String> {
-    let mut meta = metadata::lookup_or_app(&title, app_id).await?;
+    let settings = orbit.store.load_settings();
+    let steam_on = metadata_source_enabled(&settings, "steam");
+    let sgdb_on = metadata_source_enabled(&settings, "steamgriddb");
+    let web_on = metadata_source_enabled(&settings, "web");
+    let mut meta = if steam_on {
+        metadata::lookup_or_app(&title, app_id).await?
+    } else {
+        metadata::Meta {
+            name: (!title.trim().is_empty()).then(|| title.trim().to_owned()),
+            source: "none",
+            ..metadata::Meta::default()
+        }
+    };
     if meta.cover_url.is_none() {
         let name = meta.name.clone().unwrap_or_else(|| title.clone());
-        if let Some(url) = first_portrait(&orbit, &name, meta.steam_app_id.or(app_id)).await {
-            meta.cover_url = Some(url);
+        if sgdb_on {
+            meta.cover_url = first_portrait(&orbit, &name, meta.steam_app_id.or(app_id)).await;
+        }
+        if meta.cover_url.is_none() && web_on {
+            meta.cover_url = webart::covers(&name, 1)
+                .await
+                .ok()
+                .and_then(|picks| picks.into_iter().next())
+                .map(|pick| pick.url);
         }
     }
     Ok(meta)
+}
+
+/// A source absent from an older saved settings file remains enabled; newly
+/// introduced providers should not silently disappear for existing libraries.
+fn metadata_source_enabled(settings: &Option<Settings>, id: &str) -> bool {
+    settings
+        .as_ref()
+        .and_then(|value| value.get("metadataSources"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|sources| sources.iter().find(|source| source.get("id").and_then(serde_json::Value::as_str) == Some(id)))
+        .and_then(|source| source.get("enabled").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true)
 }
 
 /// Every program in a folder, so an import can ask which one is the game.
@@ -1547,7 +1578,10 @@ async fn folder_programs(path: String, max_depth: Option<usize>) -> Result<Vec<l
 
 /// A partial title, as the games the store suggests for it, with pictures.
 #[tauri::command]
-async fn metadata_cards(title: String) -> Result<Vec<metadata::Card>, String> {
+async fn metadata_cards(orbit: State<'_, Orbit>, title: String) -> Result<Vec<metadata::Card>, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "steam") {
+        return Ok(Vec::new());
+    }
     metadata::suggest_cards(&title).await
 }
 
@@ -1960,7 +1994,10 @@ async fn launcher_games(
 
 /// Titles the store suggests for a partial name, for the Add dialog.
 #[tauri::command]
-async fn metadata_suggest(title: String) -> Result<Vec<String>, String> {
+async fn metadata_suggest(orbit: State<'_, Orbit>, title: String) -> Result<Vec<String>, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "steam") {
+        return Ok(Vec::new());
+    }
     metadata::suggest(&title).await
 }
 

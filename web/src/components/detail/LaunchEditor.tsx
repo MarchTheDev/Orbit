@@ -47,10 +47,10 @@ const isProfile = (companion: Companion) => companion.when === 'alternative';
  *   save folder, other arguments, a mod loader in front of it. It is named, and
  *   it is picked from the arrow beside Play instead of the plain one.
  *
- * Both are one entry in the same saved list, told apart by `when`, because they
- * are the same shape underneath - a program, its arguments and whether it rides
- * along. Keeping them apart in the page is the whole point: a player who wants
- * "also start my mod manager" should never be asked to name a launch profile.
+ * Both are entries in the same saved list, told apart by `when`: named
+ * alternatives start the game, while companion tools and pages ride along with
+ * its normal launch. They share one Launch page but stay clearly grouped by
+ * what they do.
  */
 export function LaunchEditor({
   game,
@@ -65,11 +65,9 @@ export function LaunchEditor({
   /**
    * Which page of the game's editor is being drawn.
    *
-   * `launch` is the one decision - how Play behaves - plus the named other ways
-   * to start the same game. `extra` is everything that rides along: another
-   * program, a script, a web page. They are separate pages because they are
-   * separate questions, and putting both on one page made "how do I start this"
-   * look like three decisions of equal weight.
+   * The launch choice, named alternatives and accompanying programs or pages
+   * are shown together when the editor requests its complete Launch page.
+   * `extra` remains as a compatibility mode for older callers and previews.
    */
   section?: 'all' | 'launch' | 'extra';
 }) {
@@ -77,6 +75,7 @@ export function LaunchEditor({
   const [args, setArgs] = useState(
     target.kind === 'executable' || target.kind === 'wine' ? (target.args ?? '') : '',
   );
+  const [showArgs, setShowArgs] = useState(Boolean(target.kind === 'executable' || target.kind === 'wine' ? target.args : ''));
   const [companions, setCompanions] = useState<Companion[]>(game.companions ?? []);
   const native = isNative();
   const offered = kindsForThisMachine();
@@ -269,18 +268,25 @@ export function LaunchEditor({
                   </span>
                 </div>
 
-                <div className="orbit-launchrow">
-                  <span className="orbit-launchrow-label">Arguments</span>
-                  <span className="orbit-launchrow-control">
-                    <input
-                      className={inputCls}
-                      value={args}
-                      onChange={(e) => setArgs(e.target.value)}
-                      placeholder="None, or something like -windowed"
-                      spellCheck={false}
-                    />
-                  </span>
-                </div>
+                {(showArgs || args.trim()) ? (
+                  <div className="orbit-launchrow">
+                    <span className="orbit-launchrow-label">Arguments</span>
+                    <span className="orbit-launchrow-control">
+                      <input
+                        className={inputCls}
+                        value={args}
+                        onChange={(e) => setArgs(e.target.value)}
+                        placeholder="For example, -windowed"
+                        spellCheck={false}
+                      />
+                      {!args.trim() && <button type="button" className="orbit-launchaddbtn is-quiet" onClick={() => setShowArgs(false)}>Hide</button>}
+                    </span>
+                  </div>
+                ) : (
+                  <button type="button" className="orbit-launchaddbtn is-quiet" onClick={() => setShowArgs(true)}>
+                    <Plus className="size-3.5" /> Add arguments
+                  </button>
+                )}
 
                 {target.kind === 'wine' && (
                   <>
@@ -356,18 +362,13 @@ export function LaunchEditor({
                       </button>
                     </div>
 
-                    <div className="orbit-launchrow">
-                      <span className="orbit-launchrow-label">Extra arguments</span>
-                      <span className="orbit-launchrow-control">
-                        <input
-                          className={inputCls}
-                          value={c.extraArgs ?? ''}
-                          onChange={(event) => setCompanion(i, { extraArgs: event.target.value })}
-                          placeholder="Added to the game's own"
-                          spellCheck={false}
-                        />
-                      </span>
-                    </div>
+                    <OptionalArguments
+                      label="Extra arguments"
+                      value={c.extraArgs ?? ''}
+                      placeholder="Added to the game's own"
+                      inputClass={inputCls}
+                      onChange={(value) => setCompanion(i, { extraArgs: value })}
+                    />
 
                     <div className="orbit-launchrow">
                       <span className="orbit-launchrow-label">Starts in</span>
@@ -461,7 +462,7 @@ export function LaunchEditor({
           has to be running with the game - a frame-rate cap, a mod manager, a
           script, a wiki in the browser - belongs on its own page, because it is
           a different question from "how does Play start this game". */}
-      {section === 'extra' && (
+      {(section === 'all' || section === 'launch' || section === 'extra') && (
         <>
           <section className="orbit-launchpanel">
             <header className="orbit-launchpanel-head">
@@ -469,9 +470,14 @@ export function LaunchEditor({
                 Starts with the game
                 {alongside.length > 0 && <span className="orbit-launchbadge">{alongside.length}</span>}
               </p>
-              <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
-                <Plus className="size-3.5" /> Add
-              </button>
+              <span className="orbit-launchadds">
+                <button type="button" onClick={() => addAlongside(false)} className="orbit-launchaddbtn">
+                  <Plus className="size-3.5" /> Program
+                </button>
+                <button type="button" onClick={() => addAlongside(true)} className="orbit-launchaddbtn is-quiet">
+                  <Plus className="size-3.5" /> Web page
+                </button>
+              </span>
             </header>
 
             {alongside.length === 0 ? null : (
@@ -537,32 +543,52 @@ export function LaunchEditor({
                             )}
                           </span>
                         </div>
-                        <div className="orbit-launchrow">
-                          <span className="orbit-launchrow-label">Arguments</span>
-                          <span className="orbit-launchrow-control">
-                            <input
-                              className={inputCls}
-                              value={c.args}
-                              onChange={(event) => setCompanion(i, { args: event.target.value })}
-                              placeholder="Optional"
-                              spellCheck={false}
-                            />
-                          </span>
-                        </div>
+                        <OptionalArguments
+                          label="Arguments"
+                          value={c.args}
+                          placeholder="Optional"
+                          inputClass={inputCls}
+                          onChange={(value) => setCompanion(i, { args: value })}
+                        />
                       </>
                     )}
                   </article>
                 ))}
-                <button type="button" onClick={() => addAlongside(true)} className="orbit-launchaddbtn is-quiet">
-                  <Plus className="size-3.5" /> Also start a web page with it
-                </button>
               </div>
             )}
           </section>
-          <p className="orbit-launchsaved" aria-live="polite">{dirty ? 'Saving…' : 'Saved'}</p>
+          {section === 'extra' && <p className="orbit-launchsaved" aria-live="polite">{dirty ? 'Saving…' : 'Saved'}</p>}
         </>
       )}
 
+    </div>
+  );
+}
+
+
+/** Keep uncommon argument fields out of sight until somebody needs them. */
+function OptionalArguments({ label, value, placeholder, inputClass, onChange }: {
+  label: string;
+  value: string;
+  placeholder: string;
+  inputClass: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(Boolean(value.trim()));
+  if (!open && !value.trim()) {
+    return (
+      <button type="button" className="orbit-launchaddbtn is-quiet" onClick={() => setOpen(true)}>
+        <Plus className="size-3.5" /> Add {label.toLowerCase()}
+      </button>
+    );
+  }
+  return (
+    <div className="orbit-launchrow">
+      <span className="orbit-launchrow-label">{label}</span>
+      <span className="orbit-launchrow-control">
+        <input className={inputClass} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} spellCheck={false} />
+        {!value.trim() && <button type="button" className="orbit-launchaddbtn is-quiet" onClick={() => setOpen(false)}>Hide</button>}
+      </span>
     </div>
   );
 }

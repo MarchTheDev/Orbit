@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, FolderOpen, Image as ImageIcon, RefreshCw, Star, Trash2 } from 'lucide-react';
-import type { Game, GameStatus, HltbData, MetaData } from '../../types';
+import type { Game, HltbData, MetaData } from '../../types';
 import {
   findArtwork,
   findArtworkChoices,
@@ -37,13 +37,12 @@ const GAME_GENRES = [
 /**
  * The editor's pages.
  *
- * One page, one question. What the game *is* (its facts and art), how Play
- * starts it, what rides along with a launch, the tools that go in the game's
- * own folder, and where it keeps its progress. Grouping these differently - a
- * page of "launch and tools", a page of "artwork and details" - is what made the
- * old form read like a list of fields rather than a game being described.
+ * One page, one question. What the game *is* (its facts and artwork), how Play
+ * starts it (including named alternatives and anything that runs alongside),
+ * the tools that go in the game's own folder, and where it keeps its progress.
+ * Artwork lives once at the top of Game; launch companions live with Launch.
  */
-type Page = 'game' | 'launch' | 'extra' | 'tools' | 'wine' | 'saves';
+type Page = 'game' | 'launch' | 'tools' | 'wine' | 'saves';
 
 /**
  * One game's settings, in the middle of the window.
@@ -55,9 +54,9 @@ type Page = 'game' | 'launch' | 'extra' | 'tools' | 'wine' | 'saves';
  *   because "which game am I editing" should be answered by looking, not by
  *   reading the title of a dialog. Under it sits what can be said about the
  *   game in one block of fields, and under that, the switches.
- * - **Four pages, told apart by what they are about**: the game, how it starts,
- *   what runs with it, and where it keeps its progress. No page is a dump of
- *   leftover settings.
+ * - **A few pages, told apart by what they are about**: the game, how it starts,
+ *   tools, Wine, and saves. Alternatives and accompanying programs are together
+ *   on Launch, not scattered across separate pages.
  * - **Rows, not a card per field.** A label and its control on one line, in a
  *   grey panel that belongs to a heading. The panel says what the group is
  *   about; the label says what the line is. Nothing else is written.
@@ -71,7 +70,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   saveDir?: string;
   onSaveDir?: (path: string) => void;
   /** The page to open on, for a preview that wants to look at one directly. */
-  startOn?: Page | 'proton' | 'actions' | 'artwork';
+  startOn?: Page | 'proton' | 'actions' | 'artwork' | 'extra';
 }) {
   const meta = game.meta;
   const hltb = game.hltb;
@@ -79,7 +78,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [page, setPage] = useState<Page>(() => {
     if (startOn === 'tools') return 'tools';
     if (startOn === 'proton') return 'wine';
-    if (startOn === 'actions') return 'extra';
+    if (startOn === 'actions' || startOn === 'extra') return 'launch';
     if (startOn === 'artwork' || startOn === 'game') return 'game';
     return (startOn as Page) ?? 'game';
   });
@@ -93,7 +92,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const [customGenre, setCustomGenre] = useState(() => Boolean(meta?.genres?.[0] && !GAME_GENRES.includes(meta.genres[0])));
   const [rating, setRating] = useState(meta?.rating !== null && meta?.rating !== undefined ? String(meta.rating) : '');
   const [sizeGb, setSizeGb] = useState(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
-  const [status, setStatus] = useState<GameStatus>(game.status);
   const [favorite, setFavorite] = useState(game.favorite);
   const [hidden, setHidden] = useState(!!game.hidden);
   const [main, setMain] = useState(hltb ? String(hltb.main) : '');
@@ -132,7 +130,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     setMainExtra(game.hltb ? String(game.hltb.mainExtra) : '');
     setCompletionist(game.hltb ? String(game.hltb.completionist) : '');
     setSizeGb(game.sizeBytes > 0 ? String(Math.round((game.sizeBytes / 1e9) * 10) / 10) : '');
-    setStatus(game.status);
     setFavorite(game.favorite);
     setHidden(!!game.hidden);
     setSearching(null);
@@ -189,7 +186,7 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   };
 
   const formSnap = JSON.stringify({
-    title, status, favorite, hidden, coverPath, coverUrl, backdropUrl,
+    title, favorite, hidden, coverPath, coverUrl, backdropUrl,
     summary, developer, releaseYear, rating, genres, fit, sizeGb, main, mainExtra, completionist,
   });
   const opened = useRef<string | null>(null);
@@ -237,7 +234,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
     const gb = Number(sizeGb.replace(',', '.'));
     onUpdateRef.current({
       title: title.trim() || game.title,
-      status,
       favorite,
       hidden,
       coverPath: coverPath.trim() || null,
@@ -345,7 +341,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
   const pages: { id: Page; label: string; hidden?: boolean }[] = [
     { id: 'game', label: 'Game' },
     { id: 'launch', label: 'Launch', hidden: hideLaunchSettings },
-    { id: 'extra', label: 'Extra', hidden: hideLaunchSettings },
     { id: 'tools', label: 'Tools', hidden: hideLaunchSettings },
     { id: 'wine', label: 'Wine', hidden: hideLaunchSettings || desktopOs() !== 'linux' },
     { id: 'saves', label: 'Saves' },
@@ -370,16 +365,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
             carrying the state in its own fill and saying what it is on hover
             and to a reader. */}
         <div className="orbit-settings-strip">
-          <Segmented
-            value={status}
-            onChange={(value) => setStatus(value as GameStatus)}
-            options={[
-              { value: 'backlog', label: 'Backlog' },
-              { value: 'playing', label: 'Playing' },
-              { value: 'completed', label: 'Done' },
-              { value: 'dropped', label: 'Dropped' },
-            ]}
-          />
           <div className="orbit-settings-flags">
             <button
               type="button"
@@ -514,45 +499,6 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
               </div>
             </Panel>
 
-            <Panel title="Artwork">
-              <Row label="Cover">
-                <div className="orbit-artline">
-                  <div className="orbit-artline-frame is-portrait">
-                    {coverShown ? <img src={coverShown} alt="" /> : <span>None</span>}
-                  </div>
-                  <div className="orbit-artline-copy">
-                    <p>{coverPath.trim() ? 'A picture on this machine' : coverUrl.trim() ? 'Chosen earlier' : 'The library’s own art'}</p>
-                    <div className="orbit-seg is-small" role="group" aria-label="How the cover fills a tile">
-                      {([['auto', 'Auto'], ['cover', 'Fill'], ['contain', 'Fit']] as const).map(([id, label]) => (
-                        <button key={id} type="button" aria-pressed={fit === id} onClick={() => setFit(id)}>{label}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="orbit-btnrow">
-                    <button type="button" className="orbit-btn is-accent" onClick={() => setSearching('portrait')}>Find another</button>
-                    {(coverPath || coverUrl) && (
-                      <button type="button" className="orbit-btn" onClick={() => { setCoverPath(''); setCoverUrl(''); }}>Library's own</button>
-                    )}
-                  </div>
-                </div>
-              </Row>
-              <Row label="Wide backdrop">
-                <div className="orbit-artline">
-                  <div className="orbit-artline-frame is-wide">
-                    {backdropShown ? <img src={backdropShown} alt="" /> : <span>None</span>}
-                  </div>
-                  <div className="orbit-artline-copy">
-                    <p>{backdropUrl.trim() ? 'Chosen earlier' : 'The store’s own hero'}</p>
-                  </div>
-                  <div className="orbit-btnrow">
-                    <button type="button" className="orbit-btn is-accent" onClick={() => setSearching('wide')}>Find another</button>
-                    {backdropUrl.trim() && (
-                      <button type="button" className="orbit-btn" onClick={() => setBackdropUrl('')}>Library's own</button>
-                    )}
-                  </div>
-                </div>
-              </Row>
-            </Panel>
           </>
         )}
 
@@ -562,24 +508,12 @@ export function GameEditTab({ game, onUpdate, hideLaunchSettings = false, saveDi
             <LaunchEditor
               game={game}
               saveOnClose
-              section="launch"
+              section="all"
               onSave={(launch, companions) => onUpdate({ launch, companions })}
             />
             {/* The reshade copy says what it does once. The closing note under
                 it explained the same thing a second time, which is the kind of
                 paragraph that makes a settings page feel like a manual. */}
-          </Panel>
-        )}
-
-        {/* ----------------------------------------------------------- extra */}
-        {page === 'extra' && !hideLaunchSettings && (
-          <Panel title="Runs with the game">
-            <LaunchEditor
-              game={game}
-              saveOnClose
-              section="extra"
-              onSave={(launch, companions) => onUpdate({ launch, companions })}
-            />
           </Panel>
         )}
 
@@ -833,23 +767,6 @@ function Row({ label, stacked = false, children }: { label: string; stacked?: bo
 }
 
 /** A row of choices where one is on. */
-function Segmented<T extends string>({ value, onChange, options }: {
-  value: T;
-  onChange: (next: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <div className="orbit-seg" role="group">
-      {options.map((option) => (
-        <button key={option.value} type="button" aria-pressed={value === option.value} onClick={() => onChange(option.value)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The switch: an accent pill with a white knob that slides. */
 function Toggle({ checked, onChange, label, disabled }: {
   checked: boolean;
   onChange: (next: boolean) => void;

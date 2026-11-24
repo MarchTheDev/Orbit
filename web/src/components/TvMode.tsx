@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   ListOrdered,
   Minimize2,
+  Menu as MenuIcon,
   Play,
   Plus,
   Power,
@@ -384,6 +385,8 @@ function StardeckMenu({
   running,
   library,
   onStop,
+  onExit,
+  onPower,
 }: {
   prefs: StardeckPrefs;
   onChange: (next: StardeckPrefs) => void;
@@ -397,6 +400,8 @@ function StardeckMenu({
   running: Game | null;
   library: Game[];
   onStop: () => void;
+  onExit: () => void;
+  onPower: () => void;
 }) {
   const set = <K extends keyof StardeckPrefs>(key: K, value: StardeckPrefs[K]) =>
     onChange({ ...prefs, [key]: value });
@@ -456,6 +461,14 @@ function StardeckMenu({
             <MenuButton icon={ListOrdered} label="Library" hint="Order and what the deck holds" onClick={() => onPage('library')} />
             <MenuButton icon={Plus} label="Add a game" hint="A program, or a launcher's library" onClick={onAddGame} />
             <MenuButton icon={Settings2} label="Orbit settings" hint="Every setting in the app" onClick={onOpenSettings} />
+            <div className="orbit-deckside-exit-actions">
+              <button type="button" onClick={() => { onClose(); onExit(); }}>
+                <Minimize2 className="size-4" /><span>Desktop mode</span>
+              </button>
+              <button type="button" onClick={() => { onClose(); onPower(); }} className="is-quit">
+                <Power className="size-4" /><span>Quit Orbit</span>
+              </button>
+            </div>
           </>
         )}
 
@@ -1353,14 +1366,18 @@ export function TvMode({
           </span>
         )}
       </div>
-      <div className="orbit-deck-exit-actions" aria-label="Stardeck window actions">
-        <button type="button" onClick={exit} aria-label="Return to desktop mode" title="Return to desktop mode">
-          <Minimize2 className="size-4" /><span>Desktop mode</span>
-        </button>
-        <button type="button" onClick={onPower} aria-label="Quit Orbit" title="Quit Orbit" className="is-quit">
-          <Power className="size-4" /><span>Quit Orbit</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        className="orbit-deck-hamburger"
+        aria-label={menu ? 'Close Stardeck menu' : 'Open Stardeck menu'}
+        aria-expanded={menu}
+        onClick={() => {
+          if (menu) closeMenu();
+          else { setMenuPage('home'); setMenu(true); }
+        }}
+      >
+        <MenuIcon className="size-5" />
+      </button>
 
       {(menu || menuExiting) && (
         <div ref={menuBox} className={`orbit-deckmenu-wrap ${menuExiting ? 'is-exiting' : ''}`}>
@@ -1387,6 +1404,8 @@ export function TvMode({
             running={playingNow}
             library={list}
             onStop={onStop}
+            onExit={exit}
+            onPower={onPower}
           />
         </div>
       )}

@@ -15,12 +15,12 @@ check('Stardeck has no top bar, and Deck and Library float on the picture as pil
   !css.includes('.orbit-deck-topbar') && tv.includes('data-tv-pills') &&
     tv.includes('orbit-deck-pillbtn') && css.includes('.orbit-deck-pills'));
 
-check('Escape opens a left-hand sidebar; leaving and quitting stay outside its menu',
+check('Escape opens a hamburger menu with desktop mode and Quit Orbit actions inside it',
   css.includes('.orbit-deckside') && /justify-content: flex-start/.test(css) &&
-    tv.includes('aria-label="Stardeck menu"') &&
-    !tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Return to desktop mode') &&
-    !tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Quit Orbit') &&
-    tv.includes('aria-label="Quit Orbit"') && tv.includes('aria-label="Return to desktop mode"') &&
+    tv.includes('aria-label="Stardeck menu"') && tv.includes('className="orbit-deck-hamburger"') &&
+    tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Desktop mode') &&
+    tv.slice(tv.indexOf('function StardeckMenu'), tv.indexOf('function MenuButton')).includes('Quit Orbit') &&
+    !tv.includes('aria-label="Quit Orbit"') && !tv.includes('aria-label="Return to desktop mode"') &&
     !tv.includes('Reset Stardeck to its defaults') && tv.includes('Orbit settings') && tv.includes('Add a game'));
 
 check('the selected game is a floating sheet on the left, not a strip under the row',

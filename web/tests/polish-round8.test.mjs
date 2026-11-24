@@ -24,12 +24,13 @@ check('Stardeck is one row of covers over the selected game\'s own blurred cover
 check('Stardeck game changes fade the room and cross-fade the panel, with reduced-motion support',
   css.includes('@keyframes deck-game-in') && css.includes('@keyframes deck-backdrop-in') &&
     css.includes('prefers-reduced-motion: reduce') && tv.includes('key={game.id}') && !tv.includes('findTvBackdrop'));
-check('Launch settings separate what starts with the game from another way to start it',
-  edit.includes("page === 'launch'") && edit.includes("page === 'extra'") &&
-    launchEditor.includes('Starts with the game') && launchEditor.includes('Alternative launch') &&
-    launchEditor.includes("section === 'extra'") && launchEditor.includes("section === 'launch'") &&
+check('Launch settings merge starts-with-game tools and alternative launches into one page',
+  edit.includes("page === 'launch'") && !edit.includes("page === 'extra'") &&
+    edit.includes('section="all"') && launchEditor.includes('Starts with the game') && launchEditor.includes('Alternative launch') &&
+    launchEditor.includes("section === 'all' || section === 'launch'") &&
+    launchEditor.includes("section === 'all' || section === 'launch' || section === 'extra'") &&
     launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") &&
-    types.includes("when?: 'alongside' | 'alternative'"));
+    launchEditor.includes('Add arguments') && types.includes("when?: 'alongside' | 'alternative'"));
 check('a launch profile starts the game while a tool rides along, and neither is swept up by the other',
   session.includes('companion.is_alongside()') && lib.includes('fn start_game_alternative(') && lib.includes('profile.is_alongside()'));
 check('the Play arrow offers named launches beside the tools, by name',

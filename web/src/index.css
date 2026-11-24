@@ -8877,3 +8877,138 @@ html.orbit-tv .orbit-modal-title { color: #fff; }
   .orbit-deck-exit-actions button { width: 40px; min-width: 40px; padding: 0; }
   .orbit-deck-exit-actions button span { display: none; }
 }
+
+/* -------------------------------------------------------------------------
+   Readability and editor refinements
+   ------------------------------------------------------------------------- */
+/* Settings no longer sit on a translucent glass plate. A clear heading rule,
+   wider measure and larger type carry hierarchy without another background. */
+.orbit-setlayout {
+  width: min(100%, 90rem);
+  margin-inline: auto;
+  gap: 38px;
+}
+@media (min-width: 1024px) {
+  .orbit-setlayout { grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr); }
+}
+.orbit-setnav { gap: 22px; }
+.orbit-setnav-label { font-size: 11px; letter-spacing: .16em; }
+.orbit-setnav-row { min-height: 42px; font-size: 14px; }
+.orbit-setsec-head {
+  padding: 12px 0 16px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-accent) 36%, var(--c-border));
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.orbit-linux .orbit-setsec-head { background: none; }
+.orbit-setsec-icon { display: none; }
+.orbit-setsec-head h2 { font-size: 23px; }
+.orbit-setsec-lead { font-size: 14px; line-height: 1.65; }
+.orbit-setrow-label { font-size: 15px; }
+.orbit-setrow-hint { font-size: 13.5px; line-height: 1.65; }
+
+/* The game editor is one readable column. Its page choices are labels, not
+   little tabs in a tray; the artwork has a single home at the top of Game. */
+.orbit-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.orbit-settings-tabs {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 0 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--c-border);
+  border-radius: 0;
+  background: none;
+}
+.orbit-settings-tabs button,
+.orbit-settings-tabs button[aria-selected='true'],
+.orbit-settings-tabs button:hover,
+.orbit-settings-tabs button:hover:not([aria-selected='true']) {
+  min-height: 36px;
+  padding: 6px 2px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.orbit-settings-tabs button { color: var(--c-muted); }
+.orbit-settings-tabs button[aria-selected='true'] {
+  color: var(--c-text);
+  box-shadow: inset 0 -2px 0 var(--c-accent);
+}
+.orbit-settings-page { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.orbit-gameart {
+  grid-template-columns: clamp(6.5rem, 13vw, 9rem) minmax(0, 1fr);
+  height: clamp(9rem, 20vh, 12rem);
+}
+.orbit-gameart-cover img,
+.orbit-gameart-wide img { object-fit: cover; }
+.orbit-gameart-cover,
+.orbit-gameart-wide { min-height: 9rem; }
+
+/* Artwork-first Stardeck titles keep contrast regardless of whether the
+   selected image is a bright screenshot, a pale poster or absent altogether. */
+.tv-root .orbit-deck-detail-title,
+.tv-root [data-tv-game-title] {
+  color: #fff;
+  text-shadow: 0 2px 3px #000, 0 8px 28px #000, 0 1px 24px #000;
+  -webkit-text-stroke: .25px rgb(0 0 0 / 45%);
+}
+.tv-root .orbit-deck-hamburger {
+  position: absolute;
+  z-index: 24;
+  top: max(18px, env(safe-area-inset-top));
+  left: max(18px, env(safe-area-inset-left));
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 15px;
+  color: #fff;
+  background: rgb(7 7 12 / 72%);
+  box-shadow: 0 8px 32px #0008;
+  cursor: pointer;
+  transition: transform .18s ease, background-color .18s ease, border-color .18s ease;
+}
+.tv-root .orbit-deck-hamburger:hover { transform: scale(1.05); background: rgb(18 17 28 / 94%); border-color: rgb(255 255 255 / 48%); }
+.orbit-deckside-exit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+.orbit-deckside-exit-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 11px;
+  color: rgb(255 255 255 / 84%);
+  background: rgb(255 255 255 / 4%);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.orbit-deckside-exit-actions button:hover { background: rgb(255 255 255 / 9%); color: #fff; }
+.orbit-deckside-exit-actions .is-quit { color: #ffb4b4; border-color: rgb(248 113 113 / 24%); }
+.orbit-deckside-exit-actions .is-quit:hover { background: rgb(127 29 29 / 28%); }
+@media (max-width: 760px) {
+  .orbit-setlayout { gap: 24px; }
+  .orbit-settings { display: flex; }
+  .orbit-settings-tabs { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; }
+  .orbit-settings-page { grid-template-columns: minmax(0, 1fr); }
+  .tv-root .orbit-deck-hamburger { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); }
+}

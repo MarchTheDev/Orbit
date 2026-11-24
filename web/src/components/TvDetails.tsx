@@ -161,7 +161,7 @@ export function TvDetails({
           </div>
 
           <div className="min-w-0 flex-1">
-            <h1 className="orbit-hero-enter text-[clamp(2rem,4.6vh+1vw,3.6rem)] font-black leading-[1] tracking-[-0.02em] text-white">
+            <h1 data-tv-game-title className="orbit-hero-enter text-[clamp(2rem,4.6vh+1vw,3.6rem)] font-black leading-[1] tracking-[-0.02em] text-white">
               {game.title}
             </h1>
             {game.meta?.summary && (
