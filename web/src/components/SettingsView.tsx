@@ -84,6 +84,7 @@ import {
 import { openExternal, pickFile, pickFolder } from '../services/desktop';
 import { playShutter } from '../services/shutter';
 import { CopySettings } from './CopySettings';
+import { clearMetadataCache } from '../services/metadata';
 import { ShortcutEditor } from './ShortcutEditor';
 import { AddCloud, CloudAccounts, CloudTools } from './saves/CloudPanel';
 import { fmtBytes } from '../utils/format';
@@ -182,10 +183,10 @@ function SwitchRow({ checked, onChange, label, hint, disabled, anchor }: { check
 function MetadataSources({ settings, setSettings }: { settings: Settings; setSettings: (patch: Partial<Settings>) => void }) {
   const sources = settings.metadataSources ?? [];
   const setSources = (next: typeof sources) => setSettings({ metadataSources: next });
-  const [addOpen, setAddOpen] = useState(false);
-  const [draftLabel, setDraftLabel] = useState("");
-  const [draftUrl, setDraftUrl] = useState("");
-  const toggle = (id: string, enabled: boolean) => setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
+  const toggle = (id: string, enabled: boolean) => {
+    clearMetadataCache();
+    setSources(sources.map((src) => src.id === id ? { ...src, enabled } : src));
+  };
   const remove = (id: string) => setSources(sources.filter((src) => src.id !== id));
 
 function resolveSourceKey(id: string, label?: string, url?: string): string {
@@ -305,7 +306,9 @@ function SourceIcon({ id, label, url }: { id: string; label?: string; url?: stri
           // A line written by an older build about needing a key is not shown
           // and is not carried forward: the source below says what it does,
           // and a key it may want is the row further down this page.
-          const note = src.note && /needs?\s+key/i.test(src.note) ? null : src.note;
+          const note = src.kind === 'custom'
+            ? 'Saved endpoint — not queried by Orbit'
+            : src.note && /needs?\s+key/i.test(src.note) ? null : src.note;
           return (
           <div
             key={src.id}
@@ -328,6 +331,8 @@ function SourceIcon({ id, label, url }: { id: string; label?: string; url?: stri
               aria-checked={src.enabled}
               aria-label={`${src.label} enabled`}
               onClick={() => toggle(src.id, !src.enabled)}
+              disabled={src.kind === 'custom'}
+              title={src.kind === 'custom' ? 'Custom sources are not supported yet' : undefined}
               className="orbit-switch shrink-0"
               data-on={src.enabled || undefined}
             >
@@ -337,35 +342,9 @@ function SourceIcon({ id, label, url }: { id: string; label?: string; url?: stri
         );
         })}
       </div>
-      <div className="flex items-center justify-between pt-1">
-        <button type="button" onClick={() => setAddOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-fg"><Plus className="size-3.5" /> Add source</button>
-        <span className="text-[11px] text-muted">{sources.filter((s) => s.enabled).length} of {sources.length} on</span>
+      <div className="flex justify-end pt-1">
+        <span className="text-[11px] text-muted">{sources.filter((source) => source.kind === 'builtin' && source.enabled).length} active providers</span>
       </div>
-      {addOpen && (
-        <div className="rounded-xl border border-line bg-panel2 p-3 space-y-2">
-          <p className="text-xs font-semibold text-fg">Add a metadata source</p>
-          <p className="text-[11px] text-muted">Community extensions (e.g., VNDB). URL is required.</p>
-          <input value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} placeholder="Name - e.g., VNDB" className={inputCls} />
-          <input value={draftUrl} onChange={(e) => setDraftUrl(e.target.value)} placeholder="https://api.example.com (optional)" className={`${inputCls} font-mono`} />
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setAddOpen(false)} className="orbit-btnquiet">Cancel</button>
-            <button
-              type="button"
-              disabled={!draftLabel.trim() || !draftUrl.trim() || !/^https?:\/\//.test(draftUrl.trim())}
-              onClick={() => {
-                const id = draftLabel.trim().toLowerCase().replace(/\s+/g, "-") + "-" + Date.now().toString(36).slice(-4);
-                setSources([...sources, { id, label: draftLabel.trim(), enabled: true, kind: "custom", url: draftUrl.trim() || undefined, note: "Custom" }]);
-                setDraftLabel("");
-                setDraftUrl("");
-                setAddOpen(false);
-              }}
-              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-onaccent disabled:opacity-40"
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2162,7 +2141,7 @@ export function SettingsView({
 
       >
         <Group title="Sources" anchor={anchorFor('Metadata and artwork sources')}>
-          <p className="text-xs leading-relaxed text-muted">Steam provides store details. SteamGridDB and web search can fill missing cover art; each lookup uses the title only, never your library.</p>
+          <p className="text-xs leading-relaxed text-muted">These are the providers Orbit actually queries: Steam for game details, HowLongToBeat for playtime, and SteamGridDB or web images for fallback artwork. Lookups send a title, not your library.</p>
           <MetadataSources settings={settings} setSettings={setSettings} />
           <div className="orbit-setrow">
             <div className="orbit-setrow-copy">
@@ -2173,14 +2152,17 @@ export function SettingsView({
                   id="sgdb-key"
                   type="password"
                   value={settings.sgdbApiKey ?? ''}
-                  onChange={(e) => setSettings({ sgdbApiKey: e.target.value })}
+                  onChange={(e) => {
+                    clearMetadataCache();
+                    setSettings({ sgdbApiKey: e.target.value });
+                  }}
                   placeholder="Leave empty for Steam only"
                   className={`${inputCls} min-w-0 flex-1 font-mono`}
                   spellCheck={false}
                   autoComplete="off"
                 />
                 {settings.sgdbApiKey && (
-                  <button type="button" onClick={() => setSettings({ sgdbApiKey: '' })} className="orbit-btnquiet shrink-0">Clear</button>
+                  <button type="button" onClick={() => { clearMetadataCache(); setSettings({ sgdbApiKey: '' }); }} className="orbit-btnquiet shrink-0">Clear</button>
                 )}
               </div>
             </div>

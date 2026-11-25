@@ -93,18 +93,22 @@ const staleSources = normalizeSettings({
     // saved list was drawn as it was saved.
     { id: 'steamgriddb', label: 'SteamGridDB', enabled: true, kind: 'builtin', note: 'Alternate covers — needs key above' },
     { id: 'mine', label: 'My own thing', enabled: true, kind: 'custom', url: 'https://example.com/api', note: 'Custom' },
+    { id: 'lutris', label: 'Lutris', enabled: true, kind: 'builtin', note: 'Old unsupported row' },
+    { id: 'libretro', label: 'Libretro', enabled: true, kind: 'builtin', note: 'Old unsupported row' },
+    { id: 'protondb', label: 'ProtonDB', enabled: true, kind: 'builtin', note: 'Old unsupported row' },
   ],
 });
 const sourceOf = (id) => staleSources.metadataSources.find((source) => source.id === id);
 check('a stale note about needing a key is gone for good', !sourceOf('steamgriddb').note.includes('needs key'));
 check('the built-in line now says what the source actually does',
-  sourceOf('steamgriddb').note === 'Optional alternate covers and heroes');
+  sourceOf('steamgriddb').note === 'Optional community artwork; requires your API key');
 check('what the player decided about a source survives the rebuild', sourceOf('steam').enabled === false && sourceOf('steamgriddb').enabled === true);
 check('a built-in source an old save had forgotten is added back',
   staleSources.metadataSources.filter((source) => source.kind === 'builtin').length ===
     (DEFAULT_SETTINGS.metadataSources ?? []).length);
-check('a source the player added is left alone, URL and all',
-  sourceOf('mine').label === 'My own thing' && sourceOf('mine').url === 'https://example.com/api');
+check('a saved custom endpoint is retained but clearly disabled until Orbit can query it',
+  sourceOf('mine').label === 'My own thing' && sourceOf('mine').url === 'https://example.com/api' &&
+    sourceOf('mine').enabled === false && sourceOf('mine').note.includes('not queried'));
 check('the same list read twice does not grow', normalizeSettings(staleSources).metadataSources.length === staleSources.metadataSources.length);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

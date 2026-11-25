@@ -1,9 +1,9 @@
 /**
  * Game details.
  *
- * Steam answers with a description, genres, developer, release year and artwork
- * and asks for no key. A cover from SteamGridDB or IGDB is added only when
- * those keys are in Settings, and only when Steam has no portrait.
+ * Steam supplies catalogue details without a key. SteamGridDB and web images
+ * are independent artwork fallbacks, while HowLongToBeat is queried through
+ * its own service. Provider switches live in Settings → Metadata.
  *
  * Nothing here is asked twice. The store is quick but not free, and the pages
  * that read it are ones a player moves through: back to a list, into another
@@ -15,6 +15,7 @@
  */
 import type { GameFacts, GameSuggestion, MetaData } from '../types';
 import { gameFacts, gameSuggestions, metadataLookup, metadataSuggest } from './native';
+import { clearHltbCache } from './hltb';
 
 /**
  * How many answers each of these keeps.
@@ -53,6 +54,7 @@ function remembered<T>(kept: Map<string, Promise<T>>, key: string, ask: () => Pr
   return started;
 }
 
+const titleSuggestions = new Map<string, Promise<string[]>>();
 const searches = new Map<string, Promise<GameSuggestion[]>>();
 const answers = new Map<string, GameSuggestion[]>();
 const facts = new Map<string, Promise<GameFacts>>();
@@ -65,12 +67,23 @@ const facts = new Map<string, Promise<GameFacts>>();
  * player has.
  */
 export function fetchMetadata(title: string, appId?: number): Promise<MetaData> {
-  return metadataLookup<MetaData>(title, appId);
+  return metadataLookup<MetaData>(title.trim(), appId);
 }
 
 /** Titles a store suggests while a name is being typed. */
 export function searchTitles(title: string): Promise<string[]> {
-  return metadataSuggest(title);
+  const key = keyOf(title);
+  if (key.length < 2) return Promise.resolve([]);
+  return remembered(titleSuggestions, key, () => metadataSuggest(title.trim()));
+}
+
+/** Forget cached answers after source settings or provider credentials change. */
+export function clearMetadataCache(): void {
+  titleSuggestions.clear();
+  searches.clear();
+  answers.clear();
+  facts.clear();
+  clearHltbCache();
 }
 
 /**

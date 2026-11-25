@@ -237,6 +237,9 @@ export default function App() {
   const [statsTab, setStatsTab] = useState<StatsTab>('overview');
   /** TV mode: the library fullscreen, read from a couch. */
   const [tv, setTv] = useState(false);
+  /** Invalidates a deferred native fullscreen request if Stardeck is closed immediately. */
+  const tvEnterToken = useRef(0);
+  const tvEnterPromise = useRef<Promise<boolean> | null>(null);
 
   /**
    * Fill the screen, and give it back.
@@ -247,11 +250,33 @@ export default function App() {
    * has, so nothing is undone and nothing is said about it.
    */
   const enterTv = useCallback(() => {
+    const token = ++tvEnterToken.current;
     setTv(true);
-    void enterFullscreen();
+    if (!isNative()) {
+      // Browser fullscreen must be requested in the click handler itself.
+      tvEnterPromise.current = enterFullscreen();
+      void tvEnterPromise.current;
+      return;
+    }
+    // In the desktop app, let React mount the fullscreen surface before asking
+    // the compositor to resize the native window. Otherwise the old page can
+    // be stretched for a frame, leaving a black band at the bottom on GTK.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (tvEnterToken.current === token) {
+        tvEnterPromise.current = enterFullscreen();
+        void tvEnterPromise.current;
+      }
+    }));
   }, []);
 
   const leaveTv = useCallback(async () => {
+    // Cancel an enter that has not reached the compositor yet.
+    tvEnterToken.current += 1;
+    // A fullscreen request already handed to Tauri must settle before we ask
+    // the compositor to leave; otherwise the late enter can reopen fullscreen
+    // after close and strand the window in the wrong size.
+    await tvEnterPromise.current?.catch(() => false);
+    tvEnterPromise.current = null;
     // Keep the full-screen surface mounted until the native window has actually
     // returned to its saved bounds. Rendering the desktop during the compositor's
     // transition leaves a stale-height strip at the bottom on some platforms.

@@ -102,16 +102,21 @@ export interface MetaData {
   /** True when the game has not released yet. */
   comingSoon?: boolean;
   rating: number | null;
-  /** Portrait artwork, when the store has it. */
+  /** Portrait artwork, when an enabled source has it. */
   coverUrl?: string | null;
+  /** Which source supplied the portrait, independently of description details. */
+  coverSource?: 'steam' | 'steamgriddb' | 'web' | null;
   /** The wide header picture, which every store page has. */
   headerUrl?: string | null;
   /** Bigger, softer art for the backdrop of a game's own page, when there is a
    *  separate one. Falls back to the header. */
   backgroundUrl?: string | null;
+  backgroundSource?: 'steam' | 'steamgriddb' | 'web' | null;
+  /** Provider that supplied each populated field; used when merging metadata. */
+  fieldSources?: Record<string, string>;
   /** The store's own id, so Play can hand the game to Steam. */
   steamAppId?: number | null;
-  source?: 'steam' | 'estimate';
+  source?: 'steam' | 'steamgriddb' | 'web' | 'none' | 'estimate';
 }
 
 /**

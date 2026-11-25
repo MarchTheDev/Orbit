@@ -56,5 +56,9 @@ check('Backlog details use the Status dropdown without duplicate move-to-status 
 check('the Remove from Backlog editor action uses destructive rose styling',
   gameEditor.includes('orbit-btn is-danger') &&
     readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').includes('.orbit-btn.is-danger { border-color: #f8717150;'));
+const statistics = readFileSync(new URL('../src/components/StatisticsView.tsx', import.meta.url), 'utf8');
+check('Overview quick picks use the exact Backlog page membership rather than every Library game',
+  statistics.includes('onBacklogPage(game, syncBacklog, backlogOn, backlogOff)') &&
+    !/const pool = allGames\.filter\(\(game\) =>\s*game\.status === 'backlog'/.test(statistics));
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

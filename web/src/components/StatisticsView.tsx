@@ -865,7 +865,9 @@ export function StatisticsView({
           <div className="orbit-stats-split">
             <SectionPanel title="Something to play next" note="From your backlog - shuffled each time you open this page">
               {(() => {
-                const pool = allGames.filter((game) => game.status === 'backlog');
+                const pool = allGames.filter((game) =>
+                  onBacklogPage(game, syncBacklog, backlogOn, backlogOff),
+                );
                 if (pool.length === 0) {
                   return (
                     <p className="orbit-panel-empty">

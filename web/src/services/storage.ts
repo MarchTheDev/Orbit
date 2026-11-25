@@ -50,16 +50,21 @@ function ensureMetadataSources(settings: Settings): Settings {
     settings.metadataSources = fallback.map((source) => ({ ...source }));
     return settings;
   }
+  const retiredBuiltins = new Set(['lutris', 'libretro', 'protondb']);
   const kept = stored
-    .filter((source) => source && typeof source.id === 'string' && source.id.trim() !== '')
+    .filter((source) => source && typeof source.id === 'string' && source.id.trim() !== '' && !retiredBuiltins.has(source.id))
     .map((source) => {
       const builtin = fallback.find((candidate) => candidate.id === source.id);
       if (!builtin) {
-        // A source the player added keeps everything they typed, except the
-        // one housekeeping line an old build wrote into the note field.
+        if (source.kind === 'custom') {
+          // Older Orbit builds let users save custom endpoints, but never
+          // queried them. Keep the entered URL for reference while disabling
+          // the nonfunctional source instead of pretending it is active.
+          return { ...source, enabled: false, note: 'Saved endpoint; custom providers are not queried by Orbit.' };
+        }
         if (source.note && /needs?\s+key/i.test(source.note)) {
           const { note, ...rest } = source;
-          return note === 'Custom' ? source : rest;
+          return rest;
         }
         return source;
       }

@@ -1487,19 +1487,28 @@ async fn http_request(
 
 /// Completion-time estimates from HowLongToBeat.
 #[tauri::command]
-async fn hltb_search(title: String) -> Result<hltb::HltbData, String> {
+async fn hltb_search(orbit: State<'_, Orbit>, title: String) -> Result<hltb::HltbData, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "hltb") {
+        return Err("HowLongToBeat is turned off in Settings → Metadata.".into());
+    }
     hltb::lookup(&title).await
 }
 
 /// Search HowLongToBeat's game catalogue with titles, covers and playtimes.
 #[tauri::command]
-async fn hltb_suggestions(title: String) -> Result<Vec<hltb::HltbSuggestion>, String> {
+async fn hltb_suggestions(orbit: State<'_, Orbit>, title: String) -> Result<Vec<hltb::HltbSuggestion>, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "hltb") {
+        return Ok(Vec::new());
+    }
     hltb::suggestions(&title).await
 }
 
 /// The description and platform list from one HowLongToBeat game page.
 #[tauri::command]
-async fn hltb_game_details(game_id: i64) -> Result<hltb::HltbGameDetails, String> {
+async fn hltb_game_details(orbit: State<'_, Orbit>, game_id: i64) -> Result<hltb::HltbGameDetails, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "hltb") {
+        return Err("HowLongToBeat is turned off in Settings → Metadata.".into());
+    }
     hltb::game_details(game_id).await
 }
 
@@ -1530,29 +1539,55 @@ async fn metadata_lookup(
     let steam_on = metadata_source_enabled(&settings, "steam");
     let sgdb_on = metadata_source_enabled(&settings, "steamgriddb");
     let web_on = metadata_source_enabled(&settings, "web");
+    let mut steam_error = None;
     let mut meta = if steam_on {
-        metadata::lookup_or_app(&title, app_id).await?
+        match metadata::lookup_or_app(&title, app_id).await {
+            Ok(found) => found,
+            Err(error) => {
+                // A failed details provider is not a reason to skip the other
+                // sources. Preserve its error only if the fallbacks find nothing.
+                steam_error = Some(error);
+                blank_metadata_result(&title)
+            }
+        }
     } else {
-        metadata::Meta {
-            name: (!title.trim().is_empty()).then(|| title.trim().to_owned()),
-            source: "none",
-            ..metadata::Meta::default()
-        }
+        blank_metadata_result(&title)
     };
-    if meta.cover_url.is_none() {
-        let name = meta.name.clone().unwrap_or_else(|| title.clone());
-        if sgdb_on {
-            meta.cover_url = first_portrait(&orbit, &name, meta.steam_app_id.or(app_id)).await;
-        }
-        if meta.cover_url.is_none() && web_on {
-            meta.cover_url = webart::covers(&name, 1)
-                .await
-                .ok()
-                .and_then(|picks| picks.into_iter().next())
-                .map(|pick| pick.url);
+
+    let name = meta.name.clone().unwrap_or_else(|| title.trim().to_owned());
+    if meta.cover_url.is_none() && sgdb_on {
+        if let Some(url) = first_portrait(&orbit, &name, meta.steam_app_id.or(app_id)).await {
+            meta.cover_source = Some("steamgriddb".into());
+            meta.field_sources.insert("coverUrl".into(), "steamgriddb".into());
+            meta.cover_url = Some(url);
+            if meta.source == "none" { meta.source = "steamgriddb"; }
         }
     }
+    if meta.cover_url.is_none() && web_on && !name.is_empty() {
+        if let Ok(mut picks) = webart::covers(&name, 1).await {
+            if let Some(pick) = picks.drain(..).next() {
+                meta.cover_source = Some("web".into());
+                meta.field_sources.insert("coverUrl".into(), "web".into());
+                meta.cover_url = Some(pick.url);
+                if meta.source == "none" { meta.source = "web"; }
+            }
+        }
+    }
+
+    // A picture-only result is still useful for Add Game and the library grid;
+    // only fail when every enabled provider came back empty.
+    if meta.source == "none" && meta.cover_url.is_none() {
+        return Err(steam_error.unwrap_or_else(|| "No enabled metadata source found a match.".into()));
+    }
     Ok(meta)
+}
+
+fn blank_metadata_result(title: &str) -> metadata::Meta {
+    metadata::Meta {
+        name: (!title.trim().is_empty()).then(|| title.trim().to_owned()),
+        source: "none",
+        ..metadata::Meta::default()
+    }
 }
 
 /// A source absent from an older saved settings file remains enabled; newly
@@ -1649,14 +1684,21 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
     };
     let app_id = steam_app_id(&game);
     let settings = orbit.store.load_settings();
-    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
-        match sgdb::hero(app_id, &game.title, &key).await {
-            Ok(Some(url)) => return Ok(Some(url)),
-            Ok(None) => {}
-            Err(error) => log::debug!("SteamGridDB TV backdrop lookup failed: {error}"),
+    let steamgriddb_on = metadata_source_enabled(&settings, "steamgriddb");
+    let steam_on = metadata_source_enabled(&settings, "steam");
+    if steamgriddb_on {
+        if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+            match sgdb::hero(app_id, &game.title, &key).await {
+                Ok(Some(url)) => return Ok(Some(url)),
+                Ok(None) => {}
+                Err(error) => log::debug!("SteamGridDB TV backdrop lookup failed: {error}"),
+            }
         }
     }
-    Ok(metadata::wide_art(app_id).await.into_iter().next().map(|pick| pick.url))
+    if steam_on {
+        return Ok(metadata::wide_art(app_id).await.into_iter().next().map(|pick| pick.url));
+    }
+    Ok(None)
 }
 
 /// Wide pictures found on the web by name, for a game no store knows.
@@ -1665,7 +1707,10 @@ async fn tv_backdrop(orbit: State<'_, Orbit>, game_id: String) -> Result<Option<
 /// has one hero, so a search that only asks a store offers one answer. The
 /// result is a choice, filtered to landscape, and never applied on its own.
 #[tauri::command]
-async fn artwork_web_wide(title: String, limit: Option<usize>) -> Result<Artwork, String> {
+async fn artwork_web_wide(orbit: State<'_, Orbit>, title: String, limit: Option<usize>) -> Result<Artwork, String> {
+    if !metadata_source_enabled(&orbit.store.load_settings(), "web") {
+        return Err("Web artwork is turned off in Settings → Metadata.".into());
+    }
     let title = title.trim();
     if title.is_empty() {
         return Err("Name the game before looking for artwork.".into());
@@ -1683,31 +1728,40 @@ async fn artwork_backdrops(orbit: State<'_, Orbit>, game_id: String) -> Result<A
     let game = orbit.db.game(&game_id)?.ok_or_else(|| "That game is no longer in the library.".to_string())?;
     let app_id = steam_app_id(&game);
     let settings = orbit.store.load_settings();
+    let steam_on = metadata_source_enabled(&settings, "steam");
+    let sgdb_on = metadata_source_enabled(&settings, "steamgriddb");
+    let web_on = metadata_source_enabled(&settings, "web");
     let mut picks = Vec::new();
-    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
-        match sgdb::hero(app_id, &game.title, &key).await {
-            Ok(Some(url)) => picks.push(metadata::ArtworkPick { url, kind: "hero".into(), label: "SteamGridDB hero".into() }),
-            Ok(None) => {}
-            Err(error) => log::debug!("SteamGridDB backdrop picker: {error}"),
+    if sgdb_on {
+        if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+            match sgdb::hero(app_id, &game.title, &key).await {
+                Ok(Some(url)) => picks.push(metadata::ArtworkPick { url, kind: "hero".into(), label: "SteamGridDB hero".into() }),
+                Ok(None) => {}
+                Err(error) => log::debug!("SteamGridDB backdrop picker: {error}"),
+            }
         }
     }
-    for pick in metadata::wide_art(app_id).await {
-        if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
-    }
-    if let Some(id) = app_id {
-        if let Ok(found) = metadata::artwork(id).await {
-            for pick in found.into_iter().filter(|pick| matches!(pick.kind.as_str(), "hero" | "screenshot" | "header")) {
-                if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+    if steam_on {
+        for pick in metadata::wide_art(app_id).await {
+            if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+        }
+        if let Some(id) = app_id {
+            if let Ok(found) = metadata::artwork(id).await {
+                for pick in found.into_iter().filter(|pick| matches!(pick.kind.as_str(), "hero" | "screenshot" | "header")) {
+                    if !picks.iter().any(|existing| existing.url == pick.url) { picks.push(pick); }
+                }
             }
         }
     }
     // And the web, because one hero is not a choice. The store's own art is
     // still first; this is what fills the rest of the page when a search under
     // another name has to find something the catalogues do not know.
-    if let Ok(found) = webart::wide_covers(&game.title, 12).await {
-        for pick in found {
-            if !picks.iter().any(|existing| existing.url == pick.url) {
-                picks.push(pick);
+    if web_on {
+        if let Ok(found) = webart::wide_covers(&game.title, 12).await {
+            for pick in found {
+                if !picks.iter().any(|existing| existing.url == pick.url) {
+                    picks.push(pick);
+                }
             }
         }
     }
@@ -1732,18 +1786,22 @@ async fn artwork_choices(
 }
 
 async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) -> Result<Artwork, String> {
+    let settings = orbit.store.load_settings();
+    let steam_on = metadata_source_enabled(&settings, "steam");
+    let sgdb_on = metadata_source_enabled(&settings, "steamgriddb");
+    let web_on = metadata_source_enabled(&settings, "web");
     let app_id = match known {
         Some(id) => Some(id),
-        None => metadata::app_id_for(title).await,
+        None if steam_on => metadata::app_id_for(title).await,
+        None => None,
     };
-    let settings = orbit.store.load_settings();
     let mut picks = Vec::new();
     let mut has_more = false;
     let mut cover_error = None;
 
     // Steam's own portrait is the no-key default, and it only belongs on the
     // first page. Later pages are more community covers, not the same capsule.
-    if page == 0 {
+    if steam_on && page == 0 {
         if let Some(id) = app_id {
             if let Ok(found) = metadata::artwork(id).await {
                 picks.extend(found.into_iter().filter(|pick| pick.kind == "portrait"));
@@ -1756,22 +1814,24 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
         }
     }
 
-    if let Some(key) = setting_text(&settings, "sgdbApiKey") {
-        match sgdb::portraits(app_id, title, &key, page).await {
-            Ok(found) => {
-                has_more = found.has_more;
-                for pick in found.picks {
-                    if !picks.iter().any(|have| have.url == pick.url) {
-                        picks.push(pick);
+    if sgdb_on {
+        if let Some(key) = setting_text(&settings, "sgdbApiKey") {
+            match sgdb::portraits(app_id, title, &key, page).await {
+                Ok(found) => {
+                    has_more = found.has_more;
+                    for pick in found.picks {
+                        if !picks.iter().any(|have| have.url == pick.url) {
+                            picks.push(pick);
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                log::warn!("SteamGridDB offered nothing: {e}");
-                if e.contains("refused") {
-                    return Err(e);
+                Err(e) => {
+                    log::warn!("SteamGridDB offered nothing: {e}");
+                    if e.contains("refused") {
+                        return Err(e);
+                    }
+                    cover_error = Some(e);
                 }
-                cover_error = Some(e);
             }
         }
     }
@@ -1783,7 +1843,7 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
     // opening this wants is a choice: what the store has, what the community
     // has, and whatever else can be found by name. The store's own art still
     // comes first, because that is the one that is always right.
-    if page == 0 {
+    if web_on && page == 0 {
         match webart::covers(title, 12).await {
             Ok(found) => {
                 for pick in found {
@@ -1818,6 +1878,9 @@ async fn artwork_for(orbit: &Orbit, title: &str, known: Option<u64>, page: u32) 
 /// no library capsule. Heroes and wide banners are not covers.
 async fn first_portrait(orbit: &Orbit, title: &str, app_id: Option<u64>) -> Option<String> {
     let settings = orbit.store.load_settings();
+    if !metadata_source_enabled(&settings, "steamgriddb") {
+        return None;
+    }
     let key = setting_text(&settings, "sgdbApiKey")?;
     sgdb::portraits(app_id, title, &key, 0)
         .await

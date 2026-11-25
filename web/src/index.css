@@ -6055,7 +6055,14 @@ html.orbit-tv body {
 html.orbit-tv body::after {
   display: none;
 }
-html.orbit-tv body, html.orbit-tv #root { background: #05040d; }
+html.orbit-tv body, html.orbit-tv #root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  background: #05040d;
+}
+html.orbit-tv body { overflow: hidden; }
 .tv-root { min-height: 100dvh; }
 
 .tv-root {
@@ -9012,3 +9019,105 @@ html.orbit-linux .orbit-setsec-head { background: none; }
   .orbit-settings-page { grid-template-columns: minmax(0, 1fr); }
   .tv-root .orbit-deck-hamburger { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); }
 }
+
+/* Game edit navigation stays beside its page; the dialog itself remains a
+   centred, narrow reading column instead of spanning the whole modal. */
+.orbit-settings {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 11rem) minmax(0, 42rem);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  justify-content: center;
+  align-items: start;
+  gap: 16px 28px;
+  width: min(100%, 62rem);
+  min-height: 0;
+  margin-inline: auto;
+}
+.orbit-settings > .orbit-gameart,
+.orbit-settings > .orbit-settings-head { grid-column: 1 / -1; }
+.orbit-settings > .orbit-settings-tabs { grid-column: 1; grid-row: 3; }
+.orbit-settings > .orbit-settings-page {
+  grid-column: 2;
+  grid-row: 3;
+  width: min(100%, 40rem);
+  justify-self: center;
+}
+.orbit-settings-tabs {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 3px;
+  padding: 0 12px 0 0;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  background: none;
+}
+.orbit-settings-tabs button,
+.orbit-settings-tabs button[aria-selected='true'],
+.orbit-settings-tabs button:hover,
+.orbit-settings-tabs button:hover:not([aria-selected='true']) {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  text-align: left;
+  box-shadow: none;
+  background: transparent;
+}
+.orbit-settings-tabs button[aria-selected='true'] {
+  color: var(--c-text);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+  box-shadow: inset 2px 0 var(--c-accent);
+}
+.orbit-settings-tabs button:hover:not([aria-selected='true']) {
+  background: color-mix(in srgb, var(--c-text) 5%, transparent);
+}
+.orbit-decksheet {
+  background: #090810fa;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-color: #ffffff24;
+  box-shadow: 0 28px 80px #000c, inset 0 1px 0 #ffffff12;
+}
+.orbit-decksheet-head h1 {
+  display: inline;
+  padding: .08em .18em .12em 0;
+  border-radius: .12em;
+  background: linear-gradient(90deg, #090810 0%, #090810f0 82%, transparent 100%);
+  color: #fff;
+  text-shadow: 0 2px 9px #000;
+  overflow-wrap: anywhere;
+}
+html.orbit-linux .orbit-decksheet { background: #090810fa; }
+@media (max-width: 760px) {
+  .orbit-settings {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 12px;
+  }
+  .orbit-settings > .orbit-settings-tabs { grid-column: 1; grid-row: 3; }
+  .orbit-settings > .orbit-settings-page { grid-column: 1; grid-row: 4; }
+  .orbit-settings-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0 0 8px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--c-text) 12%, transparent);
+  }
+  .orbit-settings-tabs button[aria-selected='true'] { box-shadow: inset 0 -2px var(--c-accent); }
+}
+.orbit-launch-advanced {
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
+  padding-top: 6px;
+}
+.orbit-launch-advanced > summary {
+  width: fit-content;
+  color: var(--c-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.orbit-launch-advanced > summary:hover,
+.orbit-launch-advanced > summary:focus-visible { color: var(--c-text); }
+.orbit-launch-advanced[open] > summary { margin-bottom: 8px; }

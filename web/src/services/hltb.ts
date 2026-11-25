@@ -43,6 +43,13 @@ export function fetchHltb(title: string): Promise<HltbData> {
 const catalogues = new Map<string, Promise<HltbSuggestion[]>>();
 const details = new Map<number, Promise<HltbGameDetails>>();
 
+/** Clear provider-backed answers after metadata source preferences change. */
+export function clearHltbCache(): void {
+  times.clear();
+  catalogues.clear();
+  details.clear();
+}
+
 /** Read HLTB's description for one chosen catalogue entry. */
 export function fetchHltbDetails(gameId: number): Promise<HltbGameDetails> {
   const known = details.get(gameId);

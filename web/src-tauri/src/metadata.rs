@@ -41,13 +41,18 @@ pub struct Meta {
     /// Portrait artwork, if the store has it. The front end falls back to the
     /// wide one below before it falls back to initials.
     pub cover_url: Option<String>,
+    /// Field-level provenance, so a fallback picture is not attributed to the
+    /// source that supplied only the text details.
+    pub cover_source: Option<String>,
     /// The wide header picture, which every store page has.
     pub header_url: Option<String>,
     /// The wide background art, when the store has a separate one. Bigger and
     /// softer than the header, which is what a page backdrop wants.
     pub background_url: Option<String>,
-    /// Where these details came from. Only `steam` for now, but a field so the
-    /// front end does not have to guess if that ever changes.
+    pub background_source: Option<String>,
+    /// Per-field provenance for reliable merge decisions and debugging.
+    pub field_sources: HashMap<String, String>,
+    /// Where the detail fields came from; artwork provenance is kept per field.
     pub source: &'static str,
 }
 
@@ -295,27 +300,47 @@ async fn meta_from_app(client: &reqwest::Client, app_id: u64, app: SteamApp) -> 
     // A page with no name at all reads better as no name than as an empty one,
     // but the rest of the page is still filled in.
     let name = (!app.name.trim().is_empty()).then(|| app.name.clone());
+    let genres = names(&app.genres);
+    // A few store pages leave the developer empty and only credit the
+    // publisher, which is nearer the truth than an empty line.
+    let developer = app.developers.first().or_else(|| app.publishers.first()).cloned().unwrap_or_default();
+    let release_year = year_in(&app.release_date.date);
+    let release_date = neat(Some(app.release_date.date));
+    let rating = app.metacritic.and_then(|m| m.score).filter(|s| *s > 0);
+    let header_url = Some(header).filter(|url| !url.is_empty());
+    let mut field_sources = HashMap::new();
+    for (field, present) in [
+        ("name", name.is_some()),
+        ("summary", !summary.is_empty()),
+        ("genres", !genres.is_empty()),
+        ("developer", !developer.is_empty()),
+        ("releaseYear", release_year.is_some()),
+        ("releaseDate", release_date.is_some()),
+        ("rating", rating.is_some()),
+        ("coverUrl", cover_url.is_some()),
+        ("headerUrl", header_url.is_some()),
+        ("backgroundUrl", background.is_some()),
+        ("steamAppId", true),
+    ] {
+        if present { field_sources.insert(field.to_owned(), "steam".to_owned()); }
+    }
 
     Meta {
         name,
         summary,
-        genres: names(&app.genres),
-        // A few store pages leave the developer empty and only credit the
-        // publisher, which is nearer the truth than an empty line.
-        developer: app
-            .developers
-            .first()
-            .or_else(|| app.publishers.first())
-            .cloned()
-            .unwrap_or_default(),
+        genres,
+        developer,
         steam_app_id: Some(app_id),
-        release_year: year_in(&app.release_date.date),
-        release_date: neat(Some(app.release_date.date)),
+        release_year,
+        release_date,
         coming_soon: app.release_date.coming_soon,
-        rating: app.metacritic.and_then(|m| m.score).filter(|s| *s > 0),
+        rating,
+        cover_source: cover_url.as_ref().map(|_| "steam".to_owned()),
         cover_url,
-        header_url: Some(header).filter(|url| !url.is_empty()),
+        header_url,
+        background_source: background.as_ref().map(|_| "steam".to_owned()),
         background_url: background,
+        field_sources,
         source: "steam",
     }
 }
@@ -1058,21 +1083,21 @@ pub async fn suggest_cards(title: &str) -> Result<Vec<Card>, String> {
 /// The result whose name is closest to what was asked for.
 fn best_match<'a>(items: &'a [SteamItem], title: &str) -> Option<&'a SteamItem> {
     let want = normalize(title);
+    if want.is_empty() { return None; }
     items
         .iter()
-        .map(|item| {
+        .filter_map(|item| {
             let got = normalize(&item.name);
-            let score = if got == want {
-                1000
-            } else if got.starts_with(&want) || want.starts_with(&got) {
-                500
-            } else {
-                want.chars()
-                    .zip(got.chars())
-                    .take_while(|(a, b)| a == b)
-                    .count() as i64
-            };
-            (score, item)
+            if got == want {
+                return Some((1000usize, item));
+            }
+            // A prefix is useful for editions and subtitles, but not enough to
+            // accept an unrelated result that merely shares a short word.
+            let related = got.starts_with(&want) || want.starts_with(&got);
+            let shorter = got.chars().count().min(want.chars().count());
+            let longer = got.chars().count().max(want.chars().count());
+            let close = longer > 0 && shorter * 100 >= longer * 72;
+            (related && close).then_some((shorter * 100 / longer.max(1), item))
         })
         .max_by(|a, b| a.0.cmp(&b.0))
         .map(|(_, item)| item)
@@ -1184,6 +1209,13 @@ mod tests {
     fn the_closest_store_result_wins() {
         let items = vec![item(1, "Hades II"), item(2, "Hades"), item(3, "Hades' Star")];
         assert_eq!(best_match(&items, "Hades").map(|i| i.id), Some(2));
+    }
+
+    #[test]
+    fn a_short_prefix_does_not_auto_match_an_unrelated_sequel() {
+        let items = vec![item(1, "Sonic Frontiers"), item(2, "Sonic Generations"), item(3, "Sonic")];
+        assert_eq!(best_match(&items, "Sonic").map(|found| found.id), Some(3));
+        assert_eq!(best_match(&items[..2], "Sonic"), None);
     }
 
     #[test]

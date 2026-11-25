@@ -31,7 +31,9 @@ check('TV detail scrolling has no transient scrollbar gutter',
     css.includes('scrollbar-width: none;'));
 check('Stardeck occupies the available dynamic viewport and restores only after fullscreen exits',
   css.includes('height: 100dvh') && css.includes('[data-orbit-tv] {') &&
-    app.includes('await leaveFullscreen()') && app.includes('requestAnimationFrame'));
+    app.includes('await leaveFullscreen()') && app.includes('requestAnimationFrame') &&
+    app.includes('await tvEnterPromise.current?.catch') &&
+    tvService.includes('fullscreenRequestGeneration') && tvService.includes('pendingNativeFullscreen'));
 check('Stardeck Settings has a distinct screen treatment from desktop settings',
   app.includes('className="orbit-tv-config"') && css.includes('.orbit-tv-config .orbit-settings'));
 check('symbol icons use accent colour without a matching filled tile',

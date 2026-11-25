@@ -39,6 +39,9 @@ let askedTheDocument = false;
  * against the window's real state before anything is toggled.
  */
 let weWentFullscreen = false;
+let fullscreenRequestGeneration = 0;
+let pendingFocusUnlisten: (() => void) | null = null;
+let pendingNativeFullscreen: Promise<void> | null = null;
 
 type Bounds = { x: number; y: number; width: number; height: number; maximized: boolean };
 
@@ -103,6 +106,7 @@ export function fullscreenError(): string | null {
  */
 export async function enterFullscreen(): Promise<boolean> {
   lastError = null;
+  const generation = ++fullscreenRequestGeneration;
   if (isNative()) {
     try {
       const window = getCurrentWindow();
@@ -134,14 +138,25 @@ export async function enterFullscreen(): Promise<boolean> {
         const unlisten = await window.onFocusChanged(({ payload }) => {
           if (!payload) return;
           unlisten();
-          void window.setFullscreen(true).then(
-            () => { weWentFullscreen = true; },
-            () => undefined,
-          );
+          if (pendingFocusUnlisten === unlisten) pendingFocusUnlisten = null;
+          if (generation !== fullscreenRequestGeneration) return;
+          const request = window.setFullscreen(true).then(() => {
+            if (generation === fullscreenRequestGeneration) weWentFullscreen = true;
+          }).catch(() => undefined);
+          pendingNativeFullscreen = request;
+          void request.finally(() => {
+            if (pendingNativeFullscreen === request) pendingNativeFullscreen = null;
+          });
         });
+        pendingFocusUnlisten = unlisten;
         // A window that never comes forward stays in its own frame; Stardeck
         // fills it either way.
-        globalThis.setTimeout(() => { void unlisten(); }, 4000);
+        globalThis.setTimeout(() => {
+          if (pendingFocusUnlisten === unlisten) {
+            unlisten();
+            pendingFocusUnlisten = null;
+          }
+        }, 4000);
         return true;
       }
       await window.setFullscreen(true);
@@ -261,6 +276,11 @@ async function settleInside(
 /** Give the window back its chrome. Leaving something that was never taken is fine. */
 export async function leaveFullscreen(): Promise<void> {
   if (isNative()) {
+    fullscreenRequestGeneration += 1;
+    pendingFocusUnlisten?.();
+    pendingFocusUnlisten = null;
+    await pendingNativeFullscreen?.catch(() => undefined);
+    pendingNativeFullscreen = null;
     const window = getCurrentWindow();
     // The copy in storage is the one that survives a crash mid-session; the one
     // in memory is fresher when both exist, so it wins.

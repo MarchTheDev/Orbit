@@ -52,7 +52,10 @@ check('Metadata lookup respects Steam, SteamGridDB and web-artwork source switch
     lib.includes('metadata_source_enabled(&settings, "steam")') &&
     lib.includes('metadata_source_enabled(&settings, "steamgriddb")') &&
     lib.includes('metadata_source_enabled(&settings, "web")') &&
-    lib.includes('webart::covers(&name, 1)'));
+    lib.includes('webart::covers(&name, 1)') &&
+    lib.includes('blank_metadata_result(&title)') &&
+    lib.includes('meta.field_sources.insert("coverUrl".into(), "web".into())') &&
+    metadata.includes('pub field_sources: HashMap<String, String>'));
 check('Web-image search accepts quoted and unquoted DDG tokens and tests both shapes',
   webart.includes('trim_start_matches') && webart.includes('reads_quoted_and_unquoted_duckduckgo_tokens'));
 

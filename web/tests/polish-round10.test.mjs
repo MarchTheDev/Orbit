@@ -86,8 +86,8 @@ check('the artwork picker asks the stores and the web, in the slot’s own shape
     libRs.includes('artwork_web_wide') && libRs.includes('webart::wide_covers') &&
     webart.includes('pub async fn wide_covers') && webart.includes('fn landscapes'));
 
-check('a cover search offers the web beside the store instead of only when it is empty',
-  /if page == 0 \{\s*\n\s*match webart::covers/.test(libRs));
+check('a cover search offers web artwork on the first page when the provider is enabled',
+  /if web_on && page == 0 \{\s*\n\s*match webart::covers/.test(libRs));
 
 check('the game page’s facts are one panel in two columns, with the folder on its own line',
   library.includes('orbit-gamepage-facts') && library.includes('orbit-fact-wide') &&

@@ -362,7 +362,9 @@ export function LaunchEditor({
                       </button>
                     </div>
 
-                    <OptionalArguments
+                    <details className="orbit-launch-advanced">
+                      <summary>More launch options</summary>
+                      <OptionalArguments
                       label="Extra arguments"
                       value={c.extraArgs ?? ''}
                       placeholder="Added to the game's own"
@@ -447,13 +449,13 @@ export function LaunchEditor({
                         </span>
                       </div>
                     </div>
+                    </details>
                   </article>
                 ))}
               </div>
             )}
           </section>
 
-          <p className="orbit-launchsaved" aria-live="polite">{dirty ? 'Saving…' : 'Saved'}</p>
         </>
       )}
 
@@ -557,7 +559,6 @@ export function LaunchEditor({
               </div>
             )}
           </section>
-          {section === 'extra' && <p className="orbit-launchsaved" aria-live="polite">{dirty ? 'Saving…' : 'Saved'}</p>}
         </>
       )}
 
