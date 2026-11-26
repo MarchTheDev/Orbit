@@ -22,6 +22,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const css = read('../src/index.css');
 const app = read('../src/App.tsx');
 const tv = read('../src/components/TvMode.tsx');
+const details = read('../src/components/TvDetails.tsx');
 const settings = read('../src/components/SettingsView.tsx');
 const library = read('../src/components/LibraryView.tsx');
 const editDialog = read('../src/components/detail/GameEditDialog.tsx');
@@ -56,11 +57,10 @@ check('no cover stands on a reflection of itself',
   !tv.includes('orbit-deck-floor') && !css.includes('.orbit-deck-floor'));
 check('the room behind the covers is lit brighter than a dimmed cover',
   /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\) saturate\([\d.]+\) brightness\(1\.\d+\)/.test(css));
-check('the sheet is sized to be read from across the room, with no description in it',
-  /\.orbit-decksheet \{[^}]*width: min\(31rem/.test(css) &&
-    /\.orbit-decksheet-head h1 \{[^}]*font-size: clamp\(1\.7rem/.test(css) &&
-    /\.orbit-decksheet-play \{[^}]*height: 54px/.test(css) &&
-    !tv.includes('orbit-decksheet-summary') && !css.includes('.orbit-decksheet-summary'));
+check('the full details page is sized to be read from across the room, with tabs',
+  details.includes('data-tv-game-title') && details.includes('role="tablist"') &&
+    details.includes('overview') && details.includes('details') && details.includes('journal') &&
+    details.includes('bg-[#0d0b18]/85'));
 
 console.log('icons are a tint, never a fill');
 

@@ -28,6 +28,7 @@ check('Captures for a selected game render once and are separated by capture day
   !stats.includes('Captures for {byFolder.get(albumGame)') && stats.includes('dayLabelOf(item)') && stats.includes('orbit-album-day-label'));
 check('Observatory game info no longer shows a Steam app ID',
   !read('../src/components/LibraryView.tsx').includes('Steam app ${game.meta.steamAppId}'));
+const merge = read('../src/utils/metadataMerge.ts');
 check('Player-picked art is retained above generated artwork and auto metadata preserves custom sources',
-  art.includes('coverUrlCustom') && art.includes('backgroundUrlCustom') && edit.includes('coverUrlCustom:') && library.includes('target.meta.coverUrlCustom'));
+  art.includes('coverUrlCustom') && art.includes('backgroundUrlCustom') && edit.includes('coverUrlCustom:') && library.includes('mergeMetadata') && merge.includes('coverUrlCustom') && merge.includes('backgroundUrlCustom'));
 (globalThis).__orbitFailures = ((globalThis).__orbitFailures ?? 0) + failures;

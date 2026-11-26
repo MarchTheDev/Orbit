@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from '../data/sampleGames';
 import { applyFont, applyGlass, applyTheme, nativePalette } from '../data/themes';
 import { desktopOs } from '../utils/platform';
 import { inLibraryShelf } from '../utils/library';
+import { mergeMetadata } from '../utils/metadataMerge';
 
 /**
  * Fields a person fills in, as opposed to anything Orbit works out.
@@ -133,17 +134,12 @@ export function useLibrary() {
       const current = gamesRef.current;
       const target = current.find((g) => g.id === id);
       if (!target) return;
-      if (origin === 'auto' && target.meta?.edited) return;
       const next = typeof patch === 'function' ? patch(target) : patch;
-      const safeNext = origin === 'auto' && next.meta && target.meta
-        ? {
-            ...next,
-            meta: {
-              ...next.meta,
-              ...(target.meta.coverUrlCustom ? { coverUrl: target.meta.coverUrl, coverUrlCustom: true } : {}),
-              ...(target.meta.backgroundUrlCustom ? { backgroundUrl: target.meta.backgroundUrl, backgroundUrlCustom: true } : {}),
-            },
-          }
+      // A background lookup merges per field: it fills gaps and fixes known-bad
+      // wide covers, but never replaces a field the player locked. The old
+      // all-or-nothing `edited` gate froze whole records after one correction.
+      const safeNext = origin === 'auto' && next.meta
+        ? { ...next, meta: mergeMetadata(target.meta, next.meta, { mode: 'auto' }) }
         : next;
       const updated = { ...target, ...safeNext };
       // Pointing Orbit at a program is what turns a plan into a game: it stops

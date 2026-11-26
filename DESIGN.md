@@ -138,20 +138,37 @@ Keep the couch-first structure. Match the accent and type; do not add chrome.
 
 ## The Stardeck
 
-Couch mode is a deck, not a carousel. A named stage carries the chosen game -
-its artwork, its name, what has been played of it - and one ordered index of
-every game that can be started runs under it. The stage is the subject; the
-index is what you move.
+Couch mode is a carousel of covers over the chosen game's own artwork, blurred
+almost out of recognition. The covers are the screen: there is no bar across the
+top and no panel describing the game beside them. What is coming is visible
+before you move, and a press on a cover opens that game's whole page.
 
-- The stage never moves. Moving the index changes what the stage shows, so the
-  layout is still while the choice changes.
-- Two orientations (`stage: 'top' | 'side'`) and two artwork kinds
-  (`art: 'poster' | 'banner'`). A banner is 16:9, so it is laid out at twice a
-  poster's width rather than stretched into a poster's frame.
+- One continuous shelf. Every cover is placed by its distance from the middle -
+  a cumulative offset built from its neighbours' own widths plus a constant gap,
+  then scaled, dimmed and shaded - so the space between two covers stays the same
+  as the row turns. Five each side are laid out; the furthest is fully faded.
+- The shelf moves as one object. Each cover keeps its identity as the selection
+  walks and slides to its new distance, rather than three cards being restyled in
+  place. Reduced motion and the lite renderer take the first and last frame.
+- Browsing never opens or starts anything. Arrows, the stick, the wheel and the
+  two step buttons move the selection; a press - click, Enter, or controller
+  confirm - opens the game's page. Play is explicit, on that page.
+- The page is the game's own: its wide artwork lit behind, its wordmark over it,
+  a row of actions (Back, Play, favourite, settings), and tabs - Overview,
+  Details, Journal - so a long description never crowds the numbers. Escape
+  returns to the shelf with the same cover selected.
+- Two artwork kinds (`art: 'poster' | 'banner'`) at three sizes. A banner is
+  16:9, so it is laid out wider than a poster rather than stretched into one's
+  frame. The carousel's offsets are built from that width, so the gap is the
+  same in either shape.
 - Nothing in the chrome takes the selected game's colour. The accent is the
   theme's, the rules are hairlines, and the artwork is the only thing that
-  changes hue as the index moves.
+  changes hue as the selection moves.
 - Escape does not leave the mode. Leaving it is a choice made with a button.
+- The surface is sized from its own insets, not from a viewport unit a web view
+  may not have updated yet, and the window behind it is painted the room's
+  colour. Handing the window back is done by its client area, so the frame it
+  returns to fits above the taskbar rather than one title bar past it.
 
 ## The overlay
 

@@ -27,13 +27,21 @@ export function Startup({ onDone }: { onDone: () => void }) {
       fade = window.setTimeout(() => setLeaving(true), 320);
       done = window.setTimeout(onDone, 620);
     };
+    // Two frames, so the first paint is on screen before the opening starts to
+    // leave. A web view that does not offer frames still has to finish: the
+    // veil is what the window is shown behind, and an opening that never ends
+    // would leave the app behind it for good.
+    const frame = (next: () => void) => {
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => next());
+      else window.setTimeout(next, 16);
+    };
     // On Linux the window stays hidden until this page asks for it. Starting
     // the clock before that means the opening has already finished by the time
     // the window appears.
     if (desktopOs() === 'linux') {
       void windowReady().finally(() => {
         if (!alive) return;
-        window.requestAnimationFrame(() => window.requestAnimationFrame(start));
+        frame(() => frame(start));
       });
     } else {
       start();

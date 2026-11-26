@@ -114,6 +114,18 @@ export interface MetaData {
   backgroundSource?: 'steam' | 'steamgriddb' | 'web' | null;
   /** Provider that supplied each populated field; used when merging metadata. */
   fieldSources?: Record<string, string>;
+  /**
+   * Fields the player corrected by hand. Background lookups fill everything
+   * else, but never replace one of these. This replaces the old all-or-nothing
+   * `edited` flag: fixing a cover no longer freezes the description forever.
+   */
+  lockedFields?: string[];
+  /** How sure the catalogue match is: an app id or exact title beats a guess. */
+  matchConfidence?: 'exact' | 'close' | 'manual' | 'unknown';
+  /** The catalogue title the match was made against, for the editor to show. */
+  matchTitle?: string | null;
+  /** When the details were last fetched, so stale records can be refreshed. */
+  fetchedAt?: string;
   /** The store's own id, so Play can hand the game to Steam. */
   steamAppId?: number | null;
   source?: 'steam' | 'steamgriddb' | 'web' | 'none' | 'estimate';

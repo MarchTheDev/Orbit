@@ -44,8 +44,24 @@ const settings: Settings = { ...DEFAULT_SETTINGS };
 const TABS = ['stardeck', 'statistics', 'settings', 'journal', 'editor', 'artwork', 'launch', 'extra', 'tools', 'add'] as const;
 type Surface = (typeof TABS)[number];
 
+/**
+ * The surface in the address, so one can be linked to and reloaded.
+ *
+ * Stardeck takes the whole viewport, which means the bar above it is behind it:
+ * `preview.html#stardeck` is how that page is opened again after a reload
+ * without going through the menu to leave it first.
+ */
+function surfaceFromHash(): Surface {
+  const named = window.location.hash.replace('#', '') as Surface;
+  return TABS.includes(named) ? named : 'statistics';
+}
+
 function Preview() {
-  const [surface, setSurface] = useState<Surface>('statistics');
+  const [surface, setSurfaceState] = useState<Surface>(surfaceFromHash);
+  const setSurface = (next: Surface) => {
+    window.location.hash = next;
+    setSurfaceState(next);
+  };
   const [tab, setTab] = useState<StatsTab>('overview');
   const [editing, setEditing] = useState<Game | null>(null);
   const [localSettings, setLocalSettings] = useState<Settings>(settings);

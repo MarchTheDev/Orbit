@@ -24,10 +24,9 @@ const tvService = read('../src/services/tv.ts');
 const libRs = read('../src-tauri/src/lib.rs');
 const webart = read('../src-tauri/src/webart.rs');
 
-check('the selected game’s panel is shut until its cover is pressed',
-  tv.includes('const [sheetOpen, setSheetOpen] = useState(false)') &&
-    tv.includes('{sheetOpen && (') && tv.includes('setSheetOpen((open) => !open)') &&
-    tv.includes('onClose={() => setSheetOpen(false)}'));
+check('a cover press opens the full details page rather than a small panel',
+  tv.includes('const openDetails') && tv.includes('setDetailId') &&
+    tv.includes('openDetails(game);') && !tv.includes('sheetOpen'));
 
 check('and there is no glow behind its cover, and no name under a deck cover',
   !tv.includes('orbit-decksheet-glow') && !css.includes('.orbit-decksheet-glow {') &&

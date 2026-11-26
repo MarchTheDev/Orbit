@@ -72,7 +72,7 @@ import { ambient } from './services/ambient';
 import { desktopOs } from './utils/platform';
 import { scrollSettingsSectionToTop } from './utils/settingsNavigation';
 import { revealInExplorer } from './services/native';
-import { fetchMetadata } from './services/metadata';
+import { fetchMetadata, needsMetadata } from './services/metadata';
 import { fetchHltb } from './services/hltb';
 import { TopNav, orderedTabs } from './components/TopNav';
 import { AdaptiveBackdrop } from './components/AdaptiveBackdrop';
@@ -651,17 +651,6 @@ export default function App() {
    */
   const asked = useRef(new Set<string>());
 
-  /** True for a game still carrying the store's wide banner as its cover. */
-  const artIsWide = (g: Game) => {
-    if (!g.meta?.steamAppId) return false;
-    const cover = g.meta.coverUrl ?? '';
-    if (cover.includes('library_600x900')) return false;
-    // A portrait from another catalogue is already the tile shape. Treating it
-    // as the old wide banner would ask for artwork again on every launch.
-    if (cover.includes('steamgriddb.com') || cover.includes('images.igdb.com')) return false;
-    return true;
-  };
-
   /**
    * Fill in the gaps in the background.
    *
@@ -680,11 +669,11 @@ export default function App() {
       .filter(
         (g) =>
           !asked.current.has(g.id) &&
-          // A game whose details were corrected by hand is left exactly as it
-          // was: the lookup would use the store's idea of the title and put
-          // back what the player just took out.
-          !g.meta?.edited &&
-          (!g.meta || !g.hltb || artIsWide(g)),
+          !g.planned &&
+          // Field-level: a game is worth asking about when something is missing
+          // or stale, not merely when nothing was ever edited. Locked fields are
+          // kept by the merge, so correcting one no longer freezes the rest.
+          (needsMetadata(g) || !g.hltb),
       )
       .slice(0, 6);
     if (missing.length === 0) {
@@ -697,12 +686,11 @@ export default function App() {
       setEnriching(missing.length);
       for (const game of missing) {
         asked.current.add(game.id);
-        // Artwork fetched before Orbit asked for the portrait picture is worth
-        // asking for again: the wide banner was being cropped into a tall tile.
-        const wantDetails = !game.meta || artIsWide(game);
+        const wantDetails = needsMetadata(game);
         const wantTimes = !game.hltb;
+        const appId = game.meta?.steamAppId ?? (game.launch.kind === 'steam' ? game.launch.appId : undefined);
         const [meta, hltb] = await Promise.all([
-          wantDetails ? fetchMetadata(game.title).catch(() => null) : null,
+          wantDetails ? fetchMetadata(game.title, appId).catch(() => null) : null,
           wantTimes ? fetchHltb(game.title).catch(() => null) : null,
         ]);
         if (!alive) return;
@@ -1310,18 +1298,15 @@ export default function App() {
     setSelectedId(g.id);
     asked.current.add(g.id);
     if (!fetchMeta || !settings) return;
-    const reviewedByPlayer = !!g.meta?.edited;
     const [meta, hltb] = await Promise.all([
-      reviewedByPlayer ? Promise.resolve(null) : fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null),
+      fetchMetadata(g.title, g.meta?.steamAppId ?? undefined).catch(() => null),
       fetchHltb(g.title).catch(() => null),
     ]);
-    if (reviewedByPlayer) {
-      // Keep the details the player just reviewed, while still letting the
-      // independent playtime lookup fill in the new game's completion estimate.
-      if (hltb) updateGame(g.id, { hltb }, 'player');
-      return;
-    }
     const patch: Partial<Game> = {};
+    // What was reviewed in the dialog is the player's, and it is kept field by
+    // field rather than by refusing to look anything up: the merge holds every
+    // field they filled and fills the ones they left empty. Correcting a name
+    // used to cost the new game its cover, description and genres as well.
     if (meta) patch.meta = meta;
     if (hltb) patch.hltb = hltb;
     if (Object.keys(patch).length > 0) updateGame(g.id, patch, 'auto');

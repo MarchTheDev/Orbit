@@ -15,12 +15,12 @@ const portrait = read('../src/components/ui/PortraitBrowser.tsx');
 const picker = read('../src/components/detail/ArtworkPicker.tsx');
 const reshadeMod = read('../src-tauri/src/reshade.rs');
 
-check('Stardeck is one row of covers over the selected game\'s own blurred cover',
+check('Stardeck is a carousel of covers over the selected game\'s own blurred cover',
   css.includes('.orbit-deckbackdrop-layer') && /\.orbit-deckbackdrop-layer \{[^}]*filter: blur\(\d+px\)/.test(css) &&
     // The row takes everything the window has: a fixed share left a strip of
     // the shell's own colour under the covers.
     /\.orbit-deck \.orbit-deck-index \{[^}]*flex: 1 1 auto/.test(css) &&
-    css.includes('.orbit-decksheet'));
+    css.includes('.orbit-deck-cards'));
 check('Stardeck game changes fade the room and cross-fade the panel, with reduced-motion support',
   css.includes('@keyframes deck-game-in') && css.includes('@keyframes deck-backdrop-in') &&
     css.includes('prefers-reduced-motion: reduce') && tv.includes('key={game.id}') && !tv.includes('findTvBackdrop'));
@@ -30,11 +30,11 @@ check('Launch settings merge starts-with-game tools and alternative launches int
     launchEditor.includes("section === 'all' || section === 'launch'") &&
     launchEditor.includes("section === 'all' || section === 'launch' || section === 'extra'") &&
     launchEditor.includes("when: 'alternative'") && launchEditor.includes("when: 'alongside'") &&
-    launchEditor.includes('Add arguments') && types.includes("when?: 'alongside' | 'alternative'"));
+    launchEditor.includes('Extra arguments') && types.includes("when?: 'alongside' | 'alternative'"));
 check('a launch profile starts the game while a tool rides along, and neither is swept up by the other',
   session.includes('companion.is_alongside()') && lib.includes('fn start_game_alternative(') && lib.includes('profile.is_alongside()'));
 check('the Play arrow offers named launches beside the tools, by name',
-  gameDetail.includes('onRunLaunch?.(index)') && gameDetail.includes("companion.when === 'alternative'") && gameDetail.includes('Start it another way'));
+  gameDetail.includes('onRunLaunch?.(index)') && gameDetail.includes('usableAlternatives') && gameDetail.includes('Start it another way'));
 check('the Play arrow offers saved companions and routes selected tracked utilities into a session',
   gameDetail.includes('aria-label="More launch options"') && gameDetail.includes('onRunCompanion?.(index)') && lib.includes('fn start_game_companion(') && lib.includes('companion.counts_as_playing') && session.includes('pub fn start_action('));
 check('Edit Game exposes Proton on its own Linux-only page',

@@ -45,9 +45,13 @@ check('an empty title is refused rather than asked about', await fetchHltb('  ')
 
 console.log('the dialogs and pages still know their own shapes');
 
-// The add dialog's own lookup is not cached: a player changing a title and
-// changing it back should be able to ask for fresh details on purpose.
+// Details are remembered now, keyed by the catalogue id or the normalized
+// title, so going back to a game already seen does not ask the store again.
+// A deliberate refresh (force) still asks rather than reading the cache.
+const details = fetchMetadata('Hollow Knight');
+check('the same title asked twice joins one request, not two', details === fetchMetadata('Hollow Knight'));
+await details;
 check('a deliberate metadata lookup is never answered from a cache',
-  fetchMetadata('Hollow Knight') !== fetchMetadata('Hollow Knight'));
+  fetchMetadata('Hollow Knight', null, { force: true }) !== details);
 
 globalThis.__orbitFailures = (globalThis.__orbitFailures ?? 0) + failures;

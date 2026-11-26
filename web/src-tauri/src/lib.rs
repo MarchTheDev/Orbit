@@ -1217,13 +1217,28 @@ fn fit_window_to_desk(window: &tauri::WebviewWindow) {
         return;
     }
     let scale = f64::min(room_w as f64 / size.width as f64, room_h as f64 / size.height as f64);
-    let width = ((size.width as f64 * scale) as u32).max(1);
-    let height = ((size.height as f64 * scale) as u32).max(1);
+    let frame_w = ((size.width as f64 * scale) as u32).max(1);
+    let frame_h = ((size.height as f64 * scale) as u32).max(1);
+    // `set_size` takes the inner size, while the rectangle above is the whole
+    // frame. On a decorated window - Linux keeps the desktop's title bar - the
+    // difference is that title bar, and asking for the frame's height as the
+    // inner height hands back a window one bar too tall, its bottom edge under
+    // the taskbar. The decorations are measured rather than guessed.
+    let (border_w, border_h) = match window.inner_size() {
+        Ok(inner) => (
+            size.width.saturating_sub(inner.width),
+            size.height.saturating_sub(inner.height),
+        ),
+        Err(_) => (0, 0),
+    };
+    let width = frame_w.saturating_sub(border_w).max(1);
+    let height = frame_h.saturating_sub(border_h).max(1);
     let _ = window.set_size(tauri::PhysicalSize::new(width, height));
     // Centred on the desk it was just fitted to, rather than wherever the
-    // configured opening position put it.
-    let x = desk.position.x + ((desk.size.width as i32 - width as i32) / 2).max(0);
-    let y = desk.position.y + ((desk.size.height as i32 - height as i32) / 2).max(0);
+    // configured opening position put it. The position is the frame's, so the
+    // frame's own size is what is centred.
+    let x = desk.position.x + ((desk.size.width as i32 - frame_w as i32) / 2).max(0);
+    let y = desk.position.y + ((desk.size.height as i32 - frame_h as i32) / 2).max(0);
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 

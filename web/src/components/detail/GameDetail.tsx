@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ActiveSession, Companion, Game, GameStatus, LaunchTarget, Session } from '../../types';
-import { fetchMetadata } from '../../services/metadata';
+import { refreshGameMetadata } from '../../services/metadata';
+import { alternativeLabel, usableAlternatives } from '../../utils/launchProfiles';
 import { openExternal } from '../../services/desktop';
 import { fetchHltb } from '../../services/hltb';
 import { listGameLogs, listPlaythroughs } from '../../services/native';
@@ -263,7 +264,8 @@ export function GameDetail({
     setLoadingDetails(true);
     setDetailsError(null);
     try {
-      onUpdate({ meta: await fetchMetadata(game.title) });
+      const merged = await refreshGameMetadata(game, 'manual');
+      if (merged) onUpdate({ meta: merged });
     } catch (e) {
       setDetailsError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -315,9 +317,9 @@ export function GameDetail({
   // there: a saved launch is shown by the name it was given, because it is a way
   // to start the game; a tool is shown by its file, because it is a program.
   const allCompanions = game.companions.map((companion, index) => ({ companion, index }));
-  const launchProfiles = allCompanions.filter(
-    ({ companion }) => companion.when === 'alternative' && Boolean((companion.name ?? '').trim()),
-  );
+  // Only profiles that can actually start the game are offered: a name alone,
+  // or a name with nothing different about it, is not a launch option.
+  const launchProfiles = usableAlternatives(game.companions);
   const launchOptions = allCompanions.filter(
     ({ companion }) =>
       companion.when !== 'alternative' && Boolean((companion.url ?? '').trim() || companion.path.trim()),
@@ -479,7 +481,7 @@ export function GameDetail({
                         <p className="px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.16em] text-muted">Start it another way</p>
                         {launchProfiles.map(({ companion, index }) => (
                           <button key={`profile-${index}`} type="button" role="menuitem" onClick={() => { setLaunchMenuOpen(false); onRunLaunch?.(index); }} className="flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-2 text-left text-xs text-fg hover:bg-panel2">
-                            <span className="min-w-0 truncate">{companion.name}</span>
+                            <span className="min-w-0 truncate">{alternativeLabel(companion, index)}</span>
                             <span className="shrink-0 text-[10px] text-muted">{companion.extraArgs?.trim() ? companion.extraArgs.trim() : 'Start'}</span>
                           </button>
                         ))}

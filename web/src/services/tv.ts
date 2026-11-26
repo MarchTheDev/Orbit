@@ -142,6 +142,8 @@ export async function enterFullscreen(): Promise<boolean> {
           if (generation !== fullscreenRequestGeneration) return;
           const request = window.setFullscreen(true).then(() => {
             if (generation === fullscreenRequestGeneration) weWentFullscreen = true;
+            void paintFrame(ROOM_COLOUR);
+            remeasureViewport();
           }).catch(() => undefined);
           pendingNativeFullscreen = request;
           void request.finally(() => {
@@ -161,6 +163,8 @@ export async function enterFullscreen(): Promise<boolean> {
       }
       await window.setFullscreen(true);
       weWentFullscreen = true;
+      void paintFrame(ROOM_COLOUR);
+      remeasureViewport();
       return true;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -221,6 +225,45 @@ const pause = (ms: number) => new Promise((resolve) => globalThis.setTimeout(res
 type Placement = { x: number; y: number; width: number; height: number };
 
 /**
+ * The colour of the window itself, behind the page.
+ *
+ * The frame is what shows in any strip the web view has not covered yet, and it
+ * was a near-black that matched neither surface: a band of it under Stardeck
+ * read as a black bar rather than as the room. Painting it the colour of what
+ * is on screen means the same strip, on a compositor that hands the new frame
+ * over a beat late, is invisible instead.
+ */
+const ROOM_COLOUR = '#05040d';
+const DESK_COLOUR = '#0a0b0d';
+
+async function paintFrame(colour: string): Promise<void> {
+  try {
+    await getCurrentWindow().setBackgroundColor(colour);
+  } catch {
+    /* A runtime without the call, or a platform that does not offer it. */
+  }
+}
+
+/**
+ * Ask the page to measure itself again after the window has changed size.
+ *
+ * GTK gives the window its new frame a beat before the web view is told about
+ * it, and a page laid out against the old height keeps that height: the covers
+ * stop short of the bottom edge and the frame shows underneath them. A resize
+ * event of our own, repeated across the moment the transition settles, makes
+ * the page lay out against the size it actually has.
+ */
+function remeasureViewport(): void {
+  const view = globalThis.window;
+  if (!view || typeof view.dispatchEvent !== 'function') return;
+  for (const delay of [0, 80, 220]) {
+    globalThis.setTimeout(() => {
+      view.dispatchEvent(new Event('resize'));
+    }, delay);
+  }
+}
+
+/**
  * Put the window exactly inside the desk area, and keep putting it there until
  * it stays.
  *
@@ -242,7 +285,9 @@ async function settleInside(
   area: Placement | null,
 ): Promise<void> {
   const limit = area ?? target;
-  const want = {
+  // The frame is the whole window - title bar and borders included - because
+  // that is what has to fit the desk area, and what `target` describes.
+  const frame = {
     x: Math.max(limit.x, Math.min(target.x, limit.x + limit.width - Math.min(target.width, limit.width))),
     y: Math.max(limit.y, Math.min(target.y, limit.y + limit.height - Math.min(target.height, limit.height))),
     width: Math.min(target.width, limit.width),
@@ -257,20 +302,48 @@ async function settleInside(
       await window.unmaximize().catch(() => undefined);
       await pause(60);
     }
+
+    // `setSize` takes the *inner* size; `outerSize` measures the frame. Asking
+    // for the frame's height as the inner height is what handed the window back
+    // one title bar too tall, with its bottom edge behind the taskbar and a
+    // strip of uncovered frame above it. The difference is measured on every
+    // pass, because it is nought while the window is still fullscreen and only
+    // appears once the desktop has given the decorations back.
+    const [outer, inner] = await Promise.all([
+      window.outerSize().catch(() => null),
+      window.innerSize().catch(() => null),
+    ]);
+    const borderX = outer && inner ? Math.max(0, outer.width - inner.width) : 0;
+    const borderY = outer && inner ? Math.max(0, outer.height - inner.height) : 0;
+    // What each setter takes: an outer position, and an inner size.
+    const want = {
+      x: frame.x,
+      y: frame.y,
+      width: Math.max(1, frame.width - borderX),
+      height: Math.max(1, frame.height - borderY),
+    };
+
     await window.setPosition(new PhysicalPosition(want.x, want.y)).catch(() => undefined);
     await window.setSize(new PhysicalSize(want.width, want.height)).catch(() => undefined);
     await pause(90);
 
     const [size, position] = await Promise.all([
-      window.outerSize().catch(() => null),
+      window.innerSize().catch(() => null),
       window.outerPosition().catch(() => null),
     ]);
-    if (!size || !position) return;
+    if (!size || !position) {
+      remeasureViewport();
+      return;
+    }
 
     const right = Math.abs(size.width - want.width) <= 2 && Math.abs(size.height - want.height) <= 2;
     const placed = Math.abs(position.x - want.x) <= 2 && Math.abs(position.y - want.y) <= 2;
-    if (right && placed) return;
+    if (right && placed) {
+      remeasureViewport();
+      return;
+    }
   }
+  remeasureViewport();
 }
 
 /** Give the window back its chrome. Leaving something that was never taken is fine. */
@@ -300,9 +373,24 @@ export async function leaveFullscreen(): Promise<void> {
       /* Still try to restore the saved window state. */
     }
 
+    // The desktop's own colour goes back on the frame before the window is
+    // resized, so the strip the compositor shows mid-transition is the shell's
+    // background rather than a black band.
+    void paintFrame(DESK_COLOUR);
+
     try {
       await waitForFullscreenExit(window);
+
+      // A fullscreen the player asked for themselves is theirs to keep, and a
+      // window that is still inside it is not ours to lay out: resizing under
+      // it is what leaves a frame the desktop then has to reconcile.
+      if (!ours && (await window.isFullscreen().catch(() => false))) {
+        remeasureViewport();
+        return;
+      }
+
       const area = await workArea();
+      remeasureViewport();
 
       // Nothing saved means an older session, or a window that became
       // fullscreen some other way. Covering the desk area is the right answer
@@ -326,6 +414,7 @@ export async function leaveFullscreen(): Promise<void> {
       await settleInside(window, bounds, area);
     } catch {
       /* The window was closed, or is not ours to resize any more. */
+      remeasureViewport();
     }
     return;
   }

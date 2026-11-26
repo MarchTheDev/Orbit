@@ -4,6 +4,7 @@ const check = (label, ok) => { if (ok) console.log(`  ok   ${label}`); else { fa
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const css = read('../src/index.css');
 const tv = read('../src/components/TvMode.tsx');
+const details = read('../src/components/TvDetails.tsx');
 const settings = read('../src/components/SettingsView.tsx');
 const app = read('../src/App.tsx');
 const types = read('../src/types.ts');
@@ -23,14 +24,13 @@ check('Escape opens a hamburger menu with desktop mode and Quit Orbit actions in
     !tv.includes('aria-label="Quit Orbit"') && !tv.includes('aria-label="Return to desktop mode"') &&
     !tv.includes('Reset Stardeck to its defaults') && tv.includes('Orbit settings') && tv.includes('Add a game'));
 
-check('the selected game is a floating sheet on the left, not a strip under the row',
-  css.includes('.orbit-decksheet') && /\.orbit-decksheet \{[^}]*left:/.test(css) &&
-    tv.includes('data-deck-sheet') && tv.includes('<GameSheet') &&
-    !tv.includes('orbit-deck-stage'));
+check('a press on a cover opens the full details page, not a floating sheet',
+  tv.includes('openDetails(game);') && tv.includes('const openDetails') &&
+    !tv.includes('GameSheet') && !tv.includes('orbit-deck-stage'));
 
-check('the sheet carries Play, the star, the game settings and the full page',
-  tv.includes('data-tv-action="play"') && tv.includes('data-tv-action="favourite"') &&
-    tv.includes('data-tv-action="edit"') && tv.includes('data-tv-action="details"'));
+check('the full page carries Back, Play, the star and the game settings',
+  details.includes('data-tv-action="back"') && details.includes('data-tv-action="play"') &&
+    details.includes('data-tv-action="favourite"') && details.includes('data-tv-action="edit"'));
 
 check('the room is lit by the selected game’s cover, blurred and cross-fading',
   tv.includes('function DeckBackdrop') && css.includes('.orbit-deckbackdrop-layer') &&

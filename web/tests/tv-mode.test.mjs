@@ -175,8 +175,11 @@ const render = async (games, runningId = null, extra = {}) => {
 
 await render(library);
 check('the hub fills the window rather than sitting in the page', !!document.querySelector('[data-orbit-tv]'));
-check('Deck keeps the selected cover in the middle with one neighboring cover on each side',
-  covers().length === 3 && selected() === '0' && document.querySelector('[data-tv-cover="0"][data-deck-position="0"][aria-current="true"]') !== null, String(covers().length));
+check('Deck shows the whole shelf as a carousel with the selected cover in the middle',
+  covers().length === 4 && selected() === '0' && document.querySelector('[data-tv-cover="0"][data-deck-position="0"][aria-current="true"]') !== null, String(covers().length));
+check('the covers ahead are visible at their own distance, scaled and dimmed',
+  document.querySelector('[data-tv-cover="1"][data-deck-position="1"]') !== null &&
+    document.querySelector('[data-tv-cover="3"][data-deck-position="-1"]') !== null);
 check('there are no shelves or category tabs to choose between first',
   !document.querySelector('[data-tv-shelf]') &&
     !['Up next', 'Favourites', 'Jump back in'].some((label) => document.body.textContent.includes(label)));
@@ -198,21 +201,29 @@ check('the rail wraps rather than stopping dead at the end', selected() === '0',
 await key('ArrowLeft');
 check('and wraps the other way', selected() === '3', String(selected()));
 
+// Enter chooses the focused game and opens its full page directly — there is no
+// small panel in between any more.
 await key('Enter');
-check('Enter opens details for the focused game without launching it',
-  played.length === 0 && !!document.querySelector('[data-tv-actions]'), `${played.join()} / ${!!document.querySelector('[data-tv-actions]')}`);
-check('details open on the explicit Play action', document.activeElement?.getAttribute('data-tv-action') === 'play');
+check('Enter opens the full details page without launching it',
+  played.length === 0 && !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'),
+  `${played.join()} / back ${!!document.querySelector('[data-tv-action="back"]')}`);
+check('the page lands on Back first', document.activeElement?.getAttribute('data-tv-action') === 'back');
 
 await key('ArrowRight');
-check('right in the panel goes to the next button, not the next game',
-  document.activeElement?.getAttribute('data-tv-action') === 'favourite' &&
-    document.activeElement?.getAttribute('data-tv-cover') === null,
-  String(document.activeElement?.getAttribute('data-tv-action')));
-check('and the game on screen did not change', selected() === '3', String(selected()));
+check('right on the page moves to Play, not the next game',
+  document.activeElement?.getAttribute('data-tv-action') === 'play');
 await key('ArrowLeft');
-check('left comes back to Play', document.activeElement?.getAttribute('data-tv-action') === 'play');
+check('left comes back to Back', document.activeElement?.getAttribute('data-tv-action') === 'back');
+
+await key('Escape');
+check('escape on the page returns to the rail rather than out of TV mode',
+  !!document.querySelector('[data-tv-cover]') && left === 0,
+  `rail ${!!document.querySelector('[data-tv-cover]')} / left ${left}`);
+check('the focused cover stays on the game that was being read', selected() === '3', String(selected()));
+
+// Up from the cover reaches the pills; down chooses the game.
 await key('ArrowUp');
-check('up from the panel reaches the pills, where the two pages are',
+check('up from the cover reaches the pills, where the two pages are',
   document.activeElement?.closest('[data-tv-pills]') !== null);
 await key('ArrowRight');
 check('right in the pills stays in the pills instead of walking the rail',
@@ -221,38 +232,24 @@ await key('ArrowDown');
 check('down out of the pills lands on the selected cover',
   document.activeElement?.getAttribute('data-tv-cover') === '3');
 await key('ArrowDown');
-check('down from the cover reaches Play precisely',
-  document.activeElement?.getAttribute('data-tv-action') === 'play');
-await key('ArrowDown');
-check('down from Play returns to the selected game area',
-  document.activeElement?.getAttribute('data-tv-cover') === '3');
-await key('ArrowUp');
-check('up from the game area returns to Play',
-  document.activeElement?.getAttribute('data-tv-action') === 'play');
+check('down from the cover opens its full page',
+  !document.querySelector('[data-tv-cover]') && document.activeElement?.getAttribute('data-tv-action') === 'back');
+await key('Escape');
+
+// The step buttons browse without opening; a cover press opens the page.
 await act(async () => {
   document.querySelector('[aria-label="Next game"]').click();
 });
+check('the step button browses without launching', selected() === '0' && played.length === 0, `${selected()} / ${played.length}`);
 await act(async () => {
   document.querySelector('[data-tv-cover="0"]').click();
 });
-check('the single cover can be browsed by step without launching it',
-  title() === 'Middle Of It' && played.length === 0, `${title()} / ${played.length}`);
-
-// Enter belongs to a focused button when one is focused, or pressing it twice
-// would both open the details and start the game behind it.
-played.length = 0;
-await key('ArrowUp');
-await key('ArrowRight');
-await key('ArrowRight');
-await key('ArrowRight');
-await key('Enter');
-check('enter on a focused button is that button\'s own press',
-  played.length === 0 && !document.querySelector('[data-tv-cover]'),
-  `played ${played.length}`);
+check('a press on a cover opens its full page without launching',
+  !document.querySelector('[data-tv-cover]') && played.length === 0 && title() === 'Middle Of It', `${title()} / ${played.length}`);
 
 console.log('full page is a page of the hub, not a way out of it');
 
-check('Full page shows the selected game in TV mode rather than leaving it',
+check('the page shows the selected game in TV mode rather than leaving it',
   !!details && !document.querySelector('[data-tv-cover]'),
   `${details} / rail ${!!document.querySelector('[data-tv-cover]')}`);
 const page = document.querySelector('[data-orbit-tv]');
@@ -261,7 +258,6 @@ check('the game\'s own page is on screen, at TV size',
 check('it says what has been played of it',
   page.textContent.includes('played') || !!page.querySelector('h1'));
 check('and how long the main story takes', page.textContent.toLowerCase().includes('main story'));
-check('a pad or a keyboard lands on Back first', document.activeElement?.getAttribute('data-tv-action') === 'back');
 
 // The page sits over the game's artwork, so its cards have to hold their own
 // against whatever the picture is doing behind them.
@@ -271,10 +267,15 @@ const detailsSource = await import('node:fs').then((fs) =>
 check('the cards on a game\'s page are solid enough to read over artwork',
   !detailsSource.includes('bg-white/[0.0') && detailsSource.includes('bg-[#0d0b18]/85'));
 
+// The focused Play action launches the game, and the page stays.
+played.length = 0;
 await key('ArrowRight');
-check('right moves between the page\'s own buttons', document.activeElement?.getAttribute('data-tv-action') === 'play');
-await key('ArrowLeft');
-check('and left comes back', document.activeElement?.getAttribute('data-tv-action') === 'back');
+await act(async () => {
+  document.querySelector('[data-tv-action="play"]').click();
+});
+check('the Play action launches the game and stays on the page',
+  played.length === 1 && !document.querySelector('[data-tv-cover]'),
+  `played ${played.length}`);
 
 await key('Escape');
 check('escape on a game\'s page goes back to the rail rather than out of TV mode',
@@ -300,22 +301,19 @@ await key('ArrowRight');
 act(() => {
   window.dispatchEvent(new dom.window.CustomEvent('orbit-pad-play'));
 });
-check('Confirm on a controller cover opens details without launching',
-  played.length === 0 && !!document.querySelector('[data-tv-actions]'), `${played.join()} / ${!!document.querySelector('[data-tv-actions]')}`);
+check('Confirm on a controller cover opens the full page without launching',
+  played.length === 0 && !!document.querySelector('[data-tv-action="back"]'), `${played.join()} / back ${!!document.querySelector('[data-tv-action="back"]')}`);
 
 pad('orbit-pad-back');
 await act(async () => wait(320));
-check('Back on the controller from the rail stays in TV mode', left === 0, String(left));
+check('Back on the controller from a game\'s page returns to the rail and stays in TV mode',
+  !!document.querySelector('[data-tv-cover]') && left === 0, String(left));
 
 // From a game's page the same press steps back to the rail, not out of the mode.
 await render(library);
-// The game's panel is a press away, not part of browsing: a cover is chosen,
-// then the panel it opens carries the way to the full page.
+// A cover press opens the full page directly; Back returns to the rail.
 await act(async () => {
   document.querySelector('[data-tv-cover="0"]').click();
-});
-await act(async () => {
-  buttonWith('Full page').click();
 });
 pad('orbit-pad-back');
 await act(async () => wait(20));
@@ -326,7 +324,7 @@ console.log('TV mode opens without entrance choreography');
 
 await render(library);
 check('it opens directly on the library without a boot veil',
-  !document.querySelector('.tv-boot') && covers().length === 3 &&
+  !document.querySelector('.tv-boot') && covers().length === 4 &&
     document.activeElement?.getAttribute('data-tv-cover') === '0');
 check('the backdrop does not scale or transition when the selected game changes',
   !tvSource.includes('scale-[1.02]') && !tvSource.includes('scale-[1.06]') &&
@@ -374,12 +372,12 @@ await act(async () => {
   buttonWith('A–Z').click();
 });
 check('A–Z keeps the focused Deck and its book-page neighbors visible',
-  covers().length === 3 && !!buttonWith('A–Z'), `${title()} / ${selected()}`);
+  covers().length === 4 && !!buttonWith('A–Z'), `${title()} / ${selected()}`);
 check('and says which order it is in', !!buttonWith('A–Z'));
 // Back out of the menu so the rest of the checks are looking at the deck.
 await key('Escape');
 await key('Escape');
-check('switching order keeps the focused cover and neighboring pages visible', covers().length === 3);
+check('switching order keeps the focused cover and neighboring pages visible', covers().length === 4);
 // The covers are the screen: nothing is written under them any more. The game
 // is still named for a reader - on the page, and in the panel a press opens.
 check('no name is drawn under a cover',
@@ -537,8 +535,8 @@ press(12);
 await act(async () => {
   await wait(140);
 });
-check('up reaches the game\'s own buttons',
-  document.activeElement?.getAttribute('data-tv-action') === 'play',
+check('up from the cover reaches the pills, where the two pages are',
+  document.activeElement?.closest('[data-tv-pills]') !== null,
   String(document.activeElement?.getAttribute('data-tv-action')));
 
 await release();
@@ -546,21 +544,7 @@ press(15);
 await act(async () => {
   await wait(140);
 });
-check('and right moves between those buttons rather than off the rail',
-  document.activeElement?.getAttribute('data-tv-action') === 'favourite',
-  String(document.activeElement?.getAttribute('data-tv-action')));
-
-await release();
-press(12);
-await act(async () => {
-  await wait(140);
-});
-await release();
-press(12);
-await act(async () => {
-  await wait(140);
-});
-check('up through Play reaches the pills, where the two pages are',
+check('right in the pills stays in the pills rather than walking the rail',
   document.activeElement?.closest('[data-tv-pills]') !== null);
 
 await release();
@@ -568,31 +552,35 @@ press(13);
 await act(async () => {
   await wait(140);
 });
+check('down out of the pills lands on the selected cover',
+  document.activeElement?.getAttribute('data-tv-cover') === '0',
+  String(document.activeElement?.getAttribute('data-tv-cover')));
+
 await release();
 press(13);
 await act(async () => {
   await wait(140);
 });
-check('down from the bar crosses the focused cover and reaches Play',
+check('down from the cover opens its full page, still in TV mode',
+  !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
+
+await release();
+press(15);
+await act(async () => {
+  await wait(140);
+});
+check('right on the page moves to Play',
   document.activeElement?.getAttribute('data-tv-action') === 'play',
   String(document.activeElement?.getAttribute('data-tv-action')));
 
-// Full page is driven by the same presses: across the panel's buttons to the
-// last of them, then a confirm press on it.
-for (let step = 0; step < 3; step += 1) {
-  await release();
-  press(15);
-  await act(async () => {
-    await wait(140);
-  });
-}
 await release();
 press(0);
 await act(async () => {
   await wait(140);
 });
-check('a confirm press on Full page opens the selected game\'s page, still in TV mode',
-  !document.querySelector('[data-tv-cover]') && !!document.querySelector('[data-tv-action="back"]'));
+check('a confirm press on Play launches the selected game',
+  played.length === 1, `played ${played.length}`);
+
 await release();
 press(1);
 await act(async () => {

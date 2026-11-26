@@ -5564,58 +5564,53 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
   overflow: hidden;
   padding: 0 clamp(16px, 3.4vw, 42px);
 }
+/* The carousel: a continuous shelf of covers around the selection. Each cover
+   is placed by its distance from the middle — a cumulative offset built from the
+   neighbours' own widths plus a constant gap, then scaled and dimmed — so the
+   covers ahead are visible and the space between two stays the same as the row
+   turns. The transform animates, so walking the rail slides the whole shelf as
+   one object rather than restyling three cards in place. */
 .orbit-deck .orbit-deck-cards {
-  display: flex;
-  width: 100%;
-  max-height: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(4px, 1.2vw, 20px);
+  /* The shelf fills the stage it is given, so every cover is placed from a
+     definite centre rather than from a height a flex row may leave unset. */
+  position: absolute;
+  inset: 0;
+  margin: 0;
   padding: 0;
+  list-style: none;
   overflow: visible;
-  perspective: 1500px;
-  -webkit-mask-image: none;
-  mask-image: none;
-  scrollbar-width: none;
 }
-.orbit-deck .orbit-deck-cards::-webkit-scrollbar { display: none; }
 .orbit-deck .orbit-deck-cards > li {
-  position: relative;
-  z-index: 1;
-  transform-style: preserve-3d;
-  /* 640 ms on a long tail: a cover leaving the middle eases out of the way
-     rather than snapping to its new place, which is what makes the row read as
-     one object moving rather than three cards being restyled. */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) translateX(calc(var(--deck-x, 0) * var(--deck-w, 10rem))) scale(var(--deck-scale, 1));
+  opacity: var(--deck-opacity, 1);
+  filter: brightness(calc(1 - var(--deck-shade, 0)));
+  transform-origin: center center;
   transition: transform .44s cubic-bezier(.2,.78,.25,1), opacity .32s var(--ease-out), filter .32s var(--ease-out);
-}
-.orbit-deck .orbit-deck-cards > li:has([data-deck-position='0']) { z-index: 3; }
-.orbit-deck .orbit-deck-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transform-origin: center bottom;
-  /* The neighbours stand further back and slightly lower rather than being
-     turned hard on their axis: a shelf seen from a little above, not a fan. */
-  transition: transform .44s cubic-bezier(.2,.78,.25,1), filter .32s var(--ease-out), opacity .32s var(--ease-out);
   will-change: transform, opacity;
 }
-.orbit-deck .orbit-deck-card[data-deck-position='0'] { transform: translateY(-4px) scale(1); filter: none; opacity: 1; }
-.orbit-deck .orbit-deck-card[data-deck-position='-1'] { transform: perspective(1800px) rotateY(7deg) translateY(8px) translateX(5px) scale(.84); filter: brightness(.68) saturate(.84); opacity: .86; }
-.orbit-deck .orbit-deck-card[data-deck-position='1'] { transform: perspective(1800px) rotateY(-7deg) translateY(8px) translateX(-5px) scale(.84); filter: brightness(.68) saturate(.84); opacity: .86; }
+.orbit-deck .orbit-deck-card {
+  display: block;
+  transform-origin: center center;
+}
 /* A neighbour the pointer is over brightens where it stands. It is not pulled
    into the middle: the middle belongs to one game at a time. */
-.orbit-deck .orbit-deck-card[data-deck-position='-1']:hover,
-.orbit-deck .orbit-deck-card[data-deck-position='1']:hover { filter: brightness(.88) saturate(.98); opacity: .97; }
+.orbit-deck .orbit-deck-card:hover { filter: brightness(1.06); }
 .orbit-deck .orbit-deck-frame {
   display: block;
   overflow: hidden;
   border-radius: 14px;
   box-shadow: 0 26px 60px -22px #000c, inset 0 0 0 1px #ffffff1a;
 }
-.orbit-deck .orbit-deck-frame.is-poster { block-size: clamp(14rem, 42dvh, 27rem); aspect-ratio: 2 / 3; }
-.orbit-deck .orbit-deck-frame.is-banner { block-size: clamp(9rem, 27dvh, 17rem); aspect-ratio: 16 / 9; }
+.orbit-deck .orbit-deck-frame.is-poster { width: var(--deck-w, 10rem); aspect-ratio: 2 / 3; }
+.orbit-deck .orbit-deck-frame.is-banner { width: var(--deck-w, 16rem); aspect-ratio: 16 / 9; }
 .orbit-deck .orbit-deck-card[data-deck-position='0'] .orbit-deck-frame {
-  box-shadow: 0 34px 80px -26px #000, inset 0 0 0 1px #ffffff1a;
+  box-shadow: 0 34px 80px -26px #000, inset 0 0 0 1px #ffffff2e;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-deck .orbit-deck-cards > li { transition: none; }
 }
 .orbit-deck .orbit-deck-on {
   position: absolute;
@@ -5670,166 +5665,14 @@ html.orbit-linux .orbit-adaptive-layer { filter: blur(48px) saturate(1.2); }
 }
 .orbit-deck-step:hover { border-color: #ffffff59; color: #fff; }
 
-/* --- the game's own panel, down the left edge ------------------------------- */
-/* The sheet: a floating window over the collection with the
-   poster, the name, what has been played of it and the buttons that start it.
-   It is anchored to the left edge with a margin, so the covers behind it are
-   still visible to its right and the row is still the thing being browsed. */
-.orbit-decksheet {
-  position: absolute;
-  z-index: 5;
-  left: clamp(18px, 2.6vw, 40px);
-  top: 50%;
-  /* Sized to be read from a sofa, not from the desk chair: a third of the
-     screen with type to match, and no description - the sheet answers "what is
-     this and do I want to play it", and a paragraph is neither. */
-  width: min(31rem, 38vw);
-  max-height: calc(100% - 96px);
-  transform: translateY(-50%);
-  overflow-y: auto;
-  border-radius: 26px;
-  border: 1px solid #ffffff1f;
-  background: linear-gradient(180deg, #0d0b18d9, #07060ee6);
-  -webkit-backdrop-filter: blur(26px) saturate(1.25);
-  backdrop-filter: blur(26px) saturate(1.25);
-  box-shadow: inset 0 1px 0 #ffffff14, 0 40px 90px -30px #000;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-html.orbit-linux .orbit-decksheet { background: #0a0813f2; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.orbit-decksheet-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  border: 1px solid #ffffff24;
-  background: #0a0813b8;
-  color: #ffffffc7;
-  cursor: pointer;
-  transition: color .12s var(--ease-snap), background-color .12s var(--ease-snap);
-}
-.orbit-decksheet-close:hover { background: #ffffff1f; color: #fff; }
-.orbit-decksheet-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 24px 24px 24px;
-}
-/* The game changed: the panel's contents come in rather than swapping over. */
-.orbit-decksheet-inner { animation: deck-game-in .32s cubic-bezier(.2,.8,.2,1) both; }
+/* The game changed: the page's contents come in rather than swapping over. */
+.orbit-tv-tabpanel { animation: deck-game-in .32s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes deck-game-in {
   from { opacity: .5; transform: translate3d(0, 12px, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
-.orbit-decksheet-art { position: relative; display: flex; justify-content: center; }
-.orbit-decksheet-cover {
-  width: auto;
-  block-size: clamp(11rem, 32dvh, 19rem);
-  aspect-ratio: 2 / 3;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 22px 50px -22px #000;
-}
-.orbit-decksheet-head { min-width: 0; }
-.orbit-decksheet-head h1 {
-  font-size: clamp(1.7rem, 3.4dvh + .5vw, 2.6rem);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -.02em;
-  color: #fff;
-}
-.orbit-decksheet-facts {
-  margin: 7px 0 0;
-  font-size: 14px;
-  color: #ffffffa6;
-}
-.orbit-decksheet-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 26px;
-  margin: 0;
-  padding: 16px 0 0;
-  border-top: 1px solid #ffffff14;
-}
-.orbit-decksheet-stats > div { min-width: 0; }
-.orbit-decksheet-stats dt {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: #ffffff5c;
-}
-.orbit-decksheet-stats dd {
-  margin: 3px 0 0;
-  font-size: 17px;
-  font-weight: 620;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-.orbit-decksheet-actions { display: flex; align-items: center; gap: 10px; }
-.orbit-decksheet-play {
-  display: inline-flex;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  height: 54px;
-  padding: 0 24px;
-  border-radius: 999px;
-  background: var(--c-accent);
-  color: var(--c-on-accent, #14161a);
-  font-size: 16px;
-  font-weight: 720;
-  cursor: pointer;
-  transition: filter .14s var(--ease-snap);
-}
-.orbit-decksheet-play:hover { filter: brightness(1.08); }
-.orbit-decksheet-play.is-stop { background: #ffffff1a; color: #fff; }
-.orbit-decksheet-iconbtn {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 999px;
-  border: 1px solid #ffffff24;
-  background: #ffffff0f;
-  color: #ffffffc7;
-  cursor: pointer;
-  transition: border-color .14s var(--ease-snap), color .14s var(--ease-snap), background-color .14s var(--ease-snap);
-}
-.orbit-decksheet-iconbtn:hover { border-color: #ffffff4d; color: #fff; background: #ffffff1a; }
-.orbit-decksheet-iconbtn[aria-pressed='true'] { color: #facc15; border-color: #facc1559; }
-.orbit-decksheet-more {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: 999px;
-  color: #ffffffa6;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.orbit-decksheet-more:hover { color: #fff; background: #ffffff12; }
-@media (max-width: 980px) {
-  .orbit-decksheet { width: min(26rem, 50vw); }
-  .orbit-decksheet-cover { block-size: clamp(8rem, 22dvh, 12rem); }
-  .orbit-decksheet-play { height: 46px; font-size: 14px; }
-  .orbit-decksheet-iconbtn { width: 46px; height: 46px; }
-}
-/* A narrow window cannot hold a panel and a row side by side: the row keeps the
-   screen and the panel drops its picture. */
-@media (max-width: 720px) {
-  .orbit-decksheet { width: min(18rem, 62vw); left: 12px; }
-  .orbit-decksheet-art { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .orbit-tv-tabpanel { animation: none; }
 }
 
 /* --- the left-hand Stardeck menu (Escape) ----------------------------------- */
@@ -6063,7 +5906,9 @@ html.orbit-tv body, html.orbit-tv #root {
   background: #05040d;
 }
 html.orbit-tv body { overflow: hidden; }
-.tv-root { min-height: 100dvh; }
+/* Full height from the window it is in; the dynamic viewport is the floor for
+   the browser case, where the surface has to cover the screen it asked for. */
+.tv-root { height: 100%; min-height: 100dvh; }
 
 .tv-root {
   background:
@@ -8067,7 +7912,7 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-modaledit { max-width: 64rem; }
 .orbit-settings {
   display: grid;
-  grid-template-columns: 10rem minmax(0, 1fr);
+  grid-template-columns: 11rem minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   align-items: start;
   gap: 14px 18px;
@@ -8077,6 +7922,72 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 .orbit-settings > .orbit-settings-head { grid-column: 1 / -1; }
 .orbit-settings > .orbit-settings-tabs { grid-column: 1; grid-row: 3; }
 .orbit-settings > .orbit-settings-page { grid-column: 2; grid-row: 3; }
+
+/* The name and what it is matched to, on one line under the picture. */
+.orbit-settings-head {
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--c-panel2) 70%, transparent);
+}
+.orbit-settings-name { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.orbit-settings-sub {
+  margin: 0;
+  font-size: 11px;
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orbit-settings-head > .orbit-settings-flags { margin-left: 0; }
+
+/* Choosing which catalogue entry this game is: a search and a short list of
+   pictures, so the right one is picked by its cover rather than its spelling. */
+.orbit-matchpicker { display: flex; flex-direction: column; gap: 8px; padding: 8px 4px 2px; }
+.orbit-matchpicker > .orbit-input { flex: none; }
+.orbit-matchlist { display: flex; flex-direction: column; gap: 4px; max-height: 16rem; overflow-y: auto; }
+.orbit-matchlist button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  text-align: left;
+  color: var(--c-text);
+}
+.orbit-matchlist button:hover { border-color: var(--c-border); background: var(--c-panel); }
+.orbit-matchlist img, .orbit-matchlist button > span {
+  width: 30px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--c-bg);
+}
+.orbit-matchlist b { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 640; text-overflow: ellipsis; white-space: nowrap; }
+.orbit-matchlist small { font-size: 10px; color: var(--c-muted); font-variant-numeric: tabular-nums; }
+
+/* What is wrong with a launch draft, said once, where the Save button is. */
+.orbit-launcherrors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid #f8717140;
+  border-radius: 10px;
+  background: #f8717112;
+}
+.orbit-launcherrors p { margin: 0; font-size: 11.5px; line-height: 1.5; color: #ffb4b4; }
+
+/* The dialog footer: remove on the left, the state of the draft, then Close and
+   Save. Save is the only accent button, so the one action that writes is obvious. */
+.orbit-edit-footer { display: flex; align-items: center; gap: 8px; width: 100%; }
+.orbit-edit-status { margin-left: auto; font-size: 11px; color: var(--c-muted); }
+.orbit-edit-footer .orbit-btn.is-danger { margin-right: auto; }
+.orbit-edit-footer .orbit-btn.is-danger ~ .orbit-edit-status { margin-left: 0; }
+
+
 
 /* --- the picture at the top ---------------------------------------------- */
 .orbit-gameart {
@@ -8797,9 +8708,14 @@ html.orbit-linux.orbit-glass :is(.orbit-panel, .orbit-stats-panel, .orbit-themec
 html.orbit-tv, html.orbit-tv body, html.orbit-tv #root {
   width: 100%; height: 100%; min-height: 0; overflow: hidden;
 }
+/* The surface is sized from its own insets, not from a viewport unit. WebKitGTK
+   can hold the pre-fullscreen dynamic viewport for a beat after the window is
+   resized, and a 100dvh box then stops short of the window's bottom edge: the
+   band of bare frame under Stardeck. A fixed box with inset: 0 and a percentage
+   height follows the viewport it is actually in. */
 [data-orbit-tv] {
   position: fixed; inset: 0; width: 100%;
-  height: 100vh; height: 100dvh; min-height: 0;
+  height: 100%; min-height: 0;
 }
 .orbit-deckside-item.orbit-deckside-leave { margin-top: 4px; }
 .orbit-deckside-item.orbit-deckside-quit .orbit-deckside-itemicon { color: #f18c90; }
@@ -9071,23 +8987,6 @@ html.orbit-linux .orbit-setsec-head { background: none; }
 .orbit-settings-tabs button:hover:not([aria-selected='true']) {
   background: color-mix(in srgb, var(--c-text) 5%, transparent);
 }
-.orbit-decksheet {
-  background: #090810fa;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  border-color: #ffffff24;
-  box-shadow: 0 28px 80px #000c, inset 0 1px 0 #ffffff12;
-}
-.orbit-decksheet-head h1 {
-  display: inline;
-  padding: .08em .18em .12em 0;
-  border-radius: .12em;
-  background: linear-gradient(90deg, #090810 0%, #090810f0 82%, transparent 100%);
-  color: #fff;
-  text-shadow: 0 2px 9px #000;
-  overflow-wrap: anywhere;
-}
-html.orbit-linux .orbit-decksheet { background: #090810fa; }
 @media (max-width: 760px) {
   .orbit-settings {
     display: grid;

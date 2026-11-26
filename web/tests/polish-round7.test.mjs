@@ -22,8 +22,8 @@ check('Backlog is visible in the Settings left navigation group',
   settings.includes("{ label: 'Library', ids: ['orbit-library', 'orbit-backlog'") && settings.includes('section.label'));
 check('Stardeck settings no longer offer the ineffective Covers / Stage only shelf option',
   !tv.includes('label="Shelf"') && !tv.includes("cinema: value.cinema"));
-check('Stardeck keeps the focused cover central with book-roll neighbors and precise arrow focus',
-  tv.includes('deckCards.map(({ game, index: n, position })') && tv.includes('data-deck-position={position}') && css.includes("[data-deck-position='-1']") && css.includes("[data-deck-position='1']") && tv.includes('refocusSelectedCover.current = true') && tv.includes('coverOf(at)?.focus'));
+check('Stardeck is a continuous carousel with the focused cover central and precise arrow focus',
+  tv.includes('deckCards.map(({ game, index: n, position })') && tv.includes('data-deck-position={position}') && css.includes('--deck-x') && css.includes('var(--deck-scale') && tv.includes('refocusSelectedCover.current = true') && tv.includes('coverOf(at)?.focus'));
 check('Known artwork renders immediately while nearby covers are warmed',
   tv.includes('warmCover(game)') && cover.includes('setDisplaySrc(src)') && cover.includes("fetchPriority={loading === 'eager' ? 'high' : 'auto'}"));
 check('Library controller focus is spatial and the title remains outside the cover focus outline',

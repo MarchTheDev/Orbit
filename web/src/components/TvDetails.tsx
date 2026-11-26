@@ -5,8 +5,10 @@ import {
   Clock,
   Hourglass,
   Layers,
+  Pencil,
   Play,
   Square,
+  Star,
   Tag,
   Trophy,
 } from 'lucide-react';
@@ -15,24 +17,27 @@ import { fmtBytes, fmtDate, fmtMinutes } from '../utils/format';
 import { cn } from '../utils/cn';
 import { Cover } from './ui/Cover';
 import { tvLite } from '../services/tv';
+import { GameTitle, backdropsFor } from './TvMode';
 
 /**
- * A game, read at the size a television is read at.
+ * A game, read at the size a television is read at — the page a console opens
+ * when you choose a game from its shelf.
  *
- * The app's own details drawer is a side panel built for a mouse: tabs, small
- * rows, a column that scrolls under the pointer. None of that survives a couch,
- * so pressing Details in the hub used to hand the game back to the desktop
- * layout - which meant leaving TV mode to look at something. This is the same
- * information on a page of its own, in two columns and big type: what the game
- * is on the left, what has been played of it on the right, and how long it takes
- * across the middle. Back returns to the rail; nothing about TV mode is undone
- * to read it.
+ * Heronite's hero shape: the game's own wide artwork lights the whole page, its
+ * wordmark sits over it, a row of actions starts it, and tabs split what there
+ * is to know — Overview, Details, Journal — so a long description never crowds
+ * the numbers. Pressing a cover on the rail lands here directly; Back returns to
+ * the rail, and nothing about TV mode is undone to read it.
  */
+type Tab = 'overview' | 'details' | 'journal';
+
 export function TvDetails({
   game,
   running,
   onPlay,
   onStop,
+  onEdit,
+  onFavourite,
   onBack,
 }: {
   game: Game;
@@ -40,26 +45,31 @@ export function TvDetails({
   running: boolean;
   onPlay: () => void;
   onStop: () => void;
+  onEdit: () => void;
+  onFavourite: () => void;
   onBack: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const play = useRef<HTMLButtonElement>(null);
+  const favourite = useRef<HTMLButtonElement>(null);
+  const edit = useRef<HTMLButtonElement>(null);
   const [atTop, setAtTop] = useState(true);
+  const [tab, setTab] = useState<Tab>('overview');
 
   // The page opens with Back under the ring, so a pad has somewhere to stand
   // and a second press of the same button goes back rather than doing nothing.
   useEffect(() => {
     back.current?.focus({ preventScroll: true });
+    setTab('overview');
   }, [game.id]);
 
-  // Up and down are the page's own scroll here: there is nothing to move to
-  // above or below the two buttons, and a long description has to be readable
-  // without reaching for a mouse.
+  // Up and down are the page's own scroll here; left and right walk the action
+  // row. A long description has to be readable without reaching for a mouse.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;
-      const actions = [back.current, play.current].filter(
+      const actions = [back.current, play.current, favourite.current, edit.current].filter(
         (button): button is HTMLButtonElement => button !== null,
       );
       switch (event.key) {
@@ -103,20 +113,32 @@ export function TvDetails({
       : null;
   const achievements = game.achievements?.length ?? 0;
   const unlocked = game.achievements?.filter((a) => a.unlocked).length ?? 0;
+  const hero = backdropsFor(game)[0] ?? game.meta?.coverUrl ?? null;
+  const card = cn('rounded-xl border border-white/15 bg-[#0d0b18]/85', !tvLite && 'backdrop-blur-md');
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div data-tv-game-title className="relative flex min-h-0 flex-1 flex-col">
+      {/* The game's own wide artwork lights the page, dimmed so the type over it
+          stays readable. It is the same picture the rail's room uses, brought
+          forward and sharpened a little for the page that is about this game. */}
+      {hero && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+          <img src={hero} alt="" className="size-full object-cover opacity-40" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#05040d]/70 via-[#05040d]/55 to-[#05040d]" />
+        </div>
+      )}
+
       <div
         ref={scroller}
         onScroll={(event) => setAtTop(event.currentTarget.scrollTop < 8)}
-        className="tv-details-scroll orbit-scroll min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-2 sm:px-9"
+        className="tv-details-scroll orbit-scroll relative min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-2 sm:px-9"
       >
-        <div className="flex flex-wrap items-center gap-3">
+        <div data-tv-actions className="flex flex-wrap items-center gap-3">
           <button
             ref={back}
             data-tv-action="back"
             onClick={onBack}
-            className={cn("flex items-center gap-2 rounded-full border border-white/15 bg-[#0d0b18]/85 py-2 pl-3 pr-4 text-[13px] font-semibold text-white/90 transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40", !tvLite && 'backdrop-blur-md')}
+            className={cn('flex items-center gap-2 rounded-full border border-white/15 bg-[#0d0b18]/85 py-2 pl-3 pr-4 text-[13px] font-semibold text-white/90 transition hover:border-accent/70 hover:bg-accent/15 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40', !tvLite && 'backdrop-blur-md')}
           >
             <ArrowLeft className="size-4" />
             Back to the rail
@@ -142,33 +164,67 @@ export function TvDetails({
               Play
             </button>
           )}
+          <button
+            ref={favourite}
+            data-tv-action="favourite"
+            onClick={onFavourite}
+            aria-pressed={game.favorite}
+            aria-label={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            title={game.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            className={cn('grid size-9 place-items-center rounded-full border border-white/15 bg-[#0d0b18]/85 text-white/85 transition hover:border-yellow-300/60 hover:text-yellow-200 focus-visible:ring-4 focus-visible:ring-accent/40', game.favorite && 'border-yellow-300/50 text-yellow-200', !tvLite && 'backdrop-blur-md')}
+          >
+            <Star className="size-4" fill={game.favorite ? 'currentColor' : 'none'} />
+          </button>
+          <button
+            ref={edit}
+            data-tv-action="edit"
+            onClick={onEdit}
+            aria-label="Game settings"
+            title="Game settings"
+            className={cn('grid size-9 place-items-center rounded-full border border-white/15 bg-[#0d0b18]/85 text-white/85 transition hover:border-accent/70 hover:text-white focus-visible:ring-4 focus-visible:ring-accent/40', !tvLite && 'backdrop-blur-md')}
+          >
+            <Pencil className="size-4" />
+          </button>
         </div>
 
-        <div className="mt-6 flex flex-col gap-8 md:flex-row md:items-start">
-          <div className="flex shrink-0 flex-col items-center gap-5 md:w-[16rem]">
-            <Cover
-              game={game}
-              className="orbit-hero-enter h-[clamp(12rem,38vh,20rem)] w-auto aspect-[2/3] rounded-2xl border border-white/15 shadow-[0_30px_80px_rgba(0,0,0,.7)] [&_span]:text-4xl"
-            />
-            <div className="w-full space-y-2">
-              {game.meta?.developer && <Line label="Developer">{game.meta.developer}</Line>}
-              {game.meta?.releaseYear && <Line label="Released">{game.meta.releaseYear}</Line>}
-              {game.meta?.genres?.length ? (
-                <Line label="Genres">{game.meta.genres.join(' · ')}</Line>
-              ) : null}
-              {game.sizeBytes > 0 && <Line label="On disk">{fmtBytes(game.sizeBytes)}</Line>}
-            </div>
-          </div>
-
+        <div className="mt-6 flex flex-col gap-6 md:flex-row md:items-end">
+          <Cover
+            game={game}
+            className="orbit-hero-enter h-[clamp(10rem,30vh,16rem)] w-auto aspect-[2/3] rounded-2xl border border-white/15 shadow-[0_30px_80px_rgba(0,0,0,.7)] [&_span]:text-4xl"
+          />
           <div className="min-w-0 flex-1">
-            <h1 data-tv-game-title className="orbit-hero-enter text-[clamp(2rem,4.6vh+1vw,3.6rem)] font-black leading-[1] tracking-[-0.02em] text-white">
-              {game.title}
-            </h1>
-            {game.meta?.summary && (
-              <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-white/70">{game.meta.summary}</p>
-            )}
+            <GameTitle game={game} logo />
+            {game.meta?.genres?.length ? (
+              <p className="mt-2 text-[13px] font-medium text-white/55">{game.meta.genres.join(' · ')}</p>
+            ) : null}
+          </div>
+        </div>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        {/* Tabs split what there is to know, the way a console game page does. */}
+        <div role="tablist" aria-label="Game information" className="mt-6 flex flex-wrap gap-2">
+          {(['overview', 'details', 'journal'] as Tab[]).map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => setTab(name)}
+              className={cn(
+                'rounded-full border px-4 py-1.5 text-[12.5px] font-semibold capitalize transition focus-visible:ring-4 focus-visible:ring-accent/40',
+                tab === name ? 'border-accent/60 bg-accent/15 text-white' : 'border-white/15 bg-[#0d0b18]/70 text-white/60 hover:text-white',
+              )}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'overview' && (
+          <div key="overview" className="orbit-tv-tabpanel mt-5">
+            {game.meta?.summary && (
+              <p className={cn('max-w-3xl px-4 py-3 text-[15px] leading-relaxed text-white/75', card)}>{game.meta.summary}</p>
+            )}
+            <div className="mt-5 grid gap-6 lg:grid-cols-2">
               <section>
                 <Heading icon={Clock}>Played</Heading>
                 <div className="grid grid-cols-2 gap-2">
@@ -184,28 +240,18 @@ export function TvDetails({
                 {times.length > 0 ? (
                   <div className="space-y-2">
                     {times.map((row) => (
-                      <div key={row.label} className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-2.5", !tvLite && 'backdrop-blur-md')}>
+                      <div key={row.label} className={cn('px-3.5 py-2.5', card)}>
                         <div className="flex items-baseline justify-between gap-3">
                           <span className="text-[12.5px] text-white/60">{row.label}</span>
-                          <span className="font-mono text-base font-bold" style={{ color: row.colour }}>
-                            {row.hours}h
-                          </span>
+                          <span className="font-mono text-base font-bold" style={{ color: row.colour }}>{row.hours}h</span>
                         </div>
                         <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/40">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${longest > 0 ? (row.hours / longest) * 100 : 0}%`,
-                              background: row.colour,
-                            }}
-                          />
+                          <div className="h-full rounded-full" style={{ width: `${longest > 0 ? (row.hours / longest) * 100 : 0}%`, background: row.colour }} />
                         </div>
                       </div>
                     ))}
                     {left !== null && (
-                      <p className="text-[12.5px] text-white/45">
-                        {left > 0 ? `${left}h left of the main story` : 'the main story is nearly done'}
-                      </p>
+                      <p className="text-[12.5px] text-white/45">{left > 0 ? `${left}h left of the main story` : 'the main story is nearly done'}</p>
                     )}
                   </div>
                 ) : (
@@ -219,49 +265,68 @@ export function TvDetails({
                 <Heading icon={Tag}>Where it stands</Heading>
                 <div className="grid grid-cols-2 gap-2">
                   <Tile
-                    value={
-                      game.status === 'playing'
-                        ? 'Playing'
-                        : game.status === 'completed'
-                          ? 'Completed'
-                          : game.status === 'dropped'
-                            ? 'Dropped'
-                            : 'Backlog'
-                    }
+                    value={game.status === 'playing' ? 'Playing' : game.status === 'completed' ? 'Completed' : game.status === 'dropped' ? 'Dropped' : 'Backlog'}
                     label="status"
                   />
                   <Tile value={game.favorite ? 'Yes' : 'No'} label="favourite" />
                 </div>
               </section>
 
-              {(achievements > 0 || game.notes) && (
+              {achievements > 0 && (
                 <section>
-                  <Heading icon={achievements > 0 ? Trophy : Layers}>
-                    {achievements > 0 ? 'Achievements' : 'Notes'}
-                  </Heading>
-                  {achievements > 0 ? (
-                    <div className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-3", !tvLite && 'backdrop-blur-md')}>
-                      <p className="font-mono text-lg font-bold text-white">
-                        {unlocked}
-                        <span className="text-white/35"> / {achievements}</span>
-                      </p>
-                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/40">
-                        <div
-                          className="h-full rounded-full bg-amber-400"
-                          style={{ width: `${Math.round((unlocked / achievements) * 100)}%` }}
-                        />
-                      </div>
+                  <Heading icon={Trophy}>Achievements</Heading>
+                  <div className={cn('px-3.5 py-3', card)}>
+                    <p className="font-mono text-lg font-bold text-white">{unlocked}<span className="text-white/35"> / {achievements}</span></p>
+                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/40">
+                      <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.round((unlocked / achievements) * 100)}%` }} />
                     </div>
-                  ) : (
-                    <p className={cn("whitespace-pre-wrap rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-3 text-[12.5px] leading-relaxed text-white/65", !tvLite && 'backdrop-blur-md')}>
-                      {game.notes}
-                    </p>
-                  )}
+                  </div>
                 </section>
               )}
             </div>
           </div>
-        </div>
+        )}
+
+        {tab === 'details' && (
+          <div key="details" className="orbit-tv-tabpanel mt-5 grid gap-6 lg:grid-cols-2">
+            <section className={cn('space-y-2 px-4 py-3', card)}>
+              {game.meta?.developer && <Line label="Developer">{game.meta.developer}</Line>}
+              {game.meta?.releaseYear && <Line label="Released">{game.meta.releaseYear}</Line>}
+              {game.meta?.genres?.length ? <Line label="Genres">{game.meta.genres.join(' · ')}</Line> : null}
+              {game.sizeBytes > 0 && <Line label="On disk">{fmtBytes(game.sizeBytes)}</Line>}
+              {game.meta?.rating != null && <Line label="Score">{game.meta.rating} / 100</Line>}
+              <Line label="Matched to">{game.meta?.matchTitle ?? game.meta?.name ?? '—'}</Line>
+            </section>
+            <section className={cn('space-y-2 px-4 py-3', card)}>
+              <Line label="Starts with">{game.launch.kind === 'none' ? 'Timer only' : game.launch.kind === 'steam' ? 'Steam' : game.launch.kind === 'lutris' ? 'Lutris' : game.launch.kind === 'wine' ? 'Wine' : 'A program'}</Line>
+              {game.installDir && <Line label="Folder">{game.installDir}</Line>}
+              <Line label="Sessions">{String(game.sessionCount)}</Line>
+              <Line label="Longest">{fmtMinutes(game.longestSecs / 60)}</Line>
+            </section>
+          </div>
+        )}
+
+        {tab === 'journal' && (
+          <div key="journal" className="orbit-tv-tabpanel mt-5 grid gap-6 lg:grid-cols-2">
+            <section>
+              <Heading icon={Layers}>Notes</Heading>
+              {game.notes ? (
+                <p className={cn('whitespace-pre-wrap px-4 py-3 text-[13px] leading-relaxed text-white/70', card)}>{game.notes}</p>
+              ) : (
+                <p className="rounded-xl border border-dashed border-white/15 bg-[#0d0b18]/75 px-3.5 py-3 text-[12.5px] text-white/45">No notes yet.</p>
+              )}
+            </section>
+            <section>
+              <Heading icon={Clock}>Recent</Heading>
+              <div className="grid grid-cols-2 gap-2">
+                <Tile value={game.lastPlayed ? fmtDate(game.lastPlayed) : 'never'} label="last played" />
+                <Tile value={String(game.sessionCount)} label="sessions" />
+                <Tile value={fmtMinutes(game.playSecs / 60)} label="total" />
+                <Tile value={fmtMinutes(game.longestSecs / 60)} label="longest" />
+              </div>
+            </section>
+          </div>
+        )}
       </div>
 
       {/* The top edge fades while the page is scrolled, so the columns do not
@@ -289,7 +354,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 
 function Tile({ value, label }: { value: string; label: string }) {
   return (
-    <div className={cn("rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-2.5", !tvLite && 'backdrop-blur-md')}>
+    <div className={cn('rounded-xl border border-white/15 bg-[#0d0b18]/85 px-3.5 py-2.5', !tvLite && 'backdrop-blur-md')}>
       <p className="truncate text-[15px] font-bold text-white">{value}</p>
       <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-white/35">{label}</p>
     </div>

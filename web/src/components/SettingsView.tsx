@@ -32,7 +32,6 @@ import {
   Trophy,
   Volume2,
   Wand2,
-  Plus,
   X,
 } from 'lucide-react';
 import {
